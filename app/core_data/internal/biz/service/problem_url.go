@@ -26,6 +26,9 @@ var (
 	// 比赛单题：/acm/contest/{contestId}/{A|F|1}（路径无数字 problemId，需 problem-list 解析）
 	reURLNowCoderContest = regexp.MustCompile(`(?i)/acm/contest/(\d+)/([A-Za-z0-9]+)`)
 	reURLQOJ             = regexp.MustCompile(`(?i)/problem/(\d+)`)
+	// LibreOJ：/p/{displayId} 或 /problem/{displayId}
+	reURLLOJ             = regexp.MustCompile(`(?i)/(?:p|problem)/(\d+)`)
+	reURLUOJ             = regexp.MustCompile(`(?i)/problem/(\d+)`)
 )
 
 // reLooseHTTPURL 从粘贴文本中抠出第一个 http(s) 链接（允许前后有说明文字）
@@ -226,6 +229,32 @@ func ParseProblemURL(raw string) (*ParsedProblem, error) {
 			}, nil
 		}
 		return nil, fmt.Errorf("unrecognized qoj url")
+	}
+
+	// LibreOJ
+	if strings.Contains(host, "loj.ac") || strings.HasPrefix(host, "loj.") {
+		if m := reURLLOJ.FindStringSubmatch(path); m != nil {
+			return &ParsedProblem{
+				Platform:   spider.LOJ,
+				ExternalID: m[1],
+				Title:      m[1],
+				URL:        "https://loj.ac/p/" + m[1],
+			}, nil
+		}
+		return nil, fmt.Errorf("unrecognized loj url")
+	}
+
+	// UOJ
+	if strings.Contains(host, "uoj.ac") || strings.HasPrefix(host, "uoj.") {
+		if m := reURLUOJ.FindStringSubmatch(path); m != nil {
+			return &ParsedProblem{
+				Platform:   spider.UOJ,
+				ExternalID: m[1],
+				Title:      m[1],
+				URL:        "https://uoj.ac/problem/" + m[1],
+			}, nil
+		}
+		return nil, fmt.Errorf("unrecognized uoj url")
 	}
 
 	_ = full

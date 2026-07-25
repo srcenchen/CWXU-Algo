@@ -29,6 +29,8 @@ var (
 	reLuoGuBare   = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]*$`)
 	reAtCoderTask = regexp.MustCompile(`^[a-z0-9_]+$`)
 	reQOJNum      = regexp.MustCompile(`#?\s*(\d+)`)
+	reLOJNum      = regexp.MustCompile(`#?\s*(\d+)`)
+	reUOJNum      = regexp.MustCompile(`#?\s*(\d+)`)
 	reDigits      = regexp.MustCompile(`^\d+$`)
 	// CF API：gym 提交的 contestId 为负数
 	reCFNegativeContest = regexp.MustCompile(`^-\d+$`)
@@ -59,6 +61,10 @@ func ParseProblemIdentity(platform, contest, problem string) (*ParsedProblem, er
 		return parseNowCoder(contest, problem)
 	case spider.QOJ:
 		return parseQOJ(problem)
+	case spider.LOJ:
+		return parseLOJ(problem)
+	case spider.UOJ:
+		return parseUOJ(problem)
 	case spider.LeetCode:
 		return parseLeetCode(problem)
 	default:
@@ -329,6 +335,50 @@ func parseQOJ(problem string) (*ParsedProblem, error) {
 		ExternalID: ext,
 		Title:      title,
 		URL:        "https://qoj.ac/problem/" + ext,
+	}, nil
+}
+
+func parseLOJ(problem string) (*ParsedProblem, error) {
+	title := strings.TrimSpace(problem)
+	ext := ""
+	if m := reLOJNum.FindStringSubmatch(problem); m != nil {
+		ext = m[1]
+	} else if reDigits.MatchString(strings.TrimSpace(problem)) {
+		ext = strings.TrimSpace(problem)
+	}
+	if ext == "" {
+		return nil, fmt.Errorf("loj parse fail: %q", problem)
+	}
+	if title == "" {
+		title = ext
+	}
+	return &ParsedProblem{
+		Platform:   spider.LOJ,
+		ExternalID: ext,
+		Title:      title,
+		URL:        "https://loj.ac/p/" + ext,
+	}, nil
+}
+
+func parseUOJ(problem string) (*ParsedProblem, error) {
+	title := strings.TrimSpace(problem)
+	ext := ""
+	if m := reUOJNum.FindStringSubmatch(problem); m != nil {
+		ext = m[1]
+	} else if reDigits.MatchString(strings.TrimSpace(problem)) {
+		ext = strings.TrimSpace(problem)
+	}
+	if ext == "" {
+		return nil, fmt.Errorf("uoj parse fail: %q", problem)
+	}
+	if title == "" {
+		title = ext
+	}
+	return &ParsedProblem{
+		Platform:   spider.UOJ,
+		ExternalID: ext,
+		Title:      title,
+		URL:        "https://uoj.ac/problem/" + ext,
 	}, nil
 }
 

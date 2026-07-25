@@ -11,6 +11,8 @@ var (
 	CodeForces = "CodeForces"
 	QOJ        = "QOJ"
 	LeetCode   = "LeetCode"
+	LOJ        = "LOJ"
+	UOJ        = "UOJ"
 )
 var registry = map[string]Provider{}
 

@@ -453,8 +453,8 @@ func InferContestUserProblems(db *gorm.DB, platform, contestID string, userIDs [
 	byUser := map[int64]map[string]*agg{}
 
 	for _, r := range rows {
-		// 力扣合成再防一层
-		if platform == spider.LeetCode && model.IsLeetCodeSyntheticSubmit(platform, r.SubmitID) {
+		// 合成提交再防一层（力扣补齐 / UOJ AC 列表）
+		if model.IsSyntheticSubmitForFeed(platform, r.SubmitID) {
 			continue
 		}
 
@@ -759,7 +759,7 @@ func InferContestUpsolves(db *gorm.DB, platform, contestID string, userIDs []int
 	}
 	byUser := map[int64]map[string]*firstAC{}
 	for _, r := range rows {
-		if platform == spider.LeetCode && model.IsLeetCodeSyntheticSubmit(platform, r.SubmitID) {
+		if model.IsSyntheticSubmitForFeed(platform, r.SubmitID) {
 			continue
 		}
 		if !model.IsAcceptedStatus(r.Status) {
@@ -929,7 +929,7 @@ func ListContestPracticeCells(db *gorm.DB, platform, contestID string, userIDs [
 	}
 	byUser := map[int64]map[string]*agg{}
 	for _, r := range rows {
-		if platform == spider.LeetCode && model.IsLeetCodeSyntheticSubmit(platform, r.SubmitID) {
+		if model.IsSyntheticSubmitForFeed(platform, r.SubmitID) {
 			continue
 		}
 		ext, label := resolveSubmitExternal(platform, contestID, r.Contest, r.Problem, r.ExternalID)
@@ -1416,7 +1416,7 @@ func ListContestCellSubmits(
 
 	out := make([]ContestCellSubmit, 0, len(rows))
 	for _, r := range rows {
-		if model.IsLeetCodeSyntheticSubmit(platform, r.SubmitID) {
+		if model.IsSyntheticSubmitForFeed(platform, r.SubmitID) {
 			continue
 		}
 		ext, _ := resolveSubmitExternal(platform, contestID, r.Contest, r.Problem, r.ExternalID)

@@ -79,10 +79,17 @@ func FillIsACBatch(logs []SubmitLog) {
 //   lc-pad-*  生涯提交补齐 → 计入提交统计；不进动态
 //   lc-ac-*   合成 AC（无题号）→ 不计提交，计 AC；不进动态
 //   lc-prob-* 最近通过明细 → 不计提交（避免与日历双计）；计 AC + 题库；**进动态/提交历史**（无代码）
+//
+// UOJ submit_id 约定（见 spider/platform/uoj.go）：
+//   uoj-ac-{userId}-{problemId}  主页 AC 列表合成 → 不计提交热力；计 AC + 题库；不进动态
 
 // CountsTowardSubmitStat 是否计入提交次数 / 提交热力
 // 力扣仅 lc-cal / lc-pad 计入；lc-ac / lc-prob 只服务 AC 与题库（lc-prob 另进活动流）。
+// UOJ 合成 AC 不计提交热力（无真实时间线）。
 func CountsTowardSubmitStat(platform, submitID string) bool {
+	if IsUOJSyntheticAC(platform, submitID) {
+		return false
+	}
 	if platform != "LeetCode" {
 		return true
 	}
@@ -92,6 +99,11 @@ func CountsTowardSubmitStat(platform, submitID string) bool {
 // IsLeetCodeNonSubmitCountID 力扣不计入提交数的 submit_id（合成 AC + 最近通过明细）
 func IsLeetCodeNonSubmitCountID(submitID string) bool {
 	return strings.HasPrefix(submitID, "lc-ac-") || strings.HasPrefix(submitID, "lc-prob-")
+}
+
+// IsUOJSyntheticAC UOJ 主页 AC 列表合成记录（无真实 submission id / 时间）
+func IsUOJSyntheticAC(platform, submitID string) bool {
+	return platform == "UOJ" && strings.HasPrefix(submitID, "uoj-ac-")
 }
 
 // IsLeetCodeSyntheticSubmit 力扣合成/补齐行：不进活动流与提交明细列表
@@ -107,8 +119,17 @@ func IsLeetCodeSyntheticSubmit(platform, submitID string) bool {
 	return true
 }
 
-// SQLExcludeLeetCodeNonSubmit 提交统计 SQL 片段：排除力扣合成 AC 与最近通过明细
-const SQLExcludeLeetCodeNonSubmit = `NOT (platform = 'LeetCode' AND (submit_id LIKE 'lc-ac-%' OR submit_id LIKE 'lc-prob-%'))`
+// IsSyntheticSubmitForFeed 不进活动流 / 提交明细的合成行（力扣补齐 + UOJ AC 列表）
+func IsSyntheticSubmitForFeed(platform, submitID string) bool {
+	return IsLeetCodeSyntheticSubmit(platform, submitID) || IsUOJSyntheticAC(platform, submitID)
+}
+
+// SQLExcludeLeetCodeNonSubmit 提交统计 / 活动流 SQL：排除力扣合成与 UOJ 合成 AC
+// 历史常量名保留，避免大范围重命名；语义已扩展为「排除非真实提交」。
+const SQLExcludeLeetCodeNonSubmit = `NOT (
+	(platform = 'LeetCode' AND (submit_id LIKE 'lc-ac-%' OR submit_id LIKE 'lc-prob-%'))
+	OR (platform = 'UOJ' AND submit_id LIKE 'uoj-ac-%')
+)`
 
 // knownPlatformSubmitPrefixes 历史脏数据/误拼接：submit_id 写成 "LuoGu:123456"
 // 真实洛谷链接应为 /record/123456。力扣合成 id 用 lc-*，不会命中下列前缀。
@@ -119,9 +140,11 @@ var knownPlatformSubmitPrefixes = []string{
 	"NowCoder:", "Nowcoder:", "NOWCODER:",
 	"LeetCode:", "Leetcode:", "LEETCODE:",
 	"QOJ:", "Qoj:",
+	"LOJ:", "Loj:",
+	"UOJ:", "Uoj:",
 }
 
-// NormalizeSubmitID 去掉误写入的「平台:」前缀；不改动力扣 lc-* 合成 id。
+// NormalizeSubmitID 去掉误写入的「平台:」前缀；不改动力扣 lc-* / LOJ loj-* / UOJ uoj-ac-* 合成 id。
 func NormalizeSubmitID(platform, submitID string) string {
 	id := strings.TrimSpace(submitID)
 	if id == "" {
@@ -129,6 +152,13 @@ func NormalizeSubmitID(platform, submitID string) string {
 	}
 	// 力扣合成 / 最近通过：保持原样
 	if platform == "LeetCode" && strings.HasPrefix(id, "lc-") {
+		return id
+	}
+	// LOJ / UOJ 带前缀 submit_id：保持原样
+	if platform == "LOJ" && strings.HasPrefix(id, "loj-") {
+		return id
+	}
+	if platform == "UOJ" && strings.HasPrefix(id, "uoj-ac-") {
 		return id
 	}
 	// 优先按本行 platform 剥离

@@ -23,8 +23,8 @@ type FetchedContent struct {
 }
 
 // Fetch 按平台爬取题面 Markdown。
-// 六大 OJ（CodeForces / AtCoder / LuoGu / NowCoder / QOJ / LeetCode）均支持：
-// 提交识别入库 + 链接加题识别 + 题面爬取。
+// 已支持：CodeForces / AtCoder / LuoGu / NowCoder / QOJ / LeetCode / UOJ；
+// LOJ 为 SPA，走 generic 或占位（提交 identity 已可入库）。
 func Fetch(platform, externalID, problemURL string) (*FetchedContent, error) {
 	return FetchWithFallbacks(platform, externalID, problemURL, nil)
 }
@@ -41,10 +41,21 @@ func FetchWithFallbacks(platform, externalID, problemURL string, fallbackURLs []
 		return fetchLuoGu(externalID, problemURL)
 	case "QOJ":
 		return fetchQOJ(externalID, problemURL)
+	case "UOJ":
+		return fetchUOJ(externalID, problemURL)
 	case "NowCoder":
 		return fetchNowCoder(externalID, problemURL, fallbackURLs...)
 	case "LeetCode":
 		return fetchLeetCode(externalID, problemURL)
+	case "LOJ":
+		// LibreOJ 前端 SPA；公开页无稳定服务端 HTML 题面，generic 往往只有壳
+		if problemURL == "" && externalID != "" {
+			problemURL = "https://loj.ac/p/" + externalID
+		}
+		if problemURL != "" {
+			return fetchGeneric(problemURL)
+		}
+		return nil, fmt.Errorf("loj empty url")
 	default:
 		if problemURL != "" {
 			return fetchGeneric(problemURL)
@@ -1350,6 +1361,50 @@ func replaceNowCoderMath(q *goquery.Selection) {
 		tex = strings.ReplaceAll(tex, "$", "")
 		img.ReplaceWithHtml("$" + tex + "$")
 	})
+}
+
+func fetchUOJ(externalID, problemURL string) (*FetchedContent, error) {
+	if problemURL == "" && externalID != "" {
+		problemURL = "https://uoj.ac/problem/" + externalID
+	}
+	if problemURL == "" {
+		return nil, fmt.Errorf("empty url")
+	}
+	resp, err := httpGet(problemURL)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusForbidden {
+		return nil, fmt.Errorf("UOJ 无权限访问题面(403)")
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("UOJ status %d", resp.StatusCode)
+	}
+	doc, err := goquery.NewDocumentFromReader(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	// 登录墙
+	if t := strings.TrimSpace(doc.Find("title").First().Text()); strings.Contains(t, "登录") {
+		return nil, fmt.Errorf("UOJ 题面需登录")
+	}
+	title := strings.TrimSpace(doc.Find("h1").First().Text())
+	if title == "" {
+		title = strings.TrimSpace(doc.Find(".page-header").First().Text())
+	}
+	contentSel := doc.Find(".problem-content, #problem-content, .uoj-content article, article").First()
+	if contentSel.Length() == 0 {
+		contentSel = doc.Find(".uoj-content").First()
+	}
+	md := strings.TrimSpace(contentSel.Text())
+	if title == "" && md == "" {
+		return nil, fmt.Errorf("UOJ 题面解析为空")
+	}
+	if title == "" {
+		title = externalID
+	}
+	return &FetchedContent{Title: title, ContentMD: md}, nil
 }
 
 func fetchQOJ(externalID, problemURL string) (*FetchedContent, error) {

@@ -155,8 +155,8 @@ func (s SubmitLogService) GetSubmitLog(ctx context.Context, req *submit_log.GetS
 			break
 		}
 		for _, v := range d {
-			// 力扣：合成日历/补齐/生涯 AC 不进动态；最近通过 lc-prob-* 进提交历史与动态（无代码）
-			if model.IsLeetCodeSyntheticSubmit(v.Platform, v.SubmitID) {
+			// 力扣合成 / UOJ AC 列表合成不进动态；力扣最近通过 lc-prob-* 仍展示
+			if model.IsSyntheticSubmitForFeed(v.Platform, v.SubmitID) {
 				continue
 			}
 			var problemID uint32

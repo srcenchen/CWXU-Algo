@@ -30,6 +30,9 @@ func TestParseProblemURL_AllPlatforms(t *testing.T) {
 		{"nowcoder ac", "https://ac.nowcoder.com/acm/problem/12345", "NowCoder", "12345", "acm/problem/12345"},
 		{"nowcoder practice", "https://www.nowcoder.com/practice/abcdef0123456789abcdef0123456789", "NowCoder", "abcdef0123456789abcdef0123456789", "practice/"},
 		{"qoj", "https://qoj.ac/problem/1234", "QOJ", "1234", "problem/1234"},
+		{"loj p", "https://loj.ac/p/6582", "LOJ", "6582", "loj.ac/p/6582"},
+		{"loj problem", "https://loj.ac/problem/100", "LOJ", "100", "loj.ac/p/100"},
+		{"uoj", "https://uoj.ac/problem/1", "UOJ", "1", "uoj.ac/problem/1"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -135,6 +138,8 @@ func TestParseProblemIdentity_AllPlatforms(t *testing.T) {
 		{"nowcoder ac", "NowCoder", "", "12345 题目标题", "12345", "acm/problem/12345"},
 		{"nowcoder uuid", "NowCoder", "", "abcdef0123456789abcdef0123456789 练习题", "abcdef0123456789abcdef0123456789", "practice/"},
 		{"qoj", "QOJ", "", "#1234 Some", "1234", "problem/1234"},
+		{"loj", "LOJ", "", "#6582 雨落葡萄园", "6582", "loj.ac/p/6582"},
+		{"uoj", "UOJ", "", "#1. A + B Problem", "1", "uoj.ac/problem/1"},
 		{"leetcode", "LeetCode", "leetcode", "two-sum 两数之和", "two-sum", "two-sum"},
 	}
 	for _, tc := range cases {

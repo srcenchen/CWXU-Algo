@@ -55,6 +55,21 @@ func TestIsLeetCodeSyntheticSubmit(t *testing.T) {
 	}
 }
 
+func TestIsUOJSyntheticAC(t *testing.T) {
+	if !IsUOJSyntheticAC("UOJ", "uoj-ac-1-42") {
+		t.Fatal("uoj-ac should be synthetic")
+	}
+	if IsUOJSyntheticAC("UOJ", "12345") {
+		t.Fatal("raw uoj id not synthetic")
+	}
+	if CountsTowardSubmitStat("UOJ", "uoj-ac-1-42") {
+		t.Fatal("uoj-ac should not count toward submit heatmap")
+	}
+	if !IsSyntheticSubmitForFeed("UOJ", "uoj-ac-1-42") {
+		t.Fatal("uoj-ac should hide from feed")
+	}
+}
+
 func TestNormalizeSubmitID(t *testing.T) {
 	cases := []struct {
 		plat, in, want string
