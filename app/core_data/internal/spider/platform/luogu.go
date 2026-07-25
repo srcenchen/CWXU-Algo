@@ -301,7 +301,9 @@ func (lg *NewLuoGu) Name() string {
 	return spider.LuoGu
 }
 
-// FetchRating 洛谷用户页注入数据中的 rating（需登录会话；无参赛则 hasRating=false）
+// FetchRating 经官方 JSON API 取当前 Elo（需登录会话）。
+// 洛谷前端已不再在用户页注入 _feInjection；rating 字段也已弃用，以 eloValue / elo.rating 为准。
+// 未参加过 rated 比赛时 eloValue 为 null → hasRating=false。
 func (lg *NewLuoGu) FetchRating(username string) (int, bool, error) {
 	username = strings.TrimSpace(username)
 	if username == "" {
@@ -311,18 +313,21 @@ func (lg *NewLuoGu) FetchRating(username string) (int, bool, error) {
 	if err != nil {
 		return 0, false, err
 	}
-	// 先用搜索把用户名解析为 uid（绑定字段是用户名）
+	// 绑定字段为用户编号（uid）；也兼容用户名搜索
 	uid, err := lg.resolveUID(client, username)
 	if err != nil {
 		return 0, false, err
 	}
-	req, err := http.NewRequest("GET", fmt.Sprintf("https://www.luogu.com.cn/user/%d", uid), nil)
+	req, err := http.NewRequest("GET", fmt.Sprintf("https://www.luogu.com.cn/api/user/info/%d", uid), nil)
 	if err != nil {
 		return 0, false, err
 	}
+	req.Header.Set("User-Agent", "Mozilla/5.0 (compatible; GoAlgoSpider/1.0)")
+	req.Header.Set("X-Requested-With", "XMLHttpRequest")
+	req.Header.Set("Accept", "application/json")
 	resp, err := client.Do(req)
 	if err != nil {
-		return 0, false, fmt.Errorf("luogu user 请求失败: %w", err)
+		return 0, false, fmt.Errorf("luogu user info 请求失败: %w", err)
 	}
 	rb, err := io.ReadAll(resp.Body)
 	resp.Body.Close()
@@ -330,33 +335,43 @@ func (lg *NewLuoGu) FetchRating(username string) (int, bool, error) {
 		return 0, false, err
 	}
 	if resp.StatusCode != http.StatusOK {
-		return 0, false, fmt.Errorf("luogu user 状态码 %d", resp.StatusCode)
+		return 0, false, fmt.Errorf("luogu user info 状态码 %d: %s", resp.StatusCode, truncateForErr(string(rb), 200))
 	}
-	// 复用 _feInjection 解析，但结构不同：currentData.user.rating
-	re := regexp.MustCompile(`window\._feInjection\s*=\s*JSON\.parse\(decodeURIComponent\("(.+?)"\)\)`)
-	m := re.FindStringSubmatch(string(rb))
-	if len(m) != 2 {
-		return 0, false, fmt.Errorf("luogu user 未找到 _feInjection")
+	var out struct {
+		User *struct {
+			// 旧字段：多数账号已不再返回有效值
+			Rating *int `json:"rating"`
+			// 新 Elo：未参赛为 null
+			EloValue *int `json:"eloValue"`
+			Elo      *struct {
+				Rating int `json:"rating"`
+			} `json:"elo"`
+		} `json:"user"`
 	}
-	decoded, err := url.QueryUnescape(m[1])
-	if err != nil {
-		return 0, false, err
+	if err := json.Unmarshal(rb, &out); err != nil {
+		return 0, false, fmt.Errorf("luogu user info 解析失败: %w", err)
 	}
-	var inj struct {
-		CurrentData struct {
-			User *struct {
-				// rating 可能为 null（未参加过 rated 比赛）
-				Rating *int `json:"rating"`
-			} `json:"user"`
-		} `json:"currentData"`
-	}
-	if err := json.Unmarshal([]byte(decoded), &inj); err != nil {
-		return 0, false, fmt.Errorf("luogu user 解析失败: %w", err)
-	}
-	if inj.CurrentData.User == nil || inj.CurrentData.User.Rating == nil {
+	if out.User == nil {
 		return 0, false, nil
 	}
-	return *inj.CurrentData.User.Rating, true, nil
+	// 优先 eloValue（主站当前展示），再 elo.rating，最后旧 rating
+	if out.User.EloValue != nil && *out.User.EloValue > 0 {
+		return *out.User.EloValue, true, nil
+	}
+	if out.User.Elo != nil && out.User.Elo.Rating > 0 {
+		return out.User.Elo.Rating, true, nil
+	}
+	if out.User.Rating != nil && *out.User.Rating > 0 {
+		return *out.User.Rating, true, nil
+	}
+	return 0, false, nil
+}
+
+func truncateForErr(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "..."
 }
 
 func (lg *NewLuoGu) resolveUID(client *http.Client, username string) (int64, error) {

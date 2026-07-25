@@ -58,3 +58,22 @@ func TestFetchRating_Codeforces_UnratedEmpty(t *testing.T) {
 		t.Fatal("expected error for empty handle")
 	}
 }
+
+func TestFetchRating_LuoGu(t *testing.T) {
+	// 8457 = chen_zhe，有 Elo；983446 文档示例，通常无参赛
+	lg := &NewLuoGu{}
+	r, has, err := lg.FetchRating("8457")
+	if err != nil {
+		t.Skipf("network/login: %v", err)
+	}
+	if !has || r < 1000 {
+		t.Fatalf("chen_zhe rating unexpected: has=%v r=%d", has, r)
+	}
+	t.Logf("LuoGu 8457=%d", r)
+
+	_, has2, err := lg.FetchRating("983446")
+	if err != nil {
+		t.Skipf("network/login: %v", err)
+	}
+	t.Logf("LuoGu 983446 has=%v", has2)
+}
