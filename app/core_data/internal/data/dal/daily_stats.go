@@ -99,6 +99,7 @@ func FilterNewSubmitLogs(ctx context.Context, db *gorm.DB, logs []model.SubmitLo
 		return nil, nil
 	}
 
+	model.NormalizeSubmitIDs(logs)
 	logs = dedupeSubmitLogsBySubmitID(logs)
 	if len(logs) == 0 {
 		return nil, nil

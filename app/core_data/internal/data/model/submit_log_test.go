@@ -54,3 +54,24 @@ func TestIsLeetCodeSyntheticSubmit(t *testing.T) {
 		t.Fatal("non-LC never synthetic")
 	}
 }
+
+func TestNormalizeSubmitID(t *testing.T) {
+	cases := []struct {
+		plat, in, want string
+	}{
+		{"LuoGu", "LuoGu:286690434", "286690434"},
+		{"LuoGu", "286690434", "286690434"},
+		{"LuoGu", "  LuoGu:99  ", "99"},
+		{"CodeForces", "CodeForces:12345", "12345"},
+		{"CodeForces", "CF:99", "99"},
+		{"LeetCode", "lc-prob-1", "lc-prob-1"},
+		{"LeetCode", "LeetCode:999", "999"},
+		{"AtCoder", "AtCoder:abc", "abc"},
+		{"", "LuoGu:1", "1"},
+	}
+	for _, c := range cases {
+		if got := NormalizeSubmitID(c.plat, c.in); got != c.want {
+			t.Errorf("NormalizeSubmitID(%q,%q)=%q want %q", c.plat, c.in, got, c.want)
+		}
+	}
+}

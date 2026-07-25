@@ -167,7 +167,7 @@ func (s SubmitLogService) GetSubmitLog(ctx context.Context, req *submit_log.GetS
 				Id:        uint32(v.ID),
 				UserId:    v.UserID,
 				Platform:  v.Platform,
-				SubmitId:  v.SubmitID,
+				SubmitId:  model.NormalizeSubmitID(v.Platform, v.SubmitID),
 				Contest:   v.Contest,
 				Problem:   v.Problem,
 				Lang:      v.Lang,

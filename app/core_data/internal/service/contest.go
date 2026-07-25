@@ -1171,7 +1171,7 @@ func (c *ContestLogService) handleContestCellSubmits(ctx khttp.Context) error {
 		}
 		m := map[string]interface{}{
 			"id":         s.ID,
-			"submitId":   s.SubmitID,
+			"submitId":   model.NormalizeSubmitID(seed.Platform, s.SubmitID),
 			"status":     s.Status,
 			"lang":       s.Lang,
 			"time":       s.Time.Unix(),

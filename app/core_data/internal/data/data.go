@@ -147,6 +147,8 @@ func migrateModels(db *gorm.DB) {
 	// 废弃：预聚合去重改以 submit_logs.submit_id 为准，不再维护账本表
 	_ = db.Exec(`DROP TABLE IF EXISTS counted_submit_ids`).Error
 	ensureSubmitLogPerf(db)
+	// 一次性：submit_id 误带「平台:」前缀（如 LuoGu:123）→ 纯数字/原站 id
+	migrateStripPlatformPrefixSubmitIDs(db)
 	// 空表兜底回填（清洗任务会覆盖重建；新环境无历史时有用）
 	backfillDailyUserStatsIfEmpty(db)
 	backfillUserACIfEmpty(db)
@@ -184,6 +186,48 @@ SET comment_count = (
   SELECT COUNT(*) FROM problem_comments c WHERE c.solution_id = s.id
 )
 `).Error
+	_ = db.Create(&schemaPatch{Key: key, AppliedAt: time.Now()}).Error
+}
+
+// migrateStripPlatformPrefixSubmitIDs 一次性清洗 submit_id 误带平台前缀的脏数据。
+// 例：LuoGu:286690434 → 286690434（否则外链变成 /record/LuoGu:286690434）。
+// 若清洗后 id 与已有行冲突，删除带前缀的脏行，保留已有纯 id 行。
+func migrateStripPlatformPrefixSubmitIDs(db *gorm.DB) {
+	if db == nil || !db.Migrator().HasTable(&model.SubmitLog{}) {
+		return
+	}
+	const key = "submit_id_strip_platform_prefix_v1"
+	var n int64
+	_ = db.Model(&schemaPatch{}).Where("key = ?", key).Count(&n).Error
+	if n > 0 {
+		return
+	}
+	// PostgreSQL：已知平台前缀
+	const prefixRe = `^(LuoGu|Luogu|LUOGU|CodeForces|Codeforces|CODEFORCES|CF|AtCoder|Atcoder|ATCODER|NowCoder|Nowcoder|NOWCODER|LeetCode|Leetcode|LEETCODE|QOJ|Qoj):`
+	// 1) 已有纯 id 时删掉带前缀重复行
+	delRes := db.Exec(`
+		DELETE FROM submit_logs a
+		USING submit_logs b
+		WHERE a.submit_id ~ ?
+		  AND b.submit_id = regexp_replace(a.submit_id, ?, '')
+		  AND a.id <> b.id
+	`, prefixRe, prefixRe)
+	if delRes.Error != nil {
+		log.Warnf("database: strip submit_id prefix delete dups: %v", delRes.Error)
+		return
+	}
+	// 2) 其余带前缀行改为纯 id
+	updRes := db.Exec(`
+		UPDATE submit_logs
+		SET submit_id = regexp_replace(submit_id, ?, '')
+		WHERE submit_id ~ ?
+	`, prefixRe, prefixRe)
+	if updRes.Error != nil {
+		log.Warnf("database: strip submit_id prefix update: %v", updRes.Error)
+		return
+	}
+	log.Infof("database: strip platform-prefix submit_id deleted=%d updated=%d",
+		delRes.RowsAffected, updRes.RowsAffected)
 	_ = db.Create(&schemaPatch{Key: key, AppliedAt: time.Now()}).Error
 }
 

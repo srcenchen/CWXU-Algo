@@ -109,3 +109,48 @@ func IsLeetCodeSyntheticSubmit(platform, submitID string) bool {
 
 // SQLExcludeLeetCodeNonSubmit 提交统计 SQL 片段：排除力扣合成 AC 与最近通过明细
 const SQLExcludeLeetCodeNonSubmit = `NOT (platform = 'LeetCode' AND (submit_id LIKE 'lc-ac-%' OR submit_id LIKE 'lc-prob-%'))`
+
+// knownPlatformSubmitPrefixes 历史脏数据/误拼接：submit_id 写成 "LuoGu:123456"
+// 真实洛谷链接应为 /record/123456。力扣合成 id 用 lc-*，不会命中下列前缀。
+var knownPlatformSubmitPrefixes = []string{
+	"LuoGu:", "Luogu:", "LUOGU:",
+	"CodeForces:", "Codeforces:", "CODEFORCES:", "CF:",
+	"AtCoder:", "Atcoder:", "ATCODER:",
+	"NowCoder:", "Nowcoder:", "NOWCODER:",
+	"LeetCode:", "Leetcode:", "LEETCODE:",
+	"QOJ:", "Qoj:",
+}
+
+// NormalizeSubmitID 去掉误写入的「平台:」前缀；不改动力扣 lc-* 合成 id。
+func NormalizeSubmitID(platform, submitID string) string {
+	id := strings.TrimSpace(submitID)
+	if id == "" {
+		return id
+	}
+	// 力扣合成 / 最近通过：保持原样
+	if platform == "LeetCode" && strings.HasPrefix(id, "lc-") {
+		return id
+	}
+	// 优先按本行 platform 剥离
+	plat := strings.TrimSpace(platform)
+	if plat != "" {
+		for _, cand := range []string{plat + ":", strings.ToLower(plat) + ":", strings.ToUpper(plat) + ":"} {
+			if strings.HasPrefix(id, cand) {
+				return strings.TrimSpace(strings.TrimPrefix(id, cand))
+			}
+		}
+	}
+	for _, p := range knownPlatformSubmitPrefixes {
+		if strings.HasPrefix(id, p) {
+			return strings.TrimSpace(strings.TrimPrefix(id, p))
+		}
+	}
+	return id
+}
+
+// NormalizeSubmitIDs 批量归一化 submit_id
+func NormalizeSubmitIDs(logs []SubmitLog) {
+	for i := range logs {
+		logs[i].SubmitID = NormalizeSubmitID(logs[i].Platform, logs[i].SubmitID)
+	}
+}

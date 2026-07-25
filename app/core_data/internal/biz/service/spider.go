@@ -125,6 +125,8 @@ func (uc *SpiderUseCase) fetchAndSave(userId int64, plat model.Platform, needAll
 
 	// 写入前归一化 is_ac，读路径不再 UPPER(BTRIM(status))
 	model.FillIsACBatch(tmp)
+	// 去掉误写的「平台:」前缀（如 LuoGu:286690434 → 286690434），避免外链拼错
+	model.NormalizeSubmitIDs(tmp)
 
 	// 只插入真正的新行，才能准确累加 daily_user_stats（OnConflict DoNothing 无法区分）
 	ctx := context.Background()
