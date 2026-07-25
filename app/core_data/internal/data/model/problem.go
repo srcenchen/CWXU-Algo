@@ -120,7 +120,7 @@ const (
 	ProblemEditRejected = "rejected"
 )
 
-// ProblemEditRequest 题面/标签人工修改申请。
+// ProblemEditRequest 题面/标签/难度人工修改申请。
 // 普通用户 pending 后由站管/资源审核员审核；站管/审核员本人修改会写记录并 auto-approve。
 type ProblemEditRequest struct {
 	ID                uint        `gorm:"primaryKey"`
@@ -128,9 +128,11 @@ type ProblemEditRequest struct {
 	UserID            uint        `gorm:"index;not null"`
 	HasTags           bool        `gorm:"default:false"`
 	HasContent        bool        `gorm:"default:false"`
+	HasDifficulty     bool        `gorm:"default:false"`
 	ProposedTags      StringArray `gorm:"type:jsonb;default:'[]'"`
 	ProposedContentMD string      `gorm:"type:text"`
 	ProposedTitle     string      `gorm:"size:512"`
+	ProposedDifficulty string     `gorm:"size:32"`
 	Note              string      `gorm:"type:text"` // 提交说明
 	Status            string      `gorm:"size:16;index;default:'pending'"`
 	ReviewerID        *uint       `gorm:"index"`

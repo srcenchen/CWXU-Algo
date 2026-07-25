@@ -822,7 +822,7 @@ func (s *ProblemService) AdminUpdate(ctx context.Context, req *problem.AdminUpda
 	if req == nil || req.Id == 0 {
 		return &problem.AdminUpdateProblemRes{Code: 1, Message: "题目 id 无效"}, nil
 	}
-	if !req.UpdateTags && !req.UpdateContent && strings.TrimSpace(req.Title) == "" {
+	if !req.UpdateTags && !req.UpdateContent && strings.TrimSpace(req.Title) == "" && !req.UpdateDifficulty {
 		return &problem.AdminUpdateProblemRes{Code: 1, Message: "没有需要修改的内容"}, nil
 	}
 	uid := auth.GetCurrentUserId(ctx)
@@ -834,6 +834,7 @@ func (s *ProblemService) AdminUpdate(ctx context.Context, req *problem.AdminUpda
 		req.UpdateTags, req.Tags,
 		req.UpdateContent, req.ContentMd,
 		req.Title, "管理员/审核员直接修改",
+		req.UpdateDifficulty, req.Difficulty,
 		true, // auto-approve
 	)
 	if err != nil {
@@ -865,6 +866,7 @@ func (s *ProblemService) ProposeEdit(ctx context.Context, req *problem.ProposePr
 		req.UpdateTags, req.Tags,
 		req.UpdateContent, req.ContentMd,
 		req.Title, req.Note,
+		req.UpdateDifficulty, req.Difficulty,
 		autoApprove,
 	)
 	if err != nil {
@@ -889,20 +891,22 @@ func (s *ProblemService) toEditInfo(r *model.ProblemEditRequest, p *model.Proble
 		return nil
 	}
 	info := &problem.ProblemEditInfo{
-		Id:                uint32(r.ID),
-		ProblemId:         uint32(r.ProblemID),
-		UserId:            uint32(r.UserID),
-		UserName:          userName,
-		HasTags:           r.HasTags,
-		HasContent:        r.HasContent,
-		ProposedTags:      []string(r.ProposedTags),
-		ProposedContentMd: r.ProposedContentMD,
-		ProposedTitle:     r.ProposedTitle,
-		Note:              r.Note,
-		Status:            r.Status,
-		ReviewNote:        r.ReviewNote,
-		CreatedAt:         r.CreatedAt.Unix(),
-		UpdatedAt:         r.UpdatedAt.Unix(),
+		Id:                 uint32(r.ID),
+		ProblemId:          uint32(r.ProblemID),
+		UserId:             uint32(r.UserID),
+		UserName:           userName,
+		HasTags:            r.HasTags,
+		HasContent:         r.HasContent,
+		HasDifficulty:      r.HasDifficulty,
+		ProposedTags:       []string(r.ProposedTags),
+		ProposedContentMd:  r.ProposedContentMD,
+		ProposedTitle:      r.ProposedTitle,
+		ProposedDifficulty: r.ProposedDifficulty,
+		Note:               r.Note,
+		Status:             r.Status,
+		ReviewNote:         r.ReviewNote,
+		CreatedAt:          r.CreatedAt.Unix(),
+		UpdatedAt:          r.UpdatedAt.Unix(),
 	}
 	if r.ReviewerID != nil {
 		info.ReviewerId = uint32(*r.ReviewerID)
@@ -920,6 +924,7 @@ func (s *ProblemService) toEditInfo(r *model.ProblemEditRequest, p *model.Proble
 		}
 		info.CurrentContentMd = p.ContentMD
 		info.CurrentTitle = cleanDisplayTitle(p.Title)
+		info.CurrentDifficulty = p.Difficulty
 	}
 	return info
 }

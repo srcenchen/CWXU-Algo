@@ -3468,15 +3468,17 @@ func (x *TogglePipelineRes) GetPurged() int64 {
 
 // 站点管理员直接改题：有字段才更新（update_tags / update_content 显式开关）
 type AdminUpdateProblemReq struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            uint32                 `protobuf:"varint,1,opt,name=id,proto3" json:"id,omitempty"`
-	UpdateTags    bool                   `protobuf:"varint,2,opt,name=update_tags,json=updateTags,proto3" json:"update_tags,omitempty"`
-	Tags          []string               `protobuf:"bytes,3,rep,name=tags,proto3" json:"tags,omitempty"`
-	UpdateContent bool                   `protobuf:"varint,4,opt,name=update_content,json=updateContent,proto3" json:"update_content,omitempty"`
-	ContentMd     string                 `protobuf:"bytes,5,opt,name=content_md,json=contentMd,proto3" json:"content_md,omitempty"`
-	Title         string                 `protobuf:"bytes,6,opt,name=title,proto3" json:"title,omitempty"` // 非空才改标题
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	Id               uint32                 `protobuf:"varint,1,opt,name=id,proto3" json:"id,omitempty"`
+	UpdateTags       bool                   `protobuf:"varint,2,opt,name=update_tags,json=updateTags,proto3" json:"update_tags,omitempty"`
+	Tags             []string               `protobuf:"bytes,3,rep,name=tags,proto3" json:"tags,omitempty"`
+	UpdateContent    bool                   `protobuf:"varint,4,opt,name=update_content,json=updateContent,proto3" json:"update_content,omitempty"`
+	ContentMd        string                 `protobuf:"bytes,5,opt,name=content_md,json=contentMd,proto3" json:"content_md,omitempty"`
+	Title            string                 `protobuf:"bytes,6,opt,name=title,proto3" json:"title,omitempty"` // 非空才改标题
+	UpdateDifficulty bool                   `protobuf:"varint,7,opt,name=update_difficulty,json=updateDifficulty,proto3" json:"update_difficulty,omitempty"`
+	Difficulty       string                 `protobuf:"bytes,8,opt,name=difficulty,proto3" json:"difficulty,omitempty"` // 简单|中等|困难；update_difficulty 时写入（可空=清空）
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *AdminUpdateProblemReq) Reset() {
@@ -3551,6 +3553,20 @@ func (x *AdminUpdateProblemReq) GetTitle() string {
 	return ""
 }
 
+func (x *AdminUpdateProblemReq) GetUpdateDifficulty() bool {
+	if x != nil {
+		return x.UpdateDifficulty
+	}
+	return false
+}
+
+func (x *AdminUpdateProblemReq) GetDifficulty() string {
+	if x != nil {
+		return x.Difficulty
+	}
+	return ""
+}
+
 type AdminUpdateProblemRes struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Code          int64                  `protobuf:"varint,1,opt,name=code,proto3" json:"code,omitempty"`
@@ -3611,18 +3627,20 @@ func (x *AdminUpdateProblemRes) GetData() *ProblemInfo {
 	return nil
 }
 
-// 用户提交修改申请：至少改标签或题面其一
+// 用户提交修改申请：至少改标签/题面/标题/难度其一
 type ProposeProblemEditReq struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	ProblemId     uint32                 `protobuf:"varint,1,opt,name=problem_id,json=problemId,proto3" json:"problem_id,omitempty"`
-	UpdateTags    bool                   `protobuf:"varint,2,opt,name=update_tags,json=updateTags,proto3" json:"update_tags,omitempty"`
-	Tags          []string               `protobuf:"bytes,3,rep,name=tags,proto3" json:"tags,omitempty"`
-	UpdateContent bool                   `protobuf:"varint,4,opt,name=update_content,json=updateContent,proto3" json:"update_content,omitempty"`
-	ContentMd     string                 `protobuf:"bytes,5,opt,name=content_md,json=contentMd,proto3" json:"content_md,omitempty"`
-	Title         string                 `protobuf:"bytes,6,opt,name=title,proto3" json:"title,omitempty"`
-	Note          string                 `protobuf:"bytes,7,opt,name=note,proto3" json:"note,omitempty"` // 可选说明
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	ProblemId        uint32                 `protobuf:"varint,1,opt,name=problem_id,json=problemId,proto3" json:"problem_id,omitempty"`
+	UpdateTags       bool                   `protobuf:"varint,2,opt,name=update_tags,json=updateTags,proto3" json:"update_tags,omitempty"`
+	Tags             []string               `protobuf:"bytes,3,rep,name=tags,proto3" json:"tags,omitempty"`
+	UpdateContent    bool                   `protobuf:"varint,4,opt,name=update_content,json=updateContent,proto3" json:"update_content,omitempty"`
+	ContentMd        string                 `protobuf:"bytes,5,opt,name=content_md,json=contentMd,proto3" json:"content_md,omitempty"`
+	Title            string                 `protobuf:"bytes,6,opt,name=title,proto3" json:"title,omitempty"`
+	Note             string                 `protobuf:"bytes,7,opt,name=note,proto3" json:"note,omitempty"` // 可选说明
+	UpdateDifficulty bool                   `protobuf:"varint,8,opt,name=update_difficulty,json=updateDifficulty,proto3" json:"update_difficulty,omitempty"`
+	Difficulty       string                 `protobuf:"bytes,9,opt,name=difficulty,proto3" json:"difficulty,omitempty"` // 简单|中等|困难；update_difficulty 时写入
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *ProposeProblemEditReq) Reset() {
@@ -3700,6 +3718,20 @@ func (x *ProposeProblemEditReq) GetTitle() string {
 func (x *ProposeProblemEditReq) GetNote() string {
 	if x != nil {
 		return x.Note
+	}
+	return ""
+}
+
+func (x *ProposeProblemEditReq) GetUpdateDifficulty() bool {
+	if x != nil {
+		return x.UpdateDifficulty
+	}
+	return false
+}
+
+func (x *ProposeProblemEditReq) GetDifficulty() string {
+	if x != nil {
+		return x.Difficulty
 	}
 	return ""
 }
@@ -3846,11 +3878,14 @@ type ProblemEditInfo struct {
 	CreatedAt         int64                  `protobuf:"varint,17,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
 	UpdatedAt         int64                  `protobuf:"varint,18,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"`
 	// 当前线上快照（便于对比）
-	CurrentTags      []string `protobuf:"bytes,19,rep,name=current_tags,json=currentTags,proto3" json:"current_tags,omitempty"`
-	CurrentContentMd string   `protobuf:"bytes,20,opt,name=current_content_md,json=currentContentMd,proto3" json:"current_content_md,omitempty"`
-	CurrentTitle     string   `protobuf:"bytes,21,opt,name=current_title,json=currentTitle,proto3" json:"current_title,omitempty"`
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	CurrentTags        []string `protobuf:"bytes,19,rep,name=current_tags,json=currentTags,proto3" json:"current_tags,omitempty"`
+	CurrentContentMd   string   `protobuf:"bytes,20,opt,name=current_content_md,json=currentContentMd,proto3" json:"current_content_md,omitempty"`
+	CurrentTitle       string   `protobuf:"bytes,21,opt,name=current_title,json=currentTitle,proto3" json:"current_title,omitempty"`
+	HasDifficulty      bool     `protobuf:"varint,22,opt,name=has_difficulty,json=hasDifficulty,proto3" json:"has_difficulty,omitempty"`
+	ProposedDifficulty string   `protobuf:"bytes,23,opt,name=proposed_difficulty,json=proposedDifficulty,proto3" json:"proposed_difficulty,omitempty"`
+	CurrentDifficulty  string   `protobuf:"bytes,24,opt,name=current_difficulty,json=currentDifficulty,proto3" json:"current_difficulty,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *ProblemEditInfo) Reset() {
@@ -4026,6 +4061,27 @@ func (x *ProblemEditInfo) GetCurrentContentMd() string {
 func (x *ProblemEditInfo) GetCurrentTitle() string {
 	if x != nil {
 		return x.CurrentTitle
+	}
+	return ""
+}
+
+func (x *ProblemEditInfo) GetHasDifficulty() bool {
+	if x != nil {
+		return x.HasDifficulty
+	}
+	return false
+}
+
+func (x *ProblemEditInfo) GetProposedDifficulty() string {
+	if x != nil {
+		return x.ProposedDifficulty
+	}
+	return ""
+}
+
+func (x *ProblemEditInfo) GetCurrentDifficulty() string {
+	if x != nil {
+		return x.CurrentDifficulty
 	}
 	return ""
 }
@@ -4618,7 +4674,7 @@ const file_core_v1_problem_problem_proto_rawDesc = "" +
 	"\x04code\x18\x01 \x01(\x03R\x04code\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12\x16\n" +
 	"\x06paused\x18\x03 \x01(\bR\x06paused\x12\x16\n" +
-	"\x06purged\x18\x04 \x01(\x03R\x06purged\"\xb8\x01\n" +
+	"\x06purged\x18\x04 \x01(\x03R\x06purged\"\x85\x02\n" +
 	"\x15AdminUpdateProblemReq\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\rR\x02id\x12\x1f\n" +
 	"\vupdate_tags\x18\x02 \x01(\bR\n" +
@@ -4627,11 +4683,15 @@ const file_core_v1_problem_problem_proto_rawDesc = "" +
 	"\x0eupdate_content\x18\x04 \x01(\bR\rupdateContent\x12\x1d\n" +
 	"\n" +
 	"content_md\x18\x05 \x01(\tR\tcontentMd\x12\x14\n" +
-	"\x05title\x18\x06 \x01(\tR\x05title\"{\n" +
+	"\x05title\x18\x06 \x01(\tR\x05title\x12+\n" +
+	"\x11update_difficulty\x18\a \x01(\bR\x10updateDifficulty\x12\x1e\n" +
+	"\n" +
+	"difficulty\x18\b \x01(\tR\n" +
+	"difficulty\"{\n" +
 	"\x15AdminUpdateProblemRes\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\x03R\x04code\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x124\n" +
-	"\x04data\x18\x03 \x01(\v2 .api.core.v1.problem.ProblemInfoR\x04data\"\xdb\x01\n" +
+	"\x04data\x18\x03 \x01(\v2 .api.core.v1.problem.ProblemInfoR\x04data\"\xa8\x02\n" +
 	"\x15ProposeProblemEditReq\x12\x1d\n" +
 	"\n" +
 	"problem_id\x18\x01 \x01(\rR\tproblemId\x12\x1f\n" +
@@ -4642,7 +4702,11 @@ const file_core_v1_problem_problem_proto_rawDesc = "" +
 	"\n" +
 	"content_md\x18\x05 \x01(\tR\tcontentMd\x12\x14\n" +
 	"\x05title\x18\x06 \x01(\tR\x05title\x12\x12\n" +
-	"\x04note\x18\a \x01(\tR\x04note\"d\n" +
+	"\x04note\x18\a \x01(\tR\x04note\x12+\n" +
+	"\x11update_difficulty\x18\b \x01(\bR\x10updateDifficulty\x12\x1e\n" +
+	"\n" +
+	"difficulty\x18\t \x01(\tR\n" +
+	"difficulty\"d\n" +
 	"\x15ProposeProblemEditRes\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\x03R\x04code\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12\x1d\n" +
@@ -4651,7 +4715,7 @@ const file_core_v1_problem_problem_proto_rawDesc = "" +
 	"\x12ListProblemEditReq\x12\x12\n" +
 	"\x04page\x18\x01 \x01(\x03R\x04page\x12\x1b\n" +
 	"\tpage_size\x18\x02 \x01(\x03R\bpageSize\x12\x16\n" +
-	"\x06status\x18\x03 \x01(\tR\x06status\"\xb2\x05\n" +
+	"\x06status\x18\x03 \x01(\tR\x06status\"\xb9\x06\n" +
 	"\x0fProblemEditInfo\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\rR\x02id\x12\x1d\n" +
 	"\n" +
@@ -4681,7 +4745,10 @@ const file_core_v1_problem_problem_proto_rawDesc = "" +
 	"updated_at\x18\x12 \x01(\x03R\tupdatedAt\x12!\n" +
 	"\fcurrent_tags\x18\x13 \x03(\tR\vcurrentTags\x12,\n" +
 	"\x12current_content_md\x18\x14 \x01(\tR\x10currentContentMd\x12#\n" +
-	"\rcurrent_title\x18\x15 \x01(\tR\fcurrentTitle\"\xc3\x01\n" +
+	"\rcurrent_title\x18\x15 \x01(\tR\fcurrentTitle\x12%\n" +
+	"\x0ehas_difficulty\x18\x16 \x01(\bR\rhasDifficulty\x12/\n" +
+	"\x13proposed_difficulty\x18\x17 \x01(\tR\x12proposedDifficulty\x12-\n" +
+	"\x12current_difficulty\x18\x18 \x01(\tR\x11currentDifficulty\"\xc3\x01\n" +
 	"\x12ListProblemEditRes\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\x03R\x04code\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x128\n" +

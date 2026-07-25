@@ -2802,6 +2802,10 @@ components:
                     type: string
                 title:
                     type: string
+                updateDifficulty:
+                    type: boolean
+                difficulty:
+                    type: string
             description: 站点管理员直接改题：有字段才更新（update_tags / update_content 显式开关）
         api.core.v1.problem.AdminUpdateProblemRes:
             type: object
@@ -3124,6 +3128,12 @@ components:
                     type: string
                 currentTitle:
                     type: string
+                hasDifficulty:
+                    type: boolean
+                proposedDifficulty:
+                    type: string
+                currentDifficulty:
+                    type: string
         api.core.v1.problem.ProblemInfo:
             type: object
             properties:
@@ -3260,7 +3270,11 @@ components:
                     type: string
                 note:
                     type: string
-            description: 用户提交修改申请：至少改标签或题面其一
+                updateDifficulty:
+                    type: boolean
+                difficulty:
+                    type: string
+            description: 用户提交修改申请：至少改标签/题面/标题/难度其一
         api.core.v1.problem.ProposeProblemEditRes:
             type: object
             properties:

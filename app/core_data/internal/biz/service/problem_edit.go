@@ -42,14 +42,25 @@ func nonEmptyTags(tags model.StringArray) []string {
 	return normalizeEditTags([]string(tags))
 }
 
-// ApplyProblemFields 应用标签/题面修改，并按规则更新状态与 AI 入队。
-// updateTags / updateContent 为 true 时才写入对应字段（允许清空标签）。
+// normalizeEditDifficulty 校验难度：简单|中等|困难；空串表示清空。
+func normalizeEditDifficulty(d string) (string, error) {
+	d = strings.TrimSpace(d)
+	switch d {
+	case "", "简单", "中等", "困难":
+		return d, nil
+	default:
+		return "", fmt.Errorf("难度须为 简单 / 中等 / 困难")
+	}
+}
+
+// ApplyProblemFields 应用标签/题面/难度修改，并按规则更新状态与 AI 入队。
+// updateTags / updateContent / updateDifficulty 为 true 时才写入对应字段（允许清空标签/难度）。
 // 规则：
 //   - 标签非空 + 有题面 → COMPLETED（后续 AI 跳过）
 //   - 有题面 + 标签空 → TAGGING 并入队分析
 //   - 仅标签无题面 → 保留/回到 PENDING，不入队 AI
-func (uc *ProblemUseCase) ApplyProblemFields(problemID uint, updateTags bool, tags []string, updateContent bool, contentMD, title string) (*model.Problem, error) {
-	if !updateTags && !updateContent && strings.TrimSpace(title) == "" {
+func (uc *ProblemUseCase) ApplyProblemFields(problemID uint, updateTags bool, tags []string, updateContent bool, contentMD, title string, updateDifficulty bool, difficulty string) (*model.Problem, error) {
+	if !updateTags && !updateContent && strings.TrimSpace(title) == "" && !updateDifficulty {
 		return nil, fmt.Errorf("没有需要修改的内容")
 	}
 	var p model.Problem
@@ -66,6 +77,13 @@ func (uc *ProblemUseCase) ApplyProblemFields(problemID uint, updateTags bool, ta
 	}
 	if t := strings.TrimSpace(title); t != "" {
 		updates["title"] = t
+	}
+	if updateDifficulty {
+		d, err := normalizeEditDifficulty(difficulty)
+		if err != nil {
+			return nil, err
+		}
+		updates["difficulty"] = d
 	}
 	if len(updates) == 0 {
 		return &p, nil
@@ -154,13 +172,13 @@ func (uc *ProblemUseCase) ApplyProblemFields(problemID uint, updateTags bool, ta
 // ProposeProblemEdit 用户提交审核（同题仅允许一条 pending）。
 // autoApprove=true 时（站管/资源审核员）创建记录后立即通过：写 approved、应用字段、贡献统计计入；
 // 申请人=审核人时跳过感谢站内信/邮件，避免自己通知自己。
-func (uc *ProblemUseCase) ProposeProblemEdit(userID, problemID uint, updateTags bool, tags []string, updateContent bool, contentMD, title, note string, autoApprove bool) (uint, error) {
+func (uc *ProblemUseCase) ProposeProblemEdit(userID, problemID uint, updateTags bool, tags []string, updateContent bool, contentMD, title, note string, updateDifficulty bool, difficulty string, autoApprove bool) (uint, error) {
 	if userID == 0 {
 		return 0, fmt.Errorf("请先登录")
 	}
 	title = strings.TrimSpace(title)
-	if !updateTags && !updateContent && title == "" {
-		return 0, fmt.Errorf("请至少修改标签、题面或标题")
+	if !updateTags && !updateContent && title == "" && !updateDifficulty {
+		return 0, fmt.Errorf("请至少修改标签、题面、标题或难度")
 	}
 	if updateTags {
 		tags = normalizeEditTags(tags)
@@ -175,6 +193,13 @@ func (uc *ProblemUseCase) ProposeProblemEdit(userID, problemID uint, updateTags 
 			return 0, fmt.Errorf("题面过长")
 		}
 	}
+	if updateDifficulty {
+		d, err := normalizeEditDifficulty(difficulty)
+		if err != nil {
+			return 0, err
+		}
+		difficulty = d
+	}
 	var p model.Problem
 	if err := uc.data.DB.First(&p, problemID).Error; err != nil {
 		return 0, fmt.Errorf("题目不存在")
@@ -184,7 +209,7 @@ func (uc *ProblemUseCase) ProposeProblemEdit(userID, problemID uint, updateTags 
 	err := uc.data.DB.Where("problem_id = ? AND user_id = ? AND status = ?", problemID, userID, model.ProblemEditPending).
 		First(&existing).Error
 	if err == nil {
-		// 合并到已有 pending（分次改标签/题面不互相覆盖）
+		// 合并到已有 pending（分次改标签/题面/难度不互相覆盖）
 		if updateTags {
 			existing.HasTags = true
 			existing.ProposedTags = model.StringArray(tags)
@@ -195,6 +220,10 @@ func (uc *ProblemUseCase) ProposeProblemEdit(userID, problemID uint, updateTags 
 		}
 		if t := strings.TrimSpace(title); t != "" {
 			existing.ProposedTitle = t
+		}
+		if updateDifficulty {
+			existing.HasDifficulty = true
+			existing.ProposedDifficulty = difficulty
 		}
 		if n := strings.TrimSpace(note); n != "" {
 			existing.Note = n
@@ -214,21 +243,26 @@ func (uc *ProblemUseCase) ProposeProblemEdit(userID, problemID uint, updateTags 
 	}
 
 	req := model.ProblemEditRequest{
-		ProblemID:         problemID,
-		UserID:            userID,
-		HasTags:           updateTags,
-		HasContent:        updateContent,
-		ProposedTags:      model.StringArray(tags),
-		ProposedContentMD: contentMD,
-		ProposedTitle:     strings.TrimSpace(title),
-		Note:              strings.TrimSpace(note),
-		Status:            model.ProblemEditPending,
+		ProblemID:          problemID,
+		UserID:             userID,
+		HasTags:            updateTags,
+		HasContent:         updateContent,
+		HasDifficulty:      updateDifficulty,
+		ProposedTags:       model.StringArray(tags),
+		ProposedContentMD:  contentMD,
+		ProposedTitle:      strings.TrimSpace(title),
+		ProposedDifficulty: difficulty,
+		Note:               strings.TrimSpace(note),
+		Status:             model.ProblemEditPending,
 	}
 	if !updateTags {
 		req.ProposedTags = model.StringArray{}
 	}
 	if !updateContent {
 		req.ProposedContentMD = ""
+	}
+	if !updateDifficulty {
+		req.ProposedDifficulty = ""
 	}
 	if err := uc.data.DB.Create(&req).Error; err != nil {
 		return 0, err
@@ -295,6 +329,14 @@ func problemEditPendingSummary(problemTitle string, req *model.ProblemEditReques
 			details = append(details, "清空题目标签")
 		} else {
 			details = append(details, "标签改为「"+strings.Join(tags, "、")+"」")
+		}
+	}
+	if req.HasDifficulty {
+		d := strings.TrimSpace(req.ProposedDifficulty)
+		if d == "" {
+			details = append(details, "清空难度")
+		} else {
+			details = append(details, "难度改为「"+d+"」")
 		}
 	}
 	if note := strings.TrimSpace(req.Note); note != "" {
@@ -386,6 +428,7 @@ func (uc *ProblemUseCase) ReviewProblemEdit(requestID, reviewerID uint, approve 
 		req.HasTags, []string(req.ProposedTags),
 		req.HasContent, req.ProposedContentMD,
 		req.ProposedTitle,
+		req.HasDifficulty, req.ProposedDifficulty,
 	)
 	if err != nil {
 		return err
@@ -493,7 +536,7 @@ func (u userBrief) display() string {
 }
 
 func problemEditApprovedItems(req *model.ProblemEditRequest) []string {
-	items := make([]string, 0, 3)
+	items := make([]string, 0, 4)
 	if req == nil {
 		return []string{"题目修改"}
 	}
@@ -505,6 +548,9 @@ func problemEditApprovedItems(req *model.ProblemEditRequest) []string {
 	}
 	if req.HasTags {
 		items = append(items, "题目标签")
+	}
+	if req.HasDifficulty {
+		items = append(items, "题目难度")
 	}
 	if len(items) == 0 {
 		items = append(items, "题目修改")

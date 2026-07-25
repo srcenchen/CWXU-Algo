@@ -558,6 +558,8 @@ message AdminUpdateProblemReq {
   bool update_content = 4;
   string content_md = 5;
   string title = 6; // 非空才改标题
+  bool update_difficulty = 7;
+  string difficulty = 8; // 简单|中等|困难；update_difficulty 时写入（可空=清空）
 }
 
 message AdminUpdateProblemRes {
@@ -566,7 +568,7 @@ message AdminUpdateProblemRes {
   ProblemInfo data = 3;
 }
 
-// 用户提交修改申请：至少改标签或题面其一
+// 用户提交修改申请：至少改标签/题面/标题/难度其一
 message ProposeProblemEditReq {
   uint32 problem_id = 1;
   bool update_tags = 2;
@@ -575,6 +577,8 @@ message ProposeProblemEditReq {
   string content_md = 5;
   string title = 6;
   string note = 7; // 可选说明
+  bool update_difficulty = 8;
+  string difficulty = 9; // 简单|中等|困难；update_difficulty 时写入
 }
 
 message ProposeProblemEditRes {
@@ -613,6 +617,9 @@ message ProblemEditInfo {
   repeated string current_tags = 19;
   string current_content_md = 20;
   string current_title = 21;
+  bool has_difficulty = 22;
+  string proposed_difficulty = 23;
+  string current_difficulty = 24;
 }
 
 message ListProblemEditRes {
