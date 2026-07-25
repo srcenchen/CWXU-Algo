@@ -3646,6 +3646,11 @@ components:
                     type: string
                 userStatus:
                     type: string
+                tags:
+                    type: array
+                    items:
+                        type: string
+                    description: 题库标签（无则空数组）；题单详情展示用
         api.core.v1.problemset.RemoveReq:
             type: object
             properties:
@@ -4291,6 +4296,9 @@ components:
                 disabled:
                     type: boolean
                     description: 账号是否被禁用（禁止登录）
+                isResourceReviewer:
+                    type: boolean
+                    description: 资源审核员（可审举报/内容修改）
         api.user.v1.GetListRes_OrgBrief:
             type: object
             properties:

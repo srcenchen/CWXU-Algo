@@ -16,14 +16,15 @@ import (
 // JwtPayload JWT 载荷
 type JwtPayload struct {
 	jwt.RegisteredClaims
-	UserID      uint   `json:"userId"`
-	Username    string `json:"username"`
-	Name        string `json:"name"`
-	Email       string `json:"email"`
-	RoleID      int    `json:"roleId"` // 兼容旧字段
-	IsSiteAdmin bool   `json:"isSiteAdmin"`
-	OrgID       uint   `json:"orgId"`
-	OrgRole     string `json:"orgRole"` // member | coach | captain | org_admin
+	UserID             uint   `json:"userId"`
+	Username           string `json:"username"`
+	Name               string `json:"name"`
+	Email              string `json:"email"`
+	RoleID             int    `json:"roleId"` // 兼容旧字段
+	IsSiteAdmin        bool   `json:"isSiteAdmin"`
+	IsResourceReviewer bool   `json:"isResourceReviewer"`
+	OrgID              uint   `json:"orgId"`
+	OrgRole            string `json:"orgRole"` // member | coach | captain | org_admin
 }
 
 func parseJWTToken(ctx context.Context) string {
@@ -80,6 +81,7 @@ func parsePayload(ctx context.Context) *JwtPayload {
 					pd.Email, _ = mc["email"].(string)
 					pd.OrgRole, _ = mc["orgRole"].(string)
 					pd.IsSiteAdmin = asBool(mc["isSiteAdmin"])
+					pd.IsResourceReviewer = asBool(mc["isResourceReviewer"])
 					pd.RoleID = asInt(mc["roleId"])
 					pd.OrgID = uint(asInt(mc["orgId"]))
 				}
@@ -203,6 +205,28 @@ func VerifySiteAdmin(ctx context.Context) bool {
 		return false
 	}
 	return pd.IsSiteAdmin || pd.RoleID == permission.RoleAdmin
+}
+
+// IsContentModerator 站管或资源审核员（题库审核 / 博客 moderate / 举报处理）
+func IsContentModerator(pd *JwtPayload) bool {
+	if pd == nil {
+		return false
+	}
+	if pd.IsSiteAdmin || pd.RoleID == permission.RoleAdmin {
+		return true
+	}
+	return pd.IsResourceReviewer
+}
+
+// VerifyContentModerator 站点管理员或资源审核员
+func VerifyContentModerator(ctx context.Context) bool {
+	return IsContentModerator(parsePayload(ctx))
+}
+
+// VerifyResourceReviewer 仅资源审核员（不含站管）；一般业务用 VerifyContentModerator
+func VerifyResourceReviewer(ctx context.Context) bool {
+	pd := parsePayload(ctx)
+	return pd != nil && pd.IsResourceReviewer
 }
 
 // VerifyOrgAdmin 当前 JWT 组织的组织管理员，或站点管理员

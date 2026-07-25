@@ -815,8 +815,9 @@ func (s *ProblemService) ToggleFetch(ctx context.Context, req *problem.TogglePip
 }
 
 func (s *ProblemService) AdminUpdate(ctx context.Context, req *problem.AdminUpdateProblemReq) (*problem.AdminUpdateProblemRes, error) {
-	if !auth.VerifySiteAdmin(ctx) {
-		return &problem.AdminUpdateProblemRes{Code: 1, Message: "仅站点管理员可直接修改"}, nil
+	// 与 ProposeEdit 特权路径一致：写审核记录并 auto-approve（站管/资源审核员）
+	if !auth.VerifyContentModerator(ctx) {
+		return &problem.AdminUpdateProblemRes{Code: 1, Message: "仅站点管理员或资源审核员可直接修改"}, nil
 	}
 	if req == nil || req.Id == 0 {
 		return &problem.AdminUpdateProblemRes{Code: 1, Message: "题目 id 无效"}, nil
@@ -824,18 +825,27 @@ func (s *ProblemService) AdminUpdate(ctx context.Context, req *problem.AdminUpda
 	if !req.UpdateTags && !req.UpdateContent && strings.TrimSpace(req.Title) == "" {
 		return &problem.AdminUpdateProblemRes{Code: 1, Message: "没有需要修改的内容"}, nil
 	}
-	p, err := s.uc.ApplyProblemFields(
-		uint(req.Id),
+	uid := auth.GetCurrentUserId(ctx)
+	if uid == 0 {
+		return &problem.AdminUpdateProblemRes{Code: 1, Message: "请先登录"}, nil
+	}
+	_, err := s.uc.ProposeProblemEdit(
+		uid, uint(req.Id),
 		req.UpdateTags, req.Tags,
 		req.UpdateContent, req.ContentMd,
-		req.Title,
+		req.Title, "管理员/审核员直接修改",
+		true, // auto-approve
 	)
 	if err != nil {
 		return &problem.AdminUpdateProblemRes{Code: 1, Message: err.Error()}, nil
 	}
+	p, err := s.uc.Get(uint(req.Id))
+	if err != nil {
+		return &problem.AdminUpdateProblemRes{Code: 0, Message: "已保存并记入审核记录"}, nil
+	}
 	return &problem.AdminUpdateProblemRes{
 		Code:    0,
-		Message: "已保存",
+		Message: "已保存并记入审核记录",
 		Data:    s.toInfo(p, ""),
 	}, nil
 }
@@ -845,35 +855,31 @@ func (s *ProblemService) ProposeEdit(ctx context.Context, req *problem.ProposePr
 	if uid == 0 {
 		return &problem.ProposeProblemEditRes{Code: 1, Message: "请先登录"}, nil
 	}
-	// 站点管理员应走 AdminUpdate，这里也允许直接通过（省一步）
-	if auth.VerifySiteAdmin(ctx) {
-		p, err := s.uc.ApplyProblemFields(
-			uint(req.ProblemId),
-			req.UpdateTags, req.Tags,
-			req.UpdateContent, req.ContentMd,
-			req.Title,
-		)
-		if err != nil {
-			return &problem.ProposeProblemEditRes{Code: 1, Message: err.Error()}, nil
-		}
-		_ = p
-		return &problem.ProposeProblemEditRes{Code: 0, Message: "已直接保存（站点管理员）", RequestId: 0}, nil
-	}
 	if req == nil || req.ProblemId == 0 {
 		return &problem.ProposeProblemEditRes{Code: 1, Message: "题目 id 无效"}, nil
 	}
+	// 站管 / 资源审核员：仍写 problem_edit_requests，创建后立即 auto-approve（「已通过」有记录、贡献统计计入）
+	autoApprove := auth.VerifyContentModerator(ctx)
 	id, err := s.uc.ProposeProblemEdit(
 		uid, uint(req.ProblemId),
 		req.UpdateTags, req.Tags,
 		req.UpdateContent, req.ContentMd,
 		req.Title, req.Note,
+		autoApprove,
 	)
 	if err != nil {
 		return &problem.ProposeProblemEditRes{Code: 1, Message: err.Error()}, nil
 	}
+	if autoApprove {
+		return &problem.ProposeProblemEditRes{
+			Code:      0,
+			Message:   "已保存并记入审核记录",
+			RequestId: uint32(id),
+		}, nil
+	}
 	return &problem.ProposeProblemEditRes{
 		Code:      0,
-		Message:   "已提交，等待站点管理员审核",
+		Message:   "已提交，等待审核",
 		RequestId: uint32(id),
 	}, nil
 }
@@ -919,8 +925,8 @@ func (s *ProblemService) toEditInfo(r *model.ProblemEditRequest, p *model.Proble
 }
 
 func (s *ProblemService) ListEditRequests(ctx context.Context, req *problem.ListProblemEditReq) (*problem.ListProblemEditRes, error) {
-	if !auth.VerifySiteAdmin(ctx) {
-		return &problem.ListProblemEditRes{Code: 1, Message: "仅站点管理员可查看审核列表"}, nil
+	if !auth.VerifyContentModerator(ctx) {
+		return &problem.ListProblemEditRes{Code: 1, Message: "仅站点管理员或资源审核员可查看审核列表"}, nil
 	}
 	page, ps := int64(1), int64(20)
 	status := ""
@@ -966,8 +972,8 @@ func (s *ProblemService) ListEditRequests(ctx context.Context, req *problem.List
 }
 
 func (s *ProblemService) ReviewEdit(ctx context.Context, req *problem.ReviewProblemEditReq) (*problem.ReviewProblemEditRes, error) {
-	if !auth.VerifySiteAdmin(ctx) {
-		return &problem.ReviewProblemEditRes{Code: 1, Message: "仅站点管理员可审核"}, nil
+	if !auth.VerifyContentModerator(ctx) {
+		return &problem.ReviewProblemEditRes{Code: 1, Message: "仅站点管理员或资源审核员可审核"}, nil
 	}
 	if req == nil || req.Id == 0 {
 		return &problem.ReviewProblemEditRes{Code: 1, Message: "申请 id 无效"}, nil

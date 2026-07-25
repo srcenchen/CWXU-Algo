@@ -120,7 +120,8 @@ const (
 	ProblemEditRejected = "rejected"
 )
 
-// ProblemEditRequest 题面/标签人工修改申请（站点管理员审核；站管直改不经此表）
+// ProblemEditRequest 题面/标签人工修改申请。
+// 普通用户 pending 后由站管/资源审核员审核；站管/审核员本人修改会写记录并 auto-approve。
 type ProblemEditRequest struct {
 	ID                uint        `gorm:"primaryKey"`
 	ProblemID         uint        `gorm:"index;not null"`

@@ -15,7 +15,9 @@ type User struct {
 	Group        Group  `gorm:"foreignKey:GroupId;references:ID"`
 	RoleID       int    `gorm:"comment:角色ID兼容;default:0"` // 迁移后以 is_site_admin + org 为准
 	IsSiteAdmin  bool   `gorm:"default:false;comment:站点管理员"`
-	CurrentOrgID uint   `gorm:"default:0;comment:当前组织ID"`
+	// IsResourceReviewer 资源审核员：可审举报/内容修改；本人内容修改自动通过（仍写审核记录）
+	IsResourceReviewer bool `gorm:"default:false;comment:资源审核员"`
+	CurrentOrgID       uint `gorm:"default:0;comment:当前组织ID"`
 	// EmailEnabled 个人日报邮件；默认关，且须组织 enable_ai_email 才可开
 	EmailEnabled bool `gorm:"comment:个人日报邮件;default:false"`
 	// EmailWeeklyEnabled 个人周报（教练/队长/组织管理员）；与日报独立

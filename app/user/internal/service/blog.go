@@ -116,6 +116,11 @@ func blogIsSiteAdmin(ctx khttp.Context) bool {
 	return pd != nil && pd.IsSiteAdmin
 }
 
+// blogIsContentModerator 站管或资源审核员（博客审核/举报处理）
+func blogIsContentModerator(ctx khttp.Context) bool {
+	return auth.IsContentModerator(auth.GetCurrentUser(ctx))
+}
+
 func (s *BlogService) publicOrgID() uint {
 	id, err := data.EnsurePublicOrgID(s.db)
 	if err != nil {

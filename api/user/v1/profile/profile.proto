@@ -248,6 +248,8 @@ message GetListRes {
     bool adminForceDormant = 26;
     // 账号是否被禁用（禁止登录）
     bool disabled = 27;
+    // 资源审核员（可审举报/内容修改）
+    bool isResourceReviewer = 28;
   }
   repeated List list = 1;
   int64 total = 2;

@@ -151,13 +151,16 @@ func (uc *ProblemUseCase) ApplyProblemFields(problemID uint, updateTags bool, ta
 	return &p, nil
 }
 
-// ProposeProblemEdit 用户提交审核（同题仅允许一条 pending）
-func (uc *ProblemUseCase) ProposeProblemEdit(userID, problemID uint, updateTags bool, tags []string, updateContent bool, contentMD, title, note string) (uint, error) {
+// ProposeProblemEdit 用户提交审核（同题仅允许一条 pending）。
+// autoApprove=true 时（站管/资源审核员）创建记录后立即通过：写 approved、应用字段、贡献统计计入；
+// 申请人=审核人时跳过感谢站内信/邮件，避免自己通知自己。
+func (uc *ProblemUseCase) ProposeProblemEdit(userID, problemID uint, updateTags bool, tags []string, updateContent bool, contentMD, title, note string, autoApprove bool) (uint, error) {
 	if userID == 0 {
 		return 0, fmt.Errorf("请先登录")
 	}
-	if !updateTags && !updateContent {
-		return 0, fmt.Errorf("请至少修改标签或题面")
+	title = strings.TrimSpace(title)
+	if !updateTags && !updateContent && title == "" {
+		return 0, fmt.Errorf("请至少修改标签、题面或标题")
 	}
 	if updateTags {
 		tags = normalizeEditTags(tags)
@@ -199,6 +202,11 @@ func (uc *ProblemUseCase) ProposeProblemEdit(userID, problemID uint, updateTags 
 		if err := uc.data.DB.Save(&existing).Error; err != nil {
 			return 0, err
 		}
+		if autoApprove {
+			if err := uc.ReviewProblemEdit(existing.ID, userID, true, "特权账号自动通过"); err != nil {
+				return 0, err
+			}
+		}
 		return existing.ID, nil
 	}
 	if err != gorm.ErrRecordNotFound {
@@ -225,7 +233,13 @@ func (uc *ProblemUseCase) ProposeProblemEdit(userID, problemID uint, updateTags 
 	if err := uc.data.DB.Create(&req).Error; err != nil {
 		return 0, err
 	}
-	// 首次提交待审核：通知站管（站内信 + 可配置邮件）
+	if autoApprove {
+		if err := uc.ReviewProblemEdit(req.ID, userID, true, "特权账号自动通过"); err != nil {
+			return 0, err
+		}
+		return req.ID, nil
+	}
+	// 首次提交待审核：通知站管∪资源审核员（站内信 + 可配置邮件）
 	uc.notifyReviewPendingProblemEdit(userID, problemID, req.ID, &p, &req)
 	return req.ID, nil
 }
@@ -390,8 +404,13 @@ func (uc *ProblemUseCase) ReviewProblemEdit(requestID, reviewerID uint, approve 
 
 // notifyProblemEditResult 审核结果站内信（写 user.notifications）。
 // 通过：额外给申请人邮箱发感谢信；驳回：仅站内信，不发邮件。
+// 申请人与审核人为同一人（特权账号自动通过）时跳过站内信与邮件。
 func (uc *ProblemUseCase) notifyProblemEditResult(req *model.ProblemEditRequest, approved bool, note string, reviewerID uint) {
 	if req == nil || req.UserID == 0 {
+		return
+	}
+	// 自审通过：流水已写入，无需再通知自己
+	if approved && reviewerID != 0 && reviewerID == req.UserID {
 		return
 	}
 	typ := notify.TypeProblemEditRejected

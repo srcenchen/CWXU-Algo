@@ -21,6 +21,8 @@ const (
 	NotifTypeUserFrozen          = "user_frozen"
 	NotifTypeUserUnfrozen        = "user_unfrozen"
 	NotifTypeReviewPending       = "review_pending"
+	NotifTypeResourceReviewerAppointed = "resource_reviewer_appointed"
+	NotifTypeResourceReviewerRevoked   = "resource_reviewer_revoked"
 )
 
 // Notification 站内信（按接收用户存储）

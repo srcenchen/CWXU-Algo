@@ -329,8 +329,8 @@ func (s *BlogService) handleNotifyPref(ctx khttp.Context) error {
 
 func (s *BlogService) handleAdminOverview(ctx khttp.Context) error {
 	pd := auth.GetCurrentUser(ctx)
-	if pd == nil || !pd.IsSiteAdmin {
-		writeJSON(ctx.Response(), 403, map[string]interface{}{"code": 1, "message": "仅站点管理员可操作"})
+	if !auth.IsContentModerator(pd) {
+		writeJSON(ctx.Response(), 403, map[string]interface{}{"code": 1, "message": "仅站点管理员或资源审核员可操作"})
 		return nil
 	}
 	var activated int64
@@ -369,8 +369,8 @@ func (s *BlogService) handleAdminOverview(ctx khttp.Context) error {
 
 func (s *BlogService) handleAdminAuthors(ctx khttp.Context) error {
 	pd := auth.GetCurrentUser(ctx)
-	if pd == nil || !pd.IsSiteAdmin {
-		writeJSON(ctx.Response(), 403, map[string]interface{}{"code": 1, "message": "仅站点管理员可操作"})
+	if !auth.IsContentModerator(pd) {
+		writeJSON(ctx.Response(), 403, map[string]interface{}{"code": 1, "message": "仅站点管理员或资源审核员可操作"})
 		return nil
 	}
 	page, pageSize := parsePage(ctx.Request())
@@ -458,8 +458,8 @@ func (s *BlogService) handleAdminAuthors(ctx khttp.Context) error {
 
 func (s *BlogService) handleAdminArticles(ctx khttp.Context) error {
 	pd := auth.GetCurrentUser(ctx)
-	if pd == nil || !pd.IsSiteAdmin {
-		writeJSON(ctx.Response(), 403, map[string]interface{}{"code": 1, "message": "仅站点管理员可操作"})
+	if !auth.IsContentModerator(pd) {
+		writeJSON(ctx.Response(), 403, map[string]interface{}{"code": 1, "message": "仅站点管理员或资源审核员可操作"})
 		return nil
 	}
 	page, pageSize := parsePage(ctx.Request())
@@ -545,8 +545,8 @@ func normalizeModeration(raw string) string {
 
 func (s *BlogService) handleAdminModerate(ctx khttp.Context) error {
 	pd := auth.GetCurrentUser(ctx)
-	if pd == nil || !pd.IsSiteAdmin {
-		writeJSON(ctx.Response(), 403, map[string]interface{}{"code": 1, "message": "仅站点管理员可操作"})
+	if !auth.IsContentModerator(pd) {
+		writeJSON(ctx.Response(), 403, map[string]interface{}{"code": 1, "message": "仅站点管理员或资源审核员可操作"})
 		return nil
 	}
 	var body struct {

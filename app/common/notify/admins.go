@@ -46,13 +46,38 @@ func ListSiteAdminIDs(db *gorm.DB) []uint {
 	return out
 }
 
-// NotifySiteAdmins 给全部站管写站内信（跳过 SkipUserID）
+// contentModeratorWhere 站管 ∪ 资源审核员（审核/举报通知受众）
+const contentModeratorWhere = "(is_site_admin = true OR is_resource_reviewer = true)"
+
+// ListContentModeratorIDs 站管 + 资源审核员 user id（去重）
+func ListContentModeratorIDs(db *gorm.DB) []uint {
+	if db == nil {
+		return nil
+	}
+	var rows []siteAdminRow
+	_ = db.Table("users").Select("id, email").Where(contentModeratorWhere).Find(&rows).Error
+	out := make([]uint, 0, len(rows))
+	for _, r := range rows {
+		if r.ID > 0 {
+			out = append(out, r.ID)
+		}
+	}
+	return out
+}
+
+// NotifySiteAdmins 给站管 + 资源审核员写站内信（跳过 SkipUserID）。
+// 命名保留兼容；实际受众为内容审核相关运营身份。
 func NotifySiteAdmins(db *gorm.DB, n AdminNotif) {
+	NotifyContentModerators(db, n)
+}
+
+// NotifyContentModerators 站管 ∪ 资源审核员站内信
+func NotifyContentModerators(db *gorm.DB, n AdminNotif) {
 	if db == nil || strings.TrimSpace(n.Type) == "" {
 		return
 	}
 	var rows []siteAdminRow
-	_ = db.Table("users").Select("id, email").Where("is_site_admin = ?", true).Find(&rows).Error
+	_ = db.Table("users").Select("id, email").Where(contentModeratorWhere).Find(&rows).Error
 	for _, adm := range rows {
 		if adm.ID == 0 || adm.ID == n.SkipUserID {
 			continue
@@ -108,7 +133,7 @@ func ParseEmailList(raw string) []string {
 	return out
 }
 
-// ResolveAdminNotifyEmails 可配置收件人；空配置则 fallback 全部站管邮箱
+// ResolveAdminNotifyEmails 可配置收件人；空配置则 fallback 站管∪资源审核员邮箱
 func ResolveAdminNotifyEmails(db *gorm.DB) []string {
 	if db == nil {
 		return nil
@@ -119,7 +144,7 @@ func ResolveAdminNotifyEmails(db *gorm.DB) []string {
 		return list
 	}
 	var rows []siteAdminRow
-	_ = db.Table("users").Select("id, email").Where("is_site_admin = ?", true).Find(&rows).Error
+	_ = db.Table("users").Select("id, email").Where(contentModeratorWhere).Find(&rows).Error
 	seen := map[string]struct{}{}
 	out := make([]string, 0, len(rows))
 	for _, r := range rows {
@@ -165,9 +190,14 @@ func EmailConfiguredRecipients(db *gorm.DB, subject, html string) {
 	}
 }
 
-// NotifySiteAdminsWithEmail 站内信给全体站管 + 邮件给可配置收件人（审核/举报）
+// NotifySiteAdminsWithEmail 站内信给站管∪资源审核员 + 邮件给可配置收件人（审核/举报）
 func NotifySiteAdminsWithEmail(db *gorm.DB, n AdminNotif, emailSubject, emailHTML string) {
-	NotifySiteAdmins(db, n)
+	NotifyContentModeratorsWithEmail(db, n, emailSubject, emailHTML)
+}
+
+// NotifyContentModeratorsWithEmail 站内信 + 配置/fallback 邮件
+func NotifyContentModeratorsWithEmail(db *gorm.DB, n AdminNotif, emailSubject, emailHTML string) {
+	NotifyContentModerators(db, n)
 	if strings.TrimSpace(emailHTML) == "" {
 		emailHTML = fmt.Sprintf("<p>%s</p>", n.Body)
 	}

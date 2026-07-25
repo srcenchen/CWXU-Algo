@@ -29,6 +29,9 @@ const (
 	TypeUserFrozen     = "user_frozen"
 	TypeUserUnfrozen   = "user_unfrozen"
 	TypeReviewPending  = "review_pending"
+	// 资源审核员任命
+	TypeResourceReviewerAppointed = "resource_reviewer_appointed"
+	TypeResourceReviewerRevoked   = "resource_reviewer_revoked"
 )
 
 // Row 与 user.notifications 表对齐（避免 core 依赖 user 包）

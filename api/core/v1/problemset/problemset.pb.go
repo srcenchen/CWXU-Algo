@@ -23,18 +23,20 @@ const (
 )
 
 type ProblemsetItem struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            int64                  `protobuf:"varint,1,opt,name=id,proto3" json:"id,omitempty"`
-	ProblemId     int64                  `protobuf:"varint,2,opt,name=problemId,proto3" json:"problemId,omitempty"`
-	SortOrder     int32                  `protobuf:"varint,3,opt,name=sortOrder,proto3" json:"sortOrder,omitempty"`
-	CreatedAt     int64                  `protobuf:"varint,4,opt,name=createdAt,proto3" json:"createdAt,omitempty"`
-	Title         string                 `protobuf:"bytes,5,opt,name=title,proto3" json:"title,omitempty"`
-	Platform      string                 `protobuf:"bytes,6,opt,name=platform,proto3" json:"platform,omitempty"`
-	ExternalId    string                 `protobuf:"bytes,7,opt,name=externalId,proto3" json:"externalId,omitempty"`
-	Url           string                 `protobuf:"bytes,8,opt,name=url,proto3" json:"url,omitempty"`
-	Difficulty    string                 `protobuf:"bytes,9,opt,name=difficulty,proto3" json:"difficulty,omitempty"`
-	Status        string                 `protobuf:"bytes,10,opt,name=status,proto3" json:"status,omitempty"`
-	UserStatus    string                 `protobuf:"bytes,11,opt,name=userStatus,proto3" json:"userStatus,omitempty"`
+	state      protoimpl.MessageState `protogen:"open.v1"`
+	Id         int64                  `protobuf:"varint,1,opt,name=id,proto3" json:"id,omitempty"`
+	ProblemId  int64                  `protobuf:"varint,2,opt,name=problemId,proto3" json:"problemId,omitempty"`
+	SortOrder  int32                  `protobuf:"varint,3,opt,name=sortOrder,proto3" json:"sortOrder,omitempty"`
+	CreatedAt  int64                  `protobuf:"varint,4,opt,name=createdAt,proto3" json:"createdAt,omitempty"`
+	Title      string                 `protobuf:"bytes,5,opt,name=title,proto3" json:"title,omitempty"`
+	Platform   string                 `protobuf:"bytes,6,opt,name=platform,proto3" json:"platform,omitempty"`
+	ExternalId string                 `protobuf:"bytes,7,opt,name=externalId,proto3" json:"externalId,omitempty"`
+	Url        string                 `protobuf:"bytes,8,opt,name=url,proto3" json:"url,omitempty"`
+	Difficulty string                 `protobuf:"bytes,9,opt,name=difficulty,proto3" json:"difficulty,omitempty"`
+	Status     string                 `protobuf:"bytes,10,opt,name=status,proto3" json:"status,omitempty"`
+	UserStatus string                 `protobuf:"bytes,11,opt,name=userStatus,proto3" json:"userStatus,omitempty"`
+	// 题库标签（无则空数组）；题单详情展示用
+	Tags          []string `protobuf:"bytes,12,rep,name=tags,proto3" json:"tags,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -144,6 +146,13 @@ func (x *ProblemsetItem) GetUserStatus() string {
 		return x.UserStatus
 	}
 	return ""
+}
+
+func (x *ProblemsetItem) GetTags() []string {
+	if x != nil {
+		return x.Tags
+	}
+	return nil
 }
 
 type ProblemsetInfo struct {
@@ -1610,7 +1619,7 @@ var File_core_v1_problemset_problemset_proto protoreflect.FileDescriptor
 
 const file_core_v1_problemset_problemset_proto_rawDesc = "" +
 	"\n" +
-	"#core/v1/problemset/problemset.proto\x12\x16api.core.v1.problemset\x1a\x1cgoogle/api/annotations.proto\"\xb6\x02\n" +
+	"#core/v1/problemset/problemset.proto\x12\x16api.core.v1.problemset\x1a\x1cgoogle/api/annotations.proto\"\xca\x02\n" +
 	"\x0eProblemsetItem\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\x03R\x02id\x12\x1c\n" +
 	"\tproblemId\x18\x02 \x01(\x03R\tproblemId\x12\x1c\n" +
@@ -1629,7 +1638,8 @@ const file_core_v1_problemset_problemset_proto_rawDesc = "" +
 	" \x01(\tR\x06status\x12\x1e\n" +
 	"\n" +
 	"userStatus\x18\v \x01(\tR\n" +
-	"userStatus\"\xde\x03\n" +
+	"userStatus\x12\x12\n" +
+	"\x04tags\x18\f \x03(\tR\x04tags\"\xde\x03\n" +
 	"\x0eProblemsetInfo\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\x03R\x02id\x12\x18\n" +
 	"\aownerId\x18\x02 \x01(\x03R\aownerId\x12\x1c\n" +

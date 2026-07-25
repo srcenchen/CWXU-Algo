@@ -59,18 +59,19 @@ func IssueJWT(db *gorm.DB, u *model.User) (string, error) {
 	now := time.Now()
 	expire := now.Add(JWTAccessTTL)
 	return jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-		"userId":      u.ID,
-		"username":    u.Username,
-		"name":        u.Name,
-		"roleId":      roleID,
-		"roleIds":     string(roleIdsJSON),
-		"isSiteAdmin": u.IsSiteAdmin,
-		"orgId":       orgID,
-		"orgRole":     orgRole,
-		"exp":         expire.Unix(),
-		"nbf":         now.Unix(),
-		"iat":         now.Unix(),
-		"iss":         "goalgo",
-		"aud":         "goalgo-web",
+		"userId":             u.ID,
+		"username":           u.Username,
+		"name":               u.Name,
+		"roleId":             roleID,
+		"roleIds":            string(roleIdsJSON),
+		"isSiteAdmin":        u.IsSiteAdmin,
+		"isResourceReviewer": u.IsResourceReviewer,
+		"orgId":              orgID,
+		"orgRole":            orgRole,
+		"exp":                expire.Unix(),
+		"nbf":                now.Unix(),
+		"iat":                now.Unix(),
+		"iss":                "goalgo",
+		"aud":                "goalgo-web",
 	}).SignedString([]byte(_const.JWTSecret()))
 }

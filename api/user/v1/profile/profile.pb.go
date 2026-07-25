@@ -2786,9 +2786,11 @@ type GetListRes_List struct {
 	// 站管强制冻结同步（覆盖豁免）
 	AdminForceDormant bool `protobuf:"varint,26,opt,name=adminForceDormant,proto3" json:"adminForceDormant,omitempty"`
 	// 账号是否被禁用（禁止登录）
-	Disabled      bool `protobuf:"varint,27,opt,name=disabled,proto3" json:"disabled,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Disabled bool `protobuf:"varint,27,opt,name=disabled,proto3" json:"disabled,omitempty"`
+	// 资源审核员（可审举报/内容修改）
+	IsResourceReviewer bool `protobuf:"varint,28,opt,name=isResourceReviewer,proto3" json:"isResourceReviewer,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *GetListRes_List) Reset() {
@@ -3003,6 +3005,13 @@ func (x *GetListRes_List) GetDisabled() bool {
 	return false
 }
 
+func (x *GetListRes_List) GetIsResourceReviewer() bool {
+	if x != nil {
+		return x.IsResourceReviewer
+	}
+	return false
+}
+
 type GetByIdsRes_UserProfile struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	UserId        int64                  `protobuf:"varint,1,opt,name=userId,proto3" json:"userId,omitempty"`
@@ -3117,7 +3126,7 @@ const file_user_v1_profile_profile_proto_rawDesc = "" +
 	"\x05scope\x18\x03 \x01(\tR\x05scope\x12\x18\n" +
 	"\akeyword\x18\x04 \x01(\tR\akeyword\x12 \n" +
 	"\vdormantOnly\x18\x05 \x01(\bR\vdormantOnly\x12\"\n" +
-	"\finactiveDays\x18\x06 \x01(\x05R\finactiveDays\"\x8d\t\n" +
+	"\finactiveDays\x18\x06 \x01(\x05R\finactiveDays\"\xbd\t\n" +
 	"\n" +
 	"GetListRes\x120\n" +
 	"\x04list\x18\x01 \x03(\v2\x1c.api.user.v1.GetListRes.ListR\x04list\x12\x14\n" +
@@ -3125,7 +3134,7 @@ const file_user_v1_profile_profile_proto_rawDesc = "" +
 	"\bOrgBrief\x12\x14\n" +
 	"\x05orgId\x18\x01 \x01(\x04R\x05orgId\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x12\n" +
-	"\x04role\x18\x03 \x01(\tR\x04role\x1a\xec\a\n" +
+	"\x04role\x18\x03 \x01(\tR\x04role\x1a\x9c\b\n" +
 	"\x04List\x12\x16\n" +
 	"\x06userId\x18\x01 \x01(\x04R\x06userId\x12\x1a\n" +
 	"\busername\x18\x02 \x01(\tR\busername\x12\x12\n" +
@@ -3157,7 +3166,8 @@ const file_user_v1_profile_profile_proto_rawDesc = "" +
 	"\vlastLoginAt\x18\x18 \x01(\x03R\vlastLoginAt\x12\x18\n" +
 	"\adormant\x18\x19 \x01(\bR\adormant\x12,\n" +
 	"\x11adminForceDormant\x18\x1a \x01(\bR\x11adminForceDormant\x12\x1a\n" +
-	"\bdisabled\x18\x1b \x01(\bR\bdisabled\"\x83\x01\n" +
+	"\bdisabled\x18\x1b \x01(\bR\bdisabled\x12.\n" +
+	"\x12isResourceReviewer\x18\x1c \x01(\bR\x12isResourceReviewer\"\x83\x01\n" +
 	"\tUpdateReq\x12\x16\n" +
 	"\x06userId\x18\x01 \x01(\x04R\x06userId\x12\x12\n" +
 	"\x04name\x18\x03 \x01(\tR\x04name\x12\x14\n" +
