@@ -177,7 +177,7 @@ func backfillBlogActivationForExistingAuthors(db *gorm.DB) {
 
 const (
 	patchBlogAutoSurfaceUV       = "blog_auto_surface_uv_v1"
-	patchBlogRecommendManualOnly = "blog_recommend_manual_only_v1"
+	patchBlogRecommendManualOnly = "blog_recommend_manual_only_v2"
 )
 
 // backfillBlogAutoSurfaceAndZeroViews:
