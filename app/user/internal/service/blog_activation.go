@@ -505,6 +505,7 @@ func (s *BlogService) handleAdminArticles(ctx khttp.Context) error {
 			"title":            a.Title,
 			"summary":          a.Summary,
 			"visibility":       a.Visibility,
+			"recommend":        a.Recommend,
 			"viewCount":        a.ViewCount,
 			"likeCount":        a.LikeCount,
 			"commentCount":     a.CommentCount,
@@ -551,15 +552,50 @@ func (s *BlogService) handleAdminModerate(ctx khttp.Context) error {
 	}
 	var body struct {
 		ID     uint   `json:"id"`
-		Action string `json:"action"` // approve | reject | pending
+		Action string `json:"action"` // approve | reject | pending | feature | unfeature
 		Note   string `json:"note"`
 	}
 	if err := json.NewDecoder(ctx.Request().Body).Decode(&body); err != nil || body.ID == 0 {
 		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "参数错误"})
 		return nil
 	}
+	action := strings.ToLower(strings.TrimSpace(body.Action))
+	var a model.BlogArticle
+	if err := s.db.First(&a, body.ID).Error; err != nil {
+		writeJSON(ctx.Response(), 404, map[string]interface{}{"code": 1, "message": "文章不存在"})
+		return nil
+	}
+
+	// 精选开关：不改审核状态
+	if action == "feature" || action == "unfeature" || action == "recommend" || action == "unrecommend" {
+		want := action == "feature" || action == "recommend"
+		if want {
+			if strings.TrimSpace(a.Visibility) != model.BlogVisPublic {
+				writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "仅公开文章可设为精选"})
+				return nil
+			}
+			if normalizeModeration(a.ModerationStatus) != model.BlogModerationApproved {
+				writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "请先通过审核再设精选"})
+				return nil
+			}
+		}
+		a.Recommend = want
+		if err := s.db.Model(&a).Update("recommend", want).Error; err != nil {
+			writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "操作失败"})
+			return nil
+		}
+		writeJSON(ctx.Response(), 200, map[string]interface{}{
+			"code": 0, "message": "success",
+			"data": map[string]interface{}{
+				"id": a.ID, "recommend": want,
+				"moderationStatus": normalizeModeration(a.ModerationStatus),
+			},
+		})
+		return nil
+	}
+
 	status := ""
-	switch strings.ToLower(strings.TrimSpace(body.Action)) {
+	switch action {
 	case "approve", "approved":
 		status = model.BlogModerationApproved
 	case "reject", "rejected":
@@ -567,23 +603,22 @@ func (s *BlogService) handleAdminModerate(ctx khttp.Context) error {
 	case "pending":
 		status = model.BlogModerationPending
 	default:
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "action 须为 approve|reject|pending"})
+		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "action 须为 approve|reject|pending|feature|unfeature"})
 		return nil
 	}
 	note := strings.TrimSpace(body.Note)
 	if utf8.RuneCountInString(note) > 500 {
 		note = string([]rune(note)[:500])
 	}
-	var a model.BlogArticle
-	if err := s.db.First(&a, body.ID).Error; err != nil {
-		writeJSON(ctx.Response(), 404, map[string]interface{}{"code": 1, "message": "文章不存在"})
-		return nil
-	}
 	now := time.Now()
 	a.ModerationStatus = status
 	a.ModerationNote = note
 	a.ModeratedAt = &now
 	a.ModeratedBy = pd.UserID
+	// 驳回时取消精选
+	if status == model.BlogModerationRejected {
+		a.Recommend = false
+	}
 	if err := s.db.Save(&a).Error; err != nil {
 		writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "审核失败"})
 		return nil

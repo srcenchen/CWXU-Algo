@@ -138,7 +138,7 @@ func UpsertFromSolutionWithProblem(db *gorm.DB, userID, solutionID, problemID, a
 			"content":              content,
 			"category_id":          catPtr,
 			"visibility":           visPublic,
-			"recommend":            true,
+			// 精选(recommend) 不自动设；仅同步主站资料
 			"sync_to_main_profile": true,
 			"source_solution_id":   &sid,
 		}
@@ -179,7 +179,7 @@ func UpsertFromSolutionWithProblem(db *gorm.DB, userID, solutionID, problemID, a
 		Summary:           defSum,
 		Content:           content,
 		Visibility:        visPublic,
-		Recommend:         true,
+		Recommend:         false,
 		SyncToMainProfile: true,
 		CategoryID:        catPtr,
 		PublishedAt:       &now,

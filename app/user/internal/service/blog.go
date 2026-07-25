@@ -579,8 +579,8 @@ type blogArticleWriteReq struct {
 	CoverURL   string `json:"coverUrl"`
 	Visibility string `json:"visibility"`
 	Password   string `json:"password"`
-	// Recommend / SyncToMainProfile / OrgIDs are ignored on write (auto-surface).
-	// Kept in JSON for backward compatibility with older clients.
+	// Recommend 作者端不可写：仅站管/资源审核员经 admin/moderate 设精选。
+	// SyncToMainProfile / OrgIDs 对公开文仍自动同步资料与组织发现。
 	Recommend         bool   `json:"recommend"`
 	SyncToMainProfile bool   `json:"syncToMainProfile"`
 	CategoryID        *uint  `json:"categoryId"`
@@ -682,6 +682,12 @@ func (s *BlogService) handleUpdate(ctx khttp.Context) error {
 	// preserve solution link
 	a.SourceSolutionID = existing.SourceSolutionID
 	a.SourceProblemID = existing.SourceProblemID
+	// 精选仅审核员可改：作者更新时保留；非公开则强制取消
+	if blogaccess.AutoSurface(a.Visibility) {
+		a.Recommend = existing.Recommend
+	} else {
+		a.Recommend = false
+	}
 	if err := s.db.Save(a).Error; err != nil {
 		if strings.Contains(err.Error(), "duplicate") || strings.Contains(err.Error(), "unique") {
 			writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "短链已被占用，请换一个"})
@@ -812,7 +818,7 @@ func (s *BlogService) buildArticleFromReq(userID, existingID uint, req *blogArti
 		}
 	}
 
-	// auto-surface: public non-password → recommend + main profile; else off
+	// 公开文自动同步主站资料/组织发现；精选(recommend) 默认 false，由审核员设
 	auto := blogaccess.AutoSurface(vis)
 	return &model.BlogArticle{
 		UserID:            userID,
@@ -823,7 +829,7 @@ func (s *BlogService) buildArticleFromReq(userID, existingID uint, req *blogArti
 		CoverURL:          cover,
 		Visibility:        vis,
 		PasswordHash:      pwHash,
-		Recommend:         auto,
+		Recommend:         false,
 		SyncToMainProfile: auto,
 		CategoryID:        req.CategoryID,
 	}, ""
@@ -1020,9 +1026,10 @@ func (s *BlogService) handleMine(ctx khttp.Context) error {
 func (s *BlogService) handleRecommend(ctx khttp.Context) error {
 	page, pageSize := parsePage(ctx.Request())
 	viewer := blogViewerID(ctx)
-	// public non-password articles only (auto-surface; recommend flag kept in sync)
+	// 仅站管/审核员标记精选(recommend=true) 的公开已审文章
 	q := s.db.Model(&model.BlogArticle{}).
 		Where("visibility = ?", blogaccess.VisibilityPublic).
+		Where("recommend = ?", true).
 		Where("(moderation_status = ? OR moderation_status = '' OR moderation_status IS NULL)", model.BlogModerationApproved)
 
 	// optional org filter: 公共域/缺省 → 全站公开文；私有域 → 仅该组织成员的文章
@@ -1080,7 +1087,7 @@ func (s *BlogService) handlePlaza(ctx khttp.Context) error {
 		sort = "latest"
 	}
 
-	// all public articles (auto-surface); sort=recommend is alias of latest
+	// 最新/热门：全部公开已审；精选：仅 recommend=true（站管/审核员标记）
 	q := s.db.Model(&model.BlogArticle{}).
 		Where("visibility = ?", blogaccess.VisibilityPublic).
 		Where("(moderation_status = ? OR moderation_status = '' OR moderation_status IS NULL)", model.BlogModerationApproved)
@@ -1089,22 +1096,25 @@ func (s *BlogService) handlePlaza(ctx khttp.Context) error {
 		q = q.Where("title ILIKE ? OR summary ILIKE ?", like, like)
 	}
 
-	var total int64
-	if err := q.Count(&total).Error; err != nil {
-		writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "加载失败"})
-		return nil
-	}
-
 	switch sort {
+	case "recommend":
+		q = q.Where("recommend = ?", true)
+		q = q.Order("COALESCE(published_at, created_at) DESC")
 	case "hot":
 		q = q.Order("view_count DESC, like_count DESC, COALESCE(published_at, created_at) DESC")
-	case "recommend", "latest":
+	case "latest":
 		q = q.Order("COALESCE(published_at, created_at) DESC")
 	default:
 		writeJSON(ctx.Response(), 400, map[string]interface{}{
 			"code":    1,
 			"message": "sort 须为 latest|hot|recommend",
 		})
+		return nil
+	}
+
+	var total int64
+	if err := q.Count(&total).Error; err != nil {
+		writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "加载失败"})
 		return nil
 	}
 

@@ -175,25 +175,29 @@ func backfillBlogActivationForExistingAuthors(db *gorm.DB) {
 	`).Error
 }
 
-const patchBlogAutoSurfaceUV = "blog_auto_surface_uv_v1"
+const (
+	patchBlogAutoSurfaceUV       = "blog_auto_surface_uv_v1"
+	patchBlogRecommendManualOnly = "blog_recommend_manual_only_v1"
+)
 
 // backfillBlogAutoSurfaceAndZeroViews:
-// 1) 公开文章自动 recommend + sync_to_main_profile（可重复）
+// 1) 公开文章自动 sync_to_main_profile（可重复）；recommend 改由站管/审核员手动设精选
 // 2) 为公开文补全作者所属组织的发现同步（可重复）
 // 3) 浏览量按 UV 重计：历史 view_count 清零（一次性）
+// 4) 一次性清空历史自动 recommend，避免广场「精选」默认全量
 func backfillBlogAutoSurfaceAndZeroViews(db *gorm.DB) {
 	if db == nil || !db.Migrator().HasTable(&model.BlogArticle{}) {
 		return
 	}
-	// auto-surface flags for public (idempotent)
+	// 资料同步仍自动；精选(recommend) 不再自动打开
 	_ = db.Exec(`
 UPDATE blog_articles
-SET recommend = true, sync_to_main_profile = true
+SET sync_to_main_profile = true
 WHERE visibility = 'public'
 `).Error
 	_ = db.Exec(`
 UPDATE blog_articles
-SET recommend = false
+SET sync_to_main_profile = false, recommend = false
 WHERE visibility <> 'public'
 `).Error
 	// ensure public articles have org sync rows for all author memberships
@@ -221,17 +225,23 @@ WHERE NOT EXISTS (
 )
 `).Error
 
-	// one-shot zero views for UV migration
 	if !db.Migrator().HasTable(&model.SchemaPatch{}) {
 		return
 	}
+	// one-shot zero views for UV migration
 	var n int64
 	_ = db.Model(&model.SchemaPatch{}).Where("key = ?", patchBlogAutoSurfaceUV).Count(&n).Error
-	if n > 0 {
-		return
+	if n == 0 {
+		_ = db.Exec(`UPDATE blog_articles SET view_count = 0`).Error
+		_ = db.Create(&model.SchemaPatch{Key: patchBlogAutoSurfaceUV, AppliedAt: time.Now()}).Error
 	}
-	_ = db.Exec(`UPDATE blog_articles SET view_count = 0`).Error
-	_ = db.Create(&model.SchemaPatch{Key: patchBlogAutoSurfaceUV, AppliedAt: time.Now()}).Error
+	// one-shot: clear auto-featured recommend so 精选 only after staff picks
+	n = 0
+	_ = db.Model(&model.SchemaPatch{}).Where("key = ?", patchBlogRecommendManualOnly).Count(&n).Error
+	if n == 0 {
+		_ = db.Exec(`UPDATE blog_articles SET recommend = false`).Error
+		_ = db.Create(&model.SchemaPatch{Key: patchBlogRecommendManualOnly, AppliedAt: time.Now()}).Error
+	}
 }
 
 // backfillLastLoginAt 避免上线瞬间全员被判休眠
