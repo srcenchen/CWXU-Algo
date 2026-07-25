@@ -122,6 +122,36 @@ func TestFetchAtCoderContestAC_FiltersPracticeAndDedups(t *testing.T) {
 	}
 }
 
+// 回归：仅补题用户（history 无该场）不得把赛后 AC 写成赛时格子。
+// 线上 arc225「憨憨的竹林」绿钩即此路径污染 contest_user_problems。
+func TestAggregateAtCoderContestDetailCells_SkipsUpsolveOnly(t *testing.T) {
+	endBy := map[string]int64{"arc225": 1_000_000} // 正式参赛者才有
+	subs := []atcJson{
+		// 正式赛时
+		{ContestID: "arc225", ProblemID: "arc225_a", Result: "WA", EpochSecond: 900_000},
+		{ContestID: "arc225", ProblemID: "arc225_a", Result: "AC", EpochSecond: 950_000},
+		// 赛后练习（有 history）
+		{ContestID: "arc225", ProblemID: "arc225_c", Result: "AC", EpochSecond: 1_000_100},
+		// 从未参赛的场次：只有补题提交
+		{ContestID: "arc999", ProblemID: "arc999_e", Result: "WA", EpochSecond: 2_000_000},
+		{ContestID: "arc999", ProblemID: "arc999_e", Result: "AC", EpochSecond: 2_000_100},
+	}
+	cells := aggregateAtCoderContestDetailCells(subs, endBy)
+	by := map[string]string{}
+	for _, c := range cells {
+		by[c.ExternalID] = c.Status
+	}
+	if by["arc225_a"] != "AC" {
+		t.Fatalf("contest AC missing: %+v", cells)
+	}
+	if _, ok := by["arc225_c"]; ok {
+		t.Fatalf("post-end practice must not become cell: %+v", cells)
+	}
+	if _, ok := by["arc999_e"]; ok {
+		t.Fatalf("upsolve-only contest must not write AC cells: %+v", cells)
+	}
+}
+
 func TestFetchContestLog_EmptyUsername(t *testing.T) {
 	_, err := NewAtCoder{}.FetchContestLog(1, "", true)
 	if err == nil {

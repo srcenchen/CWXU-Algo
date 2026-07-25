@@ -695,8 +695,8 @@ func (c *ContestLogService) handleContestBoard(ctx khttp.Context) error {
 		} else if memberIDs != nil {
 			scope = fmt.Sprintf("org%d:n%d", resolvedOrg, len(memberIDs))
 		}
-		// v4：仅补题用户展示序按补题 AC 数 / 最后补题时间
-		boardCacheKey = fmt.Sprintf("core:contest:board:v4:%s:%s:%s:v%s",
+		// v5：补题推导可纠正误标 AC（未参赛赛后绿钩）
+		boardCacheKey = fmt.Sprintf("core:contest:board:v5:%s:%s:%s:v%s",
 			seed.Platform, seed.ContestId, scope, ver)
 		if b, e := c.rdb.Get(reqCtx, boardCacheKey).Bytes(); e == nil && len(b) > 0 {
 			var cached map[string]interface{}
@@ -762,15 +762,15 @@ func (c *ContestLogService) handleContestBoard(ctx khttp.Context) error {
 			cellsByUser[cell.UserID] = append(cellsByUser[cell.UserID], cell)
 		}
 	}
-	// submit_logs 是补题真源：覆盖旧补题快照，但绝不覆盖赛时 AC。
+	// submit_logs 是补题真源：覆盖旧补题/脏赛时快照。
+	// ListContestPracticeCells 仅在「赛时窗内无 AC」时产出 UPSOLVE/UPSOLVE_TRIED，
+	// 故可安全覆盖库内误标的 AC（例如 AtCoder 未参赛用户赛后提交曾被写成 AC）。
 	for _, cell := range practiceCells {
 		list := cellsByUser[cell.UserID]
 		replaced := false
 		for i := range list {
 			if strings.EqualFold(list[i].ExternalID, cell.ExternalID) {
-				if list[i].Status != model.ContestCellAC {
-					list[i] = cell
-				}
+				list[i] = cell
 				replaced = true
 				break
 			}

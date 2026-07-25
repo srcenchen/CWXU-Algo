@@ -647,3 +647,60 @@ func TestMergeContestCell_DoesNotDowngradeUpsolveToTried(t *testing.T) {
 		t.Fatalf("attempts=%d want 5", out2.Attempts)
 	}
 }
+
+// 脏 AC（赛后误标）可被 UPSOLVE 纠正；真·赛时 AC（更早 first_ac / 有 relative）保持。
+func TestMergeContestCell_UpsolveOverridesDirtyAC(t *testing.T) {
+	tPost := time.Date(2026, 7, 21, 2, 3, 31, 0, time.UTC)
+	tContest := time.Date(2026, 7, 19, 20, 30, 0, 0, time.UTC)
+	dirty := model.ContestUserProblem{
+		Platform: spider.AtCoder, ContestID: "arc225", UserID: 38,
+		Label: "E", ExternalID: "arc225_e", Status: model.ContestCellAC,
+		Attempts: 1, FirstACAt: &tPost, RelativeSec: nil,
+	}
+	up := model.ContestUserProblem{
+		Platform: spider.AtCoder, ContestID: "arc225", UserID: 38,
+		Label: "E", ExternalID: "arc225_e", Status: model.ContestCellUpsolve,
+		Attempts: 1, FirstACAt: &tPost,
+	}
+	out, write := mergeContestCellIncoming(&dirty, up)
+	if !write {
+		t.Fatal("expected write when UPSOLVE corrects dirty AC")
+	}
+	if out.Status != model.ContestCellUpsolve {
+		t.Fatalf("status=%s want UPSOLVE", out.Status)
+	}
+	if out.RelativeSec != nil {
+		t.Fatalf("upsolve relativeSec must be nil, got %v", *out.RelativeSec)
+	}
+
+	// 真赛时 AC + 赛后再交：first_ac 更早 → 保持 AC
+	rel := 1800
+	real := model.ContestUserProblem{
+		Platform: spider.AtCoder, ContestID: "arc225", UserID: 1,
+		Label: "A", ExternalID: "arc225_a", Status: model.ContestCellAC,
+		Attempts: 0, FirstACAt: &tContest, RelativeSec: &rel,
+	}
+	upA := model.ContestUserProblem{
+		Platform: spider.AtCoder, ContestID: "arc225", UserID: 1,
+		Label: "A", ExternalID: "arc225_a", Status: model.ContestCellUpsolve,
+		FirstACAt: &tPost,
+	}
+	outKeep, writeKeep := mergeContestCellIncoming(&real, upA)
+	if writeKeep {
+		t.Fatal("real contest AC must not be overwritten by later upsolve")
+	}
+	if outKeep.Status != model.ContestCellAC {
+		t.Fatalf("status=%s want AC", outKeep.Status)
+	}
+
+	// 无 relative 但 first_ac 更早（赛时）→ 仍保持
+	realNoRel := real
+	realNoRel.RelativeSec = nil
+	outKeep2, writeKeep2 := mergeContestCellIncoming(&realNoRel, upA)
+	if writeKeep2 {
+		t.Fatal("earlier first_ac AC must stay")
+	}
+	if outKeep2.Status != model.ContestCellAC {
+		t.Fatalf("status=%s want AC", outKeep2.Status)
+	}
+}

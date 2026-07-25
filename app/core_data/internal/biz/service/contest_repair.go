@@ -47,32 +47,13 @@ func RepairContestCellSubmitData(db *gorm.DB) (map[string]int64, error) {
 	out["submit_external_id"] = res.RowsAffected
 
 	// 2) 赛后误标 AC → UPSOLVE（展示补题，不进罚时）
-	// Postgres: 子查询 max(time)
-	res = db.Exec(`
-		UPDATE contest_user_problems AS cup
-		SET status = ?, relative_sec = NULL, updated_at = NOW()
-		FROM (
-			SELECT platform, contest_id, MAX(time) AS end_t
-			FROM contest_logs
-			WHERE platform = ?
-			GROUP BY platform, contest_id
-		) AS e
-		WHERE cup.platform = e.platform
-		  AND cup.contest_id = e.contest_id
-		  AND cup.status = ?
-		  AND cup.first_ac_at IS NOT NULL
-		  AND cup.first_ac_at > e.end_t + INTERVAL '15 minutes'
-	`, model.ContestCellUpsolve, spider.AtCoder, model.ContestCellAC)
-	if res.Error != nil {
-		// SQLite / 无 FROM 更新：逐场改写
-		n, err := repairDowngradePracticeCellsSQLite(db)
-		if err != nil {
-			return out, fmt.Errorf("downgrade practice cells: %w", err)
-		}
-		out["practice_cells_to_upsolve"] = n
-	} else {
-		out["practice_cells_to_upsolve"] = res.RowsAffected
+	// 优先日历 end_time（全平台真实结束）；AtCoder 无日历时用 contest_logs.time（= history EndTime）。
+	// 禁止用牛客等「time=开赛」的日志当结束，否则会误伤赛时 AC。
+	n, err := repairDowngradePracticeCells(db)
+	if err != nil {
+		return out, fmt.Errorf("downgrade practice cells: %w", err)
 	}
+	out["practice_cells_to_upsolve"] = n
 
 	// 3) 重算 AtCoder relative_sec（end − 100min 为开赛；仅赛时 AC）
 	nRel, err := repairAtCoderRelativeSec(db)
@@ -85,26 +66,68 @@ func RepairContestCellSubmitData(db *gorm.DB) (map[string]int64, error) {
 	return out, nil
 }
 
-func repairDowngradePracticeCellsSQLite(db *gorm.DB) (int64, error) {
-	type endRow struct {
+// repairDowngradePracticeCells 将 first_ac 明显晚于比赛结束的 AC 格降为 UPSOLVE。
+func repairDowngradePracticeCells(db *gorm.DB) (int64, error) {
+	type endKey struct {
+		Platform  string
+		ContestID string
+	}
+	ends := map[endKey]time.Time{}
+
+	// 日历：真实 end（unix 秒）
+	var cals []model.ContestCalendar
+	if err := db.Where("end_time > start_time AND end_time > 0").Find(&cals).Error; err != nil {
+		return 0, err
+	}
+	for _, cal := range cals {
+		plat := NormalizeCalendarPlatform(cal.Platform)
+		if plat == "" {
+			plat = cal.Platform
+		}
+		k := endKey{Platform: plat, ContestID: cal.ExternalID}
+		et := time.Unix(cal.EndTime, 0)
+		if prev, ok := ends[k]; !ok || et.After(prev) {
+			ends[k] = et
+		}
+		// 别名 platform 也挂一份，匹配 cup 里大小写不一的行
+		for _, ap := range calendarPlatformAliases(plat) {
+			ak := endKey{Platform: ap, ContestID: cal.ExternalID}
+			if prev, ok := ends[ak]; !ok || et.After(prev) {
+				ends[ak] = et
+			}
+		}
+	}
+
+	// AtCoder：history EndTime 落在 contest_logs.time，补日历缺口
+	type logEnd struct {
 		Platform  string
 		ContestID string
 		EndT      time.Time
 	}
-	var ends []endRow
+	var logEnds []logEnd
 	if err := db.Model(&model.ContestLog{}).
 		Select("platform, contest_id, MAX(time) AS end_t").
-		Where("platform = ?", spider.AtCoder).
+		Where("platform IN ?", calendarPlatformAliases(spider.AtCoder)).
 		Group("platform, contest_id").
-		Scan(&ends).Error; err != nil {
+		Scan(&logEnds).Error; err != nil {
 		return 0, err
 	}
+	for _, e := range logEnds {
+		if e.EndT.IsZero() || e.ContestID == "" {
+			continue
+		}
+		k := endKey{Platform: e.Platform, ContestID: e.ContestID}
+		if prev, ok := ends[k]; !ok || e.EndT.After(prev) {
+			ends[k] = e.EndT
+		}
+	}
+
 	var total int64
-	for _, e := range ends {
-		cutoff := e.EndT.Add(15 * time.Minute)
+	for k, endT := range ends {
+		cutoff := endT.Add(contestInferEndBuffer)
 		res := db.Model(&model.ContestUserProblem{}).Where(
 			"platform = ? AND contest_id = ? AND status = ? AND first_ac_at IS NOT NULL AND first_ac_at > ?",
-			e.Platform, e.ContestID, model.ContestCellAC, cutoff,
+			k.Platform, k.ContestID, model.ContestCellAC, cutoff,
 		).Updates(map[string]interface{}{
 			"status":       model.ContestCellUpsolve,
 			"relative_sec": nil,

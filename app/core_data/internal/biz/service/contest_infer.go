@@ -596,16 +596,51 @@ func loadContestUserProblemIndex(db *gorm.DB, platform, contestID string, userID
 	return out
 }
 
+// isDirtyContestACForUpsolve 判断已有 AC 是否更像「赛后误标」而非真赛时通过。
+// 真赛时 AC：通常有 relative_sec，或 first_ac 严格早于本次补题 first_ac。
+func isDirtyContestACForUpsolve(prev, next model.ContestUserProblem) bool {
+	if prev.Status != model.ContestCellAC {
+		return false
+	}
+	if prev.RelativeSec != nil {
+		return false
+	}
+	if prev.FirstACAt != nil && next.FirstACAt != nil && prev.FirstACAt.Before(*next.FirstACAt) {
+		// 更早的 AC 在补题之前 → 视为赛时通过，禁止降级
+		return false
+	}
+	return true
+}
+
 // mergeContestCellIncoming 合并「即将写入」与「已有」：
-// AC 最高；UPSOLVE 不被 TRIED 覆盖；赛时 AC 不被补题覆盖。
+// AC 最高；UPSOLVE 不被 TRIED 覆盖；赛时 AC 不被补题覆盖（脏 AC 除外）。
 func mergeContestCellIncoming(prev *model.ContestUserProblem, next model.ContestUserProblem) (model.ContestUserProblem, bool) {
 	if prev == nil {
 		return next, true
 	}
-	// 已有赛时 AC：仅允许用新的赛时 AC 刷新，禁止降级
+	// 已有赛时 AC：默认禁止降级。
+	// 例外：库内「脏 AC」（无 relative_sec，且 first_ac 不早于补题 first_ac）—
+	// 典型是 AtCoder 未参赛用户赛后提交被写成 AC；真·赛时 AC 的 first_ac 必早于赛后补交。
 	if prev.Status == model.ContestCellAC {
 		if next.Status == model.ContestCellAC {
 			return next, true
+		}
+		if (next.Status == model.ContestCellUpsolve || next.Status == model.ContestCellUpsolveTried) &&
+			isDirtyContestACForUpsolve(*prev, next) {
+			out := next
+			out.RelativeSec = nil
+			if next.Status == model.ContestCellUpsolve &&
+				prev.FirstACAt != nil &&
+				(out.FirstACAt == nil || prev.FirstACAt.Before(*out.FirstACAt)) {
+				out.FirstACAt = prev.FirstACAt
+			}
+			if prev.Attempts > out.Attempts {
+				out.Attempts = prev.Attempts
+			}
+			if strings.TrimSpace(out.Label) == "" {
+				out.Label = prev.Label
+			}
+			return out, true
 		}
 		return *prev, false
 	}

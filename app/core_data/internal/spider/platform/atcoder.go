@@ -332,11 +332,17 @@ func (p NewAtCoder) FetchContestDetails(userId int64, username string, needAll b
 		return nil, err
 	}
 	endBy := atcoderHistoryEndUnix(hist)
-	// start 近似：EndTime 未知时无法相对时间；有 EndTime 时用提交推 start 不可靠，相对秒可空
 	subs, err := fetchAtCoderSubmissions(username, needAll)
 	if err != nil {
 		return nil, err
 	}
+	_ = userId
+	return aggregateAtCoderContestDetailCells(subs, endBy), nil
+}
+
+// aggregateAtCoderContestDetailCells 仅对 history 有 EndTime 的正式场次聚合赛时格子。
+// 未参赛（无 EndTime）或 EndTime 之后的提交一律跳过，避免赛后补题被写成 AC。
+func aggregateAtCoderContestDetailCells(subs []atcJson, endBy map[string]int64) []spider.ContestProblemCell {
 	type agg struct {
 		attempts int
 		ac       bool
@@ -345,7 +351,6 @@ func (p NewAtCoder) FetchContestDetails(userId int64, username string, needAll b
 	}
 	by := map[string]map[string]*agg{} // contest -> problem_id -> agg
 
-	// 时间升序
 	sort.SliceStable(subs, func(i, j int) bool {
 		return subs[i].EpochSecond < subs[j].EpochSecond
 	})
@@ -355,7 +360,14 @@ func (p NewAtCoder) FetchContestDetails(userId int64, username string, needAll b
 		if cid == "" || pid == "" {
 			continue
 		}
-		if end, ok := endBy[cid]; ok && end > 0 && s.EpochSecond > end {
+		// 仅正式参赛场次写赛时格子：history 无该场 EndTime → 未参赛/仅补题，
+		// 禁止把赛后 AC 写成 ContestCellAC（否则榜上绿钩、罚时被污染）。
+		// 补题由 InferContestUpsolves / ListContestPracticeCells 标 UPSOLVE。
+		end, hasEnd := endBy[cid]
+		if !hasEnd || end <= 0 {
+			continue
+		}
+		if s.EpochSecond > end {
 			continue
 		}
 		m := by[cid]
@@ -365,7 +377,6 @@ func (p NewAtCoder) FetchContestDetails(userId int64, username string, needAll b
 		}
 		a := m[pid]
 		if a == nil {
-			// label: abc416_a → a 或 A
 			label := pid
 			if i := strings.LastIndex(pid, "_"); i >= 0 && i+1 < len(pid) {
 				label = strings.ToUpper(pid[i+1:])
@@ -418,11 +429,10 @@ func (p NewAtCoder) FetchContestDetails(userId int64, username string, needAll b
 			} else {
 				cell.Status = model.ContestCellTried
 			}
-			_ = userId
 			out = append(out, cell)
 		}
 	}
-	return out, nil
+	return out
 }
 
 // FetchRating 从 AtCoder 官方 rating 历史取最新 NewRating
