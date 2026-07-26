@@ -142,11 +142,11 @@ func (s *serviceWatcher) Add(ctx context.Context, discovery registry.Discovery, 
 		ws.watcher = watcher
 		s.watcherStatus[endpoint] = ws
 
+		initialServicesChan := make(chan []*registry.ServiceInstance, 1)
 		func() {
 			defer close(ws.initializedChan)
 			LOG.Infof("Starting to do initialize services discovery on endpoint: %s", endpoint)
 
-			initialServicesChan := make(chan []*registry.ServiceInstance, 1)
 			go func() {
 				defer close(initialServicesChan)
 				services, err := watcher.Next()
@@ -155,6 +155,8 @@ func (s *serviceWatcher) Add(ctx context.Context, discovery registry.Discovery, 
 					return
 				}
 				LOG.Infof("Succeeded to do initialize services discovery on endpoint: %s, %d services, hash: %s", endpoint, len(services), instancesSetHash(ws.selectedInstances))
+				// 缓冲为 1：即使主流程已超时放弃等待，结果也会留在缓冲里，
+				// 由后台 watch goroutine 开头消费（见下），不会丢事件。
 				initialServicesChan <- services
 			}()
 
@@ -180,6 +182,16 @@ func (s *serviceWatcher) Add(ctx context.Context, discovery registry.Discovery, 
 		}()
 
 		go func() {
+			// 初始解析超时后，init goroutine 的 Next() 仍在途：它带回的往往正是
+			// 「服务迟注册」的第一个事件（如 core_data 启动迁移数分钟后才注册）。
+			// 必须在这里消费掉，否则该事件被吞、后台 Next() 只等下一次变更，
+			// 网关会对该服务永远 no_available_node。正常路径 channel 已被读取并
+			// 关闭，此处立即返回 ok=false；同时保证同一 watcher 不会并发 Next()。
+			if services, ok := <-initialServicesChan; ok && len(services) > 0 {
+				LOG.Infof("Applying late initial services on endpoint: %s, %d services, hash: %s", endpoint, len(services), instancesSetHash(services))
+				s.setSelectedCache(endpoint, services)
+				s.doCallback(endpoint, services)
+			}
 			// watch 出错时指数退避：1s 起步、封顶 30s，成功后重置
 			const maxWatchBackoff = 30 * time.Second
 			backoff := time.Second
@@ -247,7 +259,16 @@ func (s *serviceWatcher) doCallback(endpoint string, services []*registry.Servic
 
 func (s *serviceWatcher) proccleanup() {
 	doCleanup := func() {
-		for endpoint, appliers := range s.appliers {
+		// 先在读锁下快照，避免与 Add() 的 map 写并发迭代（fatal: concurrent map iteration）
+		snapshot := map[string]map[string]Applier{}
+		func() {
+			s.lock.RLock()
+			defer s.lock.RUnlock()
+			for endpoint, appliers := range s.appliers {
+				snapshot[endpoint] = appliers
+			}
+		}()
+		for endpoint, appliers := range snapshot {
 			var cleanup []string
 			func() {
 				s.lock.RLock()
@@ -276,8 +297,8 @@ func (s *serviceWatcher) proccleanup() {
 	}
 
 	const interval = time.Second * 30
+	LOG.Infof("Start to cleanup appliers on all endpoints for every %s", interval.String())
 	for {
-		LOG.Infof("Start to cleanup appliers on all endpoints for every %s", interval.String())
 		time.Sleep(interval)
 		doCleanup()
 	}
