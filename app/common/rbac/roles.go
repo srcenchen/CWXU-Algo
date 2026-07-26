@@ -1,15 +1,21 @@
 package rbac
 
-// 系统内置角色。权限集在代码中锁定（不可经 API 编辑）；差异化需求用自定义角色叠加。
+// 系统内置角色。权限集在代码中锁定；组织可对「教练 / 队长」按组织覆盖权限（见 OrgEditableSystemRole）。
 // code 与存量数据对齐：org 模板 code == org_members.role 取值；site 角色映射 users 布尔位。
 const (
-	RoleSiteAdmin        = "site_admin"
+	RoleSiteAdmin = "site_admin"
+	RoleOrgAdmin  = "org_admin"
+	RoleCoach     = "coach"
+	RoleCaptain   = "captain"
+	RoleMember    = "member"
+
+	// RoleResourceReviewer 已下线的「资源审核员」内置身份；仅存量清理仍引用该 code。
+	// Deprecated: 内容审核权限改由站点自定义角色授予。
 	RoleResourceReviewer = "resource_reviewer"
-	RoleOrgAdmin         = "org_admin"
-	RoleCoach            = "coach"
-	RoleCaptain          = "captain"
-	RoleMember           = "member"
 )
+
+// GroupContent 内容审核权限分组 key（题库审查 / 博客审核 / 社区治理 / 举报处理）
+const GroupContent = "content"
 
 // SystemRole 内置角色模板
 type SystemRole struct {
@@ -20,7 +26,7 @@ type SystemRole struct {
 	Perms []string
 }
 
-// orgStaffPerms 教练/队长共有权限（现状「队长暂同教练」，差异化走自定义角色）
+// orgStaffPerms 教练/队长的默认权限（组织可在本组织内覆盖）
 var orgStaffPerms = []string{
 	PermOrgGroupManage,
 	PermOrgBulletinManage,
@@ -28,21 +34,26 @@ var orgStaffPerms = []string{
 	PermOrgMemberEmail,
 }
 
-var reviewerPerms = []string{
-	PermContentProblemReview,
-	PermContentBlogModerate,
-	PermContentCommunityMod,
-	PermContentReportHandle,
-}
-
 var systemRoles = []SystemRole{
 	{RoleSiteAdmin, "站点管理员", "站点最高权限，旁路全部权限校验", ScopeSite, AllCodes()},
-	{RoleResourceReviewer, "资源审核员", "题库审查、博客审核、社区内容治理与举报处理", ScopeSite, reviewerPerms},
 	{RoleOrgAdmin, "团队管理员", "本组织全部管理权限", ScopeOrg, CodesByScope(ScopeOrg)},
 	{RoleCoach, "教练", "本组织日常管理：分组、公告、训练报告", ScopeOrg, orgStaffPerms},
 	{RoleCaptain, "队长", "本组织日常管理：分组、公告、训练报告", ScopeOrg, orgStaffPerms},
 	{RoleMember, "成员", "普通成员，无管理权限", ScopeOrg, nil},
 }
+
+// orgEditableSystemRoles 组织可在本组织内改权限的内置角色。
+// 团队管理员 / 成员是组织的基本盘（最高与最低档），权限固定，不可改也不可删。
+var orgEditableSystemRoles = map[string]bool{
+	RoleCoach:   true,
+	RoleCaptain: true,
+}
+
+// OrgEditableSystemRole 该内置组织角色是否允许组织覆盖权限
+func OrgEditableSystemRole(code string) bool { return orgEditableSystemRoles[code] }
+
+// ContentPerms 内容审核权限点（审核/举报通知受众判定用）
+func ContentPerms() []string { return CodesByGroup(GroupContent) }
 
 var systemRoleByCode = func() map[string]SystemRole {
 	m := make(map[string]SystemRole, len(systemRoles))
@@ -67,7 +78,8 @@ func IsSystemRoleCode(code string) bool {
 	return ok
 }
 
-// TemplateHas 内置角色模板是否含权限（用于 org_members.role / 旧 token 推导）
+// TemplateHas 内置角色模板是否含权限。
+// ⚠️ 只看代码模板，不含组织级覆盖；组织内判定请走 service 层的 orgTemplateHas。
 func TemplateHas(roleCode, perm string) bool {
 	r, ok := systemRoleByCode[roleCode]
 	if !ok {
@@ -81,16 +93,9 @@ func TemplateHas(roleCode, perm string) bool {
 	return false
 }
 
-// LegacyHas 旧 token（无 pm claim）按旧 claims 推导权限：
-// 资源审核员 → 内容审核模板（reviewerPerms）；orgRole → 对应模板。站点管理员在调用方旁路，不经此处。
-func LegacyHas(perm string, isResourceReviewer bool, orgRole string) bool {
-	if isResourceReviewer {
-		for _, p := range reviewerPerms {
-			if p == perm {
-				return true
-			}
-		}
-	}
+// LegacyHas 旧 token（无 pm claim）按 orgRole 推导权限：走代码模板，不含组织级覆盖。
+// 站点管理员在调用方旁路，不经此处；旧 token 过期后此路径自然消失。
+func LegacyHas(perm string, orgRole string) bool {
 	if orgRole != "" {
 		return TemplateHas(orgRole, perm)
 	}

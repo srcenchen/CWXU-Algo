@@ -60,7 +60,6 @@ func socialUserJSON(u dal.SocialUser) map[string]interface{} {
 		"inCurrentOrg":       u.InCurrentOrg,
 		"sharedOrgs":         shared,
 		"isSiteAdmin":        u.IsSiteAdmin,
-		"isResourceReviewer": u.IsResourceReviewer,
 	}
 }
 
@@ -240,10 +239,9 @@ func (s *SocialService) handleIdentity(ctx khttp.Context) error {
 		Name               string
 		Avatar             string
 		IsSiteAdmin        bool `gorm:"column:is_site_admin"`
-		IsResourceReviewer bool `gorm:"column:is_resource_reviewer"`
 	}
 	err := s.dbData.DB.WithContext(ctx).Table("users").
-		Select("id AS user_id, username, name, avatar, is_site_admin, is_resource_reviewer").
+		Select("id AS user_id, username, name, avatar, is_site_admin").
 		Where("id = ?", uid).
 		Take(&u).Error
 	if err != nil {
@@ -252,7 +250,7 @@ func (s *SocialService) handleIdentity(ctx khttp.Context) error {
 	}
 	list := s.enrichList(ctx, []dal.SocialUser{{
 		UserID: u.UserID, Username: u.Username, Name: u.Name, Avatar: u.Avatar,
-		IsSiteAdmin: u.IsSiteAdmin, IsResourceReviewer: u.IsResourceReviewer,
+		IsSiteAdmin: u.IsSiteAdmin,
 	}})
 	if len(list) == 0 {
 		writeJSON(ctx.Response(), 404, map[string]interface{}{"success": false, "message": "用户不存在"})

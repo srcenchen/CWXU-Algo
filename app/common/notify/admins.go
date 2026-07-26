@@ -6,6 +6,7 @@ import (
 	"net/mail"
 	"strings"
 
+	"cwxu-algo/app/common/rbac"
 	"cwxu-algo/app/common/sitesettings"
 
 	"gorm.io/gorm"
@@ -46,16 +47,38 @@ func ListSiteAdminIDs(db *gorm.DB) []uint {
 	return out
 }
 
-// contentModeratorWhere 站管 ∪ 资源审核员（审核/举报通知受众）
-const contentModeratorWhere = "(is_site_admin = true OR is_resource_reviewer = true)"
-
-// ListContentModeratorIDs 站管 + 资源审核员 user id（去重）
-func ListContentModeratorIDs(db *gorm.DB) []uint {
+// contentModeratorRows 内容审核受众：站管 ∪ 持有内容审核权限的站点角色成员（去重）。
+// 资源审核员内置身份已下线，受众改由权限点推导。
+func contentModeratorRows(db *gorm.DB) []siteAdminRow {
 	if db == nil {
 		return nil
 	}
 	var rows []siteAdminRow
-	_ = db.Table("users").Select("id, email").Where(contentModeratorWhere).Find(&rows).Error
+	_ = db.Table("users").Select("id, email").Where("is_site_admin = ?", true).Find(&rows).Error
+	seen := make(map[uint]bool, len(rows))
+	for _, r := range rows {
+		seen[r.ID] = true
+	}
+	var byRole []siteAdminRow
+	_ = db.Table("users AS u").
+		Select("DISTINCT u.id AS id, u.email AS email").
+		Joins("JOIN user_roles ur ON ur.user_id = u.id AND ur.org_id = 0").
+		Joins("JOIN roles r ON r.id = ur.role_id AND r.scope = ?", rbac.ScopeSite).
+		Joins("JOIN role_permissions rp ON rp.role_id = r.id").
+		Where("rp.perm_code IN ?", rbac.ContentPerms()).
+		Find(&byRole).Error
+	for _, r := range byRole {
+		if r.ID > 0 && !seen[r.ID] {
+			seen[r.ID] = true
+			rows = append(rows, r)
+		}
+	}
+	return rows
+}
+
+// ListContentModeratorIDs 内容审核受众 user id（去重）
+func ListContentModeratorIDs(db *gorm.DB) []uint {
+	rows := contentModeratorRows(db)
 	out := make([]uint, 0, len(rows))
 	for _, r := range rows {
 		if r.ID > 0 {
@@ -65,19 +88,18 @@ func ListContentModeratorIDs(db *gorm.DB) []uint {
 	return out
 }
 
-// NotifySiteAdmins 给站管 + 资源审核员写站内信（跳过 SkipUserID）。
-// 命名保留兼容；实际受众为内容审核相关运营身份。
+// NotifySiteAdmins 给内容审核受众写站内信（跳过 SkipUserID）。
+// 命名保留兼容；实际受众为站管 ∪ 持内容审核权限的站点角色成员。
 func NotifySiteAdmins(db *gorm.DB, n AdminNotif) {
 	NotifyContentModerators(db, n)
 }
 
-// NotifyContentModerators 站管 ∪ 资源审核员站内信
+// NotifyContentModerators 内容审核受众站内信
 func NotifyContentModerators(db *gorm.DB, n AdminNotif) {
 	if db == nil || strings.TrimSpace(n.Type) == "" {
 		return
 	}
-	var rows []siteAdminRow
-	_ = db.Table("users").Select("id, email").Where(contentModeratorWhere).Find(&rows).Error
+	rows := contentModeratorRows(db)
 	for _, adm := range rows {
 		if adm.ID == 0 || adm.ID == n.SkipUserID {
 			continue
@@ -133,7 +155,7 @@ func ParseEmailList(raw string) []string {
 	return out
 }
 
-// ResolveAdminNotifyEmails 可配置收件人；空配置则 fallback 站管∪资源审核员邮箱
+// ResolveAdminNotifyEmails 可配置收件人；空配置则 fallback 内容审核受众邮箱
 func ResolveAdminNotifyEmails(db *gorm.DB) []string {
 	if db == nil {
 		return nil
@@ -143,8 +165,7 @@ func ResolveAdminNotifyEmails(db *gorm.DB) []string {
 	if list := ParseEmailList(raw); len(list) > 0 {
 		return list
 	}
-	var rows []siteAdminRow
-	_ = db.Table("users").Select("id, email").Where(contentModeratorWhere).Find(&rows).Error
+	rows := contentModeratorRows(db)
 	seen := map[string]struct{}{}
 	out := make([]string, 0, len(rows))
 	for _, r := range rows {

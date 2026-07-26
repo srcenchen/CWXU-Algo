@@ -70,7 +70,6 @@ func IssueJWT(db *gorm.DB, u *model.User) (string, error) {
 		"roleId":             roleID,
 		"roleIds":            string(roleIdsJSON),
 		"isSiteAdmin":        u.IsSiteAdmin,
-		"isResourceReviewer": u.IsResourceReviewer,
 		"orgId":              orgID,
 		"orgRole":            orgRole,
 		"pm":                 pm,

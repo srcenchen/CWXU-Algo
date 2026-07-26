@@ -32,9 +32,9 @@ const (
 	PermSiteUserSync    = "site.user.sync"
 
 	// —— 站点 · 任命与角色 ——
-	PermSiteAppointAdmin    = "site.appoint.admin"
-	PermSiteAppointReviewer = "site.appoint.reviewer"
-	PermSiteRoleManage      = "site.role.manage"
+	// ⚠️ 曾有 site.appoint.reviewer（bit 16）：资源审核员内置身份已下线，该 bit 永久退休，不得复用。
+	PermSiteAppointAdmin = "site.appoint.admin"
+	PermSiteRoleManage   = "site.role.manage"
 
 	// —— 站点 · 公告 ——
 	PermSiteBulletin  = "site.bulletin.manage"
@@ -106,7 +106,7 @@ var registry = []Perm{
 	{PermSiteUserSync, "用户同步运维", "冻结/解冻同步、豁免休眠、个人同步间隔与题面开关覆盖", "site_user", ScopeSite, 14},
 
 	{PermSiteAppointAdmin, "任命站点管理员", "设置 / 撤销站点管理员", "site_appoint", ScopeSite, 15},
-	{PermSiteAppointReviewer, "任命资源审核员", "设置 / 撤销资源审核员", "site_appoint", ScopeSite, 16},
+	// bit 16 = 已下线的「任命资源审核员」，永久退休不复用
 	{PermSiteRoleManage, "站点角色管理", "创建/编辑站点级自定义角色并分配成员", "site_appoint", ScopeSite, 17},
 
 	{PermSiteBulletin, "全站公告", "发布 / 管理全站公告", "site_notice", ScopeSite, 18},
@@ -185,6 +185,17 @@ func AllCodes() []string {
 	out := make([]string, 0, len(registry))
 	for _, p := range registry {
 		out = append(out, p.Code)
+	}
+	return out
+}
+
+// CodesByGroup 按分组筛选权限 code（如 content：内容审核相关）
+func CodesByGroup(group string) []string {
+	out := make([]string, 0, len(registry))
+	for _, p := range registry {
+		if p.Group == group {
+			out = append(out, p.Code)
+		}
 	}
 	return out
 }

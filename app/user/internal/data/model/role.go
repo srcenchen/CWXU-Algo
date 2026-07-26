@@ -27,6 +27,18 @@ type RolePermission struct {
 	PermCode string `gorm:"size:64;uniqueIndex:idx_role_perm;not null;comment:权限点code(见 app/common/rbac)"`
 }
 
+// OrgRolePerm 组织对内置组织角色（教练 / 队长）的权限覆盖。
+// 有行 = 该组织已自定义（整集覆盖，空串表示该角色在本组织无任何权限）；
+// 无行 = 用代码模板。团队管理员 / 成员是基本盘，不允许覆盖。
+type OrgRolePerm struct {
+	ID        uint `gorm:"primaryKey"`
+	CreatedAt time.Time
+	UpdatedAt time.Time
+	OrgID     uint   `gorm:"uniqueIndex:idx_org_role_perm;not null;comment:组织ID"`
+	RoleCode  string `gorm:"size:64;uniqueIndex:idx_org_role_perm;not null;comment:内置组织角色code(coach|captain)"`
+	PermCodes string `gorm:"type:text;comment:权限code列表,逗号分隔;空串=本组织该角色无权限"`
+}
+
 // UserRole 用户 → 角色（org_id：站点级角色恒 0；组织级角色为组织 ID）
 type UserRole struct {
 	ID        uint `gorm:"primaryKey"`

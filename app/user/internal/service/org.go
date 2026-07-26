@@ -13,7 +13,6 @@ import (
 	"strings"
 	"time"
 
-	"cwxu-algo/app/common/notify"
 	"cwxu-algo/app/common/rbac"
 	"cwxu-algo/app/common/utils/auth"
 	"cwxu-algo/app/user/internal/data"
@@ -393,7 +392,6 @@ func RegisterOrgRoutes(srv *khttp.Server, org *OrgService) {
 	r.GET("/v1/user/org/join-requests", org.handleJoinRequests)
 	r.POST("/v1/user/org/join-requests/review", org.handleJoinReview)
 	r.POST("/v1/user/platform/set-site-admin", org.handleSetSiteAdmin)
-	r.POST("/v1/user/platform/set-resource-reviewer", org.handleSetResourceReviewer)
 }
 
 // handleInvitePreview 公开：按识别码预览组织欢迎信息（不含敏感配置）
@@ -1852,83 +1850,6 @@ func (s *OrgService) handleSetSiteAdmin(ctx khttp.Context) error {
 	log.Infof("set site admin user=%d is=%v", req.UserID, req.IsSiteAdmin)
 	writeJSON(ctx.Response(), 200, map[string]interface{}{"code": 0, "message": "已更新"})
 	return nil
-}
-
-func (s *OrgService) handleSetResourceReviewer(ctx khttp.Context) error {
-	if !auth.HasPerm(ctx, rbac.PermSiteAppointReviewer) {
-		writeJSON(ctx.Response(), 403, map[string]interface{}{"code": 1, "message": "无任命资源审核员权限"})
-		return nil
-	}
-	pd := auth.GetCurrentUser(ctx)
-	var req struct {
-		UserID             uint `json:"userId"`
-		IsResourceReviewer bool `json:"isResourceReviewer"`
-	}
-	if err := readJSON(ctx.Request(), &req); err != nil || req.UserID == 0 {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "参数错误"})
-		return nil
-	}
-	var target model.User
-	if err := s.db.First(&target, req.UserID).Error; err != nil {
-		writeJSON(ctx.Response(), 404, map[string]interface{}{"code": 1, "message": "用户不存在"})
-		return nil
-	}
-	if target.IsResourceReviewer == req.IsResourceReviewer {
-		writeJSON(ctx.Response(), 200, map[string]interface{}{"code": 0, "message": "无需变更"})
-		return nil
-	}
-	if err := s.db.Model(&model.User{}).Where("id = ?", req.UserID).
-		Update("is_resource_reviewer", req.IsResourceReviewer).Error; err != nil {
-		log.Errorf("set resource reviewer: %v", err)
-		writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "更新失败，请稍后重试"})
-		return nil
-	}
-	actorID := uint(0)
-	if pd != nil {
-		actorID = pd.UserID
-	}
-	syncSiteSystemRole(s.db, req.UserID, rbac.RoleResourceReviewer, req.IsResourceReviewer)
-	s.notifyResourceReviewerChange(&target, req.IsResourceReviewer, actorID)
-	log.Infof("set resource reviewer user=%d is=%v", req.UserID, req.IsResourceReviewer)
-	writeJSON(ctx.Response(), 200, map[string]interface{}{"code": 0, "message": "已更新"})
-	return nil
-}
-
-// notifyResourceReviewerChange 任命/撤销资源审核员：站内信 + 邮件
-func (s *OrgService) notifyResourceReviewerChange(target *model.User, appointed bool, actorID uint) {
-	if target == nil || target.ID == 0 {
-		return
-	}
-	typ := notify.TypeResourceReviewerAppointed
-	title := "你已被任命为资源审核员"
-	body := "站点管理员已将你设为资源审核员。你可以审核用户提交的题面/标签修改与相关举报，你自己的内容修改将自动通过并记入审核记录。"
-	mailSubj := "你已被任命为资源审核员"
-	mailHTML := `<p>你好` + htmlEscapeName(target.Name, target.Username) + `，</p>` +
-		`<p>站点管理员已将你设为 <strong>资源审核员</strong>。</p>` +
-		`<ul><li>可审核题面/标签修改申请与内容相关举报</li>` +
-		`<li>你自己的内容修改会自动通过，并出现在「已通过」审核记录中</li></ul>` +
-		`<p>登录后可在管理入口查看「题库审查」「博客管理」。</p>`
-	if !appointed {
-		typ = notify.TypeResourceReviewerRevoked
-		title = "资源审核员身份已解除"
-		body = "站点管理员已解除你的资源审核员身份。你将不再收到内容审核相关通知，也无法进入审核入口。"
-		mailSubj = "资源审核员身份已解除"
-		mailHTML = `<p>你好` + htmlEscapeName(target.Name, target.Username) + `，</p>` +
-			`<p>站点管理员已解除你的 <strong>资源审核员</strong> 身份。</p>` +
-			`<p>你将不再收到内容审核相关通知，也无法进入审核入口。如有疑问请联系站点管理员。</p>`
-	}
-	_ = notify.Create(s.db, notify.Row{
-		UserID:  target.ID,
-		Type:    typ,
-		Title:   title,
-		Body:    body,
-		ActorID: actorID,
-		RefType: "user",
-		RefID:   target.ID,
-	})
-	if !notify.EmailUser(s.db, target.ID, mailSubj, mailHTML) {
-		log.Warnf("resource reviewer notify email skipped user=%d appointed=%v", target.ID, appointed)
-	}
 }
 
 func htmlEscapeName(name, username string) string {

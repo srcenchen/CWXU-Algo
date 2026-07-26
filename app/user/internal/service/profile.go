@@ -323,7 +323,6 @@ func (p *ProfileService) GetList(ctx context.Context, req *profile.GetListReq) (
 			RoleId:                      int32(v.RoleID),
 			LastSubmit:                  t,
 			IsSiteAdmin:                 v.IsSiteAdmin,
-			IsResourceReviewer:          v.IsResourceReviewer,
 			GroupName:                   gName,
 			EmailEnabled:                v.EmailEnabled,
 			EmailWeeklyEnabled:          v.EmailWeeklyEnabled,

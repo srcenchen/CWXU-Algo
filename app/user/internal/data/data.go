@@ -127,6 +127,7 @@ func migrateModels(db *gorm.DB) {
 		&model.Role{},
 		&model.RolePermission{},
 		&model.UserRole{},
+		&model.OrgRolePerm{},
 	)
 	if err != nil {
 		panic("数据库：数据库自动合并失败")

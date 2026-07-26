@@ -77,7 +77,6 @@ type JwtPayload struct {
 	Email              string `json:"email"`
 	RoleID             int    `json:"roleId"` // 兼容旧字段
 	IsSiteAdmin        bool   `json:"isSiteAdmin"`
-	IsResourceReviewer bool   `json:"isResourceReviewer"`
 	OrgID              uint   `json:"orgId"`
 	OrgRole            string `json:"orgRole"` // member | coach | captain | org_admin
 	Pm                 string `json:"pm,omitempty"` // 权限位图（站点权限 ∪ 当前组织权限），见 app/common/rbac
@@ -140,7 +139,6 @@ func parsePayload(ctx context.Context) *JwtPayload {
 					pd.Email, _ = mc["email"].(string)
 					pd.OrgRole, _ = mc["orgRole"].(string)
 					pd.IsSiteAdmin = asBool(mc["isSiteAdmin"])
-					pd.IsResourceReviewer = asBool(mc["isResourceReviewer"])
 					pd.RoleID = asInt(mc["roleId"])
 					pd.OrgID = uint(asInt(mc["orgId"]))
 					pd.Pm, _ = mc["pm"].(string)
@@ -268,26 +266,23 @@ func VerifySiteAdmin(ctx context.Context) bool {
 	return pd.IsSiteAdmin || pd.RoleID == permission.RoleAdmin
 }
 
-// IsContentModerator 站管或资源审核员（题库审核 / 博客 moderate / 举报处理）
+// IsContentModerator 具备任一内容审核权限（题库审查 / 博客审核 / 社区治理 / 举报处理）。
+// 资源审核员内置身份已下线，改由站点自定义角色按权限点授予。
 func IsContentModerator(pd *JwtPayload) bool {
 	if pd == nil {
 		return false
 	}
-	if pd.IsSiteAdmin || pd.RoleID == permission.RoleAdmin {
-		return true
+	for _, code := range rbac.ContentPerms() {
+		if PayloadHasPerm(pd, code) {
+			return true
+		}
 	}
-	return pd.IsResourceReviewer
+	return false
 }
 
-// VerifyContentModerator 站点管理员或资源审核员
+// VerifyContentModerator 当前请求是否具备任一内容审核权限
 func VerifyContentModerator(ctx context.Context) bool {
 	return IsContentModerator(parsePayload(ctx))
-}
-
-// VerifyResourceReviewer 仅资源审核员（不含站管）；一般业务用 VerifyContentModerator
-func VerifyResourceReviewer(ctx context.Context) bool {
-	pd := parsePayload(ctx)
-	return pd != nil && pd.IsResourceReviewer
 }
 
 // VerifyOrgAdmin 当前 JWT 组织的组织管理员，或站点管理员
@@ -368,8 +363,8 @@ func PayloadHasPerm(pd *JwtPayload, code string) bool {
 	if has, valid := rbac.MaskHas(pd.Pm, code); valid {
 		return has
 	}
-	// 旧 token（无 pm）：按资源审核员 / 组织角色模板推导
-	return rbac.LegacyHas(code, pd.IsResourceReviewer, pd.OrgRole)
+	// 旧 token（无 pm）：按组织角色模板推导
+	return rbac.LegacyHas(code, pd.OrgRole)
 }
 
 // HasPerm 当前请求是否具备权限（站点级权限，或当前 JWT 组织内的组织级权限）

@@ -42,6 +42,56 @@ func RegisterRbacRoutes(srv *khttp.Server, s *RbacService) {
 	r.GET("/v1/user/rbac/my-permissions", s.handleMyPermissions)
 }
 
+// —— 内置组织角色的组织级权限覆盖（教练 / 队长）——
+
+// orgRoleOverride 读取组织对内置角色的权限覆盖；ok=false 表示该组织未自定义，用代码模板。
+func orgRoleOverride(db *gorm.DB, orgID uint, roleCode string) (perms []string, ok bool) {
+	if db == nil || orgID == 0 || !rbac.OrgEditableSystemRole(roleCode) {
+		return nil, false
+	}
+	var row model.OrgRolePerm
+	if db.Where("org_id = ? AND role_code = ?", orgID, roleCode).First(&row).Error != nil {
+		return nil, false
+	}
+	return splitPermCodes(row.PermCodes), true
+}
+
+// splitPermCodes 覆盖行的 perm_codes 文本 → 有效权限 code 列表
+func splitPermCodes(s string) []string {
+	out := make([]string, 0, 8)
+	for _, c := range strings.Split(s, ",") {
+		c = strings.TrimSpace(c)
+		if c != "" && rbac.Valid(c) {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// orgRolePerms 内置组织角色在该组织的生效权限集：有覆盖用覆盖，否则用代码模板
+func orgRolePerms(db *gorm.DB, orgID uint, roleCode string) []string {
+	if perms, ok := orgRoleOverride(db, orgID, roleCode); ok {
+		return perms
+	}
+	if sr, ok := rbac.SystemRoleByCode(roleCode); ok {
+		return sr.Perms
+	}
+	return nil
+}
+
+// orgTemplateHas 内置组织角色在该组织是否含某权限（含组织级覆盖）
+func orgTemplateHas(db *gorm.DB, orgID uint, roleCode, perm string) bool {
+	if roleCode == "" {
+		return false
+	}
+	for _, p := range orgRolePerms(db, orgID, roleCode) {
+		if p == perm {
+			return true
+		}
+	}
+	return false
+}
+
 // —— 共享判定 / 同步助手（org.go / jwt_issue.go 复用）——
 
 // hasPermInOrgDB 指定组织内是否具备权限（查库，不信 JWT；跨组织操作的兜底）。
@@ -57,7 +107,7 @@ func hasPermInOrgDB(db *gorm.DB, userID, orgID uint, code string) bool {
 	}
 	var m model.OrgMember
 	if db.Select("role").Where("org_id = ? AND user_id = ?", orgID, userID).First(&m).Error == nil &&
-		rbac.TemplateHas(m.Role, code) {
+		orgTemplateHas(db, orgID, m.Role, code) {
 		return true
 	}
 	var n int64
@@ -147,7 +197,7 @@ func syncSiteSystemRole(db *gorm.DB, userID uint, roleCode string, has bool) {
 }
 
 // collectUserPerms 计算用户在指定组织上下文的有效权限（签发 JWT / my-permissions 用）。
-// 站点管理员 → 全部；否则 资源审核员模板 ∪ org_members 模板 ∪ 自定义角色（站点级 + 该组织）。
+// 站点管理员 → 全部；否则 org_members 模板（含本组织覆盖）∪ 自定义角色（站点级 + 该组织）。
 func collectUserPerms(db *gorm.DB, u *model.User, orgID uint, orgRole string) []string {
 	if u == nil {
 		return nil
@@ -156,18 +206,10 @@ func collectUserPerms(db *gorm.DB, u *model.User, orgID uint, orgRole string) []
 		return rbac.AllCodes()
 	}
 	set := make(map[string]bool)
-	if u.IsResourceReviewer {
-		if sr, ok := rbac.SystemRoleByCode(rbac.RoleResourceReviewer); ok {
-			for _, c := range sr.Perms {
-				set[c] = true
-			}
-		}
-	}
 	if orgRole != "" {
-		if sr, ok := rbac.SystemRoleByCode(orgRole); ok {
-			for _, c := range sr.Perms {
-				set[c] = true
-			}
+		// 内置组织角色按「本组织覆盖优先」取权限
+		for _, c := range orgRolePerms(db, orgID, orgRole) {
+			set[c] = true
 		}
 	}
 	if db != nil {
@@ -239,6 +281,22 @@ func (s *RbacService) roleToMap(r *model.Role, orgID uint) map[string]interface{
 	if r.Scope == rbac.ScopeOrg {
 		countOrg = orgID
 	}
+	// 内置组织角色：权限展示按「本组织覆盖优先」，且教练/队长允许本组织改权限
+	permsEditable := !r.IsSystem
+	customized := false
+	if r.IsSystem && r.Scope == rbac.ScopeOrg && orgID > 0 && rbac.OrgEditableSystemRole(r.Code) {
+		permsEditable = true
+		if ov, ok := orgRoleOverride(s.db, orgID, r.Code); ok {
+			perms = ov
+			customized = true
+		} else if sr, ok := rbac.SystemRoleByCode(r.Code); ok {
+			perms = append([]string{}, sr.Perms...)
+		}
+	} else if r.IsSystem {
+		if sr, ok := rbac.SystemRoleByCode(r.Code); ok {
+			perms = append([]string{}, sr.Perms...)
+		}
+	}
 	var members int64
 	_ = s.db.Model(&model.UserRole{}).Where("role_id = ? AND org_id = ?", r.ID, countOrg).Count(&members).Error
 	return map[string]interface{}{
@@ -249,6 +307,10 @@ func (s *RbacService) roleToMap(r *model.Role, orgID uint) map[string]interface{
 		"scope":       r.Scope,
 		"orgId":       r.OrgID,
 		"isSystem":    r.IsSystem,
+		// permsEditable：内置角色是否允许本组织改权限（名称/说明/成员仍锁定）
+		"permsEditable": permsEditable,
+		// customized：内置角色的权限已被本组织改过（可「恢复默认」）
+		"customized":  customized,
 		"permissions": perms,
 		"memberCount": members,
 	}
@@ -416,7 +478,7 @@ func (s *RbacService) loadEditableRole(ctx khttp.Context, pd *auth.JwtPayload, r
 		return nil
 	}
 	if role.IsSystem {
-		writeJSON(ctx.Response(), 403, map[string]interface{}{"code": 1, "message": "内置角色不可编辑或删除；如需差异化请创建自定义角色"})
+		writeJSON(ctx.Response(), 403, map[string]interface{}{"code": 1, "message": "内置角色不可改名或删除；教练 / 队长可在本组织调整权限，其余请新建自定义角色"})
 		return nil
 	}
 	if role.Scope == rbac.ScopeSite {
@@ -431,6 +493,67 @@ func (s *RbacService) loadEditableRole(ctx khttp.Context, pd *auth.JwtPayload, r
 	return &role
 }
 
+// updateSystemOrgRolePerms 处理内置组织角色的「本组织权限覆盖」。
+// 返回 true 表示本次请求已由这里处理（含错误响应），调用方直接返回。
+// 只有教练 / 队长可覆盖；团队管理员与成员是组织基本盘，权限锁定。
+func (s *RbacService) updateSystemOrgRolePerms(
+	ctx khttp.Context, pd *auth.JwtPayload, roleID, reqOrgID uint,
+	perms *[]string, reset bool, metaChange bool,
+) bool {
+	var role model.Role
+	if s.db.First(&role, roleID).Error != nil || !role.IsSystem {
+		return false // 非内置角色 → 交给自定义角色流程
+	}
+	if role.Scope != rbac.ScopeOrg || !rbac.OrgEditableSystemRole(role.Code) {
+		writeJSON(ctx.Response(), 403, map[string]interface{}{"code": 1, "message": "「" + role.Name + "」是基本角色，权限固定，不能修改或删除"})
+		return true
+	}
+	if metaChange {
+		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "内置角色的名称与说明不能修改，只能调整本组织的权限"})
+		return true
+	}
+	orgID := reqOrgID
+	if orgID == 0 {
+		orgID = pd.OrgID
+	}
+	if orgID == 0 {
+		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "缺少组织 id"})
+		return true
+	}
+	if !s.canManageOrgRoles(ctx, pd.UserID, orgID) {
+		writeJSON(ctx.Response(), 403, map[string]interface{}{"code": 1, "message": "权限不足"})
+		return true
+	}
+	if reset {
+		_ = s.db.Where("org_id = ? AND role_code = ?", orgID, role.Code).Delete(&model.OrgRolePerm{}).Error
+		writeJSON(ctx.Response(), 200, map[string]interface{}{
+			"code": 0, "message": "已恢复默认权限；成员刷新登录态后生效", "data": s.roleToMap(&role, orgID),
+		})
+		return true
+	}
+	if perms == nil {
+		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "参数错误"})
+		return true
+	}
+	list, errMsg := validateRolePerms(rbac.ScopeOrg, *perms)
+	if errMsg != "" {
+		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": errMsg})
+		return true
+	}
+	row := model.OrgRolePerm{OrgID: orgID, RoleCode: role.Code, PermCodes: strings.Join(list, ",")}
+	if err := s.db.Where("org_id = ? AND role_code = ?", orgID, role.Code).
+		Assign(map[string]interface{}{"perm_codes": row.PermCodes}).
+		FirstOrCreate(&row).Error; err != nil {
+		log.Errorf("rbac update system org role perms: %v", err)
+		writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "保存失败，请稍后重试"})
+		return true
+	}
+	writeJSON(ctx.Response(), 200, map[string]interface{}{
+		"code": 0, "message": "已保存；成员权限在刷新登录态后生效", "data": s.roleToMap(&role, orgID),
+	})
+	return true
+}
+
 func (s *RbacService) handleRoleUpdate(ctx khttp.Context) error {
 	pd := auth.GetCurrentUser(ctx)
 	if pd == nil {
@@ -438,13 +561,20 @@ func (s *RbacService) handleRoleUpdate(ctx khttp.Context) error {
 		return nil
 	}
 	var req struct {
-		RoleID      uint      `json:"roleId"`
-		Name        *string   `json:"name"`
+		RoleID uint      `json:"roleId"`
+		OrgID  uint      `json:"orgId"`
+		Name   *string   `json:"name"`
 		Description *string   `json:"description"`
 		Permissions *[]string `json:"permissions"`
+		// ResetPermissions 内置角色专用：清除本组织的权限覆盖，恢复默认
+		ResetPermissions bool `json:"resetPermissions"`
 	}
 	if err := readJSON(ctx.Request(), &req); err != nil || req.RoleID == 0 {
 		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "参数错误"})
+		return nil
+	}
+	// 内置组织角色（教练 / 队长）：只改本组织的权限覆盖，名称与成员仍锁定
+	if done := s.updateSystemOrgRolePerms(ctx, pd, req.RoleID, req.OrgID, req.Permissions, req.ResetPermissions, req.Name != nil || req.Description != nil); done {
 		return nil
 	}
 	role := s.loadEditableRole(ctx, pd, req.RoleID)

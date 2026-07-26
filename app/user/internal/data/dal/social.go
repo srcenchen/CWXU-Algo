@@ -95,7 +95,6 @@ type SocialUser struct {
 	Avatar   string `gorm:"column:avatar"`
 	// 全站特殊身份（公共域 badge 用；列表 SQL 需选出）
 	IsSiteAdmin        bool `gorm:"column:is_site_admin"`
-	IsResourceReviewer bool `gorm:"column:is_resource_reviewer"`
 	// InCurrentOrg 目标是否属于观众当前组织
 	InCurrentOrg bool `gorm:"-"`
 	// SharedOrgs 双方共属、且非当前域的组织称呼（含公共域；切换组织后仍返回）
@@ -110,7 +109,6 @@ type socialUserRow struct {
 	Name               string `gorm:"column:name"`
 	Avatar             string `gorm:"column:avatar"`
 	IsSiteAdmin        bool   `gorm:"column:is_site_admin"`
-	IsResourceReviewer bool   `gorm:"column:is_resource_reviewer"`
 }
 
 func rowsToSocialUsers(rows []socialUserRow) []SocialUser {
@@ -122,7 +120,6 @@ func rowsToSocialUsers(rows []socialUserRow) []SocialUser {
 			Name:               r.Name,
 			Avatar:             r.Avatar,
 			IsSiteAdmin:        r.IsSiteAdmin,
-			IsResourceReviewer: r.IsResourceReviewer,
 		})
 	}
 	return out
@@ -150,7 +147,7 @@ func (d *SocialDal) ListFollowing(ctx context.Context, userID uint, page, pageSi
 	}
 	var rows []socialUserRow
 	err := d.db.WithContext(ctx).Table("user_follows f").
-		Select("u.id AS user_id, u.username, u.name, u.avatar, u.is_site_admin, u.is_resource_reviewer").
+		Select("u.id AS user_id, u.username, u.name, u.avatar, u.is_site_admin").
 		Joins("JOIN users u ON u.id = f.followee_id").
 		Where("f.follower_id = ?", userID).
 		Order("f.id DESC").
@@ -177,7 +174,7 @@ func (d *SocialDal) ListFollowers(ctx context.Context, userID uint, page, pageSi
 	}
 	var rows []socialUserRow
 	err := d.db.WithContext(ctx).Table("user_follows f").
-		Select("u.id AS user_id, u.username, u.name, u.avatar, u.is_site_admin, u.is_resource_reviewer").
+		Select("u.id AS user_id, u.username, u.name, u.avatar, u.is_site_admin").
 		Joins("JOIN users u ON u.id = f.follower_id").
 		Where("f.followee_id = ?", userID).
 		Order("f.id DESC").
@@ -212,7 +209,7 @@ func (d *SocialDal) SearchUsers(ctx context.Context, keyword string, page, pageS
 		return nil, 0, err
 	}
 	var rows []socialUserRow
-	err := q.Select("id AS user_id, username, name, avatar, is_site_admin, is_resource_reviewer").
+	err := q.Select("id AS user_id, username, name, avatar, is_site_admin").
 		Order("id ASC").
 		Offset((page - 1) * pageSize).Limit(pageSize).
 		Scan(&rows).Error
@@ -558,7 +555,7 @@ func (d *SocialDal) SearchUsersInContext(ctx context.Context, keyword string, pa
 		return nil, 0, err
 	}
 	var rows []socialUserRow
-	err := base.Select("u.id AS user_id, u.username, u.name, u.avatar, u.is_site_admin, u.is_resource_reviewer").
+	err := base.Select("u.id AS user_id, u.username, u.name, u.avatar, u.is_site_admin").
 		Order("u.id ASC").
 		Offset((page - 1) * pageSize).Limit(pageSize).
 		Scan(&rows).Error

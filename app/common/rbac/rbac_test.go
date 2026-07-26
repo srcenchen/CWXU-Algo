@@ -102,25 +102,19 @@ func TestMaskEdgeCases(t *testing.T) {
 }
 
 func TestLegacyHas(t *testing.T) {
-	if !LegacyHas(PermContentBlogModerate, true, "") {
-		t.Fatal("资源审核员应有博客审核")
-	}
-	if LegacyHas(PermSiteConfigWrite, true, "") {
-		t.Fatal("资源审核员不应有站点配置")
-	}
-	if !LegacyHas(PermOrgBulletinManage, false, "coach") {
+	if !LegacyHas(PermOrgBulletinManage, "coach") {
 		t.Fatal("教练应有组织公告")
 	}
-	if LegacyHas(PermOrgMemberRole, false, "coach") {
+	if LegacyHas(PermOrgMemberRole, "coach") {
 		t.Fatal("教练不应有成员任命")
 	}
-	if !LegacyHas(PermOrgMemberRole, false, "org_admin") {
+	if !LegacyHas(PermOrgMemberRole, "org_admin") {
 		t.Fatal("团队管理员应有成员任命")
 	}
-	if LegacyHas(PermOrgGroupManage, false, "member") {
+	if LegacyHas(PermOrgGroupManage, "member") {
 		t.Fatal("成员不应有分组管理")
 	}
-	if LegacyHas(PermOrgGroupManage, false, "") {
+	if LegacyHas(PermOrgGroupManage, "") {
 		t.Fatal("无组织角色不应有权限")
 	}
 }

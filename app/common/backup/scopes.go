@@ -52,6 +52,7 @@ var AllTableSpecs = []TableSpec{
 	{File: "roles.ndjson", DB: "user", Table: "roles", Scope: ScopeOrgs, SeqCol: "id"},
 	{File: "role_permissions.ndjson", DB: "user", Table: "role_permissions", Scope: ScopeOrgs, SeqCol: "id"},
 	{File: "user_roles.ndjson", DB: "user", Table: "user_roles", Scope: ScopeOrgs, SeqCol: "id"},
+	{File: "org_role_perms.ndjson", DB: "user", Table: "org_role_perms", Scope: ScopeOrgs, SeqCol: "id"},
 	{File: "pastes.ndjson", DB: "user", Table: "pastes", Scope: ScopePastes, SeqCol: "id"},
 	{File: "site_visit_dailies.ndjson", DB: "user", Table: "site_visit_dailies", Scope: ScopeVisits, SeqCol: "id"},
 	{File: "platforms.ndjson", DB: "core", Table: "platforms", Scope: ScopePlatforms, SeqCol: "id"},

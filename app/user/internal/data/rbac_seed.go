@@ -13,6 +13,9 @@ import (
 // 用户 ↔ 角色 的指派迁移必须一次性（schema_patches），否则会覆盖管理员后续调整。
 const patchRbacBootstrap = "rbac_bootstrap_v1"
 
+// patchDropReviewer 资源审核员内置身份下线：剥离存量持有者 + 清角色行。一次性执行。
+const patchDropReviewer = "rbac_drop_resource_reviewer_v1"
+
 // seedRbac 内置角色种子 + 权限集同步 + 存量指派一次性迁移 + 孤儿清理。幂等。
 func seedRbac(db *gorm.DB) {
 	if db == nil {
@@ -44,6 +47,11 @@ func seedRbac(db *gorm.DB) {
 	if claimSchemaPatch(db, patchRbacBootstrap) {
 		bootstrapUserRoles(db)
 		log.Info("rbac bootstrap: 存量角色已迁移至 user_roles")
+	}
+
+	// 2.5 资源审核员下线：剥离存量持有者（旧列保留可回滚）
+	if claimSchemaPatch(db, patchDropReviewer) {
+		dropResourceReviewer(db)
 	}
 
 	// 3. 孤儿清理（用户/组织/角色已删）：与 org_members 孤儿清理同思路，可重复执行
@@ -79,8 +87,27 @@ func syncRolePerms(db *gorm.DB, roleID uint, want []string) {
 	}
 }
 
+// dropResourceReviewer 资源审核员下线的存量清理：
+// 剥离所有持有者的标记与角色指派，删除内置角色行本身。
+// users.is_resource_reviewer 列保留（可回滚），但全部置 false。
+func dropResourceReviewer(db *gorm.DB) {
+	var role model.Role
+	if db.Where("code = ?", rbac.RoleResourceReviewer).First(&role).Error == nil && role.ID > 0 {
+		_ = db.Where("role_id = ?", role.ID).Delete(&model.UserRole{}).Error
+		_ = db.Where("role_id = ?", role.ID).Delete(&model.RolePermission{}).Error
+		_ = db.Delete(&model.Role{}, role.ID).Error
+	}
+	res := db.Model(&model.User{}).Where("is_resource_reviewer = ?", true).
+		Update("is_resource_reviewer", false)
+	if res.Error != nil {
+		log.Errorf("rbac drop reviewer: %v", res.Error)
+		return
+	}
+	log.Infof("rbac: 资源审核员身份已下线，剥离 %d 名存量持有者", res.RowsAffected)
+}
+
 // bootstrapUserRoles 存量身份 → user_roles：
-// users.is_site_admin / is_resource_reviewer → 站点角色；org_members.role → 组织模板角色。
+// users.is_site_admin → 站点角色；org_members.role → 组织模板角色。
 func bootstrapUserRoles(db *gorm.DB) {
 	if err := db.Exec(`
 		INSERT INTO user_roles (created_at, user_id, role_id, org_id)
@@ -90,15 +117,6 @@ func bootstrapUserRoles(db *gorm.DB) {
 		ON CONFLICT DO NOTHING
 	`, rbac.RoleSiteAdmin).Error; err != nil {
 		log.Errorf("rbac bootstrap site_admin: %v", err)
-	}
-	if err := db.Exec(`
-		INSERT INTO user_roles (created_at, user_id, role_id, org_id)
-		SELECT NOW(), u.id, r.id, 0
-		FROM users u JOIN roles r ON r.code = ?
-		WHERE u.is_resource_reviewer = true
-		ON CONFLICT DO NOTHING
-	`, rbac.RoleResourceReviewer).Error; err != nil {
-		log.Errorf("rbac bootstrap resource_reviewer: %v", err)
 	}
 	if err := db.Exec(`
 		INSERT INTO user_roles (created_at, user_id, role_id, org_id)
