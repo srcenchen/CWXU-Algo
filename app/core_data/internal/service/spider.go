@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"cwxu-algo/api/core/v1/spider"
+	"cwxu-algo/app/common/rbac"
 	"cwxu-algo/app/common/utils/auth"
 	"cwxu-algo/app/common/utils/ratelimit"
 	bizservice "cwxu-algo/app/core_data/internal/biz/service"
@@ -49,13 +50,14 @@ func (s SpiderService) allow(ctx context.Context, key string, interval time.Dura
 
 func (s SpiderService) Update(ctx context.Context, req *spider.UpdateReq) (*spider.UpdateRes, error) {
 	// 仅站点管理员可手动触发全量同步（普通用户依赖定时任务与绑定后自动抓取）
-	if !auth.VerifyAdmin(ctx) {
+	if !auth.HasPerm(ctx, rbac.PermSiteSpiderOps) {
 		return nil, UpdateForbidden
 	}
 	if !s.allow(ctx, ratelimit.SpiderUpdateKey(req.UserId), 60*time.Second) {
 		return nil, RateLimitError
 	}
-	s.spider.Do(req.UserId, true) // 全量更新该用户全部已绑定平台
+	// 后台入队（与 UpdateAll 一致）：Publish 等 confirm 可达秒级，HTTP 路径不阻塞
+	go s.spider.Do(req.UserId, true) // 全量更新该用户全部已绑定平台
 	return &spider.UpdateRes{
 		Code:    0,
 		Message: "更新成功，请稍等片刻，该用户的全量 OJ 数据正在同步",
@@ -64,7 +66,7 @@ func (s SpiderService) Update(ctx context.Context, req *spider.UpdateReq) (*spid
 
 // UpdateAll 管理员一键触发所有已绑定 OJ 用户的全量更新（分批入队，削峰）
 func (s SpiderService) UpdateAll(ctx context.Context, _ *spider.UpdateAllReq) (*spider.UpdateAllRes, error) {
-	if !auth.VerifyAdmin(ctx) {
+	if !auth.HasPerm(ctx, rbac.PermSiteSpiderOps) {
 		return nil, SetForbidden
 	}
 	adminId := int64(auth.GetCurrentUserId(ctx))
@@ -103,7 +105,7 @@ func RegisterSpiderExtraRoutes(srv *khttp.Server, s *SpiderService) {
 
 // handleRepairContestCells 幂等修复 AtCoder 赛时提交明细相关脏数据（仅站管）。
 func (s *SpiderService) handleRepairContestCells(ctx khttp.Context) error {
-	if !auth.VerifySiteAdmin(ctx) && !auth.VerifyAdmin(ctx) {
+	if !auth.HasPerm(ctx, rbac.PermSiteSpiderOps) {
 		writeSpiderJSON(ctx, 403, map[string]interface{}{"success": false, "message": "仅管理员可操作"})
 		return nil
 	}
@@ -128,7 +130,7 @@ func (s *SpiderService) handleRepairContestCells(ctx khttp.Context) error {
 // handleUpdatePlatform body: { "platform": "LeetCode" }
 // 仅入队该平台已绑定用户的 needAll 任务，并强制清去重（避免与刚跑完的 update-all 撞 pending）。
 func (s *SpiderService) handleUpdatePlatform(ctx khttp.Context) error {
-	if !auth.VerifyAdmin(ctx) {
+	if !auth.HasPerm(ctx, rbac.PermSiteSpiderOps) {
 		writeSpiderJSON(ctx, 403, map[string]interface{}{"code": 1, "message": "仅站点管理员可操作", "count": 0})
 		return nil
 	}
@@ -274,7 +276,8 @@ func (s SpiderService) SetSpider(ctx context.Context, req *spider.SetSpiderReq) 
 	// 强制允许本次入队（旧全量任务可能仍占 pending/inflight）
 	s.spider.ResetDedup(req.UserId, platformName)
 	// 只全量抓取刚绑定的这一平台，避免重绑 CF 时把其它 OJ 再扫一遍
-	s.spider.DoPlatform(req.UserId, platformName, true)
+	// 后台入队：MQ confirm 可达秒级，绑定 HTTP 路径不阻塞
+	go s.spider.DoPlatform(req.UserId, platformName, true)
 	return &spider.SetSpiderRep{
 		Code:    0,
 		Message: fmt.Sprintf("绑定成功，正在同步 %s 的全量数据，请稍候", platformName),
@@ -285,7 +288,7 @@ const purgeSubmitsConfirm = "PURGE_SUBMITS"
 
 // SubmitInventory 运维：真实入库提交库存（仅站点管理员）
 func (s SpiderService) SubmitInventory(ctx context.Context, _ *spider.SubmitInventoryReq) (*spider.SubmitInventoryRes, error) {
-	if !auth.VerifySiteAdmin(ctx) {
+	if !auth.HasPerm(ctx, rbac.PermSiteSpiderOps) {
 		return nil, errors.Forbidden("权限不足", "仅站点管理员可查看提交库存")
 	}
 	var total, realTotal int64
@@ -329,7 +332,7 @@ func (s SpiderService) SubmitInventory(ctx context.Context, _ *spider.SubmitInve
 // 硬删：submit_logs（真假全删）、日汇总、AC 预聚合、contest_logs、提醒发送日志、
 // 以及相关 Redis 缓存。用户账号在 user 库，本接口不动。
 func (s SpiderService) PurgeSubmitsAndRecrawl(ctx context.Context, req *spider.PurgeSubmitsAndRecrawlReq) (*spider.PurgeSubmitsAndRecrawlRes, error) {
-	if !auth.VerifySiteAdmin(ctx) {
+	if !auth.HasPerm(ctx, rbac.PermSiteSpiderOps) {
 		return nil, errors.Forbidden("权限不足", "仅站点管理员可执行此运维操作")
 	}
 	if strings.TrimSpace(req.GetConfirm()) != purgeSubmitsConfirm {

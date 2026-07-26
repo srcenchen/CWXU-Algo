@@ -1,6 +1,7 @@
 package platform
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -11,7 +12,7 @@ func TestLOJ_FetchSubmitLog_IncrementalLive(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skip live loj")
 	}
-	logs, err := NewLOJ{}.FetchSubmitLog(1, "supy", false)
+	logs, err := NewLOJ{}.FetchSubmitLog(context.Background(), 1, "supy", false)
 	if err != nil {
 		t.Fatalf("loj incremental: %v", err)
 	}
@@ -62,7 +63,7 @@ func TestUOJ_FetchSubmitLog_Live(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skip live uoj")
 	}
-	logs, err := NewUOJ{}.FetchSubmitLog(42, "lgvc", true)
+	logs, err := NewUOJ{}.FetchSubmitLog(context.Background(), 42, "lgvc", true)
 	if err != nil {
 		t.Fatalf("uoj ac list: %v", err)
 	}

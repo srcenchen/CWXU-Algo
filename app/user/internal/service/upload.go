@@ -3,6 +3,7 @@ package service
 import (
 	"bytes"
 	"crypto/rand"
+	"cwxu-algo/app/common/rbac"
 	"cwxu-algo/app/common/utils/auth"
 	"encoding/hex"
 	"fmt"
@@ -259,14 +260,14 @@ func RegisterUploadRoutes(srv *khttp.Server) {
 		default:
 			purpose = "misc"
 		}
-		if purpose == "site" && !auth.VerifySiteAdmin(ctx) {
+		if purpose == "site" && !auth.HasPerm(ctx, rbac.PermSiteConfigWrite) {
 			return ctx.JSON(http.StatusForbidden, map[string]interface{}{
-				"code": 1, "message": "仅站点管理员可上传站点素材",
+				"code": 1, "message": "需要修改站点配置权限",
 			})
 		}
-		if purpose == "bulletin" && !auth.VerifyStaff(ctx) {
+		if purpose == "bulletin" && !auth.HasPerm(ctx, rbac.PermOrgBulletinManage) {
 			return ctx.JSON(http.StatusForbidden, map[string]interface{}{
-				"code": 1, "message": "需要组织管理权限",
+				"code": 1, "message": "需要组织公告管理权限",
 			})
 		}
 

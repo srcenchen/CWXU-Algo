@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"cwxu-algo/app/agent/internal/agent/tool"
 	"cwxu-algo/app/common/conf"
@@ -19,6 +20,9 @@ import (
 )
 
 const defaultMaxRounds = 8
+
+// llmCallTimeout 单轮 LLM 调用上限：模型/网络挂起时不至于占死 worker
+const llmCallTimeout = 90 * time.Second
 
 type Chat struct {
 	yaml   *conf.Agent
@@ -100,7 +104,10 @@ func (c *Chat) Chat(ctx context.Context, messages []*model.ChatCompletionMessage
 			Messages: messages,
 			Tools:    toolUse,
 		}
-		resp, err := client.CreateChatCompletion(ctx, &req)
+		// 每轮调用带独立超时
+		callCtx, cancel := context.WithTimeout(ctx, llmCallTimeout)
+		resp, err := client.CreateChatCompletion(callCtx, &req)
+		cancel()
 		if err != nil {
 			return "", err
 		}
@@ -112,7 +119,7 @@ func (c *Chat) Chat(ctx context.Context, messages []*model.ChatCompletionMessage
 			finalResp = *choice.Message.Content.StringValue
 		}
 		if choice.Message.ReasoningContent != nil {
-			log.Infof("reasoning: %s", *choice.Message.ReasoningContent)
+			log.Debugf("reasoning: %s", truncate(*choice.Message.ReasoningContent, 500))
 		}
 		if choice.FinishReason != model.FinishReasonToolCalls || len(choice.Message.ToolCalls) == 0 {
 			return finalResp, nil
@@ -141,11 +148,13 @@ func (c *Chat) Chat(ctx context.Context, messages []*model.ChatCompletionMessage
 	return finalResp, fmt.Errorf("工具调用超过最大轮次 %d", defaultMaxRounds)
 }
 
+// truncate 按 rune 截断，避免在多字节字符中间截出乱码
 func truncate(s string, n int) string {
-	if len(s) <= n {
+	r := []rune(s)
+	if len(r) <= n {
 		return s
 	}
-	return s[:n] + "..."
+	return string(r[:n]) + "..."
 }
 
 // sanitizeToolResult 工具失败时避免模型把错误写进用户可见报告
@@ -161,9 +170,9 @@ func sanitizeToolResult(msg string) string {
 			return "工具暂不可用，忽略本工具结果。请仅使用用户消息预置 JSON 生成完整 HTML，不要在输出中提及工具或错误。"
 		}
 	}
-	// 控制工具回传体积，防止挤掉最终 HTML
-	if len(m) > 6000 {
-		return m[:6000] + "\n...(truncated) 请优先使用预置 JSON。"
+	// 控制工具回传体积，防止挤掉最终 HTML（按 rune 截断，避免截出乱码）
+	if r := []rune(m); len(r) > 6000 {
+		return string(r[:6000]) + "\n...(truncated) 请优先使用预置 JSON。"
 	}
 	return m
 }

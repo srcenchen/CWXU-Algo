@@ -75,6 +75,15 @@ func (uc *SummaryUseCase) tryAcquireLock(ctx context.Context, key string, ttl ti
 	return ok
 }
 
+// releaseLock 显式释放锁（失败路径用：避免瞬时失败在 TTL 内一直撞锁被静默吞掉）
+func (uc *SummaryUseCase) releaseLock(key string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := uc.redis.Del(ctx, key).Err(); err != nil {
+		log.Warnf("释放锁失败 %s: %v", key, err)
+	}
+}
+
 func truncateRunes(s string, n int) string {
 	r := []rune(s)
 	if len(r) <= n {

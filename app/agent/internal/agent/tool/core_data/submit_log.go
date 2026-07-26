@@ -11,7 +11,6 @@ import (
 
 	"github.com/go-kratos/kratos/v2/log"
 	"github.com/go-kratos/kratos/v2/registry"
-	"github.com/go-kratos/kratos/v2/transport/grpc"
 	"github.com/volcengine/volcengine-go-sdk/service/arkruntime/model"
 	grpc2 "google.golang.org/grpc"
 )
@@ -38,12 +37,8 @@ func (c *SubmitLog) coreDataRPC() (*grpc2.ClientConn, error) {
 	if c == nil || c.reg == nil {
 		return nil, fmt.Errorf("registry 未配置")
 	}
-	return grpc.DialInsecure(
-		toolRPCContext(c.ctx),
-		grpc.WithEndpoint("discovery:///core-data"),
-		grpc.WithDiscovery((*c.reg).(registry.Discovery)),
-		grpc.WithTimeout(20*time.Second),
-	)
+	// 复用共享长连接，避免每次工具调用 dial+Close
+	return SharedGRPCConn(c.reg, "core-data")
 }
 
 func (c *SubmitLog) Description() *model.Tool {
@@ -92,7 +87,6 @@ func (c *SubmitLog) Handle(endDate string, userId int, limit int) (string, error
 	if err != nil {
 		return "", err
 	}
-	defer conn.Close()
 	sb := submit_log.NewSubmitClient(conn)
 	t, err := time.Parse("20060102", endDate)
 	if err != nil {

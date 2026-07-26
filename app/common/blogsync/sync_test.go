@@ -52,8 +52,9 @@ func TestUpsertFromSolution(t *testing.T) {
 	if created.Summary == "" {
 		t.Fatalf("solution sync should auto-fill default summary")
 	}
-	if !created.Recommend {
-		t.Fatal("public solution mirror should auto recommend")
+	// 精选已改为站管/审核员手动标记（083e1f0），题解镜像不再自动 recommend
+	if created.Recommend {
+		t.Fatal("solution mirror must not auto recommend")
 	}
 
 	// 作者手填摘要后，题解再更新不应覆盖

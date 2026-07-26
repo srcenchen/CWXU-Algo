@@ -53,12 +53,17 @@ func ApplyUserACFromSubmits(ctx context.Context, db *gorm.DB, logs []model.Submi
 		}
 	}
 
-	for _, f := range firstMap {
-		row := model.UserACProblem{
-			UserID:     f.userID,
-			ProblemKey: f.key,
-			Platform:   f.platform,
-			FirstACAt:  f.at,
+	// 分批多值 upsert，替代逐行 Create（长事务/大批量时显著减少 round-trip）
+	const upsertBatch = 200
+	if len(firstMap) > 0 {
+		rows := make([]model.UserACProblem, 0, len(firstMap))
+		for _, f := range firstMap {
+			rows = append(rows, model.UserACProblem{
+				UserID:     f.userID,
+				ProblemKey: f.key,
+				Platform:   f.platform,
+				FirstACAt:  f.at,
+			})
 		}
 		err := db.WithContext(ctx).
 			Clauses(clause.OnConflict{
@@ -73,19 +78,23 @@ func ApplyUserACFromSubmits(ctx context.Context, db *gorm.DB, logs []model.Submi
 					),
 				}),
 			}).
-			Create(&row).Error
+			CreateInBatches(&rows, upsertBatch).Error
 		if err != nil {
 			return err
 		}
 	}
 
-	for _, row := range dayMap {
+	if len(dayMap) > 0 {
+		rows := make([]model.UserACProblemDay, 0, len(dayMap))
+		for _, row := range dayMap {
+			rows = append(rows, row)
+		}
 		err := db.WithContext(ctx).
 			Clauses(clause.OnConflict{
 				Columns:   []clause.Column{{Name: "user_id"}, {Name: "day"}, {Name: "problem_key"}},
 				DoNothing: true,
 			}).
-			Create(&row).Error
+			CreateInBatches(&rows, upsertBatch).Error
 		if err != nil {
 			return err
 		}

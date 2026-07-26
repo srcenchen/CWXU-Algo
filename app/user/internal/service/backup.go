@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"cwxu-algo/app/common/backup"
+	"cwxu-algo/app/common/rbac"
 	"cwxu-algo/app/common/utils/auth"
 	"cwxu-algo/app/user/internal/data"
 	"cwxu-algo/app/user/internal/data/model"
@@ -22,10 +23,12 @@ import (
 
 const (
 	maxBackupUploadBytes = 2 << 30 // 2 GiB
+	// multipart 解析的内存驻留上限：超过部分自动落盘临时文件，避免整包吃进内存
+	backupUploadMemoryBytes = 32 << 20 // 32 MiB
 	// 导出/导入任务结束后保留 10 分钟（含 zip），超时自动删库记录与磁盘文件
-	backupJobRetention   = 10 * time.Minute
-	backupCleanupEvery   = 1 * time.Minute
-	maxListedJobs        = 30
+	backupJobRetention = 10 * time.Minute
+	backupCleanupEvery = 1 * time.Minute
+	maxListedJobs      = 30
 )
 
 // RegisterBackupRoutes 站点数据备份/恢复（仅站点管理员；自定义路由以支持大文件与长下载）
@@ -39,9 +42,9 @@ func RegisterBackupRoutes(srv *khttp.Server, d *data.Data) {
 	r := srv.Route("/")
 
 	r.POST("/v1/user/site/backup/export", func(ctx khttp.Context) error {
-		if !auth.VerifySiteAdmin(ctx) {
+		if !auth.HasPerm(ctx, rbac.PermSiteBackup) {
 			return ctx.JSON(http.StatusForbidden, map[string]interface{}{
-				"code": 1, "message": "仅站点管理员可导出数据",
+				"code": 1, "message": "需要站点备份权限",
 			})
 		}
 		var body struct {
@@ -74,6 +77,12 @@ func RegisterBackupRoutes(srv *khttp.Server, d *data.Data) {
 			CreatedBy: uid,
 		}
 		if err := d.DB.Create(&job).Error; err != nil {
+			// 部分唯一索引（kind + pending/running）兜底并发：同类任务同时只允许一个
+			if isUniqueViolation(err) {
+				return ctx.JSON(http.StatusConflict, map[string]interface{}{
+					"code": 1, "message": "已有导出任务进行中，请稍后再试",
+				})
+			}
 			return ctx.JSON(http.StatusInternalServerError, map[string]interface{}{
 				"code": 1, "message": "创建任务失败",
 			})
@@ -85,13 +94,16 @@ func RegisterBackupRoutes(srv *khttp.Server, d *data.Data) {
 	})
 
 	r.POST("/v1/user/site/backup/import", func(ctx khttp.Context) error {
-		if !auth.VerifySiteAdmin(ctx) {
+		if !auth.HasPerm(ctx, rbac.PermSiteBackup) {
 			return ctx.JSON(http.StatusForbidden, map[string]interface{}{
-				"code": 1, "message": "仅站点管理员可导入数据",
+				"code": 1, "message": "需要站点备份权限",
 			})
 		}
 		req := ctx.Request()
-		if err := req.ParseMultipartForm(maxBackupUploadBytes); err != nil {
+		// 总量限制交给 MaxBytesReader（2GiB）；ParseMultipartForm 仅限内存驻留 32MB，
+		// 其余由 multipart 自动落盘临时文件
+		req.Body = http.MaxBytesReader(ctx.Response(), req.Body, maxBackupUploadBytes)
+		if err := req.ParseMultipartForm(backupUploadMemoryBytes); err != nil {
 			return ctx.JSON(http.StatusBadRequest, map[string]interface{}{
 				"code": 1, "message": "解析表单失败或文件过大（最大 2GB）",
 			})
@@ -129,6 +141,12 @@ func RegisterBackupRoutes(srv *khttp.Server, d *data.Data) {
 			CreatedBy: uid,
 		}
 		if err := d.DB.Create(&job).Error; err != nil {
+			// 部分唯一索引（kind + pending/running）兜底并发：同类任务同时只允许一个
+			if isUniqueViolation(err) {
+				return ctx.JSON(http.StatusConflict, map[string]interface{}{
+					"code": 1, "message": "已有导入任务进行中，请稍后再试",
+				})
+			}
 			return ctx.JSON(http.StatusInternalServerError, map[string]interface{}{
 				"code": 1, "message": "创建任务失败",
 			})
@@ -168,9 +186,9 @@ func RegisterBackupRoutes(srv *khttp.Server, d *data.Data) {
 	})
 
 	r.GET("/v1/user/site/backup/jobs", func(ctx khttp.Context) error {
-		if !auth.VerifySiteAdmin(ctx) {
+		if !auth.HasPerm(ctx, rbac.PermSiteBackup) {
 			return ctx.JSON(http.StatusForbidden, map[string]interface{}{
-				"code": 1, "message": "仅站点管理员",
+				"code": 1, "message": "需要站点备份权限",
 			})
 		}
 		var jobs []model.BackupJob
@@ -185,9 +203,9 @@ func RegisterBackupRoutes(srv *khttp.Server, d *data.Data) {
 	})
 
 	r.GET("/v1/user/site/backup/jobs/{id}", func(ctx khttp.Context) error {
-		if !auth.VerifySiteAdmin(ctx) {
+		if !auth.HasPerm(ctx, rbac.PermSiteBackup) {
 			return ctx.JSON(http.StatusForbidden, map[string]interface{}{
-				"code": 1, "message": "仅站点管理员",
+				"code": 1, "message": "需要站点备份权限",
 			})
 		}
 		id, _ := strconv.ParseUint(ctx.Vars().Get("id"), 10, 64)
@@ -208,9 +226,9 @@ func RegisterBackupRoutes(srv *khttp.Server, d *data.Data) {
 	})
 
 	r.GET("/v1/user/site/backup/jobs/{id}/download", func(ctx khttp.Context) error {
-		if !auth.VerifySiteAdmin(ctx) {
+		if !auth.HasPerm(ctx, rbac.PermSiteBackup) {
 			return ctx.JSON(http.StatusForbidden, map[string]interface{}{
-				"code": 1, "message": "仅站点管理员",
+				"code": 1, "message": "需要站点备份权限",
 			})
 		}
 		id, _ := strconv.ParseUint(ctx.Vars().Get("id"), 10, 64)
@@ -256,9 +274,9 @@ func RegisterBackupRoutes(srv *khttp.Server, d *data.Data) {
 	})
 
 	r.DELETE("/v1/user/site/backup/jobs/{id}", func(ctx khttp.Context) error {
-		if !auth.VerifySiteAdmin(ctx) {
+		if !auth.HasPerm(ctx, rbac.PermSiteBackup) {
 			return ctx.JSON(http.StatusForbidden, map[string]interface{}{
-				"code": 1, "message": "仅站点管理员",
+				"code": 1, "message": "需要站点备份权限",
 			})
 		}
 		id, _ := strconv.ParseUint(ctx.Vars().Get("id"), 10, 64)

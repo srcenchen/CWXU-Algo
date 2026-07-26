@@ -1,8 +1,9 @@
 package platform
 
 import (
-	"cwxu-algo/app/common/utils/ojhttp"
 	"bytes"
+	"context"
+	"cwxu-algo/app/common/utils/ojhttp"
 	"cwxu-algo/app/core_data/internal/data/model"
 	"cwxu-algo/app/core_data/internal/spider"
 	"encoding/json"
@@ -19,6 +20,13 @@ import (
 	"time"
 
 	"github.com/go-kratos/kratos/v2/log"
+)
+
+const (
+	// luoguLoginMaxRetry 登录重试上限（原 20 次过多，OCR/验证码接口反复打）
+	luoguLoginMaxRetry = 5
+	// luoguLoginBaseDelay 登录重试退避基数（指数递增）
+	luoguLoginBaseDelay = 500 * time.Millisecond
 )
 
 type NewLuoGu struct {
@@ -90,13 +98,17 @@ func (lg *NewLuoGu) login(username, password string) (*http.Client, error) {
 		captchaURL = "https://www.luogu.com.cn/lg4/captcha"
 		ocrURL     = "https://api.alistgo.com/ocr/file"
 		loginURL   = "https://www.luogu.com.cn/do-auth/password"
-		maxRetry   = 20
+		maxRetry   = luoguLoginMaxRetry
 	)
 
 	jar, _ := cookiejar.New(nil)
 	client := ojhttp.NewWithJar(jar)
 
 	for attempt := 1; attempt <= maxRetry; attempt++ {
+		// 指数退避，减轻验证码/OCR 接口压力
+		if attempt > 1 {
+			time.Sleep(luoguLoginBaseDelay << (attempt - 2))
+		}
 		// 1. 拉验证码（cookie 在这里生成）
 		resp, err := client.Get(captchaURL)
 		if err != nil {
@@ -177,12 +189,12 @@ func (lg *NewLuoGu) parseLuoGuHTML(html string) (*Injection, error) {
 	return &inj, nil
 }
 
-// isSessionValid checks if the cached client still has a valid session
-func (lg *NewLuoGu) isSessionValid() bool {
-	if lg.client == nil {
+// isSessionValid 校验给定客户端会话是否有效（锁内快照传入，网络请求不持锁读共享字段）
+func (lg *NewLuoGu) isSessionValid(client *http.Client) bool {
+	if client == nil {
 		return false
 	}
-	resp, err := lg.client.Get("https://www.luogu.com.cn/api/user/search?user=sanenchen")
+	resp, err := client.Get("https://www.luogu.com.cn/api/user/search?user=sanenchen")
 	if err != nil {
 		return false
 	}
@@ -203,8 +215,14 @@ func (lg *NewLuoGu) getClient() (*http.Client, error) {
 	lg.mu.RUnlock()
 
 	if cached != nil && !expired {
-		// Validate session without holding lock
-		if lg.isSessionValid() {
+		// Validate session without holding lock（用快照，不再无锁读共享字段）
+		if lg.isSessionValid(cached) {
+			// 会话命中：刷新 lastUsed，活跃会话不被 30 分钟窗口误判过期
+			lg.mu.Lock()
+			if lg.client == cached {
+				lg.lastUsed = time.Now()
+			}
+			lg.mu.Unlock()
 			return cached, nil
 		}
 	}
@@ -213,7 +231,8 @@ func (lg *NewLuoGu) getClient() (*http.Client, error) {
 	defer lg.mu.Unlock()
 
 	// Double-check after acquiring write lock
-	if lg.client != nil && time.Since(lg.lastUsed) < 30*time.Minute && lg.isSessionValid() {
+	if lg.client != nil && time.Since(lg.lastUsed) < 30*time.Minute && lg.isSessionValid(lg.client) {
+		lg.lastUsed = time.Now()
 		return lg.client, nil
 	}
 
@@ -226,13 +245,16 @@ func (lg *NewLuoGu) getClient() (*http.Client, error) {
 	return client, nil
 }
 
-func (lg *NewLuoGu) FetchSubmitLog(userId int64, username string, needAll bool) ([]model.SubmitLog, error) {
+func (lg *NewLuoGu) FetchSubmitLog(ctx context.Context, userId int64, username string, needAll bool) ([]model.SubmitLog, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	baseUrl := fmt.Sprintf("https://www.luogu.com.cn/record/list?user=%s&page=", username)
 	client, err := lg.getClient()
 	if err != nil {
 		return nil, err
 	}
-	req, _ := http.NewRequest("GET", baseUrl+"1", nil)
+	req, _ := http.NewRequestWithContext(ctx, "GET", baseUrl+"1", nil)
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
@@ -256,8 +278,11 @@ func (lg *NewLuoGu) FetchSubmitLog(userId int64, username string, needAll bool) 
 			totPage = 200
 		}
 		for i := 2; i <= totPage; i++ {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
 			time.Sleep(300 * time.Millisecond)
-			req, _ := http.NewRequest("GET", baseUrl+fmt.Sprint(i), nil)
+			req, _ := http.NewRequestWithContext(ctx, "GET", baseUrl+fmt.Sprint(i), nil)
 			resp, err := client.Do(req)
 			if err != nil {
 				return nil, err

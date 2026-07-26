@@ -19,6 +19,7 @@ import (
 	"cwxu-algo/app/common/discovery"
 	"cwxu-algo/app/common/mail"
 	"cwxu-algo/app/common/notify"
+	"cwxu-algo/app/common/rbac"
 	"cwxu-algo/app/common/utils/auth"
 	"cwxu-algo/app/core_data/internal/data"
 	"cwxu-algo/app/core_data/internal/data/model"
@@ -415,7 +416,7 @@ func (s *CommunityService) handleCommentDelete(ctx khttp.Context) error {
 		writeJSON(ctx.Response(), 404, map[string]interface{}{"success": false, "message": "评论不存在"})
 		return nil
 	}
-	if row.UserID != pd.UserID && !auth.VerifySiteAdmin(ctx) {
+	if row.UserID != pd.UserID && !auth.HasPerm(ctx, rbac.PermContentCommunityMod) {
 		writeJSON(ctx.Response(), 403, map[string]interface{}{"success": false, "message": "只能删除自己的评论"})
 		return nil
 	}
@@ -652,7 +653,7 @@ func (s *CommunityService) handleSolutionUpdate(ctx khttp.Context) error {
 		writeJSON(ctx.Response(), 404, map[string]interface{}{"success": false, "message": "题解不存在"})
 		return nil
 	}
-	if row.UserID != pd.UserID && !auth.VerifySiteAdmin(ctx) {
+	if row.UserID != pd.UserID && !auth.HasPerm(ctx, rbac.PermContentCommunityMod) {
 		writeJSON(ctx.Response(), 403, map[string]interface{}{"success": false, "message": "只能编辑自己的题解"})
 		return nil
 	}
@@ -700,7 +701,7 @@ func (s *CommunityService) handleSolutionDelete(ctx khttp.Context) error {
 		writeJSON(ctx.Response(), 404, map[string]interface{}{"success": false, "message": "题解不存在"})
 		return nil
 	}
-	if row.UserID != pd.UserID && !auth.VerifySiteAdmin(ctx) {
+	if row.UserID != pd.UserID && !auth.HasPerm(ctx, rbac.PermContentCommunityMod) {
 		writeJSON(ctx.Response(), 403, map[string]interface{}{"success": false, "message": "只能删除自己的题解"})
 		return nil
 	}
@@ -859,8 +860,8 @@ func (s *CommunityService) handleActivityFeed(ctx khttp.Context) error {
 	if pd != nil {
 		orgID = pd.OrgID
 	}
-	// 允许 query 覆盖仅站管；普通用户强制当前组织
-	if q := queryUint(ctx, "orgId"); q > 0 && pd != nil && auth.VerifySiteAdmin(ctx) {
+	// 允许 query 覆盖仅限具备全站统计权限者；普通用户强制当前组织
+	if q := queryUint(ctx, "orgId"); q > 0 && pd != nil && auth.HasPerm(ctx, rbac.PermSiteStatsRead) {
 		orgID = q
 	}
 	page, pageSize := pageParams(ctx, 1, 20, 50)

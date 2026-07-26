@@ -1,6 +1,7 @@
 package platform
 
 import (
+	"context"
 	"cwxu-algo/app/core_data/internal/spider"
 	"encoding/json"
 	"fmt"
@@ -273,7 +274,7 @@ func TestLeetCodeFetchContestLogLive(t *testing.T) {
 
 func TestLeetCodeFetchLive(t *testing.T) {
 	p := NewLeetCode{}
-	full, err := p.FetchSubmitLog(999001, "sanenchen-o", true)
+	full, err := p.FetchSubmitLog(context.Background(), 999001, "sanenchen-o", true)
 	if err != nil {
 		t.Fatalf("full fetch: %v", err)
 	}
@@ -329,7 +330,7 @@ func TestLeetCodeFetchLive(t *testing.T) {
 		t.Fatal("expected recent AC (lc-prob-*) from public profile")
 	}
 	// 生涯提交：cal + pad 应接近 totalSubmissions（允许接口略有偏差）
-	prog, err := fetchLeetCodeProgress("sanenchen-o")
+	prog, err := fetchLeetCodeProgress(context.Background(), "sanenchen-o")
 	if err != nil {
 		t.Fatalf("progress: %v", err)
 	}
@@ -343,7 +344,7 @@ func TestLeetCodeFetchLive(t *testing.T) {
 	t.Logf("full total=%d cal=%d pad=%d ac=%d prob=%d uniqueSlug=%d acTotal=%d totalSub=%d",
 		len(full), cal, pad, ac, prob, len(probSlugs), prog.AcTotal, prog.TotalSubmissions)
 
-	incr, err := p.FetchSubmitLog(999001, "sanenchen-o", false)
+	incr, err := p.FetchSubmitLog(context.Background(), 999001, "sanenchen-o", false)
 	if err != nil {
 		t.Fatalf("incr fetch: %v", err)
 	}

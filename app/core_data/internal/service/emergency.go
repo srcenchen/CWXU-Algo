@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"cwxu-algo/api/core/v1/emergency"
+	"cwxu-algo/app/common/rbac"
 	"cwxu-algo/app/common/utils/auth"
 	"cwxu-algo/app/core_data/internal/data/dal"
 	"cwxu-algo/app/core_data/internal/data/model"
@@ -35,7 +36,7 @@ func (s *EmergencyService) modelToProto(m *model.EmergencyNotice) *emergency.Eme
 }
 
 func (s *EmergencyService) Create(ctx context.Context, req *emergency.CreateEmergencyReq) (*emergency.CreateEmergencyRes, error) {
-	if !auth.VerifySiteAdmin(ctx) {
+	if !auth.HasPerm(ctx, rbac.PermSiteEmergency) {
 		return &emergency.CreateEmergencyRes{Code: 1, Message: "权限不足，仅站点管理员可发布紧急通知"}, nil
 	}
 	user := auth.GetCurrentUser(ctx)
@@ -68,7 +69,7 @@ func (s *EmergencyService) Create(ctx context.Context, req *emergency.CreateEmer
 }
 
 func (s *EmergencyService) Update(ctx context.Context, req *emergency.UpdateEmergencyReq) (*emergency.UpdateEmergencyRes, error) {
-	if !auth.VerifySiteAdmin(ctx) {
+	if !auth.HasPerm(ctx, rbac.PermSiteEmergency) {
 		return &emergency.UpdateEmergencyRes{Code: 1, Message: "权限不足"}, nil
 	}
 	existing, err := s.dal.GetById(req.Id)
@@ -106,7 +107,7 @@ func (s *EmergencyService) Update(ctx context.Context, req *emergency.UpdateEmer
 }
 
 func (s *EmergencyService) Delete(ctx context.Context, req *emergency.DeleteEmergencyReq) (*emergency.DeleteEmergencyRes, error) {
-	if !auth.VerifySiteAdmin(ctx) {
+	if !auth.HasPerm(ctx, rbac.PermSiteEmergency) {
 		return &emergency.DeleteEmergencyRes{Code: 1, Message: "权限不足"}, nil
 	}
 	if _, err := s.dal.GetById(req.Id); err != nil {
@@ -122,7 +123,7 @@ func (s *EmergencyService) Delete(ctx context.Context, req *emergency.DeleteEmer
 }
 
 func (s *EmergencyService) List(ctx context.Context, req *emergency.ListEmergencyReq) (*emergency.ListEmergencyRes, error) {
-	if !auth.VerifySiteAdmin(ctx) {
+	if !auth.HasPerm(ctx, rbac.PermSiteEmergency) {
 		return &emergency.ListEmergencyRes{Code: 1, Message: "权限不足"}, nil
 	}
 	page := req.Page
@@ -171,7 +172,7 @@ func (s *EmergencyService) Active(ctx context.Context, _ *emergency.ActiveEmerge
 }
 
 func (s *EmergencyService) Reorder(ctx context.Context, req *emergency.ReorderEmergencyReq) (*emergency.ReorderEmergencyRes, error) {
-	if !auth.VerifySiteAdmin(ctx) {
+	if !auth.HasPerm(ctx, rbac.PermSiteEmergency) {
 		return &emergency.ReorderEmergencyRes{Code: 1, Message: "权限不足"}, nil
 	}
 	if len(req.Ids) == 0 {

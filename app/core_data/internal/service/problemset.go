@@ -908,12 +908,25 @@ func (s *ProblemsetService) handleReorder(ctx khttp.Context) error {
 		}
 	}
 	err := s.db.Transaction(func(tx *gorm.DB) error {
+		// 单条 VALUES join 批量更新排序，替代逐项 UPDATE
+		var sb strings.Builder
+		args := make([]interface{}, 0, len(ids)*2+1)
+		sb.WriteString(`
+			UPDATE problemset_items AS it
+			SET sort_order = v.sort_order
+			FROM (VALUES `)
 		for i, id := range ids {
-			if err := tx.Model(&model.ProblemsetItem{}).
-				Where("id = ? AND problemset_id = ?", id, ps.ID).
-				Update("sort_order", i).Error; err != nil {
-				return err
+			if i > 0 {
+				sb.WriteString(", ")
 			}
+			sb.WriteString("(?::bigint, ?::bigint)")
+			args = append(args, id, i)
+		}
+		sb.WriteString(`) AS v(id, sort_order)
+			WHERE it.id = v.id AND it.problemset_id = ?`)
+		args = append(args, ps.ID)
+		if err := tx.Exec(sb.String(), args...).Error; err != nil {
+			return err
 		}
 		return tx.Model(&model.Problemset{}).Where("id = ?", ps.ID).
 			UpdateColumn("updated_at", time.Now()).Error

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"cwxu-algo/app/common/notify"
+	"cwxu-algo/app/common/rbac"
 	"cwxu-algo/app/common/utils/auth"
 	"cwxu-algo/app/user/internal/data"
 	"cwxu-algo/app/user/internal/data/model"
@@ -223,6 +224,7 @@ func (s *OrgService) ensureOrgMember(orgID, userID uint, role string, groupID *u
 		if err == nil {
 			s.invalidateOrgMembersCache(orgID)
 			s.invalidateDisplayCache(orgID, userID)
+			syncOrgMemberSystemRole(s.db, orgID, userID)
 		}
 		return err
 	}
@@ -245,6 +247,7 @@ func (s *OrgService) ensureOrgMember(orgID, userID uint, role string, groupID *u
 	if err == nil {
 		s.invalidateOrgMembersCache(orgID)
 		s.invalidateDisplayCache(orgID, userID)
+		syncOrgMemberSystemRole(s.db, orgID, userID)
 	}
 	return err
 }
@@ -361,6 +364,7 @@ func (s *OrgService) addOrgMemberAtomic(orgID, userID uint, role, displayName st
 	if err == nil {
 		s.invalidateOrgMembersCache(orgID)
 		s.invalidateDisplayCache(orgID, userID)
+		syncOrgMemberSystemRole(s.db, orgID, userID)
 	}
 	return err
 }
@@ -592,7 +596,7 @@ func (s *OrgService) handleList(ctx khttp.Context) error {
 	mine := q.Get("mine") != "0"
 
 	var orgs []model.Org
-	if pd.IsSiteAdmin && q.Get("all") == "1" {
+	if q.Get("all") == "1" && auth.HasPerm(ctx, rbac.PermSiteOrgList) {
 		_ = s.db.Order("is_system DESC, id ASC").Find(&orgs).Error
 	} else if mine {
 		var mems []model.OrgMember
@@ -647,7 +651,7 @@ func (s *OrgService) handleGet(ctx khttp.Context) error {
 		writeJSON(ctx.Response(), 404, map[string]interface{}{"code": 1, "message": "组织不存在"})
 		return nil
 	}
-	showInvite := pd != nil && (pd.IsSiteAdmin || s.isOrgAdminDB(pd.UserID, orgID))
+	showInvite := pd != nil && (pd.IsSiteAdmin || hasPermInOrgDB(s.db, pd.UserID, orgID, rbac.PermOrgInviteView))
 	item := s.orgToMapWithSeats(&o, showInvite)
 	if pd != nil {
 		var m model.OrgMember
@@ -663,8 +667,8 @@ func (s *OrgService) handleGet(ctx khttp.Context) error {
 
 func (s *OrgService) handleCreate(ctx khttp.Context) error {
 	pd := auth.GetCurrentUser(ctx)
-	if pd == nil || !auth.VerifySiteAdmin(ctx) {
-		writeJSON(ctx.Response(), 403, map[string]interface{}{"code": 1, "message": "仅站点管理员可创建组织"})
+	if pd == nil || !auth.HasPerm(ctx, rbac.PermSiteOrgCreate) {
+		writeJSON(ctx.Response(), 403, map[string]interface{}{"code": 1, "message": "无创建组织权限"})
 		return nil
 	}
 	var req struct {
@@ -758,6 +762,7 @@ func (s *OrgService) handleCreate(ctx khttp.Context) error {
 	}
 	s.invalidateOrgMembersCache(o.ID)
 	s.invalidateDisplayCache(o.ID, adminUID)
+	syncOrgMemberSystemRole(s.db, o.ID, adminUID)
 	writeJSON(ctx.Response(), 200, map[string]interface{}{
 		"code": 0, "message": "创建成功", "data": s.orgToMapWithSeats(&o, true),
 	})
@@ -767,8 +772,8 @@ func (s *OrgService) handleCreate(ctx khttp.Context) error {
 // handleDelete 站点管理员硬删除组织；公共域不可删
 func (s *OrgService) handleDelete(ctx khttp.Context) error {
 	pd := auth.GetCurrentUser(ctx)
-	if pd == nil || !auth.VerifySiteAdmin(ctx) {
-		writeJSON(ctx.Response(), 403, map[string]interface{}{"code": 1, "message": "仅站点管理员可删除组织"})
+	if pd == nil || !auth.HasPerm(ctx, rbac.PermSiteOrgDelete) {
+		writeJSON(ctx.Response(), 403, map[string]interface{}{"code": 1, "message": "无删除组织权限"})
 		return nil
 	}
 	var req struct {
@@ -833,6 +838,16 @@ func (s *OrgService) handleDelete(ctx khttp.Context) error {
 		if err := tx.Where("org_id = ?", o.ID).Delete(&model.Group{}).Error; err != nil {
 			return err
 		}
+		// RBAC：组织角色指派、组织自定义角色及其权限一并清理
+		if err := tx.Where("org_id = ?", o.ID).Delete(&model.UserRole{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Exec(`DELETE FROM role_permissions rp USING roles r WHERE rp.role_id = r.id AND r.org_id = ?`, o.ID).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("org_id = ?", o.ID).Delete(&model.Role{}).Error; err != nil {
+			return err
+		}
 		if err := tx.Delete(&o).Error; err != nil {
 			return err
 		}
@@ -882,49 +897,55 @@ func (s *OrgService) handleUpdate(ctx khttp.Context) error {
 		return nil
 	}
 	siteAdmin := auth.VerifySiteAdmin(ctx)
-	orgAdmin := siteAdmin || s.isOrgAdminDB(pd.UserID, req.ID)
-	if !orgAdmin {
+	// 字段级权限：品牌/名称/加入方式=org.info.write；功能开关=org.policy.toggle；
+	// 状态/席位/间隔/强制同步等站点策略=site.org.policy（站点管理员旁路全部）。
+	canInfo := verifyOrgPerm(ctx, s.db, pd.UserID, req.ID, rbac.PermOrgInfoWrite)
+	canToggle := verifyOrgPerm(ctx, s.db, pd.UserID, req.ID, rbac.PermOrgPolicyToggle)
+	canSitePolicy := auth.HasPerm(ctx, rbac.PermSiteOrgPolicy)
+	if !canInfo && !canToggle && !canSitePolicy {
 		writeJSON(ctx.Response(), 403, map[string]interface{}{"code": 1, "message": "权限不足"})
 		return nil
 	}
 
 	updates := map[string]interface{}{}
-	// 品牌字段使用 PATCH 语义；显式传空串才表示清空。
-	if req.BrandTitle != nil {
-		updates["brand_title"] = strings.TrimSpace(*req.BrandTitle)
+	if canInfo {
+		// 品牌字段使用 PATCH 语义；显式传空串才表示清空。
+		if req.BrandTitle != nil {
+			updates["brand_title"] = strings.TrimSpace(*req.BrandTitle)
+		}
+		if req.BrandLogo != nil {
+			updates["brand_logo"] = strings.TrimSpace(*req.BrandLogo)
+		}
+		if req.BrandFavicon != nil {
+			updates["brand_favicon"] = strings.TrimSpace(*req.BrandFavicon)
+		}
+		if req.JoinMode != nil && (*req.JoinMode == model.OrgJoinAuto || *req.JoinMode == model.OrgJoinReview) {
+			updates["join_mode"] = *req.JoinMode
+		}
+		// 名称：公共域改名属站点策略
+		if req.Name != nil && strings.TrimSpace(*req.Name) != "" {
+			if !o.IsSystem || canSitePolicy {
+				updates["name"] = strings.TrimSpace(*req.Name)
+			}
+		}
 	}
-	if req.BrandLogo != nil {
-		updates["brand_logo"] = strings.TrimSpace(*req.BrandLogo)
-	}
-	if req.BrandFavicon != nil {
-		updates["brand_favicon"] = strings.TrimSpace(*req.BrandFavicon)
-	}
-
-	if req.JoinMode != nil && (*req.JoinMode == model.OrgJoinAuto || *req.JoinMode == model.OrgJoinReview) {
-		updates["join_mode"] = *req.JoinMode
-	}
-	if req.EnableAISummary != nil {
-		updates["enable_ai_summary"] = *req.EnableAISummary
-	}
-	if req.EnableAIEmail != nil {
-		updates["enable_ai_email"] = *req.EnableAIEmail
-	}
-	if req.EnableAIWeeklyEmail != nil {
-		updates["enable_ai_weekly_email"] = *req.EnableAIWeeklyEmail
-	}
-	if req.EnableSpider != nil {
-		updates["enable_spider"] = *req.EnableSpider
-	}
-
-	// 名称：公共域仅站点管理员可改
-	if req.Name != nil && strings.TrimSpace(*req.Name) != "" {
-		if !o.IsSystem || siteAdmin {
-			updates["name"] = strings.TrimSpace(*req.Name)
+	if canToggle {
+		if req.EnableAISummary != nil {
+			updates["enable_ai_summary"] = *req.EnableAISummary
+		}
+		if req.EnableAIEmail != nil {
+			updates["enable_ai_email"] = *req.EnableAIEmail
+		}
+		if req.EnableAIWeeklyEmail != nil {
+			updates["enable_ai_weekly_email"] = *req.EnableAIWeeklyEmail
+		}
+		if req.EnableSpider != nil {
+			updates["enable_spider"] = *req.EnableSpider
 		}
 	}
 
-	// 间隔 / 状态 / 用户数上限：仅站点管理员
-	if siteAdmin {
+	// 间隔 / 状态 / 用户数上限 / 强制同步：站点策略
+	if canSitePolicy {
 		if req.Status != nil && (*req.Status == model.OrgStatusActive || *req.Status == model.OrgStatusSuspended) {
 			if !o.IsSystem {
 				updates["status"] = *req.Status
@@ -981,46 +1002,71 @@ func (s *OrgService) handleUpdate(ctx khttp.Context) error {
 	}
 	_ = s.db.First(&o, req.ID)
 	writeJSON(ctx.Response(), 200, map[string]interface{}{
-		"code": 0, "message": "success", "data": s.orgToMapWithSeats(&o, siteAdmin || orgAdmin),
+		"code": 0, "message": "success", "data": s.orgToMapWithSeats(&o, siteAdmin || canInfo || canToggle),
 	})
 	return nil
 }
 
-// forceOffDailyEmailWithoutOrgGrant 关闭日报组织授权后，对仅依赖该组织授权的用户关个人日报
+// forceOffDailyEmailWithoutOrgGrant 关闭日报组织授权后，对仅依赖该组织授权的用户关个人日报。
+// 集合式单条 UPDATE + RETURNING 受影响 id，避免逐用户 N 次查询/更新。
 func (s *OrgService) forceOffDailyEmailWithoutOrgGrant(changedOrgID uint) {
-	var memberIDs []uint
-	_ = s.db.Model(&model.OrgMember{}).Where("org_id = ?", changedOrgID).Pluck("user_id", &memberIDs)
-	for _, uid := range memberIDs {
-		var n int64
-		s.db.Table("org_members AS m").
-			Joins("JOIN orgs o ON o.id = m.org_id").
-			Where("m.user_id = ? AND o.status = ? AND o.enable_ai_email = ?",
-				uid, model.OrgStatusActive, true).
-			Count(&n)
-		if n == 0 {
-			_ = s.db.Model(&model.User{}).Where("id = ?", uid).Update("email_enabled", false)
-			s.invalidateUserProfileCache(uid)
-		}
+	var affected []uint
+	err := s.db.Raw(`
+		UPDATE users SET email_enabled = false
+		WHERE email_enabled = true
+		  AND id IN (SELECT user_id FROM org_members WHERE org_id = ?)
+		  AND NOT EXISTS (
+			SELECT 1 FROM org_members m
+			JOIN orgs o ON o.id = m.org_id
+			WHERE m.user_id = users.id AND o.status = ? AND o.enable_ai_email = true
+		  )
+		RETURNING id
+	`, changedOrgID, model.OrgStatusActive).Scan(&affected).Error
+	if err != nil {
+		log.Errorf("org force off daily email org=%d: %v", changedOrgID, err)
+		return
 	}
+	s.invalidateUserProfileCaches(affected)
 }
 
 func (s *OrgService) forceOffWeeklyEmailWithoutOrgGrant(changedOrgID uint) {
-	var memberIDs []uint
-	_ = s.db.Model(&model.OrgMember{}).Where("org_id = ?", changedOrgID).Pluck("user_id", &memberIDs)
-	for _, uid := range memberIDs {
-		var n int64
-		s.db.Table("org_members AS m").
-			Joins("JOIN orgs o ON o.id = m.org_id").
-			Where(`m.user_id = ? AND o.status = ?
-				AND o.enable_ai_weekly_email = ? AND m.role IN ?`,
-				uid, model.OrgStatusActive, true,
-				[]string{model.OrgRoleCoach, model.OrgRoleCaptain, model.OrgRoleOrgAdmin}).
-			Count(&n)
-		if n == 0 {
-			_ = s.db.Model(&model.User{}).Where("id = ?", uid).Update("email_weekly_enabled", false)
-			s.invalidateUserProfileCache(uid)
-		}
+	var affected []uint
+	err := s.db.Raw(`
+		UPDATE users SET email_weekly_enabled = false
+		WHERE email_weekly_enabled = true
+		  AND id IN (SELECT user_id FROM org_members WHERE org_id = ?)
+		  AND NOT EXISTS (
+			SELECT 1 FROM org_members m
+			JOIN orgs o ON o.id = m.org_id
+			WHERE m.user_id = users.id AND o.status = ?
+			  AND o.enable_ai_weekly_email = true AND m.role IN ?
+		  )
+		RETURNING id
+	`, changedOrgID, model.OrgStatusActive,
+		[]string{model.OrgRoleCoach, model.OrgRoleCaptain, model.OrgRoleOrgAdmin}).Scan(&affected).Error
+	if err != nil {
+		log.Errorf("org force off weekly email org=%d: %v", changedOrgID, err)
+		return
 	}
+	s.invalidateUserProfileCaches(affected)
+}
+
+// invalidateUserProfileCaches 按受影响的用户 id 列表批量失效缓存（单次 DEL 多 key）
+func (s *OrgService) invalidateUserProfileCaches(userIDs []uint) {
+	if s == nil || s.rdb == nil || len(userIDs) == 0 {
+		return
+	}
+	keys := make([]string, 0, len(userIDs))
+	for _, uid := range userIDs {
+		if uid == 0 {
+			continue
+		}
+		keys = append(keys, fmt.Sprintf("user:%d:profile", uid))
+	}
+	if len(keys) == 0 {
+		return
+	}
+	_ = s.rdb.Del(context.Background(), keys...).Err()
 }
 
 func (s *OrgService) handleSwitch(ctx khttp.Context) error {
@@ -1177,6 +1223,8 @@ func (s *OrgService) handleLeave(ctx khttp.Context) error {
 	}
 	s.invalidateOrgMembersCache(req.OrgID)
 	s.invalidateDisplayCache(req.OrgID, pd.UserID)
+	// membership 已删 → 清除该组织全部角色指派（含自定义）
+	syncOrgMemberSystemRole(s.db, req.OrgID, pd.UserID)
 	// 若当前组织是离开的组织，切回公共域
 	u, _ := s.loadUser(pd.UserID)
 	token := ""
@@ -1338,8 +1386,8 @@ func (s *OrgService) handleAddMember(ctx khttp.Context) error {
 		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "参数错误"})
 		return nil
 	}
-	// 站点管理员可操作任意 org；组织管理员仅本 org
-	if !auth.VerifySiteAdmin(ctx) && !s.isOrgAdminDB(pd.UserID, req.OrgID) {
+	// 站点管理员可操作任意 org；组织内需 org.member.add 权限
+	if !verifyOrgPerm(ctx, s.db, pd.UserID, req.OrgID, rbac.PermOrgMemberAdd) {
 		writeJSON(ctx.Response(), 403, map[string]interface{}{"code": 1, "message": "权限不足"})
 		return nil
 	}
@@ -1423,7 +1471,7 @@ func (s *OrgService) handleSetDisplayName(ctx khttp.Context) error {
 		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "组织内名称过长（最多 32 字）"})
 		return nil
 	}
-	if uid != pd.UserID && !auth.VerifySiteAdmin(ctx) && !s.isOrgAdminDB(pd.UserID, req.OrgID) {
+	if uid != pd.UserID && !verifyOrgPerm(ctx, s.db, pd.UserID, req.OrgID, rbac.PermOrgMemberDisplayName) {
 		writeJSON(ctx.Response(), 403, map[string]interface{}{"code": 1, "message": "权限不足"})
 		return nil
 	}
@@ -1481,8 +1529,8 @@ func (s *OrgService) handleSetRole(ctx khttp.Context) error {
 			}
 		}
 	}
-	// 站点管理员可任命任意组织；组织管理员可任命本组织
-	if !auth.VerifySiteAdmin(ctx) && !s.isOrgAdminDB(pd.UserID, req.OrgID) {
+	// 站点管理员可任命任意组织；组织内需 org.member.role 权限
+	if !verifyOrgPerm(ctx, s.db, pd.UserID, req.OrgID, rbac.PermOrgMemberRole) {
 		writeJSON(ctx.Response(), 403, map[string]interface{}{"code": 1, "message": "权限不足"})
 		return nil
 	}
@@ -1511,6 +1559,7 @@ func (s *OrgService) handleSetRole(ctx khttp.Context) error {
 		s.setDefaultOrg(req.UserID, req.OrgID)
 	} else {
 		_ = s.db.Model(&m).Update("role", req.Role).Error
+		syncOrgMemberSystemRole(s.db, req.OrgID, req.UserID)
 	}
 	writeJSON(ctx.Response(), 200, map[string]interface{}{"code": 0, "message": "已更新角色"})
 	return nil
@@ -1539,7 +1588,7 @@ func (s *OrgService) handleRemoveMember(ctx khttp.Context) error {
 		writeJSON(ctx.Response(), 403, map[string]interface{}{"code": 1, "message": "不能将成员移出公共域"})
 		return nil
 	}
-	if !auth.VerifySiteAdmin(ctx) && !s.isOrgAdminDB(pd.UserID, req.OrgID) {
+	if !verifyOrgPerm(ctx, s.db, pd.UserID, req.OrgID, rbac.PermOrgMemberRemove) {
 		writeJSON(ctx.Response(), 403, map[string]interface{}{"code": 1, "message": "权限不足"})
 		return nil
 	}
@@ -1559,6 +1608,8 @@ func (s *OrgService) handleRemoveMember(ctx khttp.Context) error {
 	}
 	s.invalidateOrgMembersCache(req.OrgID)
 	s.invalidateDisplayCache(req.OrgID, req.UserID)
+	// membership 已删 → 清除该组织全部角色指派（含自定义）
+	syncOrgMemberSystemRole(s.db, req.OrgID, req.UserID)
 	// 若被移出的是其默认组织，回落公共域
 	s.fallbackDefaultOrgIf(req.UserID, req.OrgID)
 	writeJSON(ctx.Response(), 200, map[string]interface{}{"code": 0, "message": "已移除成员"})
@@ -1576,7 +1627,7 @@ func (s *OrgService) handleInviteGet(ctx khttp.Context) error {
 	if orgID == 0 {
 		orgID = pd.OrgID
 	}
-	if !auth.VerifySiteAdmin(ctx) && !s.isOrgAdminDB(pd.UserID, orgID) {
+	if !verifyOrgPerm(ctx, s.db, pd.UserID, orgID, rbac.PermOrgInviteView) {
 		writeJSON(ctx.Response(), 403, map[string]interface{}{"code": 1, "message": "权限不足"})
 		return nil
 	}
@@ -1606,7 +1657,7 @@ func (s *OrgService) handleInviteRotate(ctx khttp.Context) error {
 	if orgID == 0 {
 		orgID = pd.OrgID
 	}
-	if !auth.VerifySiteAdmin(ctx) && !s.isOrgAdminDB(pd.UserID, orgID) {
+	if !verifyOrgPerm(ctx, s.db, pd.UserID, orgID, rbac.PermOrgInviteRotate) {
 		writeJSON(ctx.Response(), 403, map[string]interface{}{"code": 1, "message": "权限不足"})
 		return nil
 	}
@@ -1631,16 +1682,32 @@ func (s *OrgService) handleJoinRequests(ctx khttp.Context) error {
 	if orgID == 0 {
 		orgID = pd.OrgID
 	}
-	if !auth.VerifySiteAdmin(ctx) && !s.isOrgAdminDB(pd.UserID, orgID) {
+	if !verifyOrgPerm(ctx, s.db, pd.UserID, orgID, rbac.PermOrgJoinReview) {
 		writeJSON(ctx.Response(), 403, map[string]interface{}{"code": 1, "message": "权限不足"})
 		return nil
 	}
+	// 最多取最近 200 条待审申请；用户信息批量 IN 查询，消除逐条 First
+	const maxJoinRequests = 200
 	var reqs []model.OrgJoinRequest
-	_ = s.db.Where("org_id = ? AND status = ?", orgID, model.JoinReqPending).Order("id DESC").Find(&reqs).Error
+	_ = s.db.Where("org_id = ? AND status = ?", orgID, model.JoinReqPending).
+		Order("id DESC").Limit(maxJoinRequests).Find(&reqs).Error
+	userIDs := make([]uint, 0, len(reqs))
+	for _, r := range reqs {
+		if r.UserID > 0 {
+			userIDs = append(userIDs, r.UserID)
+		}
+	}
+	userByID := map[uint]model.User{}
+	if len(userIDs) > 0 {
+		var us []model.User
+		_ = s.db.Select("id", "username").Where("id IN ?", userIDs).Find(&us).Error
+		for _, u := range us {
+			userByID[u.ID] = u
+		}
+	}
 	list := make([]map[string]interface{}, 0, len(reqs))
 	for _, r := range reqs {
-		var u model.User
-		_ = s.db.First(&u, r.UserID)
+		u := userByID[r.UserID]
 		display := strings.TrimSpace(r.OrgDisplayName)
 		if display == "" {
 			display = u.Username
@@ -1675,7 +1742,7 @@ func (s *OrgService) handleJoinReview(ctx khttp.Context) error {
 		writeJSON(ctx.Response(), 404, map[string]interface{}{"code": 1, "message": "申请不存在"})
 		return nil
 	}
-	if !auth.VerifySiteAdmin(ctx) && !s.isOrgAdminDB(pd.UserID, jr.OrgID) {
+	if !verifyOrgPerm(ctx, s.db, pd.UserID, jr.OrgID, rbac.PermOrgJoinReview) {
 		writeJSON(ctx.Response(), 403, map[string]interface{}{"code": 1, "message": "权限不足"})
 		return nil
 	}
@@ -1747,8 +1814,8 @@ func (s *OrgService) orgName(orgID uint) string {
 }
 
 func (s *OrgService) handleSetSiteAdmin(ctx khttp.Context) error {
-	if !auth.VerifySiteAdmin(ctx) {
-		writeJSON(ctx.Response(), 403, map[string]interface{}{"code": 1, "message": "仅站点管理员可操作"})
+	if !auth.HasPerm(ctx, rbac.PermSiteAppointAdmin) {
+		writeJSON(ctx.Response(), 403, map[string]interface{}{"code": 1, "message": "无任命站点管理员权限"})
 		return nil
 	}
 	var req struct {
@@ -1781,14 +1848,15 @@ func (s *OrgService) handleSetSiteAdmin(ctx khttp.Context) error {
 		writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "更新失败，请稍后重试"})
 		return nil
 	}
+	syncSiteSystemRole(s.db, req.UserID, rbac.RoleSiteAdmin, req.IsSiteAdmin)
 	log.Infof("set site admin user=%d is=%v", req.UserID, req.IsSiteAdmin)
 	writeJSON(ctx.Response(), 200, map[string]interface{}{"code": 0, "message": "已更新"})
 	return nil
 }
 
 func (s *OrgService) handleSetResourceReviewer(ctx khttp.Context) error {
-	if !auth.VerifySiteAdmin(ctx) {
-		writeJSON(ctx.Response(), 403, map[string]interface{}{"code": 1, "message": "仅站点管理员可操作"})
+	if !auth.HasPerm(ctx, rbac.PermSiteAppointReviewer) {
+		writeJSON(ctx.Response(), 403, map[string]interface{}{"code": 1, "message": "无任命资源审核员权限"})
 		return nil
 	}
 	pd := auth.GetCurrentUser(ctx)
@@ -1819,6 +1887,7 @@ func (s *OrgService) handleSetResourceReviewer(ctx khttp.Context) error {
 	if pd != nil {
 		actorID = pd.UserID
 	}
+	syncSiteSystemRole(s.db, req.UserID, rbac.RoleResourceReviewer, req.IsResourceReviewer)
 	s.notifyResourceReviewerChange(&target, req.IsResourceReviewer, actorID)
 	log.Infof("set resource reviewer user=%d is=%v", req.UserID, req.IsResourceReviewer)
 	writeJSON(ctx.Response(), 200, map[string]interface{}{"code": 0, "message": "已更新"})

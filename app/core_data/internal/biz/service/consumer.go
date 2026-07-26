@@ -2,7 +2,6 @@ package service
 
 import (
 	"encoding/json"
-	"fmt"
 	"sync"
 
 	"cwxu-algo/app/common/event"
@@ -51,10 +50,9 @@ func (c *Consumer) Consume() {
 		Handler: func(body []byte, _ amqp.Table) error {
 			msg := event.SpiderEvent{}
 			if err := json.Unmarshal(body, &msg); err != nil {
-				log.Errorf("RabbitMQ(Spider): 解析json出错 %s", err.Error())
-				// 坏消息：返回 nil 让上层 Ack？不，返回特殊——这里返回 error 会重试；
-				// 解析失败应直接丢弃：用不可重试错误由 MaxRetry 后 drop
-				return fmt.Errorf("bad json: %w", err)
+				// 坏消息重试也不会成功：直接 Ack 丢弃，避免空占重试轮次
+				log.Warnf("RabbitMQ(Spider): 解析json失败，丢弃消息: %v", err)
+				return nil
 			}
 			if c.spiderTask != nil {
 				c.spiderTask.MarkInflight(msg.UserId, msg.Platform)

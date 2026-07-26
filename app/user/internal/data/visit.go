@@ -482,7 +482,8 @@ func (d *Data) CountMAU(ctx context.Context) int64 {
 	return n
 }
 
-// ListVisitSeries 近 days 天（含今天）
+// ListVisitSeries 近 days 天（含今天）：PG 按 day BETWEEN 一次查出后内存补零，
+// 缺行（通常只有今天）才回落 Redis 单日查询。
 func (d *Data) ListVisitSeries(ctx context.Context, days int) []DayVisitStat {
 	if days < 1 {
 		days = 30
@@ -493,9 +494,35 @@ func (d *Data) ListVisitSeries(ctx context.Context, days int) []DayVisitStat {
 	_ = d.FlushVisitDay(ctx, time.Now().AddDate(0, 0, -1))
 
 	now := time.Now()
+	byDay := map[string]model.SiteVisitDaily{}
+	if d.DB != nil {
+		start := visitDayDate(now.AddDate(0, 0, -(days - 1)))
+		end := visitDayDate(now)
+		var rows []model.SiteVisitDaily
+		if err := d.DB.WithContext(ctx).
+			Where("day BETWEEN ? AND ?", start, end).
+			Find(&rows).Error; err == nil {
+			for _, r := range rows {
+				byDay[r.Day.In(visitLoc).Format("2006-01-02")] = r
+			}
+		}
+	}
+
 	out := make([]DayVisitStat, 0, days)
 	for i := days - 1; i >= 0; i-- {
 		day := now.AddDate(0, 0, -i)
+		dateStr := day.In(visitLoc).Format("2006-01-02")
+		if row, ok := byDay[dateStr]; ok {
+			out = append(out, DayVisitStat{
+				Date:     dateStr,
+				PV:       row.PV,
+				DAU:      row.DAU,
+				UV:       row.UV,
+				UniqueIP: row.UniqueIP,
+			})
+			continue
+		}
+		// 无落库行：今天走 Redis 实时值，历史缺日补零（GetDayVisitStat 查不到时即为零值）
 		out = append(out, d.GetDayVisitStat(ctx, day))
 	}
 	return out

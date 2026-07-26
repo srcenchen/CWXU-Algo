@@ -12,6 +12,7 @@ import (
 	"net/http/httputil"
 	"os"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -26,6 +27,35 @@ import (
 	"github.com/go-kratos/kratos/v2/log"
 	"github.com/go-kratos/kratos/v2/selector"
 )
+
+// _defaultMaxRequestBodyBytes 非流式端点请求体默认上限（16MB）。
+// 非流式请求会被整体读入内存用于重试，必须设上限防止大请求打爆网关内存。
+// 可用环境变量 PROXY_MAX_REQUEST_BODY_BYTES 覆盖全局默认；
+// 单个端点可用 metadata.maxRequestBodyBytes 覆盖；大上传路由请直接配置 stream: true 走流式转发。
+var _defaultMaxRequestBodyBytes = int64(16 << 20)
+
+func init() {
+	if v := os.Getenv("PROXY_MAX_REQUEST_BODY_BYTES"); v != "" {
+		n, err := strconv.ParseInt(v, 10, 64)
+		if err != nil || n <= 0 {
+			panic("invalid PROXY_MAX_REQUEST_BODY_BYTES: " + v)
+		}
+		_defaultMaxRequestBodyBytes = n
+	}
+}
+
+// endpointMaxBodyBytes 端点级请求体上限：metadata.maxRequestBodyBytes 优先，否则全局默认。
+func endpointMaxBodyBytes(e *config.Endpoint) int64 {
+	if e != nil && e.Metadata != nil {
+		if raw, ok := e.Metadata["maxRequestBodyBytes"]; ok {
+			if n, err := strconv.ParseInt(strings.TrimSpace(raw), 10, 64); err == nil && n > 0 {
+				return n
+			}
+			log.Warnf("invalid maxRequestBodyBytes metadata on endpoint %s %s, fallback to default", e.Method, e.Path)
+		}
+	}
+	return _defaultMaxRequestBodyBytes
+}
 
 // Option is proxy option.
 type Option func(*Proxy)
@@ -131,6 +161,7 @@ func (p *Proxy) buildEndpoint(buildCtx *client.BuildContext, e *config.Endpoint,
 	if err != nil {
 		return nil, nil, err
 	}
+	maxBodyBytes := endpointMaxBodyBytes(e)
 	observer := p.observable.Observe(e)
 	markSuccessStat, markFailedStat, markBreakerStat := splitRetryMetricsHandler(observer)
 	retryBreaker := sre.NewBreaker(sre.WithSuccess(0.8), sre.WithRequest(10))
@@ -192,9 +223,16 @@ func (p *Proxy) buildEndpoint(buildCtx *client.BuildContext, e *config.Endpoint,
 			return
 		}
 
-		body, err := io.ReadAll(req.Body)
+		// 非流式请求整体读入内存用于重试：按端点上限截断，超限直接 413
+		body, err := io.ReadAll(io.LimitReader(req.Body, maxBodyBytes+1))
 		if err != nil {
 			writeError(w, req, e, err, observer)
+			return
+		}
+		if int64(len(body)) > maxBodyBytes {
+			log.Warnf("request body exceeds limit %d bytes on endpoint: [%s] %s %s", maxBodyBytes, e.Protocol, e.Method, e.Path)
+			observer.HandleRequest(req, w.Header(), http.StatusRequestEntityTooLarge, nil)
+			http.Error(w, http.StatusText(http.StatusRequestEntityTooLarge), http.StatusRequestEntityTooLarge)
 			return
 		}
 		observer.HandleReceivedBytes(req, int64(len(body)))
@@ -204,6 +242,14 @@ func (p *Proxy) buildEndpoint(buildCtx *client.BuildContext, e *config.Endpoint,
 		}
 
 		var resp *http.Response
+		// 每次 attempt 结束时显式 cancel 上一次的 context，避免重试循环内 defer 堆积；
+		// 最后一次成功 attempt 的 cancel 延迟到响应体拷贝完成（handler 返回）后执行。
+		var attemptCancel context.CancelFunc
+		defer func() {
+			if attemptCancel != nil {
+				attemptCancel()
+			}
+		}()
 		for i := 0; i < retryStrategy.attempts; i++ {
 			if i > 0 {
 				if !retryFeature.Enabled() {
@@ -227,8 +273,11 @@ func (p *Proxy) buildEndpoint(buildCtx *client.BuildContext, e *config.Endpoint,
 				markFailed(w, req, i, err)
 				break
 			}
+			if attemptCancel != nil {
+				attemptCancel()
+			}
 			tryCtx, cancel := p.prepareAttemptTimeoutContext(ctx, req, retryStrategy.perTryTimeout)
-			defer cancel()
+			attemptCancel = cancel
 			reader := bytes.NewReader(body)
 			req.Body = io.NopCloser(reader)
 			resp, err = tripper.RoundTrip(req.Clone(tryCtx))

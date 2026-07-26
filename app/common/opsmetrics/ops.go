@@ -12,6 +12,30 @@ import (
 const ttl = 72 * time.Hour
 const mauTTL = 40 * 24 * time.Hour
 
+// inflightTTL 并发计数键的 TTL：随每次 Incr 续期。进程异常退出导致的
+// 计数残留最多 10 分钟自愈，不再永久漂移。
+const inflightTTL = 10 * time.Minute
+
+// recordAPIScript 打点合并为单次 Lua：req 计数 + 服务计数 + inflight（带 TTL）+ 峰值，
+// 避免原先 pipeline + GET/GET/SET 多次串行往返。
+// KEYS: 1=reqKey 2=svcKey 3=inflightKey 4=peakKey
+// ARGV: 1=ttl 秒 2=inflight ttl 秒 3=是否写服务计数("1"/"0")
+var recordAPIScript = redis.NewScript(`
+redis.call('INCR', KEYS[1])
+redis.call('EXPIRE', KEYS[1], ARGV[1])
+if ARGV[3] == '1' then
+  redis.call('INCR', KEYS[2])
+  redis.call('EXPIRE', KEYS[2], ARGV[1])
+end
+local cur = redis.call('INCR', KEYS[3])
+redis.call('EXPIRE', KEYS[3], ARGV[2])
+local peak = tonumber(redis.call('GET', KEYS[4]) or '0')
+if cur > peak then
+  redis.call('SET', KEYS[4], cur, 'EX', ARGV[1])
+end
+return cur
+`)
+
 var loc *time.Location
 
 func init() {
@@ -41,30 +65,24 @@ func RecordAPIRequest(ctx context.Context, rdb *redis.Client, service string) fu
 	inflightKey := "ops:api:inflight"
 	peakKey := fmt.Sprintf("ops:api:peak:%s", day)
 
-	pipe := rdb.Pipeline()
-	pipe.Incr(ctx, reqKey)
-	pipe.Expire(ctx, reqKey, ttl)
-	if service != "" {
-		pipe.Incr(ctx, svcKey)
-		pipe.Expire(ctx, svcKey, ttl)
+	// 单次 Lua 完成全部打点（含峰值），减少串行往返
+	hasSvc := "1"
+	if service == "" {
+		hasSvc = "0"
+		svcKey = reqKey // 占位：脚本在 ARGV[3]=0 时不会碰 KEYS[2]
 	}
-	pipe.Incr(ctx, inflightKey)
-	_, _ = pipe.Exec(ctx)
-
-	// 峰值：当前 inflight 与 peak 取 max
-	cur, err := rdb.Get(ctx, inflightKey).Int64()
-	if err == nil && cur > 0 {
-		// Lua-free：GET peak + SET if higher（竞态可接受，峰值略偏低亦可）
-		peak, _ := rdb.Get(ctx, peakKey).Int64()
-		if cur > peak {
-			_ = rdb.Set(ctx, peakKey, cur, ttl).Err()
-		}
-	}
+	_, _ = recordAPIScript.Run(ctx, rdb,
+		[]string{reqKey, svcKey, inflightKey, peakKey},
+		int(ttl/time.Second), int(inflightTTL/time.Second), hasSvc,
+	).Result()
 
 	return func() {
-		n, err := rdb.Decr(ctx, inflightKey).Result()
+		// 客户端取消不应导致计数漂移：用独立短超时 ctx 落 Decr
+		dctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		n, err := rdb.Decr(dctx, inflightKey).Result()
 		if err == nil && n < 0 {
-			_ = rdb.Set(ctx, inflightKey, 0, 0).Err()
+			_ = rdb.Set(dctx, inflightKey, 0, inflightTTL).Err()
 		}
 	}
 }

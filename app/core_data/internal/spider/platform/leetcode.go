@@ -2,6 +2,7 @@ package platform
 
 import (
 	"bytes"
+	"context"
 	"cwxu-algo/app/common/utils/ojhttp"
 	"cwxu-algo/app/core_data/internal/data/model"
 	"cwxu-algo/app/core_data/internal/spider"
@@ -83,21 +84,24 @@ func (p NewLeetCode) Name() string {
 	return spider.LeetCode
 }
 
-func (p NewLeetCode) FetchSubmitLog(userId int64, username string, needAll bool) ([]model.SubmitLog, error) {
+func (p NewLeetCode) FetchSubmitLog(ctx context.Context, userId int64, username string, needAll bool) ([]model.SubmitLog, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	if username == "" {
 		return nil, fmt.Errorf("leetcode username 为空")
 	}
 
-	cal, err := fetchLeetCodeCalendar(username)
+	cal, err := fetchLeetCodeCalendar(ctx, username)
 	if err != nil {
 		return nil, err
 	}
-	prog, err := fetchLeetCodeProgress(username)
+	prog, err := fetchLeetCodeProgress(ctx, username)
 	if err != nil {
 		return nil, err
 	}
 	// 最近通过失败不阻断热力/总数；题库侧只是少几题
-	recent, recentErr := fetchLeetCodeRecentAC(username)
+	recent, recentErr := fetchLeetCodeRecentAC(ctx, username)
 	if recentErr != nil {
 		recent = nil
 	}
@@ -211,9 +215,12 @@ func (p NewLeetCode) FetchSubmitLog(userId int64, username string, needAll bool)
 	return res, nil
 }
 
-func fetchLeetCodeCalendar(username string) (map[int64]int, error) {
+func fetchLeetCodeCalendar(ctx context.Context, username string) (map[int64]int, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	url := fmt.Sprintf(lcCalAPI, username)
-	req, err := http.NewRequest(http.MethodGet, url, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -265,7 +272,10 @@ func fetchLeetCodeCalendar(username string) (map[int64]int, error) {
 	return out, nil
 }
 
-func fetchLeetCodeProgress(username string) (lcProgress, error) {
+func fetchLeetCodeProgress(ctx context.Context, username string) (lcProgress, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	payload := map[string]interface{}{
 		"query": `query userPublicProfile($userSlug: String!) {
 			userProfilePublicProfile(userSlug: $userSlug) {
@@ -275,7 +285,7 @@ func fetchLeetCodeProgress(username string) (lcProgress, error) {
 		"variables": map[string]string{"userSlug": username},
 	}
 	b, _ := json.Marshal(payload)
-	req, err := http.NewRequest(http.MethodPost, lcGraphQL, bytes.NewReader(b))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, lcGraphQL, bytes.NewReader(b))
 	if err != nil {
 		return lcProgress{}, err
 	}
@@ -338,7 +348,10 @@ func dedupeLeetCodeRecentAC(in []lcRecentAC) []lcRecentAC {
 	return out
 }
 
-func fetchLeetCodeRecentAC(username string) ([]lcRecentAC, error) {
+func fetchLeetCodeRecentAC(ctx context.Context, username string) ([]lcRecentAC, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	payload := map[string]interface{}{
 		"query": `query recentACSubmissions($userSlug: String!) {
 			recentACSubmissions(userSlug: $userSlug) {
@@ -355,7 +368,7 @@ func fetchLeetCodeRecentAC(username string) ([]lcRecentAC, error) {
 		"variables": map[string]string{"userSlug": username},
 	}
 	b, _ := json.Marshal(payload)
-	req, err := http.NewRequest(http.MethodPost, lcGraphQLNoj, bytes.NewReader(b))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, lcGraphQLNoj, bytes.NewReader(b))
 	if err != nil {
 		return nil, err
 	}

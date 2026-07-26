@@ -12,6 +12,7 @@ import (
 	"cwxu-algo/api/core/v1/contest_log"
 	"cwxu-algo/api/user/v1/profile"
 	"cwxu-algo/app/common/discovery"
+	"cwxu-algo/app/common/rbac"
 	"cwxu-algo/app/common/utils"
 	"cwxu-algo/app/common/utils/auth"
 	bizservice "cwxu-algo/app/core_data/internal/biz/service"
@@ -501,7 +502,7 @@ func (c *ContestLogService) handleContestProblems(ctx khttp.Context) error {
 	}
 	forceQ := strings.TrimSpace(ctx.Query().Get("force"))
 	force := forceQ == "1" || strings.EqualFold(forceQ, "true")
-	if force && !auth.VerifyAdmin(ctx) && !auth.VerifySiteAdmin(ctx) {
+	if force && !auth.HasPerm(ctx, rbac.PermSiteSpiderOps) {
 		writeContestJSON(ctx, 403, map[string]interface{}{"success": false, "message": "仅管理员可强制 ensure"})
 		return nil
 	}

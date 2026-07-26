@@ -1,6 +1,7 @@
 package spider
 
 import (
+	"context"
 	"time"
 
 	"cwxu-algo/app/core_data/internal/data/model"
@@ -36,13 +37,14 @@ type SubmitLogFetcher interface {
 	// FetchSubmitLog 获取提交记录
 	//
 	// 参数：
+	//   - ctx: 调用方超时/取消透传到 HTTP 请求与翻页
 	//   - userId: 用户唯一 ID
 	//   - username: 平台用户名
 	//   - needAll: 是否全量抓取
 	//
 	// 返回值：
 	//   - []model.SubmitLog: 提交记录列表
-	FetchSubmitLog(userId int64, username string, needAll bool) ([]model.SubmitLog, error)
+	FetchSubmitLog(ctx context.Context, userId int64, username string, needAll bool) ([]model.SubmitLog, error)
 }
 
 // SubmitContestFetcher 提交记录 Fetcher

@@ -1,6 +1,7 @@
 package platform
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -36,13 +37,16 @@ type NewUOJ struct{}
 
 func (p NewUOJ) Name() string { return spider.UOJ }
 
-func uojFetchProfileHTML(username string) (string, error) {
+func uojFetchProfileHTML(ctx context.Context, username string) (string, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	username = strings.TrimSpace(username)
 	if username == "" {
 		return "", fmt.Errorf("uoj username 为空")
 	}
 	u := uojProfileURL + url.PathEscape(username)
-	req, err := http.NewRequest(http.MethodGet, u, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
 		return "", err
 	}
@@ -137,9 +141,9 @@ func parseUOJRating(html string) (int, bool) {
 
 // FetchSubmitLog 从公开主页拉 AC 题目集。
 // needAll 与增量语义相同（单页全量 AC）；新 AC 靠 submit_id 去重插入。
-func (p NewUOJ) FetchSubmitLog(userId int64, username string, needAll bool) ([]model.SubmitLog, error) {
+func (p NewUOJ) FetchSubmitLog(ctx context.Context, userId int64, username string, needAll bool) ([]model.SubmitLog, error) {
 	_ = needAll
-	html, err := uojFetchProfileHTML(username)
+	html, err := uojFetchProfileHTML(ctx, username)
 	if err != nil {
 		return nil, err
 	}
@@ -171,7 +175,7 @@ func (p NewUOJ) FetchSubmitLog(userId int64, username string, needAll bool) ([]m
 
 // FetchRating 主页 Rating 区块。
 func (p NewUOJ) FetchRating(username string) (int, bool, error) {
-	html, err := uojFetchProfileHTML(username)
+	html, err := uojFetchProfileHTML(context.Background(), username)
 	if err != nil {
 		return 0, false, err
 	}

@@ -559,12 +559,14 @@ func (d *StatisticDal) countAcRawTotalScoped(userId int64, memberIDs []int64) in
 	return count
 }
 
-// getWeekStart 获取本周周一 00:00:00
+// getWeekStart 获取本周周一 00:00:00（按本地时区日期构造；
+// Truncate(24h) 是按 UTC 对齐，非零时区会切错日界）
 func getWeekStart(t time.Time) time.Time {
 	weekday := t.Weekday()
 	if weekday == time.Sunday {
 		weekday = 7
 	}
 	days := int(weekday - time.Monday)
-	return t.AddDate(0, 0, -days).Truncate(24 * time.Hour)
+	monday := t.AddDate(0, 0, -days)
+	return time.Date(monday.Year(), monday.Month(), monday.Day(), 0, 0, 0, 0, t.Location())
 }

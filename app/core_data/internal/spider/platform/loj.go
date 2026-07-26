@@ -2,6 +2,7 @@ package platform
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -64,12 +65,15 @@ type lojUserMetaResp struct {
 	} `json:"meta"`
 }
 
-func lojPostJSON(path string, body any, out any) error {
+func lojPostJSON(ctx context.Context, path string, body any, out any) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	payload, err := json.Marshal(body)
 	if err != nil {
 		return err
 	}
-	req, err := http.NewRequest(http.MethodPost, lojAPIBase+path, bytes.NewReader(payload))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, lojAPIBase+path, bytes.NewReader(payload))
 	if err != nil {
 		return err
 	}
@@ -186,7 +190,10 @@ func lojSubmissionToLog(userId int64, s lojSubmissionMeta) model.SubmitLog {
 
 // FetchSubmitLog 拉取 LibreOJ 公开提交。
 // needAll=false：仅最新一页；needAll=true：maxId 向前翻页直至结束。
-func (p NewLOJ) FetchSubmitLog(userId int64, username string, needAll bool) ([]model.SubmitLog, error) {
+func (p NewLOJ) FetchSubmitLog(ctx context.Context, userId int64, username string, needAll bool) ([]model.SubmitLog, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	username = strings.TrimSpace(username)
 	if username == "" {
 		return nil, fmt.Errorf("loj username 为空")
@@ -198,6 +205,9 @@ func (p NewLOJ) FetchSubmitLog(userId int64, username string, needAll bool) ([]m
 		pages  int
 	)
 	for {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		pages++
 		if pages > lojMaxPages {
 			break
@@ -209,7 +219,7 @@ func (p NewLOJ) FetchSubmitLog(userId int64, username string, needAll bool) ([]m
 			MaxID:     maxID,
 		}
 		var resp lojQuerySubmissionResp
-		if err := lojPostJSON("submission/querySubmission", reqBody, &resp); err != nil {
+		if err := lojPostJSON(ctx, "submission/querySubmission", reqBody, &resp); err != nil {
 			return nil, err
 		}
 		if resp.Error == "NO_SUCH_USER" {
@@ -248,7 +258,7 @@ func (p NewLOJ) FetchRating(username string) (int, bool, error) {
 		return 0, false, fmt.Errorf("loj username 为空")
 	}
 	var resp lojUserMetaResp
-	if err := lojPostJSON("user/getUserMeta", map[string]string{"username": username}, &resp); err != nil {
+	if err := lojPostJSON(context.Background(), "user/getUserMeta", map[string]string{"username": username}, &resp); err != nil {
 		return 0, false, err
 	}
 	if resp.Error == "NO_SUCH_USER" {

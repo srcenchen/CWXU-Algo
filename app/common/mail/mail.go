@@ -1,15 +1,36 @@
 package mail
 
 import (
+	"context"
 	"crypto/tls"
 	"fmt"
 	"io"
 	"strings"
+	"time"
 
 	"cwxu-algo/app/common/conf"
 
 	"gopkg.in/gomail.v2"
 )
+
+// sendTimeout SMTP 发送整体上限：gomail DialAndSend 无读写 deadline，
+// 服务器半开时会永久阻塞，必须由外层兜底超时。
+const sendTimeout = 30 * time.Second
+
+// dialAndSendTimeout 带超时的 DialAndSend：超时即返回错误。
+// 超时后后台 goroutine 会随 TCP 层自身超时退出，不会无限累积。
+func dialAndSendTimeout(d *gomail.Dialer, m *gomail.Message, timeout time.Duration) error {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- d.DialAndSend(m) }()
+	select {
+	case err := <-done:
+		return err
+	case <-ctx.Done():
+		return fmt.Errorf("发送邮件超时（%v）", timeout)
+	}
+}
 
 // Sender SMTP 邮件发送
 type Sender struct {
@@ -123,7 +144,7 @@ func (s *Sender) SendWithAttachments(to, subject, body string, attachments []Att
 		ServerName: s.host,
 	}
 
-	if err := d.DialAndSend(m); err != nil {
+	if err := dialAndSendTimeout(d, m, sendTimeout); err != nil {
 		return fmt.Errorf("发送邮件失败: %w", err)
 	}
 	return nil

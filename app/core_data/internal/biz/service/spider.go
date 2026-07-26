@@ -51,6 +51,10 @@ func NewSpiderUseCase(data *data.Data, problem *ProblemUseCase, spiderTask *task
 // loadDataTimeout 单用户整次爬取上限，防止某平台挂死占满 worker 导致 spider 队列堆积
 const loadDataTimeout = 8 * time.Minute
 
+// ensureContestSem 后补比赛题目录的共享有界并发：
+// 多用户比赛同步同时触发时不再无界起 goroutine（每场一个），全进程最多同时 4 个
+var ensureContestSem = make(chan struct{}, 4)
+
 // LoadData 加载数据。platform 非空时只抓该平台；空则抓全部已绑定平台。
 // 无绑定平台时成功返回；有平台且全部失败则返回 error（consumer 可重试）。
 // 仅在有新写入时失效缓存，避免空跑爬虫打穿 period/heatmap 缓存。
@@ -83,7 +87,7 @@ func (uc *SpiderUseCase) LoadData(userId int64, needAll bool, platform string) e
 		if err := ctx.Err(); err != nil {
 			return fmt.Errorf("load data timeout user=%d after partial: %w", userId, err)
 		}
-		changed, err := uc.loadOnePlatform(userId, plat, needAll)
+		changed, err := uc.loadOnePlatform(ctx, userId, plat, needAll)
 		if changed {
 			dirty = true
 		}
@@ -98,8 +102,8 @@ func (uc *SpiderUseCase) LoadData(userId int64, needAll bool, platform string) e
 	return nil
 }
 
-// fetchAndSave 拉取并写入提交；返回新插入行数
-func (uc *SpiderUseCase) fetchAndSave(userId int64, plat model.Platform, needAll bool) (int64, error) {
+// fetchAndSave 拉取并写入提交；返回新插入行数。fetchCtx 为整次爬取超时（透传到 HTTP）
+func (uc *SpiderUseCase) fetchAndSave(fetchCtx context.Context, userId int64, plat model.Platform, needAll bool) (int64, error) {
 	p, ok := spider.Get(plat.Platform)
 	if !ok {
 		return 0, fmt.Errorf("平台插件不存在")
@@ -115,7 +119,7 @@ func (uc *SpiderUseCase) fetchAndSave(userId int64, plat model.Platform, needAll
 		genAtStart = task.CurrentGeneration(uc.data.RDB, userId, plat.Platform)
 	}
 
-	tmp, err := sbFetch.FetchSubmitLog(userId, plat.Username, needAll)
+	tmp, err := sbFetch.FetchSubmitLog(fetchCtx, userId, plat.Username, needAll)
 	if err != nil {
 		return 0, err
 	}
@@ -175,7 +179,8 @@ func (uc *SpiderUseCase) fetchAndSave(userId int64, plat model.Platform, needAll
 				userId, plat.Platform, len(tmp), len(neu), needAll)
 		}
 
-		// 预聚合 + 写入 submit_logs（unique submit_id + OnConflict DoNothing）
+		// 预聚合 + 写入 submit_logs（唯一键 (platform, submit_id) + OnConflict DoNothing）
+		// 预聚合已批量化（见 dal），事务内语句数为常数级，避免逐行长事务
 		err = uc.data.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 			if err := dal.ApplyDailyDeltas(ctx, tx, dal.AggregateSubmitDeltas(neu)); err != nil {
 				return err
@@ -184,7 +189,7 @@ func (uc *SpiderUseCase) fetchAndSave(userId int64, plat model.Platform, needAll
 				return err
 			}
 			return tx.Clauses(clause.OnConflict{
-				Columns:   []clause.Column{{Name: "submit_id"}},
+				Columns:   []clause.Column{{Name: "platform"}, {Name: "submit_id"}},
 				DoNothing: true,
 			}).CreateInBatches(&neu, submitInsertBatchSize).Error
 		})
@@ -439,6 +444,9 @@ func (uc *SpiderUseCase) fetchAndSaveContest(userId int64, plat model.Platform, 
 			n++
 			pName, cID := plat.Platform, cid
 			go func() {
+				// 共享信号量限并发，防止一次同步冲出几十个 ensure goroutine
+				ensureContestSem <- struct{}{}
+				defer func() { <-ensureContestSem }()
 				if _, e := uc.problem.EnsureContestProblemsOnce(pName, cID); e != nil {
 					log.Warnf("Spider: ensure contest after log %s/%s: %v", pName, cID, e)
 				}
@@ -536,7 +544,7 @@ func (uc *SpiderUseCase) fetchAndSaveRating(plat model.Platform) {
 }
 
 // loadOnePlatform 返回 (是否有数据变更, error)
-func (uc *SpiderUseCase) loadOnePlatform(userId int64, plat model.Platform, needAll bool) (bool, error) {
+func (uc *SpiderUseCase) loadOnePlatform(ctx context.Context, userId int64, plat model.Platform, needAll bool) (bool, error) {
 	// needAll 全量：最多 3 次（原先 12 次会把 worker 占死、队列堆积）
 	maxRetries := 1
 	if needAll {
@@ -545,7 +553,7 @@ func (uc *SpiderUseCase) loadOnePlatform(userId int64, plat model.Platform, need
 	var anyChange bool
 	var lastErr error
 	for i := 0; i < maxRetries; i++ {
-		rows, err := uc.fetchAndSave(userId, plat, needAll)
+		rows, err := uc.fetchAndSave(ctx, userId, plat, needAll)
 		if rows > 0 {
 			anyChange = true
 		}

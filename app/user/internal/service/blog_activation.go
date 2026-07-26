@@ -7,6 +7,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"cwxu-algo/app/common/rbac"
 	"cwxu-algo/app/common/utils/auth"
 	"cwxu-algo/app/user/internal/data/model"
 
@@ -329,8 +330,8 @@ func (s *BlogService) handleNotifyPref(ctx khttp.Context) error {
 
 func (s *BlogService) handleAdminOverview(ctx khttp.Context) error {
 	pd := auth.GetCurrentUser(ctx)
-	if !auth.IsContentModerator(pd) {
-		writeJSON(ctx.Response(), 403, map[string]interface{}{"code": 1, "message": "仅站点管理员或资源审核员可操作"})
+	if !auth.PayloadHasPerm(pd, rbac.PermSiteBlogBoard) {
+		writeJSON(ctx.Response(), 403, map[string]interface{}{"code": 1, "message": "需要博客数据看板权限"})
 		return nil
 	}
 	var activated int64
@@ -369,8 +370,8 @@ func (s *BlogService) handleAdminOverview(ctx khttp.Context) error {
 
 func (s *BlogService) handleAdminAuthors(ctx khttp.Context) error {
 	pd := auth.GetCurrentUser(ctx)
-	if !auth.IsContentModerator(pd) {
-		writeJSON(ctx.Response(), 403, map[string]interface{}{"code": 1, "message": "仅站点管理员或资源审核员可操作"})
+	if !auth.PayloadHasPerm(pd, rbac.PermSiteBlogBoard) {
+		writeJSON(ctx.Response(), 403, map[string]interface{}{"code": 1, "message": "需要博客数据看板权限"})
 		return nil
 	}
 	page, pageSize := parsePage(ctx.Request())
@@ -458,8 +459,8 @@ func (s *BlogService) handleAdminAuthors(ctx khttp.Context) error {
 
 func (s *BlogService) handleAdminArticles(ctx khttp.Context) error {
 	pd := auth.GetCurrentUser(ctx)
-	if !auth.IsContentModerator(pd) {
-		writeJSON(ctx.Response(), 403, map[string]interface{}{"code": 1, "message": "仅站点管理员或资源审核员可操作"})
+	if !auth.PayloadHasPerm(pd, rbac.PermSiteBlogBoard) {
+		writeJSON(ctx.Response(), 403, map[string]interface{}{"code": 1, "message": "需要博客数据看板权限"})
 		return nil
 	}
 	page, pageSize := parsePage(ctx.Request())
@@ -546,8 +547,8 @@ func normalizeModeration(raw string) string {
 
 func (s *BlogService) handleAdminModerate(ctx khttp.Context) error {
 	pd := auth.GetCurrentUser(ctx)
-	if !auth.IsContentModerator(pd) {
-		writeJSON(ctx.Response(), 403, map[string]interface{}{"code": 1, "message": "仅站点管理员或资源审核员可操作"})
+	if !auth.PayloadHasPerm(pd, rbac.PermContentBlogModerate) {
+		writeJSON(ctx.Response(), 403, map[string]interface{}{"code": 1, "message": "需要博客审核权限"})
 		return nil
 	}
 	var body struct {

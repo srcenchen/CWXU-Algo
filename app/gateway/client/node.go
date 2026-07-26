@@ -18,7 +18,10 @@ import (
 )
 
 var _ selector.Node = &node{}
-var _dialTimeout = 200 * time.Millisecond
+
+// _dialTimeout 后端建连超时：200ms 在跨机/网络抖动时误杀率高，默认放宽到 1s；
+// 可用 PROXY_DIAL_TIMEOUT 覆盖。
+var _dialTimeout = 1 * time.Second
 var followRedirect = false
 
 var _globalClient *http.Client = nil

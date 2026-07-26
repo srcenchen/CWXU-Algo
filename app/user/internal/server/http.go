@@ -103,6 +103,7 @@ func NewHTTPServer(
 	roleService *service.RoleService,
 	siteService *service.SiteService,
 	orgService *service.OrgService,
+	rbacService *service.RbacService,
 	pasteService *service.PasteService,
 	socialService *service.SocialService,
 	notificationService *service.NotificationService,
@@ -144,6 +145,7 @@ func NewHTTPServer(
 	site.RegisterSiteHTTPServer(srv, siteService)
 	service.RegisterUploadRoutes(srv)
 	service.RegisterOrgRoutes(srv, orgService)
+	service.RegisterRbacRoutes(srv, rbacService)
 	service.RegisterPasteRoutes(srv, pasteService)
 	service.RegisterSocialRoutes(srv, socialService)
 	service.RegisterNotificationRoutes(srv, notificationService)

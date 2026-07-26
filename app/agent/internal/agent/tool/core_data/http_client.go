@@ -6,10 +6,8 @@ import (
 	"io"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/go-kratos/kratos/v2/registry"
-	khttp "github.com/go-kratos/kratos/v2/transport/http"
 )
 
 // discoveryHTTPGet 经服务发现对目标服务发 GET（带 elevated Bearer）。
@@ -19,16 +17,11 @@ func discoveryHTTPGet(ctx context.Context, reg *registry.Registrar, service, pat
 		return nil, 0, fmt.Errorf("registry 未配置")
 	}
 	ctx = toolRPCContext(ctx)
-	client, err := khttp.NewClient(
-		ctx,
-		khttp.WithEndpoint("discovery:///"+service),
-		khttp.WithDiscovery((*reg).(registry.Discovery)),
-		khttp.WithTimeout(20*time.Second),
-	)
+	// 复用共享长连接客户端，避免每次工具调用 NewClient+Close
+	client, err := SharedHTTPClient(reg, service)
 	if err != nil {
 		return nil, 0, err
 	}
-	defer client.Close()
 
 	if !strings.HasPrefix(path, "/") {
 		path = "/" + path

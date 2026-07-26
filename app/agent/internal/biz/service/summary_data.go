@@ -12,12 +12,11 @@ import (
 	"cwxu-algo/api/core/v1/statistic"
 	"cwxu-algo/api/core/v1/submit_log"
 	profile2 "cwxu-algo/api/user/v1/profile"
+	"cwxu-algo/app/agent/internal/agent/tool/core_data"
 	"cwxu-algo/app/common/utils"
 	"cwxu-algo/app/common/utils/auth"
 
 	"github.com/go-kratos/kratos/v2/log"
-	"github.com/go-kratos/kratos/v2/registry"
-	"github.com/go-kratos/kratos/v2/transport/grpc"
 	grpc2 "google.golang.org/grpc"
 )
 
@@ -96,22 +95,14 @@ type WeeklyReportData struct {
 	InactiveMembers  []string    `json:"inactiveMembers"`
 }
 
-func (uc *SummaryUseCase) dialUser(ctx context.Context) (*grpc2.ClientConn, error) {
-	return grpc.DialInsecure(
-		ctx,
-		grpc.WithEndpoint("discovery:///user"),
-		grpc.WithDiscovery((*uc.reg).(registry.Discovery)),
-		grpc.WithTimeout(20*time.Second),
-	)
+// dialUser / dialCoreData 返回按服务名缓存的共享长连接（调用方不得 Close）。
+// 鉴权 metadata 由每次 RPC 的 ctx 携带，与连接无关。
+func (uc *SummaryUseCase) dialUser(_ context.Context) (*grpc2.ClientConn, error) {
+	return core_data.SharedGRPCConn(uc.reg, "user")
 }
 
-func (uc *SummaryUseCase) dialCoreData(ctx context.Context) (*grpc2.ClientConn, error) {
-	return grpc.DialInsecure(
-		ctx,
-		grpc.WithEndpoint("discovery:///core-data"),
-		grpc.WithDiscovery((*uc.reg).(registry.Discovery)),
-		grpc.WithTimeout(20*time.Second),
-	)
+func (uc *SummaryUseCase) dialCoreData(_ context.Context) (*grpc2.ClientConn, error) {
+	return core_data.SharedGRPCConn(uc.reg, "core-data")
 }
 
 func (uc *SummaryUseCase) userRPC() (*grpc2.ClientConn, error) {
@@ -121,13 +112,14 @@ func (uc *SummaryUseCase) userRPC() (*grpc2.ClientConn, error) {
 func (uc *SummaryUseCase) userProfile(userId int64) *profile2.GetByIdRes {
 	conn, err := uc.userRPC()
 	if err != nil {
+		log.Warnf("userProfile dial user=%d: %v", userId, err)
 		return nil
 	}
-	defer conn.Close()
 	p := profile2.NewProfileClient(conn)
 	// 注意：无 JWT 时 GetById 会剥离 email / emailEnabled 等私有字段，仅可取公开 name 等。
 	res, err := p.GetById(context.Background(), &profile2.GetByIdReq{UserId: userId})
 	if err != nil {
+		log.Warnf("userProfile GetById user=%d: %v", userId, err)
 		return nil
 	}
 	return res
@@ -142,7 +134,6 @@ func (uc *SummaryUseCase) userSyncPolicy(userId int64) *profile2.UserSyncPolicy 
 	if err != nil {
 		return nil
 	}
-	defer conn.Close()
 	cli := profile2.NewProfileClient(conn)
 	res, err := cli.GetSyncPolicies(context.Background(), &profile2.GetSyncPoliciesReq{
 		UserIds: []int64{userId},
@@ -167,7 +158,6 @@ func (uc *SummaryUseCase) userContactEmail(userId int64) string {
 	if err != nil {
 		return ""
 	}
-	defer conn.Close()
 	cli := profile2.NewProfileClient(conn)
 	res, err := cli.GetContactEmail(context.Background(), &profile2.GetContactEmailReq{UserId: userId})
 	if err != nil || res == nil {
@@ -210,9 +200,9 @@ func (uc *SummaryUseCase) checkEmailEnabled(userId int64) bool {
 func (uc *SummaryUseCase) getUserIds() []int64 {
 	userRpc, err := uc.userRPC()
 	if err != nil {
+		log.Warnf("getUserIds dial user 服务失败: %v", err)
 		return make([]int64, 0)
 	}
-	defer userRpc.Close()
 	profile := profile2.NewProfileClient(userRpc)
 	getUsers := func(pageNum int) (*profile2.GetListRes, error) {
 		return profile.GetList(context.Background(), &profile2.GetListReq{
@@ -222,6 +212,7 @@ func (uc *SummaryUseCase) getUserIds() []int64 {
 	}
 	res, err := getUsers(1)
 	if err != nil {
+		log.Warnf("getUserIds GetList page=1: %v", err)
 		return make([]int64, 0)
 	}
 	rList := []*profile2.GetListRes{res}
@@ -229,6 +220,7 @@ func (uc *SummaryUseCase) getUserIds() []int64 {
 	for i := 2; i <= int(totalPage); i++ {
 		r, err := getUsers(i)
 		if err != nil {
+			log.Warnf("getUserIds GetList page=%d: %v", i, err)
 			continue
 		}
 		rList = append(rList, r)
@@ -281,7 +273,6 @@ func (uc *SummaryUseCase) fetchHeatmap(ctx context.Context, userId int64, start,
 	if err != nil {
 		return nil, err
 	}
-	defer conn.Close()
 	cli := statistic.NewStatisticClient(conn)
 	res, err := cli.Heatmap(ctx, &statistic.HeatmapReq{
 		UserId:    userId,
@@ -304,7 +295,6 @@ func (uc *SummaryUseCase) fetchPeriod(ctx context.Context, userId int64) (*stati
 	if err != nil {
 		return nil, err
 	}
-	defer conn.Close()
 	cli := statistic.NewStatisticClient(conn)
 	res, err := cli.PeriodCount(ctx, &statistic.PeriodCountReq{UserId: userId})
 	if err != nil {
@@ -330,7 +320,6 @@ func (uc *SummaryUseCase) fetchSubmitLogs(ctx context.Context, userId int64, end
 	if err != nil {
 		return nil, err
 	}
-	defer conn.Close()
 	cli := submit_log.NewSubmitClient(conn)
 	// cursor = 次日 0 点，向前取 limit 条
 	cursor := endDate.AddDate(0, 0, 1).Unix()
@@ -374,7 +363,6 @@ func (uc *SummaryUseCase) fetchUserTagRadar(ctx context.Context, userId int64) [
 	if err != nil {
 		return nil
 	}
-	defer conn.Close()
 	cli := problem.NewProblemClient(conn)
 	res, err := cli.UserProfile(ctx, &problem.UserProfileReq{UserId: userId})
 	if err != nil || res == nil {
@@ -425,7 +413,6 @@ func (uc *SummaryUseCase) fetchRank(ctx context.Context, start, end time.Time, s
 	if err != nil {
 		return nil, err
 	}
-	defer conn.Close()
 	cli := statistic.NewStatisticClient(conn)
 	res, err := cli.Rank(ctx, &statistic.RankReq{
 		StartDate: start.Format(dateLayout),
@@ -458,7 +445,6 @@ func (uc *SummaryUseCase) fetchLastSubmitMap(ctx context.Context, userIds []int6
 	if err != nil {
 		return nil, err
 	}
-	defer conn.Close()
 	cli := submit_log.NewSubmitClient(conn)
 	// 分批，避免一次过大
 	result := make(map[int64]int64, len(userIds))
@@ -545,7 +531,6 @@ func (uc *SummaryUseCase) fetchUserRecentContests(ctx context.Context, userId in
 	if err != nil {
 		return nil
 	}
-	defer conn.Close()
 	cli := contest_log.NewContestClient(conn)
 	res, err := cli.GetUserContestHistory(ctx, &contest_log.GetUserContestHistoryReq{
 		UserId: userId,
@@ -673,7 +658,6 @@ func (uc *SummaryUseCase) loadWeeklyReportData(ctx context.Context, coachUserId 
 						}
 					}
 				}
-				conn.Close()
 			}
 			threshold := weekEnd.AddDate(0, 0, -2) // 连续3天：最后提交早于 end-2 日
 			type pair struct {

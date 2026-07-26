@@ -43,46 +43,60 @@ func ApplyUserProblemStatusFromSubmits(ctx context.Context, db *gorm.DB, logs []
 		}
 		best[k] = st
 	}
+	if len(best) == 0 {
+		return nil
+	}
 	now := time.Now()
-	for k, st := range best {
-		// 读旧状态，判断是否首次升到 AC（驱动 user_tag_ac）
-		var prev model.UserProblemStatus
-		prevSt := ""
-		if e := db.WithContext(ctx).
-			Where("user_id = ? AND problem_id = ?", k.uid, k.pid).
-			First(&prev).Error; e == nil {
-			prevSt = prev.Status
-		}
+	// 一次批量读旧状态（(user_id, problem_id) IN），内存比对是否首次升到 AC
+	pairs := make([][]interface{}, 0, len(best))
+	for k := range best {
+		pairs = append(pairs, []interface{}{k.uid, k.pid})
+	}
+	prevMap := make(map[key]string, len(best))
+	var prevRows []model.UserProblemStatus
+	if err := db.WithContext(ctx).
+		Where("(user_id, problem_id) IN ?", pairs).
+		Find(&prevRows).Error; err != nil {
+		return err
+	}
+	for _, r := range prevRows {
+		prevMap[key{uid: r.UserID, pid: r.ProblemID}] = r.Status
+	}
 
-		row := model.UserProblemStatus{
+	// 批量 upsert；AC 永不被 TRIED 覆盖
+	rows := make([]model.UserProblemStatus, 0, len(best))
+	for k, st := range best {
+		rows = append(rows, model.UserProblemStatus{
 			UserID:    k.uid,
 			ProblemID: k.pid,
 			Status:    st,
 			UpdatedAt: now,
-		}
-		// AC 永不被 TRIED 覆盖
-		doUpdates := clause.Assignments(map[string]interface{}{
-			"updated_at": now,
-			"status": gorm.Expr(
-				`CASE WHEN user_problem_status.status = 'AC' THEN 'AC' ELSE EXCLUDED.status END`,
-			),
 		})
-		if err := db.WithContext(ctx).
-			Clauses(clause.OnConflict{
-				Columns:   []clause.Column{{Name: "user_id"}, {Name: "problem_id"}},
-				DoUpdates: doUpdates,
-			}).
-			Create(&row).Error; err != nil {
-			return err
+	}
+	doUpdates := clause.Assignments(map[string]interface{}{
+		"updated_at": now,
+		"status": gorm.Expr(
+			`CASE WHEN user_problem_status.status = 'AC' THEN 'AC' ELSE EXCLUDED.status END`,
+		),
+	})
+	if err := db.WithContext(ctx).
+		Clauses(clause.OnConflict{
+			Columns:   []clause.Column{{Name: "user_id"}, {Name: "problem_id"}},
+			DoUpdates: doUpdates,
+		}).
+		CreateInBatches(&rows, 200).Error; err != nil {
+		return err
+	}
+	// 首次变为 AC：标签画像 +1；待做题单自动剔除
+	for k, st := range best {
+		if st != model.UserProblemStatusAC || prevMap[k] == model.UserProblemStatusAC {
+			continue
 		}
-		// 首次变为 AC：标签画像 +1；待做题单自动剔除
-		if st == model.UserProblemStatusAC && prevSt != model.UserProblemStatusAC {
-			if err := IncUserTagACForFirstProblemAC(ctx, db, k.uid, k.pid); err != nil {
-				log.Warnf("user_tag_ac first AC user=%d problem=%d: %v", k.uid, k.pid, err)
-			}
-			if err := RemoveFromTodoOnAC(ctx, db, k.uid, k.pid); err != nil {
-				log.Warnf("RemoveFromTodoOnAC user=%d problem=%d: %v", k.uid, k.pid, err)
-			}
+		if err := IncUserTagACForFirstProblemAC(ctx, db, k.uid, k.pid); err != nil {
+			log.Warnf("user_tag_ac first AC user=%d problem=%d: %v", k.uid, k.pid, err)
+		}
+		if err := RemoveFromTodoOnAC(ctx, db, k.uid, k.pid); err != nil {
+			log.Warnf("RemoveFromTodoOnAC user=%d problem=%d: %v", k.uid, k.pid, err)
 		}
 	}
 	return nil

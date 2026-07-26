@@ -3,8 +3,11 @@ package service
 import (
 	"context"
 	"fmt"
+	"sync"
+	"time"
 
 	"cwxu-algo/api/user/v1/profile"
+	"cwxu-algo/app/common/rbac"
 	"cwxu-algo/app/common/utils/auth"
 	"cwxu-algo/app/core_data/internal/userrpc"
 
@@ -12,11 +15,29 @@ import (
 	"github.com/go-kratos/kratos/v2/registry"
 )
 
-// ResolveOrgMemberIDs 解析组织成员 userId 列表。
+// orgScopeMembersCacheTTL 组织成员列表进程内短缓存（动态流/比赛列表每请求都要成员列表）
+const orgScopeMembersCacheTTL = 60 * time.Second
+
+type orgScopeMembersEntry struct {
+	ids   []int64
+	orgID uint
+	at    time.Time
+}
+
+var (
+	orgScopeMembersMu sync.Mutex
+	// key = 请求 orgID（0 表示回落公共域）
+	orgScopeMembersCache = map[uint]orgScopeMembersEntry{}
+	// 公共域 orgID 值缓存（isPublicOrgContext 不再拉全量成员）
+	orgScopePublicID   uint
+	orgScopePublicIDAt time.Time
+)
+
+// ResolveOrgMemberIDs 解析组织成员 userId 列表（带 60s 进程内缓存）。
 // orgID=0 时用 JWT 当前组织；仍为 0 则 user 服务回落公共域。
-// scopeSite=true 且站点管理员：unrestricted=true 表示全站。
+// scopeSite=true 且具备全站统计权限：unrestricted=true 表示全站。
 func ResolveOrgMemberIDs(ctx context.Context, reg *registry.Registrar, orgID uint, scopeSite bool) (userIDs []int64, resolvedOrg uint, unrestricted bool, err error) {
-	if scopeSite && auth.VerifySiteAdmin(ctx) {
+	if scopeSite && auth.HasPerm(ctx, rbac.PermSiteStatsRead) {
 		return nil, 0, true, nil
 	}
 	if orgID == 0 {
@@ -24,6 +45,14 @@ func ResolveOrgMemberIDs(ctx context.Context, reg *registry.Registrar, orgID uin
 			orgID = pd.OrgID
 		}
 	}
+	orgScopeMembersMu.Lock()
+	if e, ok := orgScopeMembersCache[orgID]; ok && time.Since(e.at) < orgScopeMembersCacheTTL {
+		ids, resolved := e.ids, e.orgID
+		orgScopeMembersMu.Unlock()
+		return ids, resolved, false, nil
+	}
+	orgScopeMembersMu.Unlock()
+
 	client, err := userrpc.ProfileClient(reg)
 	if err != nil {
 		return nil, orgID, false, err
@@ -37,7 +66,16 @@ func ResolveOrgMemberIDs(ctx context.Context, reg *registry.Registrar, orgID uin
 	if ids == nil {
 		ids = []int64{}
 	}
-	return ids, uint(res.GetOrgId()), false, nil
+	resolved := uint(res.GetOrgId())
+	orgScopeMembersMu.Lock()
+	orgScopeMembersCache[orgID] = orgScopeMembersEntry{ids: ids, orgID: resolved, at: time.Now()}
+	if orgID == 0 {
+		// 顺带记住公共域 orgID（orgID=0 时 user 服务回落公共域）
+		orgScopePublicID = resolved
+		orgScopePublicIDAt = time.Now()
+	}
+	orgScopeMembersMu.Unlock()
+	return ids, resolved, false, nil
 }
 
 // fetchFollowingIDs 某人关注的 userId 列表
@@ -85,7 +123,8 @@ func filterPublicFeedUserIDs(ctx context.Context, reg *registry.Registrar, userI
 	return ids
 }
 
-// isPublicOrgContext orgID=0 或公共域 slug → 隐私生效
+// isPublicOrgContext orgID=0 或公共域 slug → 隐私生效。
+// 公共域 orgID 走进程内缓存比较，不再每次拉全量成员。
 func isPublicOrgContext(ctx context.Context, reg *registry.Registrar, orgID uint) bool {
 	if orgID == 0 {
 		return true
@@ -93,6 +132,14 @@ func isPublicOrgContext(ctx context.Context, reg *registry.Registrar, orgID uint
 	if reg == nil {
 		return true
 	}
+	orgScopeMembersMu.Lock()
+	if orgScopePublicID > 0 && time.Since(orgScopePublicIDAt) < orgScopeMembersCacheTTL {
+		pub := orgScopePublicID
+		orgScopeMembersMu.Unlock()
+		return pub == orgID
+	}
+	orgScopeMembersMu.Unlock()
+
 	client, err := userrpc.ProfileClient(reg)
 	if err != nil {
 		return true
@@ -102,6 +149,10 @@ func isPublicOrgContext(ctx context.Context, reg *registry.Registrar, orgID uint
 	if err != nil {
 		return true
 	}
+	orgScopeMembersMu.Lock()
+	orgScopePublicID = uint(pub.GetOrgId())
+	orgScopePublicIDAt = time.Now()
+	orgScopeMembersMu.Unlock()
 	return uint(pub.GetOrgId()) == orgID
 }
 
@@ -124,7 +175,7 @@ func intersectIDs(a, b []int64) []int64 {
 
 // ResolveOrgMemberIDsFromConn 复用已有 user 连接
 func ResolveOrgMemberIDsFromConn(ctx context.Context, client profile.ProfileClient, orgID uint, scopeSite bool) ([]int64, uint, bool, error) {
-	if scopeSite && auth.VerifySiteAdmin(ctx) {
+	if scopeSite && auth.HasPerm(ctx, rbac.PermSiteStatsRead) {
 		return nil, 0, true, nil
 	}
 	if orgID == 0 {

@@ -1,6 +1,7 @@
 package platform
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -80,7 +81,19 @@ type trainingHistoryResp struct {
 }
 
 func getSubLogResp(url string) (*goquery.Document, error) {
-	resp, err := ojhttp.Get(url)
+	return getSubLogRespCtx(context.Background(), url)
+}
+
+// getSubLogRespCtx 同 getSubLogResp，ctx 透传到 HTTP 请求（爬虫超时可中断）
+func getSubLogRespCtx(ctx context.Context, url string) (*goquery.Document, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := ojhttp.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("发起http请求失败: %s", err.Error())
 	}
@@ -181,9 +194,12 @@ func practiceSubmissionsToLogs(userId int64, subs []practiceSubmission) []model.
 }
 
 // fetchPracticeCodingLogs 拉 AC 站 practice-coding HTML 提交。
-func fetchPracticeCodingLogs(userId int64, uid string, needAll bool) ([]model.SubmitLog, error) {
+func fetchPracticeCodingLogs(ctx context.Context, userId int64, uid string, needAll bool) ([]model.SubmitLog, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	url := fmt.Sprintf(nowcoderPracticeCodingURL, uid, 1)
-	doc, err := getSubLogResp(url)
+	doc, err := getSubLogRespCtx(ctx, url)
 	if err != nil {
 		return nil, err
 	}
@@ -195,9 +211,12 @@ func fetchPracticeCodingLogs(userId int64, uid string, needAll bool) ([]model.Su
 			totPage = nowcoderPracticeMaxPages
 		}
 		for i := 2; i <= totPage; i++ {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
 			time.Sleep(nowcoderPageSleep)
 			pageURL := fmt.Sprintf(nowcoderPracticeCodingURL, uid, i)
-			pageDoc, err := getSubLogResp(pageURL)
+			pageDoc, err := getSubLogRespCtx(ctx, pageURL)
 			if err != nil {
 				return nil, err
 			}
@@ -207,9 +226,12 @@ func fetchPracticeCodingLogs(userId int64, uid string, needAll bool) ([]model.Su
 	return practiceSubmissionsToLogs(userId, subs), nil
 }
 
-func fetchTrainingHistoryPage(uid string, page, pageSize int) (*trainingHistoryResp, error) {
+func fetchTrainingHistoryPage(ctx context.Context, uid string, page, pageSize int) (*trainingHistoryResp, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	body := fmt.Sprintf(`{"pageNo":%d,"pageSize":%d,"userId":%s}`, page, pageSize, uid)
-	req, err := http.NewRequest(http.MethodPost, nowcoderTrainingHistoryURL, strings.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, nowcoderTrainingHistoryURL, strings.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
@@ -255,7 +277,10 @@ func trainingRecordsToLogs(userId int64, records []trainingHistoryRecord) []mode
 }
 
 // fetchTrainingHistoryLogs 拉主站训练提交历史；失败返回空切片（与原逻辑一致）。
-func fetchTrainingHistoryLogs(userId int64, uid string, needAll bool) []model.SubmitLog {
+func fetchTrainingHistoryLogs(ctx context.Context, userId int64, uid string, needAll bool) []model.SubmitLog {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	limit := nowcoderTrainingLimitIncr
 	if needAll {
 		limit = nowcoderTrainingLimitAll
@@ -271,7 +296,7 @@ func fetchTrainingHistoryLogs(userId int64, uid string, needAll bool) []model.Su
 		return true
 	}
 
-	first, err := fetchTrainingHistoryPage(uid, 1, nowcoderTrainingPageSize)
+	first, err := fetchTrainingHistoryPage(ctx, uid, 1, nowcoderTrainingPageSize)
 	if err != nil {
 		return result
 	}
@@ -279,8 +304,11 @@ func fetchTrainingHistoryLogs(userId int64, uid string, needAll bool) []model.Su
 		return result
 	}
 	for page := 2; page <= first.Data.TotalPage; page++ {
+		if ctx.Err() != nil {
+			break
+		}
 		time.Sleep(nowcoderPageSleep)
-		r, err := fetchTrainingHistoryPage(uid, page, nowcoderTrainingPageSize)
+		r, err := fetchTrainingHistoryPage(ctx, uid, page, nowcoderTrainingPageSize)
 		if err != nil {
 			break
 		}

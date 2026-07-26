@@ -14,6 +14,7 @@ import (
 	"cwxu-algo/app/common/discovery"
 	"cwxu-algo/app/common/notify"
 	"cwxu-algo/app/common/permission"
+	"cwxu-algo/app/common/rbac"
 	"cwxu-algo/app/common/utils"
 	"cwxu-algo/app/common/utils/auth"
 	"cwxu-algo/app/user/internal/biz"
@@ -24,9 +25,7 @@ import (
 
 	"github.com/go-kratos/kratos/v2/errors"
 	"github.com/go-kratos/kratos/v2/log"
-	"github.com/go-kratos/kratos/v2/registry"
 	"github.com/go-kratos/kratos/v2/transport"
-	"github.com/go-kratos/kratos/v2/transport/grpc"
 	khttp "github.com/go-kratos/kratos/v2/transport/http"
 	grpc2 "google.golang.org/grpc"
 	"gorm.io/gorm"
@@ -118,9 +117,9 @@ func (p *ProfileService) GetByName(ctx context.Context, req *profile.GetByNameRe
 }
 
 func (p *ProfileService) MoveGroup(ctx context.Context, req *profile.MoveGroupReq) (*profile.MoveGroupRes, error) {
-	// 组织 staff（教练/队长/团队管理员）或站点管理员
-	if !auth.VerifyStaff(ctx) {
-		return nil, errors.Forbidden("权限不足", "需要教练、队长、团队管理员或站点管理员权限")
+	// 细粒度权限：分组管理
+	if !auth.HasPerm(ctx, rbac.PermOrgGroupManage) {
+		return nil, errors.Forbidden("权限不足", "需要分组管理权限")
 	}
 	pd := auth.GetCurrentUser(ctx)
 	if pd == nil || pd.OrgID == 0 {
@@ -153,13 +152,9 @@ func (p *ProfileService) MoveGroup(ctx context.Context, req *profile.MoveGroupRe
 	}, nil
 }
 
+// coreDataRPC 复用全进程共享的 core-data gRPC 长连接；调用方不得 Close。
 func (p *ProfileService) coreDataRPC() (*grpc2.ClientConn, error) {
-	return grpc.DialInsecure(
-		context.Background(),
-		grpc.WithEndpoint("discovery:///core-data"),
-		grpc.WithDiscovery(p.reg.Reg.(registry.Discovery)),
-		grpc.WithTimeout(20*time.Second),
-	)
+	return sharedCoreDataConn(p.reg)
 }
 
 func (p *ProfileService) GetList(ctx context.Context, req *profile.GetListReq) (*profile.GetListRes, error) {
@@ -177,15 +172,15 @@ func (p *ProfileService) GetList(ctx context.Context, req *profile.GetListReq) (
 	scope := req.Scope
 	useSite := false
 	if scope == "site" {
-		if !auth.VerifySiteAdmin(ctx) {
-			return nil, errors.Forbidden("权限不足", "仅站点管理员可查看全站用户")
+		if !auth.HasPerm(ctx, rbac.PermSiteUserList) {
+			return nil, errors.Forbidden("权限不足", "需要全站用户列表权限")
 		}
 		useSite = true
 	} else if scope == "org" {
 		useSite = false
 	} else {
 		// 兼容旧客户端
-		useSite = auth.VerifySiteAdmin(ctx)
+		useSite = auth.HasPerm(ctx, rbac.PermSiteUserList)
 	}
 	keyword := strings.TrimSpace(req.GetKeyword())
 	// BindQuery 对手写 proto 字段/bool 偶发丢参；再从 URL 兜底解析
@@ -218,24 +213,18 @@ func (p *ProfileService) GetList(ctx context.Context, req *profile.GetListReq) (
 	for _, v := range pf {
 		ids = append(ids, int64(v.ID))
 	}
-	// 获取 最后一次 提交时间
-	conn, err := p.coreDataRPC()
-	if err != nil {
-		return nil, InternalServer
-	}
-	defer conn.Close()
-	sb := submit_log.NewSubmitClient(conn)
-	sp, err := sb.LastSubmitTime(ctx, &submit_log.LastSubmitTimeReq{UserIds: ids})
-	if err != nil {
-		log.Info(err.Error())
-		return nil, InternalServer
-	}
-
-	var timeMap map[int64]int64
-	err = utils.GobDecoder(sp.TimeMap, &timeMap)
-	if err != nil {
-		log.Info(err.Error())
-		return nil, InternalServer
+	// 获取 最后一次 提交时间；core-data 不可用时降级为空提交时间，不阻断整页列表
+	timeMap := map[int64]int64{}
+	if conn, err := p.coreDataRPC(); err != nil {
+		log.Warnf("GetList core-data 连接不可用，最后提交时间降级为空: %v", err)
+	} else {
+		sb := submit_log.NewSubmitClient(conn)
+		if sp, err := sb.LastSubmitTime(ctx, &submit_log.LastSubmitTimeReq{UserIds: ids}); err != nil {
+			log.Warnf("GetList 查询最后提交时间失败，降级为空: %v", err)
+		} else if err := utils.GobDecoder(sp.TimeMap, &timeMap); err != nil {
+			log.Warnf("GetList 解析最后提交时间失败，降级为空: %v", err)
+			timeMap = map[int64]int64{}
+		}
 	}
 
 	uids := make([]uint, 0, len(pf))
@@ -532,7 +521,6 @@ func (p *ProfileService) buildGetByIdRes(ctx context.Context, pf *model.User) (*
 	if conn, err := p.coreDataRPC(); err != nil {
 		log.Warnf("GetById spider dial user=%d: %v", pf.ID, err)
 	} else {
-		defer conn.Close()
 		s := spider.NewSpiderClient(conn)
 		if sp, err := s.GetSpider(ctx, &spider.GetSpiderReq{UserId: int64(pf.ID)}); err != nil {
 			log.Warnf("GetById spider user=%d: %v", pf.ID, err)
@@ -665,8 +653,8 @@ func (p *ProfileService) GetSyncPolicies(ctx context.Context, req *profile.GetSy
 
 // SetSyncExempt 站点管理员：永不休眠
 func (p *ProfileService) SetSyncExempt(ctx context.Context, req *profile.SetSyncExemptReq) (*profile.SetSyncExemptRes, error) {
-	if !auth.VerifySiteAdmin(ctx) {
-		return nil, errors.Forbidden("权限不足", "仅站点管理员可设置")
+	if !auth.HasPerm(ctx, rbac.PermSiteUserSync) {
+		return nil, errors.Forbidden("权限不足", "需要用户同步运维权限")
 	}
 	if req.UserId <= 0 {
 		return nil, errors.BadRequest("参数错误", "用户ID无效")
@@ -686,8 +674,8 @@ func (p *ProfileService) SetSyncExempt(ctx context.Context, req *profile.SetSync
 
 // ClearDormant 站点管理员：批量刷新最近活跃时间，一次性解除休眠（非永久豁免）
 func (p *ProfileService) ClearDormant(ctx context.Context, req *profile.ClearDormantReq) (*profile.ClearDormantRes, error) {
-	if !auth.VerifySiteAdmin(ctx) {
-		return nil, errors.Forbidden("权限不足", "仅站点管理员可操作")
+	if !auth.HasPerm(ctx, rbac.PermSiteUserSync) {
+		return nil, errors.Forbidden("权限不足", "需要用户同步运维权限")
 	}
 	if req == nil || len(req.UserIds) == 0 {
 		return nil, errors.BadRequest("参数错误", "请选择至少一个用户")
@@ -700,21 +688,10 @@ func (p *ProfileService) ClearDormant(ctx context.Context, req *profile.ClearDor
 	if err != nil {
 		return nil, errors.InternalServer("内部错误", err.Error())
 	}
-	// 站内信通知被解冻用户
+	// 站内信通知被解冻用户（一次批量插入）
 	if n > 0 && p.db != nil {
-		for _, id := range req.UserIds {
-			if id <= 0 {
-				continue
-			}
-			_ = notify.Create(p.db, notify.Row{
-				UserID:  uint(id),
-				Type:    notify.TypeUserUnfrozen,
-				Title:   "账号已恢复活跃",
-				Body:    "站点管理员已解除你的不活跃状态，自动同步等功能将按规则恢复",
-				RefType: "user",
-				RefID:   uint(id),
-			})
-		}
+		p.batchNotifyUsers(req.UserIds, notify.TypeUserUnfrozen,
+			"账号已恢复活跃", "站点管理员已解除你的不活跃状态，自动同步等功能将按规则恢复")
 	}
 	return &profile.ClearDormantRes{
 		Code:    0,
@@ -725,8 +702,8 @@ func (p *ProfileService) ClearDormant(ctx context.Context, req *profile.ClearDor
 
 // ForceDormant 站点管理员：强制冻结（不遵循组织约定/始终同步等豁免；登录或解除后恢复）
 func (p *ProfileService) ForceDormant(ctx context.Context, req *profile.ForceDormantReq) (*profile.ForceDormantRes, error) {
-	if !auth.VerifySiteAdmin(ctx) {
-		return nil, errors.Forbidden("权限不足", "仅站点管理员可操作")
+	if !auth.HasPerm(ctx, rbac.PermSiteUserSync) {
+		return nil, errors.Forbidden("权限不足", "需要用户同步运维权限")
 	}
 	if req == nil {
 		return nil, errors.BadRequest("参数错误", "请求无效")
@@ -804,19 +781,9 @@ func (p *ProfileService) ForceDormant(ctx context.Context, req *profile.ForceDor
 		return nil, errors.InternalServer("内部错误", err.Error())
 	}
 	if n > 0 && p.db != nil {
-		for _, id := range existing {
-			if id <= 0 {
-				continue
-			}
-			_ = notify.Create(p.db, notify.Row{
-				UserID:  uint(id),
-				Type:    notify.TypeUserFrozen,
-				Title:   "账号同步已暂停",
-				Body:    "站点管理员已暂停你的自动同步与部分后台任务",
-				RefType: "user",
-				RefID:   uint(id),
-			})
-		}
+		// 一次批量插入站内信
+		p.batchNotifyUsers(existing, notify.TypeUserFrozen,
+			"账号同步已暂停", "站点管理员已暂停你的自动同步与部分后台任务")
 	}
 	skipped := int32(requested) - int32(n)
 	if skipped < 0 {
@@ -836,8 +803,8 @@ func (p *ProfileService) ForceDormant(ctx context.Context, req *profile.ForceDor
 
 // SetDisabled 站点管理员：禁用/启用账号（禁用后无法登录，后台同步一并暂停）
 func (p *ProfileService) SetDisabled(ctx context.Context, req *profile.SetDisabledReq) (*profile.SetDisabledRes, error) {
-	if !auth.VerifySiteAdmin(ctx) {
-		return nil, errors.Forbidden("权限不足", "仅站点管理员可操作")
+	if !auth.HasPerm(ctx, rbac.PermSiteUserDisable) {
+		return nil, errors.Forbidden("权限不足", "需要禁用账号权限")
 	}
 	if req == nil || req.UserId <= 0 {
 		return nil, errors.BadRequest("参数错误", "用户ID无效")
@@ -936,8 +903,8 @@ func (p *ProfileService) GetNonPublicOrgUserIds(ctx context.Context, _ *profile.
 
 // SetProblemPipeline 站点管理员设置个人题面爬取 / AI 覆盖
 func (p *ProfileService) SetProblemPipeline(ctx context.Context, req *profile.SetProblemPipelineReq) (*profile.SetProblemPipelineRes, error) {
-	if !auth.VerifySiteAdmin(ctx) {
-		return nil, errors.Forbidden("权限不足", "仅站点管理员可设置题面流水线开关")
+	if !auth.HasPerm(ctx, rbac.PermSiteUserSync) {
+		return nil, errors.Forbidden("权限不足", "需要用户同步运维权限")
 	}
 	if req.UserId <= 0 {
 		return nil, errors.BadRequest("参数错误", "用户ID无效")
@@ -964,8 +931,8 @@ func (p *ProfileService) SetProblemPipeline(ctx context.Context, req *profile.Se
 
 // SetSyncIntervals 站点管理员设置个人爬取 / AI 总结间隔（优先级高于组织）
 func (p *ProfileService) SetSyncIntervals(ctx context.Context, req *profile.SetSyncIntervalsReq) (*profile.SetSyncIntervalsRes, error) {
-	if !auth.VerifySiteAdmin(ctx) {
-		return nil, errors.Forbidden("权限不足", "仅站点管理员可设置个人同步间隔")
+	if !auth.HasPerm(ctx, rbac.PermSiteUserSync) {
+		return nil, errors.Forbidden("权限不足", "需要用户同步运维权限")
 	}
 	if req.UserId <= 0 {
 		return nil, errors.BadRequest("参数错误", "用户ID无效")
@@ -1034,8 +1001,8 @@ func (p *ProfileService) GetByIds(ctx context.Context, req *profile.GetByIdsReq)
 
 // Delete 站点管理员删除用户：清空 core 训练数据 + user 库关联后硬删除账号
 func (p *ProfileService) Delete(ctx context.Context, req *profile.DeleteReq) (*profile.DeleteRes, error) {
-	if !auth.VerifyAdmin(ctx) {
-		return nil, errors.Forbidden("权限不足", "仅管理员可删除用户")
+	if !auth.HasPerm(ctx, rbac.PermSiteUserDelete) {
+		return nil, errors.Forbidden("权限不足", "需要删除账号权限")
 	}
 	if req.UserId <= 0 {
 		return nil, errors.BadRequest("参数错误", "用户ID无效")
@@ -1057,7 +1024,6 @@ func (p *ProfileService) Delete(ctx context.Context, req *profile.DeleteReq) (*p
 	if err != nil {
 		return nil, errors.InternalServer("内部错误", "无法连接数据服务: "+err.Error())
 	}
-	defer conn.Close()
 	sc := spider.NewSpiderClient(conn)
 	purgeRes, err := sc.PurgeUserData(ctx, &spider.PurgeUserDataReq{UserId: req.UserId})
 	if err != nil {
@@ -1075,12 +1041,47 @@ func (p *ProfileService) Delete(ctx context.Context, req *profile.DeleteReq) (*p
 	}, nil
 }
 
+// batchNotifyUsers 批量冻结/解冻等场景的站内信：在 user 侧组好 []model.Notification
+// 后一次 CreateInBatches 落库（notify 包仅提供逐条接口，且归 common 不在本侧修改）。
+func (p *ProfileService) batchNotifyUsers(userIDs []int64, notifType, title, body string) {
+	if p == nil || p.db == nil || len(userIDs) == 0 {
+		return
+	}
+	now := time.Now()
+	seen := make(map[int64]struct{}, len(userIDs))
+	rows := make([]model.Notification, 0, len(userIDs))
+	for _, id := range userIDs {
+		if id <= 0 {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		rows = append(rows, model.Notification{
+			CreatedAt: now,
+			UserID:    uint(id),
+			Type:      notifType,
+			Title:     title,
+			Body:      body,
+			RefType:   "user",
+			RefID:     uint(id),
+		})
+	}
+	if len(rows) == 0 {
+		return
+	}
+	if err := p.db.CreateInBatches(&rows, 200).Error; err != nil {
+		log.Warnf("批量站内信写入失败 type=%s count=%d: %v", notifType, len(rows), err)
+	}
+}
+
 // canManageEmailPrefs 本人、站点管理员，或当前组织 staff 管理本组织成员
 func (p *ProfileService) canManageEmailPrefs(ctx context.Context, targetUserID int64) bool {
 	if auth.VerifySelfOrAbove(ctx, uint(targetUserID)) {
 		return true
 	}
-	if !auth.VerifyStaff(ctx) {
+	if !auth.HasPerm(ctx, rbac.PermOrgMemberEmail) {
 		return false
 	}
 	pd := auth.GetCurrentUser(ctx)

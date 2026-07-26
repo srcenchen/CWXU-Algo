@@ -87,8 +87,8 @@ func ApplyDailyDeltas(ctx context.Context, db *gorm.DB, deltas []DailyDelta) err
 		CreateInBatches(&rows, batch).Error
 }
 
-// FilterNewSubmitLogs 入库前去重（submit_logs.submit_id 唯一约束为真相）：
-//  1) 本批内按 submit_id 去重
+// FilterNewSubmitLogs 入库前去重（submit_logs (platform, submit_id) 唯一约束为真相）：
+//  1) 本批内按 (platform, submit_id) 去重
 //  2) 去掉 submit_logs 已有（防全量重爬对 daily/user_ac 双计）
 //  3) 力扣 lc-prob：同一用户同一 titleSlug 已有则跳过
 //
@@ -105,26 +105,29 @@ func FilterNewSubmitLogs(ctx context.Context, db *gorm.DB, logs []model.SubmitLo
 		return nil, nil
 	}
 
-	ids := make([]string, len(logs))
+	// 按平台分组查已有 submit_id，避免跨平台撞号误判为已入库
+	byPlat := make(map[string][]string, 2)
 	for i := range logs {
-		ids[i] = logs[i].SubmitID
+		byPlat[logs[i].Platform] = append(byPlat[logs[i].Platform], logs[i].SubmitID)
 	}
 	const chunk = 500
-	exist := make(map[string]struct{}, len(ids)/2)
-	for i := 0; i < len(ids); i += chunk {
-		j := i + chunk
-		if j > len(ids) {
-			j = len(ids)
-		}
-		part := ids[i:j]
-		var found []string
-		if err := db.WithContext(ctx).Model(&model.SubmitLog{}).
-			Where("submit_id IN ?", part).
-			Pluck("submit_id", &found).Error; err != nil {
-			return nil, err
-		}
-		for _, id := range found {
-			exist[id] = struct{}{}
+	exist := make(map[string]struct{}, len(logs)/2)
+	for plat, ids := range byPlat {
+		for i := 0; i < len(ids); i += chunk {
+			j := i + chunk
+			if j > len(ids) {
+				j = len(ids)
+			}
+			part := ids[i:j]
+			var found []string
+			if err := db.WithContext(ctx).Model(&model.SubmitLog{}).
+				Where("platform = ? AND submit_id IN ?", plat, part).
+				Pluck("submit_id", &found).Error; err != nil {
+				return nil, err
+			}
+			for _, id := range found {
+				exist[plat+"\x00"+id] = struct{}{}
+			}
 		}
 	}
 	out := make([]model.SubmitLog, 0, len(logs))
@@ -132,7 +135,7 @@ func FilterNewSubmitLogs(ctx context.Context, db *gorm.DB, logs []model.SubmitLo
 		if logs[i].SubmitID == "" {
 			continue
 		}
-		if _, ok := exist[logs[i].SubmitID]; ok {
+		if _, ok := exist[logs[i].Platform+"\x00"+logs[i].SubmitID]; ok {
 			continue
 		}
 		out = append(out, logs[i])
@@ -213,7 +216,7 @@ func PruneLeetCodeProbDuplicates(ctx context.Context, db *gorm.DB, userID int64)
 	return res.RowsAffected, res.Error
 }
 
-// dedupeSubmitLogsBySubmitID 本批内按 submit_id 去重，保留首次出现
+// dedupeSubmitLogsBySubmitID 本批内按 (platform, submit_id) 去重，保留首次出现
 func dedupeSubmitLogsBySubmitID(logs []model.SubmitLog) []model.SubmitLog {
 	if len(logs) <= 1 {
 		return logs
@@ -225,10 +228,11 @@ func dedupeSubmitLogsBySubmitID(logs []model.SubmitLog) []model.SubmitLog {
 		if id == "" {
 			continue
 		}
-		if _, ok := seen[id]; ok {
+		key := logs[i].Platform + "\x00" + id
+		if _, ok := seen[key]; ok {
 			continue
 		}
-		seen[id] = struct{}{}
+		seen[key] = struct{}{}
 		out = append(out, logs[i])
 	}
 	return out

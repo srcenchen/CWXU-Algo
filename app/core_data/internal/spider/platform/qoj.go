@@ -1,6 +1,7 @@
 package platform
 
 import (
+	"context"
 	"cwxu-algo/app/common/utils/ojhttp"
 	"crypto/md5"
 	"encoding/hex"
@@ -18,6 +19,15 @@ import (
 	"cwxu-algo/app/core_data/internal/spider"
 
 	"github.com/go-kratos/kratos/v2/log"
+)
+
+const (
+	// qojLoginMaxRetry 登录重试上限（原 20 次过多，风控下反复打接口）
+	qojLoginMaxRetry = 5
+	// qojLoginBaseDelay 登录重试退避基数（指数递增）
+	qojLoginBaseDelay = 500 * time.Millisecond
+	// qojMaxPagesAll needAll 翻页硬顶（对齐洛谷 200 页），防无界翻页
+	qojMaxPagesAll = 200
 )
 
 type NewQOJ struct {
@@ -116,11 +126,10 @@ func (q *NewQOJ) doLogin(
 }
 
 func (q *NewQOJ) login(username, password string) (*http.Client, error) {
-	const maxRetry = 20
 	jar, _ := cookiejar.New(nil)
 	client := ojhttp.NewWithJar(jar)
 
-	for attempt := 1; attempt <= maxRetry; attempt++ {
+	for attempt := 1; attempt <= qojLoginMaxRetry; attempt++ {
 		ok, body, err := q.doLogin(client, username, password)
 		if err != nil {
 			return nil, err
@@ -128,13 +137,16 @@ func (q *NewQOJ) login(username, password string) (*http.Client, error) {
 		if ok {
 			return client, err
 		}
-		log.Info(fmt.Sprintf("retry %d/%d, resp=%s\n", attempt, maxRetry, body))
+		log.Info(fmt.Sprintf("retry %d/%d, resp=%s\n", attempt, qojLoginMaxRetry, body))
+		// 指数退避，减轻风控/验证码接口压力
+		time.Sleep(qojLoginBaseDelay << (attempt - 1))
 	}
-	return nil, fmt.Errorf("login failed after %d retries", maxRetry)
+	return nil, fmt.Errorf("login failed after %d retries", qojLoginMaxRetry)
 }
 
-func (q *NewQOJ) isSessionValid() bool {
-	if q.client == nil {
+// isSessionValid 校验给定客户端会话是否有效（锁内快照传入，网络请求不持锁读共享字段）
+func (q *NewQOJ) isSessionValid(client *http.Client) bool {
+	if client == nil {
 		return false
 	}
 
@@ -144,7 +156,7 @@ func (q *NewQOJ) isSessionValid() bool {
 	}
 	setBrowserHeaders(req)
 
-	resp, err := q.client.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return false
 	}
@@ -164,7 +176,13 @@ func (q *NewQOJ) getClient() (*http.Client, error) {
 	q.mu.RUnlock()
 
 	if cached != nil && !expired {
-		if q.isSessionValid() {
+		if q.isSessionValid(cached) {
+			// 会话命中：刷新 lastUsed，活跃会话不被 30 分钟窗口误判过期
+			q.mu.Lock()
+			if q.client == cached {
+				q.lastUsed = time.Now()
+			}
+			q.mu.Unlock()
 			return cached, nil
 		}
 	}
@@ -172,7 +190,8 @@ func (q *NewQOJ) getClient() (*http.Client, error) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 
-	if q.client != nil && time.Since(q.lastUsed) < 30*time.Minute && q.isSessionValid() {
+	if q.client != nil && time.Since(q.lastUsed) < 30*time.Minute && q.isSessionValid(q.client) {
+		q.lastUsed = time.Now()
 		return q.client, nil
 	}
 
@@ -190,7 +209,10 @@ func stripTags(s string) string {
 	return strings.TrimSpace(re.ReplaceAllString(s, ""))
 }
 
-func (q *NewQOJ) FetchSubmitLog(userId int64, username string, needAll bool) ([]model.SubmitLog, error) {
+func (q *NewQOJ) FetchSubmitLog(ctx context.Context, userId int64, username string, needAll bool) ([]model.SubmitLog, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	baseUrl := fmt.Sprintf("https://qoj.ac/submissions?submitter=%s&page=", url.QueryEscape(username))
 	client, err := q.getClient()
 	if err != nil {
@@ -201,8 +223,11 @@ func (q *NewQOJ) FetchSubmitLog(userId int64, username string, needAll bool) ([]
 	page := 1
 
 	for {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		reqURL := fmt.Sprintf("%s%d", baseUrl, page)
-		req, err := http.NewRequest("GET", reqURL, nil)
+		req, err := http.NewRequestWithContext(ctx, "GET", reqURL, nil)
 		if err != nil {
 			return nil, err
 		}
@@ -270,6 +295,10 @@ func (q *NewQOJ) FetchSubmitLog(userId int64, username string, needAll bool) ([]
 		}
 
 		if !needAll {
+			break
+		}
+		// 翻页硬顶（对齐洛谷 200 页），防异常用户/解析漂移导致无界翻页
+		if page >= qojMaxPagesAll {
 			break
 		}
 

@@ -18,6 +18,9 @@ var (
 	readTimeout       = time.Second * 15
 	writeTimeout      = time.Second * 15
 	idleTimeout       = time.Second * 120
+	// 环境变量显式配置时不再被 EnsureTimeoutAtLeast 动态抬高
+	readTimeoutFromEnv  = false
+	writeTimeoutFromEnv = false
 )
 
 func init() {
@@ -31,16 +34,35 @@ func init() {
 		if readTimeout, err = time.ParseDuration(v); err != nil {
 			panic(err)
 		}
+		readTimeoutFromEnv = true
 	}
 	if v := os.Getenv("PROXY_WRITE_TIMEOUT"); v != "" {
 		if writeTimeout, err = time.ParseDuration(v); err != nil {
 			panic(err)
 		}
+		writeTimeoutFromEnv = true
 	}
 	if v := os.Getenv("PROXY_IDLE_TIMEOUT"); v != "" {
 		if idleTimeout, err = time.ParseDuration(v); err != nil {
 			panic(err)
 		}
+	}
+}
+
+// EnsureTimeoutAtLeast 依据端点最大超时抬高服务器 read/write 超时，
+// 避免长端点（如 /v1/core/* 120s）尚未完成就被 writeTimeout(默认 15s) 掐断。
+// 须在 NewProxy 之前调用；PROXY_READ_TIMEOUT / PROXY_WRITE_TIMEOUT 显式配置时以环境变量为准。
+func EnsureTimeoutAtLeast(min time.Duration) {
+	if min <= 0 {
+		return
+	}
+	if !writeTimeoutFromEnv && writeTimeout < min {
+		log.Infof("proxy write timeout raised to %s to cover the slowest endpoint timeout", min)
+		writeTimeout = min
+	}
+	if !readTimeoutFromEnv && readTimeout < min {
+		log.Infof("proxy read timeout raised to %s to cover the slowest endpoint timeout", min)
+		readTimeout = min
 	}
 }
 

@@ -27,8 +27,6 @@ import (
 	"cwxu-algo/app/user/internal/data/model"
 
 	"github.com/go-kratos/kratos/v2/log"
-	"github.com/go-kratos/kratos/v2/registry"
-	"github.com/go-kratos/kratos/v2/transport/grpc"
 	"github.com/redis/go-redis/v9"
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
@@ -229,17 +227,12 @@ func (s *AuthService) enqueueWakeSpider(userID int64) bool {
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
-		conn, err := grpc.DialInsecure(
-			ctx,
-			grpc.WithEndpoint("discovery:///core-data"),
-			grpc.WithDiscovery(s.reg.Reg.(registry.Discovery)),
-			grpc.WithTimeout(12*time.Second),
-		)
+		// 复用共享 core-data 长连接（不 Close）
+		conn, err := sharedCoreDataConn(s.reg)
 		if err != nil {
 			log.Warnf("wake spider dial user=%d: %v", userID, err)
 			return
 		}
-		defer conn.Close()
 		cli := spiderpb.NewSpiderClient(conn)
 		res, err := cli.EnqueueUserSpider(ctx, &spiderpb.EnqueueUserSpiderReq{
 			UserId:  userID,
@@ -469,14 +462,19 @@ func (s *AuthService) SendCode(ctx context.Context, req *pb.SendCodeReq) (*pb.Se
 	}
 	_ = s.rdb.Set(ctx, cdKey, "1", codeCooldown).Err()
 
+	// 验证码已写入 Redis，邮件异步发送：SMTP 慢/超时不再阻塞接口。
+	// 权衡：发送失败用户无感知（仅打 Error 日志），可等冷却结束后重新获取。
 	subject, body := codeMailContent(purpose, code, s.siteTitle(ctx))
-	if err := sender.Send(email, subject, body); err != nil {
-		log.Errorf("发送验证码邮件失败: %v", err)
-		_ = s.rdb.Del(ctx, codeKey).Err()
-		res.Success = false
-		res.Message = "邮件发送失败，请稍后重试"
-		return res, nil
-	}
+	go func(email, subject, body string) {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Errorf("发送验证码邮件 panic（email=%s）: %v", email, r)
+			}
+		}()
+		if err := sender.Send(email, subject, body); err != nil {
+			log.Errorf("发送验证码邮件失败（email=%s）: %v", email, err)
+		}
+	}(email, subject, body)
 
 	res.Success = true
 	res.Message = "验证码已发送，请查收邮箱"

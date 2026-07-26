@@ -5,17 +5,15 @@ import (
 	"cwxu-algo/api/core/v1/submit_log"
 	"cwxu-algo/api/user/v1/group"
 	"cwxu-algo/app/common/discovery"
+	"cwxu-algo/app/common/rbac"
 	"cwxu-algo/app/common/utils"
 	"cwxu-algo/app/common/utils/auth"
 	"cwxu-algo/app/user/internal/biz"
 	"cwxu-algo/app/user/internal/data/dal"
 	"strconv"
-	"time"
 
 	"github.com/go-kratos/kratos/v2/errors"
 	"github.com/go-kratos/kratos/v2/log"
-	"github.com/go-kratos/kratos/v2/registry"
-	"github.com/go-kratos/kratos/v2/transport/grpc"
 	grpc2 "google.golang.org/grpc"
 )
 
@@ -26,19 +24,15 @@ type GroupService struct {
 	groupDal     *dal.GroupDal
 }
 
+// coreDataRPC 复用全进程共享的 core-data gRPC 长连接；调用方不得 Close。
 func (g *GroupService) coreDataRPC() (*grpc2.ClientConn, error) {
-	return grpc.DialInsecure(
-		context.Background(),
-		grpc.WithEndpoint("discovery:///core-data"),
-		grpc.WithDiscovery(g.reg.Reg.(registry.Discovery)),
-		grpc.WithTimeout(20*time.Second),
-	)
+	return sharedCoreDataConn(g.reg)
 }
 
 func (g *GroupService) Create(ctx context.Context, request *group.CreateRequest) (*group.CreateReply, error) {
 	// 教练/队长/团队管理员/站点管理员均可建组
-	if !auth.VerifyStaff(ctx) {
-		return nil, errors.Forbidden("权限不足", "需要教练、队长、团队管理员或站点管理员权限")
+	if !auth.HasPerm(ctx, rbac.PermOrgGroupManage) {
+		return nil, errors.Forbidden("权限不足", "需要分组管理权限")
 	}
 	if request.Name == "" {
 		return nil, errors.BadRequest("参数错误", "组名称不能为空")
@@ -62,8 +56,8 @@ func (g *GroupService) Create(ctx context.Context, request *group.CreateRequest)
 }
 
 func (g *GroupService) Delete(ctx context.Context, request *group.DeleteRequest) (*group.DeleteReply, error) {
-	if !auth.VerifyStaff(ctx) {
-		return nil, errors.Forbidden("权限不足", "需要教练、队长、团队管理员或站点管理员权限")
+	if !auth.HasPerm(ctx, rbac.PermOrgGroupManage) {
+		return nil, errors.Forbidden("权限不足", "需要分组管理权限")
 	}
 	if request.Id == 0 {
 		return nil, errors.BadRequest("参数错误", "组ID不能为空")
@@ -79,8 +73,8 @@ func (g *GroupService) Delete(ctx context.Context, request *group.DeleteRequest)
 }
 
 func (g *GroupService) Get(ctx context.Context, request *group.GetRequest) (*group.GetReply, error) {
-	if !auth.VerifyStaff(ctx) {
-		return nil, errors.Forbidden("权限不足", "需要当前组织管理权限")
+	if !auth.HasPerm(ctx, rbac.PermOrgGroupManage) {
+		return nil, errors.Forbidden("权限不足", "需要分组管理权限")
 	}
 	if err := g.assertGroupInCurrentOrg(ctx, request.Id); err != nil {
 		return nil, err
@@ -132,7 +126,6 @@ func (g *GroupService) Get(ctx context.Context, request *group.GetRequest) (*gro
 		if err != nil {
 			log.Info(err.Error())
 		} else {
-			defer conn.Close()
 			sb := submit_log.NewSubmitClient(conn)
 			sp, err := sb.LastSubmitTime(ctx, &submit_log.LastSubmitTimeReq{UserIds: userIds})
 			if err == nil {
@@ -163,8 +156,8 @@ func (g *GroupService) Get(ctx context.Context, request *group.GetRequest) (*gro
 }
 
 func (g *GroupService) List(ctx context.Context, request *group.ListRequest) (*group.ListReply, error) {
-	if !auth.VerifyStaff(ctx) {
-		return nil, errors.Forbidden("权限不足", "需要当前组织管理权限")
+	if !auth.HasPerm(ctx, rbac.PermOrgGroupManage) {
+		return nil, errors.Forbidden("权限不足", "需要分组管理权限")
 	}
 	page := request.Page
 	if page < 1 {
@@ -219,8 +212,8 @@ func (g *GroupService) List(ctx context.Context, request *group.ListRequest) (*g
 }
 
 func (g *GroupService) Update(ctx context.Context, request *group.UpdateRequest) (*group.UpdateReply, error) {
-	if !auth.VerifyStaff(ctx) {
-		return nil, errors.Forbidden("权限不足", "需要教练、队长、团队管理员或站点管理员权限")
+	if !auth.HasPerm(ctx, rbac.PermOrgGroupManage) {
+		return nil, errors.Forbidden("权限不足", "需要分组管理权限")
 	}
 	if request.Id == 0 {
 		return nil, errors.BadRequest("参数错误", "组ID不能为空")

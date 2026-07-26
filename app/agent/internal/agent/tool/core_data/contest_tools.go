@@ -6,27 +6,21 @@ import (
 	"fmt"
 	"net/url"
 	"strconv"
-	"time"
 
 	"cwxu-algo/api/core/v1/contest_log"
 
 	"github.com/go-kratos/kratos/v2/log"
 	"github.com/go-kratos/kratos/v2/registry"
-	"github.com/go-kratos/kratos/v2/transport/grpc"
 	"github.com/volcengine/volcengine-go-sdk/service/arkruntime/model"
 	grpc2 "google.golang.org/grpc"
 )
 
-func dialCoreContest(reg *registry.Registrar, ctx context.Context) (*grpc2.ClientConn, error) {
+func dialCoreContest(reg *registry.Registrar, _ context.Context) (*grpc2.ClientConn, error) {
 	if reg == nil {
 		return nil, fmt.Errorf("registry 未配置")
 	}
-	return grpc.DialInsecure(
-		toolRPCContext(ctx),
-		grpc.WithEndpoint("discovery:///core-data"),
-		grpc.WithDiscovery((*reg).(registry.Discovery)),
-		grpc.WithTimeout(20*time.Second),
-	)
+	// 复用共享长连接，避免每次工具调用 dial+Close
+	return SharedGRPCConn(reg, "core-data")
 }
 
 // ---------- contest_list ----------
@@ -91,7 +85,6 @@ func (c *ContestListTool) AiInterface(jsonStr string) string {
 	if err != nil {
 		return "连接失败: " + err.Error()
 	}
-	defer conn.Close()
 	cli := contest_log.NewContestClient(conn)
 	res, err := cli.GetContestList(toolRPCContext(c.ctx), &contest_log.GetContestListReq{
 		UserId:   p.UserId,
@@ -190,7 +183,6 @@ func (c *ContestRankingTool) AiInterface(jsonStr string) string {
 	if err != nil {
 		return "连接失败: " + err.Error()
 	}
-	defer conn.Close()
 	cli := contest_log.NewContestClient(conn)
 	req := &contest_log.GetContestRankingReq{
 		ContestId: p.ContestId,
@@ -291,7 +283,6 @@ func (c *ContestHistoryTool) AiInterface(jsonStr string) string {
 	if err != nil {
 		return "连接失败: " + err.Error()
 	}
-	defer conn.Close()
 	cli := contest_log.NewContestClient(conn)
 	res, err := cli.GetUserContestHistory(toolRPCContext(c.ctx), &contest_log.GetUserContestHistoryReq{
 		UserId:   p.UserId,

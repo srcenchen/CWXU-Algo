@@ -6,10 +6,11 @@ import (
 )
 
 type SubmitLog struct {
-	ID         uint      `gorm:"comment:ID"`
-	Platform   string    `gorm:"comment:平台"`
+	ID       uint  `gorm:"comment:ID"`
+	// (platform, submit_id) 复合唯一：不同 OJ 的数字提交号会撞（如 CF 123 与洛谷 123）
+	Platform   string    `gorm:"comment:平台;uniqueIndex:idx_submit_plat_sid,priority:1"`
 	UserID     int64     `gorm:"comment:用户ID;index;index:idx_submit_user_time,priority:1;index:idx_submit_user_isac_time,priority:1"`
-	SubmitID   string    `gorm:"comment:提交ID;unique"`
+	SubmitID   string    `gorm:"comment:提交ID;uniqueIndex:idx_submit_plat_sid,priority:2"`
 	Contest    string    `gorm:"comment:比赛名称"`
 	Problem    string    `gorm:"comment:问题"`
 	Lang       string    `gorm:"comment:语言"`

@@ -69,6 +69,8 @@ func (uc *SummaryUseCase) PersonalLastDay(userId int64) error {
 
 	data, err := uc.loadDailyReportData(ctx, userId)
 	if err != nil {
+		// 瞬时失败：释放锁，MQ 重试可立即重进，不被 3 分钟锁静默吞掉
+		uc.releaseLock(lockKey)
 		return err
 	}
 
@@ -113,6 +115,7 @@ func (uc *SummaryUseCase) PersonalLastDay(userId int64) error {
 
 	subject := fmt.Sprintf("【%s 日报】%s · %s", brand, formatCNDate(data.Yesterday), data.Name)
 	if err := uc.sendHTMLEmail(data.Email, subject, html); err != nil {
+		uc.releaseLock(lockKey)
 		return fmt.Errorf("发送日报失败: %w", err)
 	}
 	log.Infof("用户 %d 日报已发送至 %s", userId, data.Email)
@@ -181,8 +184,9 @@ func (uc *SummaryUseCase) WeeklyStaff(userId int64) error {
 		return nil
 	}
 
+	// 锁 TTL ≥ 最大工作时长（工作 ctx 8 分钟），防止未完成时锁先过期导致并发重跑
 	lockKey := fmt.Sprintf("agent:lock:summary:weekly:%d", userId)
-	if !uc.tryAcquireLock(context.Background(), lockKey, 5*time.Minute) {
+	if !uc.tryAcquireLock(context.Background(), lockKey, 10*time.Minute) {
 		log.Infof("用户 %d 周报发送进行中，跳过", userId)
 		return nil
 	}
@@ -243,7 +247,6 @@ func (uc *SummaryUseCase) userStaffOrgIDs(ctx context.Context, userId int64) []i
 	if err != nil {
 		return nil
 	}
-	defer conn.Close()
 	cli := profile2.NewProfileClient(conn)
 	res, err := cli.GetStaffOrgIds(ctx, &profile2.GetStaffOrgIdsReq{UserId: userId})
 	if err != nil || res == nil {
@@ -263,8 +266,10 @@ func (uc *SummaryUseCase) ensureSharedWeeklyReport(ctx context.Context, orgID, u
 		return h, id, true, nil
 	}
 
+	// 等锁上限大幅缩短：单 worker 不能被 2s 轮询占死 7 分钟。
+	// 30s 内等不到共享产物就自行生成兜底（可能与持锁方并存一份，可接受且不丢消息）。
 	lockKey := fmt.Sprintf("agent:lock:summary:weekly:org:%d:%s:%s", orgID, startS, endS)
-	deadline := time.Now().Add(7 * time.Minute)
+	deadline := time.Now().Add(30 * time.Second)
 	for {
 		if err := ctx.Err(); err != nil {
 			return "", "", false, err

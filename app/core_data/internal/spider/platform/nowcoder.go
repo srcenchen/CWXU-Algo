@@ -1,6 +1,7 @@
 package platform
 
 import (
+	"context"
 	"fmt"
 	"strconv"
 	"strings"
@@ -27,12 +28,12 @@ func (nc NewNowCoder) Name() string {
 
 // FetchSubmitLog 合并竞赛练习提交与主站训练提交。
 // username 为牛客竞赛 uid（数字），与绑定 platforms.username 一致。
-func (nc NewNowCoder) FetchSubmitLog(userId int64, username string, needAll bool) ([]model.SubmitLog, error) {
-	practice, err := fetchPracticeCodingLogs(userId, username, needAll)
+func (nc NewNowCoder) FetchSubmitLog(ctx context.Context, userId int64, username string, needAll bool) ([]model.SubmitLog, error) {
+	practice, err := fetchPracticeCodingLogs(ctx, userId, username, needAll)
 	if err != nil {
 		return nil, err
 	}
-	training := fetchTrainingHistoryLogs(userId, username, needAll)
+	training := fetchTrainingHistoryLogs(ctx, userId, username, needAll)
 	out := make([]model.SubmitLog, 0, len(practice)+len(training))
 	out = append(out, practice...)
 	out = append(out, training...)

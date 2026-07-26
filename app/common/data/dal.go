@@ -69,8 +69,12 @@ func GetCacheDalTTL[T any](
 
 	// miss：singleflight 合并并发回源
 	v, err, _ := cacheSF.Do(cacheKey, func() (interface{}, error) {
+		// 回源 ctx 与首个调用者解耦：首个调用者取消不应拖死同 key 的等待者。
+		// 注意 dbFunc 不接收 ctx，其内部若捕获了调用方 ctx 无法在此解耦。
+		sfCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
 		// double-check：其它协程可能已写入
-		if rVal, err := rdb.Get(ctx, cacheKey).Result(); err == nil {
+		if rVal, err := rdb.Get(sfCtx, cacheKey).Result(); err == nil {
 			var data T
 			if err := utils.GobDecoder([]byte(rVal), &data); err != nil {
 				return nil, fmt.Errorf("缓存解析出错 %s", err.Error())
@@ -86,7 +90,7 @@ func GetCacheDalTTL[T any](
 		if err != nil {
 			return nil, errors.New("gob编码失败")
 		}
-		_ = rdb.Set(ctx, cacheKey, b, ttl).Err()
+		_ = rdb.Set(sfCtx, cacheKey, b, ttl).Err()
 		return &data, nil
 	})
 	if err != nil {

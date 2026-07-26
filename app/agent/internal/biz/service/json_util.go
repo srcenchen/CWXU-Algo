@@ -7,12 +7,10 @@ import (
 	"io"
 	"net/http"
 	"strings"
-	"time"
 
 	"cwxu-algo/app/agent/internal/agent/tool/core_data"
 
 	"github.com/go-kratos/kratos/v2/registry"
-	khttp "github.com/go-kratos/kratos/v2/transport/http"
 )
 
 func jsonIndent(v interface{}) (string, error) {
@@ -35,16 +33,11 @@ func httpDiscoveryGet(ctx context.Context, reg *registry.Registrar, service, pat
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	client, err := khttp.NewClient(
-		ctx,
-		khttp.WithEndpoint("discovery:///"+service),
-		khttp.WithDiscovery((*reg).(registry.Discovery)),
-		khttp.WithTimeout(20*time.Second),
-	)
+	// 复用共享长连接客户端，避免每次调用 NewClient+Close
+	client, err := core_data.SharedHTTPClient(reg, service)
 	if err != nil {
 		return nil, 0, err
 	}
-	defer client.Close()
 	if !strings.HasPrefix(path, "/") {
 		path = "/" + path
 	}

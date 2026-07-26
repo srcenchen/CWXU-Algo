@@ -1,6 +1,7 @@
 package platform
 
 import (
+	"context"
 	"cwxu-algo/app/common/utils/ojhttp"
 	"cwxu-algo/app/core_data/internal/data/model"
 	"cwxu-algo/app/core_data/internal/spider"
@@ -26,9 +27,16 @@ type atcJson struct {
 	ExecutionTime int    `json:"execution_time"` // 执行时间（毫秒）
 }
 
-func fetchLog(url string) ([]atcJson, error) {
-	// 发起 Get 请求
-	resp, err := ojhttp.Get(url)
+func fetchLog(ctx context.Context, url string) ([]atcJson, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	// 发起 Get 请求（ctx 透传，调用方超时可中断）
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := ojhttp.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("发起http请求失败: %s", err.Error())
 	}
@@ -49,7 +57,7 @@ func fetchLog(url string) ([]atcJson, error) {
 	return atc, nil
 }
 
-func (p NewAtCoder) FetchSubmitLog(userId int64, username string, needAll bool) (res []model.SubmitLog, err error) {
+func (p NewAtCoder) FetchSubmitLog(ctx context.Context, userId int64, username string, needAll bool) (res []model.SubmitLog, err error) {
 	// needAll=true：from_second=0 全量；false：最近 60 小时
 	t := time.Unix(0, 0)
 	if needAll == false {
@@ -59,7 +67,7 @@ func (p NewAtCoder) FetchSubmitLog(userId int64, username string, needAll bool) 
 		"https://atc.luckysan.top/atcoder/atcoder-api/v3/user/submissions?user=%s&from_second=%d",
 		username, int(t.Unix()),
 	)
-	atc, err := fetchLog(url)
+	atc, err := fetchLog(ctx, url)
 	if err != nil {
 		return nil, err
 	}
@@ -92,7 +100,7 @@ func (p NewAtCoder) FetchSubmitLog(userId int64, username string, needAll bool) 
 			"https://atc.luckysan.top/atcoder/atcoder-api/v3/user/submissions?user=%s&from_second=%d",
 			username, lastEpoch,
 		)
-		atc, err = fetchLog(url)
+		atc, err = fetchLog(ctx, url)
 		if err != nil {
 			return nil, err
 		}
@@ -256,7 +264,7 @@ func fetchAtCoderSubmissions(username string, needAll bool) ([]atcJson, error) {
 		username, from,
 	)
 	for {
-		page, err := fetchLog(url)
+		page, err := fetchLog(context.Background(), url)
 		if err != nil {
 			return nil, err
 		}

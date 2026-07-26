@@ -10,6 +10,7 @@ import (
 	"cwxu-algo/app/common/conf"
 	"cwxu-algo/app/common/mail"
 	"cwxu-algo/app/common/opsmetrics"
+	"cwxu-algo/app/common/rbac"
 	"cwxu-algo/app/common/sitesettings"
 	"cwxu-algo/app/common/utils/auth"
 	"cwxu-algo/app/common/utils/clientip"
@@ -199,8 +200,8 @@ func (s *SiteService) GetConfig(ctx context.Context, _ *site.GetConfigReq) (*sit
 }
 
 func (s *SiteService) GetAdminConfig(ctx context.Context, _ *site.GetAdminConfigReq) (*site.GetAdminConfigRes, error) {
-	if !auth.VerifySiteAdmin(ctx) {
-		return &site.GetAdminConfigRes{Code: 1, Message: "仅站点管理员可查看"}, nil
+	if !auth.HasPerm(ctx, rbac.PermSiteConfigRead) {
+		return &site.GetAdminConfigRes{Code: 1, Message: "需要查看站点配置权限"}, nil
 	}
 	row, err := s.ensureRow(ctx)
 	if err != nil {
@@ -233,8 +234,8 @@ func (s *SiteService) GetAdminConfig(ctx context.Context, _ *site.GetAdminConfig
 }
 
 func (s *SiteService) UpdateConfig(ctx context.Context, req *site.UpdateConfigReq) (*site.UpdateConfigRes, error) {
-	if !auth.VerifySiteAdmin(ctx) {
-		return &site.UpdateConfigRes{Code: 1, Message: "仅站点管理员可修改站点配置"}, nil
+	if !auth.HasPerm(ctx, rbac.PermSiteConfigWrite) {
+		return &site.UpdateConfigRes{Code: 1, Message: "需要修改站点配置权限"}, nil
 	}
 	row, err := s.ensureRow(ctx)
 	if err != nil {
@@ -333,8 +334,8 @@ func isRealSecret(s string) bool {
 }
 
 func (s *SiteService) TestEmail(ctx context.Context, req *site.TestEmailReq) (*site.TestEmailRes, error) {
-	if !auth.VerifySiteAdmin(ctx) {
-		return &site.TestEmailRes{Code: 1, Message: "仅站点管理员可测试邮件", Success: false}, nil
+	if !auth.HasPerm(ctx, rbac.PermSiteConfigWrite) {
+		return &site.TestEmailRes{Code: 1, Message: "需要修改站点配置权限", Success: false}, nil
 	}
 	to := strings.TrimSpace(req.To)
 	if to == "" {
@@ -436,8 +437,8 @@ func (s *SiteService) VisitPing(ctx context.Context, req *site.VisitPingReq) (*s
 }
 
 func (s *SiteService) GetAccessStats(ctx context.Context, req *site.GetAccessStatsReq) (*site.GetAccessStatsRes, error) {
-	if !auth.VerifySiteAdmin(ctx) {
-		return &site.GetAccessStatsRes{Code: 1, Message: "仅站点管理员可查看访问情况"}, nil
+	if !auth.HasPerm(ctx, rbac.PermSiteStatsRead) {
+		return &site.GetAccessStatsRes{Code: 1, Message: "需要站点访问统计权限"}, nil
 	}
 	days := int32(30)
 	ipLimit := 200

@@ -8,6 +8,14 @@ middlewares:
       # 与 user/core_data/agent 的 server.jwt_secret 保持一致，至少 32 字符。
       secret: ""
 endpoints:
+  # 站点备份导入/导出下载：大文件传输走流式转发（不在网关缓冲、不占内存），
+  # 上传大小限制（2GiB）由 user 服务自身控制。需放在 /v1/user/* 之前（按注册顺序匹配）。
+  - path: /v1/user/site/backup/*
+    timeout: 600s
+    protocol: HTTP
+    stream: true
+    backends:
+      - target: 'discovery:///user'
   - path: /v1/user/*
     timeout: 5s
     protocol: HTTP
@@ -15,14 +23,62 @@ endpoints:
 #      - target: '127.0.0.1:8001'
       - target: 'discovery:///user'
 #          stripPrefix: /bbs
+    middlewares:
+      - name: circuitbreaker
+        options:
+          '@type': type.googleapis.com/gateway.middleware.circuitbreaker.v1.CircuitBreaker
+          # 10s 窗口内请求数 ≥ 50 且成功率低于 60% 时熔断，熔断期间直接返回 503
+          successRatio:
+            success: 0.6
+            request: 50
+            bucket: 10
+            window: 10s
+          responseData:
+            statusCode: 503
+            header:
+              - key: Content-Type
+                value: ["application/json"]
+            body: "eyJjb2RlIjogMSwgIm1lc3NhZ2UiOiAi5pyN5Yqh5pqC5pe25LiN5Y+v55So77yM6K+356iN5ZCO6YeN6K+VIn0="
   - path: /v1/core/*
     # 题库补全近期 / 重置队列等管理接口可能超过 5s
     timeout: 120s
     protocol: HTTP
     backends:
       - target: 'discovery:///core-data'
+    middlewares:
+      - name: circuitbreaker
+        options:
+          '@type': type.googleapis.com/gateway.middleware.circuitbreaker.v1.CircuitBreaker
+          successRatio:
+            success: 0.6
+            request: 50
+            bucket: 10
+            window: 10s
+          responseData:
+            statusCode: 503
+            header:
+              - key: Content-Type
+                value: ["application/json"]
+            body: "eyJjb2RlIjogMSwgIm1lc3NhZ2UiOiAi5pyN5Yqh5pqC5pe25LiN5Y+v55So77yM6K+356iN5ZCO6YeN6K+VIn0="
   - path: /v1/agent/*
-    timeout: 5s
+    # agent 端点均为异步设计（GetRecentSummary 读缓存未命中才入队、训练报告为后台 job），
+    # LLM 调用不在请求路径上；10s 覆盖冷启动时 DB/队列读写即可。
+    timeout: 10s
     protocol: HTTP
     backends:
       - target: 'discovery:///agent'
+    middlewares:
+      - name: circuitbreaker
+        options:
+          '@type': type.googleapis.com/gateway.middleware.circuitbreaker.v1.CircuitBreaker
+          successRatio:
+            success: 0.6
+            request: 50
+            bucket: 10
+            window: 10s
+          responseData:
+            statusCode: 503
+            header:
+              - key: Content-Type
+                value: ["application/json"]
+            body: "eyJjb2RlIjogMSwgIm1lc3NhZ2UiOiAi5pyN5Yqh5pqC5pe25LiN5Y+v55So77yM6K+356iN5ZCO6YeN6K+VIn0="

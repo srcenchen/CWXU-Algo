@@ -1,6 +1,7 @@
 package platform
 
 import (
+	"context"
 	"cwxu-algo/app/common/utils/ojhttp"
 	"cwxu-algo/app/core_data/internal/data/model"
 	"cwxu-algo/app/core_data/internal/spider"
@@ -79,8 +80,8 @@ type cfContestListEntry struct {
 	StartTimeSeconds int64  `json:"startTimeSeconds"`
 }
 
-func (p NewCodeforces) FetchSubmitLog(userId int64, username string, needAll bool) (res []model.SubmitLog, err error) {
-	subs, err := fetchCFUserStatusPaged(username, needAll)
+func (p NewCodeforces) FetchSubmitLog(ctx context.Context, userId int64, username string, needAll bool) (res []model.SubmitLog, err error) {
+	subs, err := fetchCFUserStatusPaged(ctx, username, needAll)
 	if err != nil {
 		return nil, err
 	}
@@ -103,7 +104,10 @@ func (p NewCodeforces) FetchSubmitLog(userId int64, username string, needAll boo
 
 // fetchCFUserStatusPaged 分页拉取 user.status；短缓存供 submit/contest 复用。
 // needAll=false：仅第 1 页（最多 1000）；needAll=true：分页直至不足一页或达硬顶。
-func fetchCFUserStatusPaged(username string, needAll bool) ([]cfJson, error) {
+func fetchCFUserStatusPaged(ctx context.Context, username string, needAll bool) ([]cfJson, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	username = strings.TrimSpace(username)
 	if username == "" {
 		return nil, fmt.Errorf("codeforces handle 为空")
@@ -123,12 +127,19 @@ func fetchCFUserStatusPaged(username string, needAll bool) ([]cfJson, error) {
 	}
 	all := make([]cfJson, 0, cfStatusPageSize)
 	for page := 0; page < maxPages; page++ {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		from := page*cfStatusPageSize + 1
 		url := fmt.Sprintf(
 			"https://codeforces.com/api/user.status?handle=%s&from=%d&count=%d",
 			username, from, cfStatusPageSize,
 		)
-		resp, err := ojhttp.Get(url)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+		if err != nil {
+			return nil, err
+		}
+		resp, err := ojhttp.Do(req)
 		if err != nil {
 			return nil, fmt.Errorf("发起http请求失败: %s", err.Error())
 		}
@@ -341,7 +352,7 @@ func fetchCFUserRating(username string) ([]cfRatingEntry, error) {
 // 复用 fetchCFUserStatusPaged 缓存，避免与 FetchSubmitLog 重复拉 1e6。
 // 返回：acByContest[contestId]=unique OK 数；participateTime[contestId]=最早提交 unix。
 func fetchCFContestACFromStatus(username string, needAll bool) (map[int]int, map[int]int64, error) {
-	subs, err := fetchCFUserStatusPaged(username, needAll)
+	subs, err := fetchCFUserStatusPaged(context.Background(), username, needAll)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -395,7 +406,7 @@ func (p NewCodeforces) FetchContestDetails(userId int64, username string, needAl
 	if username == "" {
 		return nil, fmt.Errorf("codeforces handle 为空")
 	}
-	subs, err := fetchCFUserStatusPaged(username, needAll)
+	subs, err := fetchCFUserStatusPaged(context.Background(), username, needAll)
 	if err != nil {
 		return nil, err
 	}

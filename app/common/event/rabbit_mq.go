@@ -293,11 +293,19 @@ func (r *RabbitMQ) Publish(exchange, key string, mandatory, immediate bool, msg 
 		}
 		select {
 		case confirmation, ok := <-confirm:
-			if !ok || !confirmation.Ack {
+			if !ok {
+				// confirm 通道被关：channel 已失效，直接丢弃
+				r.dropPubCh()
+				return fmt.Errorf("mq publisher confirm rejected")
+			}
+			if !confirmation.Ack {
 				return fmt.Errorf("mq publisher confirm rejected")
 			}
 			return nil
 		case <-time.After(pubConfirmWait):
+			// 超时：迟到的 confirm 会滞留在该 channel，若继续复用会导致
+			// 下一次发布读到过期 confirm 而确认错位——所有超时路径必须丢弃 pub channel
+			r.dropPubCh()
 			return fmt.Errorf("mq publisher confirm timeout")
 		}
 	}

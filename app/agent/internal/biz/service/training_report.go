@@ -19,6 +19,12 @@ import (
 	"github.com/volcengine/volcengine-go-sdk/volcengine"
 )
 
+// 训练报告并发控制：AI + 数据聚合都很重（2c4g），全进程最多同时跑 2 个任务；
+// 超出的任务保持 pending 排队。每组织在途任务数另设上限，防止单组织刷爆队列。
+var trainingReportSem = make(chan struct{}, 2)
+
+const maxActiveTrainingJobsPerOrg = 2
+
 // StartTrainingReportParams 启动参数
 type StartTrainingReportParams struct {
 	OrgID     int64
@@ -58,6 +64,10 @@ func (uc *SummaryUseCase) StartTrainingReport(ctx context.Context, p StartTraini
 	// 同组织同区间同分组防连点：进行中的任务直接复用
 	if existing := uc.findActiveTrainingJob(ctx, p); existing != "" {
 		return existing, nil
+	}
+	// 每组织在途任务上限：超限直接报错，提示稍后再试
+	if n := uc.countActiveTrainingJobs(ctx, p.OrgID); n >= maxActiveTrainingJobsPerOrg {
+		return "", fmt.Errorf("当前组织已有 %d 个报告任务在排队/生成中，请等其完成后再试", n)
 	}
 	jobID := newJobID()
 	now := time.Now()
@@ -116,7 +126,29 @@ func (uc *SummaryUseCase) findActiveTrainingJob(ctx context.Context, p StartTrai
 	return ""
 }
 
+// countActiveTrainingJobs 组织当前排队/运行中的任务数
+func (uc *SummaryUseCase) countActiveTrainingJobs(ctx context.Context, orgID int64) int {
+	jobs, err := uc.listJobs(ctx, orgID, 20)
+	if err != nil {
+		return 0
+	}
+	n := 0
+	for _, j := range jobs {
+		if j == nil {
+			continue
+		}
+		if j.Status == ReportStatusPending || j.Status == ReportStatusRunning {
+			n++
+		}
+	}
+	return n
+}
+
 func (uc *SummaryUseCase) runTrainingReportJob(jobID string) {
+	// 全局并发限流：拿不到名额时排队（任务保持 pending「排队中」），10 分钟超时从拿到名额起算
+	trainingReportSem <- struct{}{}
+	defer func() { <-trainingReportSem }()
+
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
 	defer func() {
@@ -209,8 +241,11 @@ func (uc *SummaryUseCase) runTrainingReportJob(jobID string) {
 	log.Infof("training report done job=%s org=%d", jobID, job.OrgID)
 }
 
-func (uc *SummaryUseCase) failJob(ctx context.Context, jobID, detail string) {
-	_ = uc.updateJob(ctx, jobID, func(j *TrainingReportJob) {
+func (uc *SummaryUseCase) failJob(_ context.Context, jobID, detail string) {
+	// 调用方 ctx 可能已超时/取消：用独立短超时写 Redis，保证任务能落 failed 状态
+	wctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	_ = uc.updateJob(wctx, jobID, func(j *TrainingReportJob) {
 		j.Status = ReportStatusFailed
 		j.Progress = 100
 		j.Message = "失败"

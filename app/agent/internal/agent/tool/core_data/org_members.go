@@ -4,13 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"time"
 
 	"cwxu-algo/api/user/v1/profile"
 
 	"github.com/go-kratos/kratos/v2/log"
 	"github.com/go-kratos/kratos/v2/registry"
-	"github.com/go-kratos/kratos/v2/transport/grpc"
 	"github.com/volcengine/volcengine-go-sdk/service/arkruntime/model"
 	grpc2 "google.golang.org/grpc"
 )
@@ -30,12 +28,8 @@ func (c *OrgMembersTool) userRPC() (*grpc2.ClientConn, error) {
 	if c == nil || c.reg == nil {
 		return nil, fmt.Errorf("registry 未配置")
 	}
-	return grpc.DialInsecure(
-		toolRPCContext(c.ctx),
-		grpc.WithEndpoint("discovery:///user"),
-		grpc.WithDiscovery((*c.reg).(registry.Discovery)),
-		grpc.WithTimeout(20*time.Second),
-	)
+	// 复用共享长连接，避免每次工具调用 dial+Close
+	return SharedGRPCConn(c.reg, "user")
 }
 
 func (c *OrgMembersTool) Description() *model.Tool {
@@ -69,7 +63,6 @@ func (c *OrgMembersTool) AiInterface(jsonStr string) string {
 	if err != nil {
 		return "连接失败: " + err.Error()
 	}
-	defer conn.Close()
 	cli := profile.NewProfileClient(conn)
 	res, err := cli.GetUserIdsByOrg(toolRPCContext(c.ctx), &profile.GetUserIdsByOrgReq{OrgId: p.OrgId})
 	if err != nil {
@@ -95,12 +88,8 @@ func (c *GroupMembersTool) userRPC() (*grpc2.ClientConn, error) {
 	if c == nil || c.reg == nil {
 		return nil, fmt.Errorf("registry 未配置")
 	}
-	return grpc.DialInsecure(
-		toolRPCContext(c.ctx),
-		grpc.WithEndpoint("discovery:///user"),
-		grpc.WithDiscovery((*c.reg).(registry.Discovery)),
-		grpc.WithTimeout(20*time.Second),
-	)
+	// 复用共享长连接，避免每次工具调用 dial+Close
+	return SharedGRPCConn(c.reg, "user")
 }
 
 func (c *GroupMembersTool) Description() *model.Tool {
@@ -134,7 +123,6 @@ func (c *GroupMembersTool) AiInterface(jsonStr string) string {
 	if err != nil {
 		return "连接失败: " + err.Error()
 	}
-	defer conn.Close()
 	cli := profile.NewProfileClient(conn)
 	res, err := cli.GetUserIdsByGroup(toolRPCContext(c.ctx), &profile.GetUserIdsByGroupReq{GroupId: p.GroupId})
 	if err != nil {

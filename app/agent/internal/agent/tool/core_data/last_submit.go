@@ -4,14 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"time"
 
 	"cwxu-algo/api/core/v1/submit_log"
 	"cwxu-algo/app/common/utils"
 
 	"github.com/go-kratos/kratos/v2/log"
 	"github.com/go-kratos/kratos/v2/registry"
-	"github.com/go-kratos/kratos/v2/transport/grpc"
 	"github.com/volcengine/volcengine-go-sdk/service/arkruntime/model"
 	grpc2 "google.golang.org/grpc"
 )
@@ -31,12 +29,8 @@ func (c *LastSubmitTool) coreDataRPC() (*grpc2.ClientConn, error) {
 	if c == nil || c.reg == nil {
 		return nil, fmt.Errorf("registry 未配置")
 	}
-	return grpc.DialInsecure(
-		toolRPCContext(c.ctx),
-		grpc.WithEndpoint("discovery:///core-data"),
-		grpc.WithDiscovery((*c.reg).(registry.Discovery)),
-		grpc.WithTimeout(20*time.Second),
-	)
+	// 复用共享长连接，避免每次工具调用 dial+Close
+	return SharedGRPCConn(c.reg, "core-data")
 }
 
 func (c *LastSubmitTool) Description() *model.Tool {
@@ -77,7 +71,6 @@ func (c *LastSubmitTool) AiInterface(jsonStr string) string {
 	if err != nil {
 		return "连接失败: " + err.Error()
 	}
-	defer conn.Close()
 	cli := submit_log.NewSubmitClient(conn)
 	res, err := cli.LastSubmitTime(toolRPCContext(c.ctx), &submit_log.LastSubmitTimeReq{UserIds: p.UserIds})
 	if err != nil {

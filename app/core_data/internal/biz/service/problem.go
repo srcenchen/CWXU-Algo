@@ -75,9 +75,11 @@ func (uc *ProblemUseCase) BindSubmitsAfterSpider(userId int64) {
 		log.Errorf("BindSubmitsAfterSpider query: %v", err)
 		return
 	}
+	// 批量预查已存在题，resolveOne 命中缓存不再逐条 SELECT（500 条省 500 次查询）
+	cache := uc.prefetchProblemsForLogs(logs)
 	boundAC := make([]model.SubmitLog, 0, 32)
 	for i := range logs {
-		if _, _, err := uc.resolveOne(&logs[i], true); err != nil {
+		if _, _, err := uc.resolveOneWithCache(&logs[i], true, cache); err != nil {
 			log.Debugf("resolve submit %d: %v", logs[i].ID, err)
 			continue
 		}
@@ -102,6 +104,47 @@ func (uc *ProblemUseCase) BindSubmitsAfterSpider(userId int64) {
 // resolveOne 解析并绑定单条提交；返回 (problem, isNew, err)
 // highPriority=true：增量爬虫路径，MQ 最高优先级
 func (uc *ProblemUseCase) resolveOne(sl *model.SubmitLog, highPriority bool) (*model.Problem, bool, error) {
+	return uc.resolveOneWithCache(sl, highPriority, nil)
+}
+
+// prefetchProblemsForLogs 批量预查 (platform, external_id) 已存在题，供批量绑定复用。
+// 返回 nil 表示预查失败（调用方按无缓存逐条查询）。
+func (uc *ProblemUseCase) prefetchProblemsForLogs(logs []model.SubmitLog) map[string]*model.Problem {
+	if len(logs) == 0 {
+		return map[string]*model.Problem{}
+	}
+	seen := map[string]struct{}{}
+	pairs := make([][]interface{}, 0, len(logs))
+	for i := range logs {
+		parsed, err := ParseProblemIdentity(logs[i].Platform, logs[i].Contest, logs[i].Problem)
+		if err != nil || parsed.SkipBank {
+			continue
+		}
+		k := parsed.Platform + "\x00" + parsed.ExternalID
+		if _, ok := seen[k]; ok {
+			continue
+		}
+		seen[k] = struct{}{}
+		pairs = append(pairs, []interface{}{parsed.Platform, parsed.ExternalID})
+	}
+	if len(pairs) == 0 {
+		return map[string]*model.Problem{}
+	}
+	var rows []model.Problem
+	if err := uc.data.DB.Where("(platform, external_id) IN ?", pairs).Find(&rows).Error; err != nil {
+		log.Warnf("prefetchProblemsForLogs: %v", err)
+		return nil
+	}
+	out := make(map[string]*model.Problem, len(rows))
+	for i := range rows {
+		p := rows[i]
+		out[p.Platform+"\x00"+p.ExternalID] = &p
+	}
+	return out
+}
+
+// resolveOneWithCache 同 resolveOne；cache 非 nil 时命中即免逐条 SELECT，写路径后回填缓存
+func (uc *ProblemUseCase) resolveOneWithCache(sl *model.SubmitLog, highPriority bool, cache map[string]*model.Problem) (*model.Problem, bool, error) {
 	parsed, err := ParseProblemIdentity(sl.Platform, sl.Contest, sl.Problem)
 	if err != nil {
 		return nil, false, err
@@ -111,8 +154,18 @@ func (uc *ProblemUseCase) resolveOne(sl *model.SubmitLog, highPriority bool) (*m
 		return nil, false, fmt.Errorf("skip bank: %s", parsed.Platform)
 	}
 
+	cacheKey := parsed.Platform + "\x00" + parsed.ExternalID
 	var existing model.Problem
-	err = uc.data.DB.Where("platform = ? AND external_id = ?", parsed.Platform, parsed.ExternalID).First(&existing).Error
+	if cache != nil {
+		if p, ok := cache[cacheKey]; ok && p != nil {
+			existing = *p
+			err = nil
+		} else {
+			err = gorm.ErrRecordNotFound
+		}
+	} else {
+		err = uc.data.DB.Where("platform = ? AND external_id = ?", parsed.Platform, parsed.ExternalID).First(&existing).Error
+	}
 	isNew := false
 	if err == gorm.ErrRecordNotFound {
 		status := model.ProblemStatusPending
@@ -228,6 +281,11 @@ func (uc *ProblemUseCase) resolveOne(sl *model.SubmitLog, highPriority bool) (*m
 		case model.ProblemStatusCompleted, model.ProblemStatusFailedPerm, model.ProblemStatusSkipped:
 			// 已分析完成 / 永久失败 / 跳过：不入队
 		}
+	}
+	// 回填缓存：同批后续同题提交复用（含新建题），避免重复建题/查询
+	if cache != nil {
+		cp := existing
+		cache[cacheKey] = &cp
 	}
 	return &existing, isNew, nil
 }
@@ -1306,15 +1364,27 @@ func (uc *ProblemUseCase) ResetQueues() (purgedFetch, purgedAnalyze, enqueuedFet
 		err = e
 	}
 
+	// 单次重灌上限：防止历史积压把整表拉进内存/灌爆 MQ（可再次触发续灌）
+	const resetQueueScanLimit = 5000
+
 	// 待爬取：PENDING / FETCHING；仅有组织用户提交的题才重灌
+	cutoff := time.Now().Add(-backfillWindow)
+	// 批量取「近窗有爬取资格用户提交」题集合，避免逐题 COUNT
+	fetchSet, fetchOK := uc.recentPipelineProblemSet("fetch", cutoff)
 	var fetchTodos []model.Problem
 	_ = uc.data.DB.
 		Where("status IN ?", []string{model.ProblemStatusPending, model.ProblemStatusFetching}).
 		Where("(content_md IS NULL OR content_md = '')").
 		Order("last_submitted_at DESC NULLS LAST, id DESC").
+		Limit(resetQueueScanLimit).
 		Find(&fetchTodos).Error
 	for _, p := range fetchTodos {
-		if !uc.shouldEnqueueFetch(p.ID) {
+		if fetchOK {
+			if _, ok := fetchSet[p.ID]; !ok {
+				continue
+			}
+		} else if !uc.shouldEnqueueFetch(p.ID) {
+			// 名单不可用回退逐题检查
 			continue
 		}
 		_ = uc.data.DB.Model(&model.Problem{}).Where("id = ?", p.ID).
@@ -1325,7 +1395,6 @@ func (uc *ProblemUseCase) ResetQueues() (purgedFetch, purgedAnalyze, enqueuedFet
 	}
 
 	// 待分析：TAGGING + 有题面；已 COMPLETED 不入队
-	cutoff := time.Now().Add(-backfillWindow)
 	recentClause, recentArgs := sqlHasRecentSubmit(cutoff)
 	var analyzeTodos []model.Problem
 	_ = uc.data.DB.
@@ -1333,6 +1402,7 @@ func (uc *ProblemUseCase) ResetQueues() (purgedFetch, purgedAnalyze, enqueuedFet
 		Where("content_md IS NOT NULL AND content_md != ''").
 		Where(recentClause, recentArgs...).
 		Order("last_submitted_at DESC NULLS LAST, id DESC").
+		Limit(resetQueueScanLimit).
 		Find(&analyzeTodos).Error
 	for _, p := range analyzeTodos {
 		if e := uc.enqueueAnalyzePrio(p.ID, mqPriorityBulk); e == nil {

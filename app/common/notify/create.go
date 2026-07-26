@@ -67,12 +67,14 @@ func Create(db *gorm.DB, n Row) error {
 	return db.Create(&n).Error
 }
 
-// CreateMany 批量写入（去重接收者）
+// CreateMany 批量写入（去重接收者）；改用 CreateInBatches 减少逐行往返
 func CreateMany(db *gorm.DB, rows []Row) error {
 	if db == nil || len(rows) == 0 {
 		return nil
 	}
 	seen := map[uint]struct{}{}
+	now := time.Now()
+	batch := make([]Row, 0, len(rows))
 	for _, r := range rows {
 		if r.UserID == 0 {
 			continue
@@ -81,9 +83,17 @@ func CreateMany(db *gorm.DB, rows []Row) error {
 			continue
 		}
 		seen[r.UserID] = struct{}{}
-		if err := Create(db, r); err != nil {
-			return err
+		r.Title = strings.TrimSpace(r.Title)
+		if r.Title == "" {
+			r.Title = "通知"
 		}
+		if r.CreatedAt.IsZero() {
+			r.CreatedAt = now
+		}
+		batch = append(batch, r)
 	}
-	return nil
+	if len(batch) == 0 {
+		return nil
+	}
+	return db.CreateInBatches(&batch, 200).Error
 }

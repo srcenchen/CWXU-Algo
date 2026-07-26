@@ -9,7 +9,7 @@ import (
 	"cwxu-algo/api/core/v1/problem"
 	"cwxu-algo/api/user/v1/profile"
 	"cwxu-algo/app/common/discovery"
-	"cwxu-algo/app/common/permission"
+	"cwxu-algo/app/common/rbac"
 	"cwxu-algo/app/common/utils/auth"
 	biz "cwxu-algo/app/core_data/internal/biz/service"
 	"cwxu-algo/app/core_data/internal/data/model"
@@ -528,8 +528,8 @@ func firstNonEmptyTitle(a, b string) string {
 }
 
 func (s *ProblemService) Progress(ctx context.Context, req *problem.ProgressReq) (*problem.ProgressRes, error) {
-	// 管理端可查看进度；运维写操作仍仅管理员
-	if !auth.VerifyStaff(ctx) {
+	// 具备训练报告/管理端统计权限者可查看进度；运维写操作仍需题库运维权限
+	if !auth.HasPerm(ctx, rbac.PermOrgReportView) {
 		return &problem.ProgressRes{Code: 1, Message: "权限不足"}, nil
 	}
 	snap, err := s.uc.Progress()
@@ -583,7 +583,7 @@ func (s *ProblemService) Progress(ctx context.Context, req *problem.ProgressReq)
 }
 
 func (s *ProblemService) Backfill(ctx context.Context, req *problem.BackfillReq) (*problem.BackfillRes, error) {
-	if !auth.VerifyMinRole(ctx, permission.RoleAdmin) {
+	if !auth.HasPerm(ctx, rbac.PermSiteProblemOps) {
 		return &problem.BackfillRes{Code: 1, Message: "仅管理员可触发回填"}, nil
 	}
 	// 后台执行：避免 gateway/core HTTP 超时导致前端 500，而任务其实还在跑
@@ -611,7 +611,7 @@ func (s *ProblemService) Backfill(ctx context.Context, req *problem.BackfillReq)
 }
 
 func (s *ProblemService) ResetQueues(ctx context.Context, req *problem.ResetQueuesReq) (*problem.ResetQueuesRes, error) {
-	if !auth.VerifyMinRole(ctx, permission.RoleAdmin) {
+	if !auth.HasPerm(ctx, rbac.PermSiteProblemOps) {
 		return &problem.ResetQueuesRes{Code: 1, Message: "仅管理员可操作"}, nil
 	}
 	if ok, running := s.uc.TryStartAdminOp("reset-queues"); !ok {
@@ -634,7 +634,7 @@ func (s *ProblemService) ResetQueues(ctx context.Context, req *problem.ResetQueu
 }
 
 func (s *ProblemService) EmergencyStop(ctx context.Context, req *problem.EmergencyStopReq) (*problem.EmergencyStopRes, error) {
-	if !auth.VerifyMinRole(ctx, permission.RoleAdmin) {
+	if !auth.HasPerm(ctx, rbac.PermSiteProblemOps) {
 		return &problem.EmergencyStopRes{Code: 1, Message: "仅管理员可操作"}, nil
 	}
 	pf, pa, err := s.uc.EmergencyStop()
@@ -650,7 +650,7 @@ func (s *ProblemService) EmergencyStop(ctx context.Context, req *problem.Emergen
 }
 
 func (s *ProblemService) ResetAll(ctx context.Context, req *problem.ResetAllReq) (*problem.ResetAllRes, error) {
-	if !auth.VerifyMinRole(ctx, permission.RoleAdmin) {
+	if !auth.HasPerm(ctx, rbac.PermSiteProblemOps) {
 		return &problem.ResetAllRes{Code: 1, Message: "仅管理员可操作"}, nil
 	}
 	requeue := true
@@ -672,7 +672,7 @@ func (s *ProblemService) ResetAll(ctx context.Context, req *problem.ResetAllReq)
 }
 
 func (s *ProblemService) Resume(ctx context.Context, req *problem.ResumeReq) (*problem.ResumeRes, error) {
-	if !auth.VerifyMinRole(ctx, permission.RoleAdmin) {
+	if !auth.HasPerm(ctx, rbac.PermSiteProblemOps) {
 		return &problem.ResumeRes{Code: 1, Message: "仅管理员可操作"}, nil
 	}
 	s.uc.Resume()
@@ -680,7 +680,7 @@ func (s *ProblemService) Resume(ctx context.Context, req *problem.ResumeReq) (*p
 }
 
 func (s *ProblemService) ClearRecentFailed(ctx context.Context, req *problem.ClearRecentFailedReq) (*problem.ClearRecentFailedRes, error) {
-	if !auth.VerifyMinRole(ctx, permission.RoleAdmin) {
+	if !auth.HasPerm(ctx, rbac.PermSiteProblemOps) {
 		return &problem.ClearRecentFailedRes{Code: 1, Message: "仅管理员可操作"}, nil
 	}
 	cleared, err := s.uc.ClearRecentFailed()
@@ -701,7 +701,7 @@ func (s *ProblemService) ClearRecentFailed(ctx context.Context, req *problem.Cle
 }
 
 func (s *ProblemService) ClearNowCoderContent(ctx context.Context, req *problem.ClearNowCoderContentReq) (*problem.ClearNowCoderContentRes, error) {
-	if !auth.VerifyMinRole(ctx, permission.RoleAdmin) {
+	if !auth.HasPerm(ctx, rbac.PermSiteProblemOps) {
 		return &problem.ClearNowCoderContentRes{Code: 1, Message: "仅管理员可操作"}, nil
 	}
 	if ok, running := s.uc.TryStartAdminOp("clear-nowcoder-content"); !ok {
@@ -735,7 +735,7 @@ func (s *ProblemService) ClearNowCoderContent(ctx context.Context, req *problem.
 }
 
 func (s *ProblemService) RetryFailed(ctx context.Context, req *problem.RetryFailedReq) (*problem.RetryFailedRes, error) {
-	if !auth.VerifyMinRole(ctx, permission.RoleAdmin) {
+	if !auth.HasPerm(ctx, rbac.PermSiteProblemOps) {
 		return &problem.RetryFailedRes{Code: 1, Message: "仅管理员可操作"}, nil
 	}
 	if s.uc != nil {
@@ -772,7 +772,7 @@ func (s *ProblemService) RetryFailed(ctx context.Context, req *problem.RetryFail
 }
 
 func (s *ProblemService) ToggleAnalyze(ctx context.Context, req *problem.TogglePipelineReq) (*problem.TogglePipelineRes, error) {
-	if !auth.VerifyMinRole(ctx, permission.RoleAdmin) {
+	if !auth.HasPerm(ctx, rbac.PermSiteProblemOps) {
 		return &problem.TogglePipelineRes{Code: 1, Message: "仅管理员可操作"}, nil
 	}
 	pause := true
@@ -794,7 +794,7 @@ func (s *ProblemService) ToggleAnalyze(ctx context.Context, req *problem.ToggleP
 }
 
 func (s *ProblemService) ToggleFetch(ctx context.Context, req *problem.TogglePipelineReq) (*problem.TogglePipelineRes, error) {
-	if !auth.VerifyMinRole(ctx, permission.RoleAdmin) {
+	if !auth.HasPerm(ctx, rbac.PermSiteProblemOps) {
 		return &problem.TogglePipelineRes{Code: 1, Message: "仅管理员可操作"}, nil
 	}
 	pause := true
@@ -816,7 +816,7 @@ func (s *ProblemService) ToggleFetch(ctx context.Context, req *problem.TogglePip
 
 func (s *ProblemService) AdminUpdate(ctx context.Context, req *problem.AdminUpdateProblemReq) (*problem.AdminUpdateProblemRes, error) {
 	// 与 ProposeEdit 特权路径一致：写审核记录并 auto-approve（站管/资源审核员）
-	if !auth.VerifyContentModerator(ctx) {
+	if !auth.HasPerm(ctx, rbac.PermContentProblemReview) {
 		return &problem.AdminUpdateProblemRes{Code: 1, Message: "仅站点管理员或资源审核员可直接修改"}, nil
 	}
 	if req == nil || req.Id == 0 {
@@ -860,7 +860,7 @@ func (s *ProblemService) ProposeEdit(ctx context.Context, req *problem.ProposePr
 		return &problem.ProposeProblemEditRes{Code: 1, Message: "题目 id 无效"}, nil
 	}
 	// 站管 / 资源审核员：仍写 problem_edit_requests，创建后立即 auto-approve（「已通过」有记录、贡献统计计入）
-	autoApprove := auth.VerifyContentModerator(ctx)
+	autoApprove := auth.HasPerm(ctx, rbac.PermContentProblemReview)
 	id, err := s.uc.ProposeProblemEdit(
 		uid, uint(req.ProblemId),
 		req.UpdateTags, req.Tags,
@@ -930,7 +930,7 @@ func (s *ProblemService) toEditInfo(r *model.ProblemEditRequest, p *model.Proble
 }
 
 func (s *ProblemService) ListEditRequests(ctx context.Context, req *problem.ListProblemEditReq) (*problem.ListProblemEditRes, error) {
-	if !auth.VerifyContentModerator(ctx) {
+	if !auth.HasPerm(ctx, rbac.PermContentProblemReview) {
 		return &problem.ListProblemEditRes{Code: 1, Message: "仅站点管理员或资源审核员可查看审核列表"}, nil
 	}
 	page, ps := int64(1), int64(20)
@@ -977,7 +977,7 @@ func (s *ProblemService) ListEditRequests(ctx context.Context, req *problem.List
 }
 
 func (s *ProblemService) ReviewEdit(ctx context.Context, req *problem.ReviewProblemEditReq) (*problem.ReviewProblemEditRes, error) {
-	if !auth.VerifyContentModerator(ctx) {
+	if !auth.HasPerm(ctx, rbac.PermContentProblemReview) {
 		return &problem.ReviewProblemEditRes{Code: 1, Message: "仅站点管理员或资源审核员可审核"}, nil
 	}
 	if req == nil || req.Id == 0 {

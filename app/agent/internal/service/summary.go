@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
@@ -12,12 +13,14 @@ import (
 	biz "cwxu-algo/app/agent/internal/biz/service"
 	"cwxu-algo/app/agent/internal/data"
 	"cwxu-algo/app/common/event"
+	"cwxu-algo/app/common/rbac"
 	"cwxu-algo/app/common/utils/auth"
-	"cwxu-algo/app/core_data/task"
 
 	"github.com/go-kratos/kratos/v2/errors"
+	"github.com/go-kratos/kratos/v2/log"
 	khttp "github.com/go-kratos/kratos/v2/transport/http"
 	"github.com/redis/go-redis/v9"
+	"github.com/streadway/amqp"
 )
 
 type SummaryService struct {
@@ -33,8 +36,8 @@ func (s SummaryService) GetRecentSummary(ctx context.Context, request *summary.G
 	key := fmt.Sprintf("agent:summary:%d:recent", request.UserId)
 	val, err := s.rdb.Get(ctx, key).Result()
 	if err == redis.Nil {
-		st := task.NewSummaryTask(s.rabbitMQ, s.rdb)
-		st.Do(request.UserId, "PersonalRecent")
+		// HTTP 路径异步入队：不 QueueDeclare（启动时已声明）、不同步等 confirm
+		s.enqueueSummaryAsync(request.UserId, "PersonalRecent")
 		return &summary.GetSummaryReply{
 			Code: 1,
 			Msg:  "嘿嘿，稍等稍等，您的 AI 分析报告马上就好(1-2min)",
@@ -52,9 +55,6 @@ func (s SummaryService) GetRecentSummary(ctx context.Context, request *summary.G
 }
 
 func (s SummaryService) StartTrainingReport(ctx context.Context, req *summary.StartTrainingReportRequest) (*summary.StartTrainingReportReply, error) {
-	if !auth.VerifyStaff(ctx) {
-		return nil, errors.Forbidden("权限不足", "仅教练/队长/组织管理员可导出训练报告")
-	}
 	pd := auth.GetCurrentUser(ctx)
 	if pd == nil {
 		return nil, errors.Unauthorized("未登录", "请先登录")
@@ -66,9 +66,9 @@ func (s SummaryService) StartTrainingReport(ctx context.Context, req *summary.St
 	if orgID <= 0 {
 		return nil, errors.BadRequest("参数错误", "缺少组织 id")
 	}
-	// 非站管只能操作当前 JWT 组织
-	if !pd.IsSiteAdmin && uint(orgID) != pd.OrgID {
-		return nil, errors.Forbidden("权限不足", "只能导出当前组织的训练报告")
+	// 细粒度权限：站管旁路；否则须在目标组织内具备训练报告权限
+	if !auth.HasOrgPerm(ctx, uint(orgID), rbac.PermOrgReportView) {
+		return nil, errors.Forbidden("权限不足", "无权导出该组织的训练报告")
 	}
 	if s.uc == nil {
 		return nil, errors.ServiceUnavailable("服务未就绪", "训练报告服务不可用")
@@ -93,9 +93,6 @@ func (s SummaryService) StartTrainingReport(ctx context.Context, req *summary.St
 }
 
 func (s SummaryService) GetTrainingReportJob(ctx context.Context, req *summary.GetTrainingReportJobRequest) (*summary.GetTrainingReportJobReply, error) {
-	if !auth.VerifyStaff(ctx) {
-		return nil, errors.Forbidden("权限不足", "仅 staff 可查看")
-	}
 	if s.uc == nil || req.GetJobId() == "" {
 		return nil, errors.BadRequest("参数错误", "缺少 jobId")
 	}
@@ -106,9 +103,9 @@ func (s SummaryService) GetTrainingReportJob(ctx context.Context, req *summary.G
 	if job == nil {
 		return nil, errors.NotFound("不存在", "任务不存在或已清理")
 	}
-	pd := auth.GetCurrentUser(ctx)
-	if pd != nil && !pd.IsSiteAdmin && job.OrgID != int64(pd.OrgID) {
-		return nil, errors.Forbidden("权限不足", "无权查看其他组织任务")
+	// 细粒度权限：站管旁路；否则须在任务所属组织内具备训练报告权限
+	if !auth.HasOrgPerm(ctx, uint(job.OrgID), rbac.PermOrgReportView) {
+		return nil, errors.Forbidden("权限不足", "无权查看该组织任务")
 	}
 	return &summary.GetTrainingReportJobReply{
 		Code: 0,
@@ -118,9 +115,6 @@ func (s SummaryService) GetTrainingReportJob(ctx context.Context, req *summary.G
 }
 
 func (s SummaryService) ListTrainingReportJobs(ctx context.Context, req *summary.ListTrainingReportJobsRequest) (*summary.ListTrainingReportJobsReply, error) {
-	if !auth.VerifyStaff(ctx) {
-		return nil, errors.Forbidden("权限不足", "仅 staff 可查看")
-	}
 	pd := auth.GetCurrentUser(ctx)
 	if pd == nil {
 		return nil, errors.Unauthorized("未登录", "请先登录")
@@ -129,8 +123,9 @@ func (s SummaryService) ListTrainingReportJobs(ctx context.Context, req *summary
 	if orgID <= 0 {
 		orgID = int64(pd.OrgID)
 	}
-	if !pd.IsSiteAdmin && uint(orgID) != pd.OrgID {
-		return nil, errors.Forbidden("权限不足", "无权查看其他组织")
+	// 细粒度权限：站管旁路；否则须在目标组织内具备训练报告权限
+	if !auth.HasOrgPerm(ctx, uint(orgID), rbac.PermOrgReportView) {
+		return nil, errors.Forbidden("权限不足", "无权查看该组织")
 	}
 	if s.uc == nil {
 		return &summary.ListTrainingReportJobsReply{Code: 0, Msg: "ok"}, nil
@@ -183,11 +178,6 @@ func RegisterTrainingReportDownload(srv *khttp.Server, uc *biz.SummaryUseCase) {
 	}
 	r := srv.Route("/")
 	r.GET("/v1/agent/training-report/download", func(ctx khttp.Context) error {
-		if !auth.VerifyStaff(ctx) {
-			return ctx.JSON(http.StatusForbidden, map[string]interface{}{
-				"code": 1, "message": "仅 staff 可下载",
-			})
-		}
 		jobID := ctx.Query().Get("jobId")
 		if jobID == "" {
 			return ctx.JSON(http.StatusBadRequest, map[string]interface{}{
@@ -200,10 +190,10 @@ func RegisterTrainingReportDownload(srv *khttp.Server, uc *biz.SummaryUseCase) {
 				"code": 1, "message": "任务不存在",
 			})
 		}
-		pd := auth.GetCurrentUser(ctx)
-		if pd != nil && !pd.IsSiteAdmin && job.OrgID != int64(pd.OrgID) {
+		// 细粒度权限：站管旁路；否则须在任务所属组织内具备训练报告权限
+		if !auth.HasOrgPerm(ctx, uint(job.OrgID), rbac.PermOrgReportView) {
 			return ctx.JSON(http.StatusForbidden, map[string]interface{}{
-				"code": 1, "message": "无权下载其他组织报告",
+				"code": 1, "message": "无权下载该组织报告",
 			})
 		}
 		abs, ct, name, err := biz.ResolveArtifactAbs(job)
@@ -235,7 +225,46 @@ func RegisterTrainingReportDownload(srv *khttp.Server, uc *biz.SummaryUseCase) {
 	})
 }
 
+// summaryPendingTTL 与 core_data 侧 SummaryTask 保持一致的去重窗口
+const summaryPendingTTL = 20 * time.Minute
+
+func summaryPendingKey(userId int64, typ string) string {
+	return fmt.Sprintf("summary:pending:%s:%d", typ, userId)
+}
+
+// enqueueSummaryAsync HTTP 缓存 miss 路径的入队：Redis 去重后 PublishAsync，
+// 绝不阻塞 HTTP（QueueDeclare 已在 NewSummaryService 启动时做过一次）。
+func (s SummaryService) enqueueSummaryAsync(userId int64, typ string) {
+	if s.rabbitMQ == nil {
+		log.Errorf("enqueueSummaryAsync: mq not ready")
+		return
+	}
+	if s.rdb != nil {
+		ok, err := s.rdb.SetNX(context.Background(), summaryPendingKey(userId, typ), "1", summaryPendingTTL).Result()
+		if err == nil && !ok {
+			log.Debugf("enqueueSummaryAsync: dedup skip user=%d type=%s", userId, typ)
+			return
+		}
+	}
+	body, err := json.Marshal(event.SummaryEvent{UserId: userId, Type: typ})
+	if err != nil {
+		log.Errorf("enqueueSummaryAsync: json.Marshal failed: %v", err)
+		return
+	}
+	s.rabbitMQ.PublishAsync("", "summary", false, false, amqp.Publishing{
+		ContentType:  "application/json",
+		Body:         body,
+		DeliveryMode: amqp.Persistent,
+	})
+}
+
 func NewSummaryService(data *data.Data, rabbitMQ *event.RabbitMQ, uc *biz.SummaryUseCase) *SummaryService {
+	// 队列声明放启动期一次性做；失败仅告警（consumer 侧 DeclareOnMissing 兜底）
+	if rabbitMQ != nil {
+		if _, err := rabbitMQ.QueueDeclare("summary", true, false, false, false, nil); err != nil {
+			log.Warnf("NewSummaryService: QueueDeclare summary: %v", err)
+		}
+	}
 	return &SummaryService{
 		rdb:      data.RDB,
 		rabbitMQ: rabbitMQ,

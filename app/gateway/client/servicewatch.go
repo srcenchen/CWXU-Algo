@@ -22,7 +22,9 @@ var ErrCancelWatch = errors.New("cancel watch")
 var globalServiceWatcher = newServiceWatcher()
 var LOG = log.NewHelper(log.With(log.GetLogger(), "source", "servicewatch"))
 
-var _initialResolveTimeout = time.Duration(0)
+// _initialResolveTimeout 初始服务解析默认 5s 超时，避免注册中心异常时启动无限阻塞；
+// 可用 INITIAL_RESOLVE_TIMEOUT 覆盖。
+var _initialResolveTimeout = 5 * time.Second
 
 func init() {
 	debug.Register("watcher", globalServiceWatcher)
@@ -178,6 +180,9 @@ func (s *serviceWatcher) Add(ctx context.Context, discovery registry.Discovery, 
 		}()
 
 		go func() {
+			// watch 出错时指数退避：1s 起步、封顶 30s，成功后重置
+			const maxWatchBackoff = 30 * time.Second
+			backoff := time.Second
 			for {
 				services, err := watcher.Next()
 				if err != nil {
@@ -185,10 +190,15 @@ func (s *serviceWatcher) Add(ctx context.Context, discovery registry.Discovery, 
 						LOG.Warnf("The watch process on: %s has been canceled", endpoint)
 						return
 					}
-					LOG.Errorf("Failed to watch on endpoint: %s, err: %+v, the watch process will attempt again after 1 second", endpoint, err)
-					time.Sleep(time.Second)
+					LOG.Errorf("Failed to watch on endpoint: %s, err: %+v, the watch process will attempt again after %s", endpoint, err, backoff)
+					time.Sleep(backoff)
+					backoff *= 2
+					if backoff > maxWatchBackoff {
+						backoff = maxWatchBackoff
+					}
 					continue
 				}
+				backoff = time.Second
 				if len(services) == 0 {
 					LOG.Warnf("Empty services on endpoint: %s, this most likely no available instance in discovery", endpoint)
 					continue
@@ -251,7 +261,7 @@ func (s *serviceWatcher) proccleanup() {
 				}
 			}()
 			if len(cleanup) <= 0 {
-				return
+				continue
 			}
 			LOG.Infof("Cleanup appliers on endpoint: %q with keys: %+v", endpoint, cleanup)
 			func() {

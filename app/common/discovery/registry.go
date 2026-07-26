@@ -13,6 +13,9 @@ type Register struct {
 	Reg registry.Registrar
 }
 
+// NewConsulRegister 仅在各服务启动期由 wire 生成代码调用一次；
+// 改为返回 error 会破坏所有服务的 wire 依赖图（签名冻结），
+// 且注册中心连不上时启动本就无法继续，故保留 panic（fail-fast）。
 func NewConsulRegister(data *conf.Server) *Register {
 	client, err := api.NewClient(&api.Config{Address: data.RegDsn})
 	if err != nil {

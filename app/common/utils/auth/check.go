@@ -5,13 +5,68 @@ import (
 	"encoding/json"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	_const "cwxu-algo/app/common/const"
 	"cwxu-algo/app/common/permission"
+	"cwxu-algo/app/common/rbac"
 
 	"github.com/go-kratos/kratos/v2/transport"
 	"github.com/golang-jwt/jwt/v5"
 )
+
+// JWT 解析结果小缓存：同一请求内多次 Verify* 会重复走签名校验，开销可观。
+// 不改任何导出签名，仅在包内以 token 字符串为 key 短缓存成功解析结果；
+// 条目过期取 min(token exp, 60s)，容量满时整体清空（简单胜过 LRU）。
+const (
+	jwtCacheMaxEntries = 2048
+	jwtCacheTTL        = 60 * time.Second
+)
+
+type jwtCacheEntry struct {
+	pd  JwtPayload
+	exp time.Time
+}
+
+var (
+	jwtCacheMu sync.Mutex
+	jwtCache   = map[string]jwtCacheEntry{}
+)
+
+func cachedPayload(token string) *JwtPayload {
+	jwtCacheMu.Lock()
+	defer jwtCacheMu.Unlock()
+	e, ok := jwtCache[token]
+	if !ok {
+		return nil
+	}
+	if time.Now().After(e.exp) {
+		delete(jwtCache, token)
+		return nil
+	}
+	pd := e.pd // 返回副本，避免调用方改写缓存
+	return &pd
+}
+
+func storePayload(token string, pd *JwtPayload) {
+	if pd == nil {
+		return
+	}
+	exp := time.Now().Add(jwtCacheTTL)
+	if pd.ExpiresAt != nil && pd.ExpiresAt.Time.Before(exp) {
+		exp = pd.ExpiresAt.Time
+	}
+	if !time.Now().Before(exp) {
+		return
+	}
+	jwtCacheMu.Lock()
+	defer jwtCacheMu.Unlock()
+	if len(jwtCache) >= jwtCacheMaxEntries {
+		jwtCache = make(map[string]jwtCacheEntry, jwtCacheMaxEntries/4)
+	}
+	jwtCache[token] = jwtCacheEntry{pd: *pd, exp: exp}
+}
 
 // JwtPayload JWT 载荷
 type JwtPayload struct {
@@ -25,6 +80,7 @@ type JwtPayload struct {
 	IsResourceReviewer bool   `json:"isResourceReviewer"`
 	OrgID              uint   `json:"orgId"`
 	OrgRole            string `json:"orgRole"` // member | coach | captain | org_admin
+	Pm                 string `json:"pm,omitempty"` // 权限位图（站点权限 ∪ 当前组织权限），见 app/common/rbac
 }
 
 func parseJWTToken(ctx context.Context) string {
@@ -43,6 +99,9 @@ func parsePayload(ctx context.Context) *JwtPayload {
 	tokenString := parseJWTToken(ctx)
 	if tokenString == "" {
 		return nil
+	}
+	if pd := cachedPayload(tokenString); pd != nil {
+		return pd
 	}
 	keyFunc := func(token *jwt.Token) (interface{}, error) {
 		if token.Method != jwt.SigningMethodHS256 {
@@ -84,6 +143,7 @@ func parsePayload(ctx context.Context) *JwtPayload {
 					pd.IsResourceReviewer = asBool(mc["isResourceReviewer"])
 					pd.RoleID = asInt(mc["roleId"])
 					pd.OrgID = uint(asInt(mc["orgId"]))
+					pd.Pm, _ = mc["pm"].(string)
 				}
 			} else {
 				return nil
@@ -94,6 +154,7 @@ func parsePayload(ctx context.Context) *JwtPayload {
 	if !pd.IsSiteAdmin && pd.RoleID == permission.RoleAdmin {
 		pd.IsSiteAdmin = true
 	}
+	storePayload(tokenString, pd)
 	return pd
 }
 
@@ -290,4 +351,44 @@ func VerifyCaptain(ctx context.Context) bool {
 		return true
 	}
 	return pd.RoleID == permission.RoleCaptain
+}
+
+// —— 细粒度权限（RBAC）——
+// 权威顺序：站点管理员旁路 → JWT pm 位图 → 旧 token 按旧 claims 推导。
+// 组织级权限只代表「当前 JWT 组织」内的授权；跨组织操作须走 DB 兜底（user 服务 hasPermInOrgDB）。
+
+// PayloadHasPerm 按 payload 判定权限
+func PayloadHasPerm(pd *JwtPayload, code string) bool {
+	if pd == nil {
+		return false
+	}
+	if pd.IsSiteAdmin || pd.RoleID == permission.RoleAdmin {
+		return true
+	}
+	if has, valid := rbac.MaskHas(pd.Pm, code); valid {
+		return has
+	}
+	// 旧 token（无 pm）：按资源审核员 / 组织角色模板推导
+	return rbac.LegacyHas(code, pd.IsResourceReviewer, pd.OrgRole)
+}
+
+// HasPerm 当前请求是否具备权限（站点级权限，或当前 JWT 组织内的组织级权限）
+func HasPerm(ctx context.Context, code string) bool {
+	return PayloadHasPerm(parsePayload(ctx), code)
+}
+
+// HasOrgPerm 当前请求是否对指定组织具备组织级权限（仅信 JWT：要求 JWT 组织与目标一致）。
+// JWT 组织不一致时返回 false，由业务层决定是否查库兜底。
+func HasOrgPerm(ctx context.Context, orgID uint, code string) bool {
+	pd := parsePayload(ctx)
+	if pd == nil {
+		return false
+	}
+	if pd.IsSiteAdmin || pd.RoleID == permission.RoleAdmin {
+		return true
+	}
+	if orgID == 0 || pd.OrgID != orgID {
+		return false
+	}
+	return PayloadHasPerm(pd, code)
 }

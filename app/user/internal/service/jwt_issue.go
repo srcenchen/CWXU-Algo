@@ -4,6 +4,7 @@ import (
 	"time"
 
 	_const "cwxu-algo/app/common/const"
+	"cwxu-algo/app/common/rbac"
 	"cwxu-algo/app/user/internal/data/model"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -55,6 +56,10 @@ func IssueJWT(db *gorm.DB, u *model.User) (string, error) {
 		roleIdsJSON = []byte("[1]")
 	}
 
+	// pm：细粒度权限位图（站点权限 ∪ 当前组织权限），见 app/common/rbac。
+	// 站点管理员在校验侧旁路，但仍编码全量便于前端直接渲染。
+	pm := rbac.Encode(collectUserPerms(db, u, orgID, orgRole))
+
 	// 默认可续期访问令牌；前端活跃时通过 refresh 从 DB 重签，滚动续期并同步权限。
 	now := time.Now()
 	expire := now.Add(JWTAccessTTL)
@@ -68,6 +73,7 @@ func IssueJWT(db *gorm.DB, u *model.User) (string, error) {
 		"isResourceReviewer": u.IsResourceReviewer,
 		"orgId":              orgID,
 		"orgRole":            orgRole,
+		"pm":                 pm,
 		"exp":                expire.Unix(),
 		"nbf":                now.Unix(),
 		"iat":                now.Unix(),

@@ -20,7 +20,9 @@ const (
 	defaultMaxIdle = 3
 )
 
-// InitGorm 初始化GORM 连接数据库
+// InitGorm 初始化GORM 连接数据库。
+// 仅在各服务启动期由 wire 生成代码调用；改为返回 error 会改变导出签名并
+// 波及全部服务的 wire 依赖图，而数据库连不上时启动本就应终止，故保留 panic（fail-fast）。
 func InitGorm(conf *conf.Data) *gorm.DB {
 	var db *gorm.DB
 	var err error

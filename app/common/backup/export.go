@@ -144,6 +144,9 @@ func exportTable(db *gorm.DB, table, outPath string) (int64, error) {
 			}
 			q = q.Order("id ASC")
 		} else {
+			// 无 id 列的表退回 OFFSET 分页：候选排序列（user_id/day/…）随表不同
+			// 且非全表唯一，难以做通用 keyset。此路径仅管理员手动备份使用（低频），
+			// 大表 OFFSET 深翻页的开销可接受，保留现状并注明。
 			q = q.Offset(int(total))
 			if orderBy != "" {
 				q = q.Order(orderBy)

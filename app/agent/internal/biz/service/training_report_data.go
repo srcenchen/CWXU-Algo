@@ -5,16 +5,17 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"cwxu-algo/api/core/v1/contest_log"
 	"cwxu-algo/api/core/v1/statistic"
 	"cwxu-algo/api/core/v1/submit_log"
 	profile2 "cwxu-algo/api/user/v1/profile"
+	"cwxu-algo/app/agent/internal/agent/tool/core_data"
 
 	"github.com/go-kratos/kratos/v2/log"
-	"github.com/go-kratos/kratos/v2/registry"
-	"github.com/go-kratos/kratos/v2/transport/grpc"
+	"golang.org/x/sync/errgroup"
 	grpc2 "google.golang.org/grpc"
 )
 
@@ -201,37 +202,29 @@ func ParseDateRange(startS, endS string) (start, end time.Time, err error) {
 	return start, end, nil
 }
 
-func (uc *SummaryUseCase) dialUserCtx(ctx context.Context) (*grpc2.ClientConn, error) {
+// dialUserCtx / dialCoreCtx 返回按服务名缓存的共享长连接（调用方不得 Close）。
+// 整个报告生成过程复用同一条连接；鉴权 metadata 由每次 RPC 的 ctx 携带。
+func (uc *SummaryUseCase) dialUserCtx(_ context.Context) (*grpc2.ClientConn, error) {
 	if uc == nil || uc.reg == nil {
 		return nil, fmt.Errorf("service discovery 未配置")
 	}
-	return grpc.DialInsecure(
-		ctx,
-		grpc.WithEndpoint("discovery:///user"),
-		grpc.WithDiscovery((*uc.reg).(registry.Discovery)),
-		grpc.WithTimeout(30*time.Second),
-	)
+	return core_data.SharedGRPCConn(uc.reg, "user")
 }
 
-func (uc *SummaryUseCase) dialCoreCtx(ctx context.Context) (*grpc2.ClientConn, error) {
+func (uc *SummaryUseCase) dialCoreCtx(_ context.Context) (*grpc2.ClientConn, error) {
 	if uc == nil || uc.reg == nil {
 		return nil, fmt.Errorf("service discovery 未配置")
 	}
-	return grpc.DialInsecure(
-		ctx,
-		grpc.WithEndpoint("discovery:///core-data"),
-		grpc.WithDiscovery((*uc.reg).(registry.Discovery)),
-		grpc.WithTimeout(30*time.Second),
-	)
+	return core_data.SharedGRPCConn(uc.reg, "core-data")
 }
 
-// resolveMemberIDs 组织成员（排除教练），可选按组过滤
-func (uc *SummaryUseCase) resolveMemberIDs(ctx context.Context, orgID, groupID int64) ([]int64, error) {
+// resolveMemberIDs 组织成员（排除教练），可选按组过滤。
+// coachSet 由调用方一次拉取后传入，避免重复请求成员列表。
+func (uc *SummaryUseCase) resolveMemberIDs(ctx context.Context, orgID, groupID int64, coachSet map[int64]struct{}) ([]int64, error) {
 	conn, err := uc.dialUserCtx(ctx)
 	if err != nil {
 		return nil, err
 	}
-	defer conn.Close()
 	cli := profile2.NewProfileClient(conn)
 
 	var ids []int64
@@ -268,7 +261,6 @@ func (uc *SummaryUseCase) resolveMemberIDs(ctx context.Context, orgID, groupID i
 		ids = []int64{}
 	}
 	// 教练不计入任何统计
-	coachSet := uc.fetchCoachUserIDSet(ctx, orgID)
 	if len(coachSet) > 0 {
 		filtered := make([]int64, 0, len(ids))
 		for _, id := range ids {
@@ -369,7 +361,6 @@ func (uc *SummaryUseCase) fetchIdentities(ctx context.Context, userIDs []int64, 
 	if err != nil {
 		return out
 	}
-	defer conn.Close()
 	cli := profile2.NewProfileClient(conn)
 	const batch = 100
 	for i := 0; i < len(userIDs); i += batch {
@@ -411,7 +402,6 @@ func (uc *SummaryUseCase) fetchHeatmapUser(ctx context.Context, userId int64, st
 	if err != nil {
 		return nil, err
 	}
-	defer conn.Close()
 	cli := statistic.NewStatisticClient(conn)
 	res, err := cli.Heatmap(ctx, &statistic.HeatmapReq{
 		UserId:    userId,
@@ -439,8 +429,10 @@ func (uc *SummaryUseCase) LoadTrainingReportData(ctx context.Context, orgID, gro
 		log.Warnf("training report elevated: %v", eerr)
 		elevated = ctx
 	}
+	// 教练名单只拉一次：成员过滤与提交动态过滤共用
+	coachSet := uc.fetchCoachUserIDSet(elevated, orgID)
 	// 用 elevated 上下文解析成员并排除教练
-	memberIDs, err := uc.resolveMemberIDs(elevated, orgID, groupID)
+	memberIDs, err := uc.resolveMemberIDs(elevated, orgID, groupID, coachSet)
 	if err != nil {
 		return nil, err
 	}
@@ -460,39 +452,48 @@ func (uc *SummaryUseCase) LoadTrainingReportData(ctx context.Context, orgID, gro
 	acByUser := make(map[int64]int64, len(memberIDs))
 	var prevTotal int64
 
-	// 分批拉个人热力（提交 + AC）
+	// 拉个人热力（提交 + AC + 上期）：errgroup 有限并发，缩短总时长且不打爆 core
+	var hmMu sync.Mutex
+	g := new(errgroup.Group)
+	g.SetLimit(4)
 	for _, uid := range memberIDs {
-		hm, err := uc.fetchHeatmapUser(ctx, uid, start, end, false)
-		if err != nil {
-			log.Warnf("training report heatmap user=%d: %v", uid, err)
-			continue
-		}
-		var uSum int64
-		for i, d := range hm {
-			if i < len(dayTotals) {
-				dayTotals[i].Count += d.Count
+		uid := uid
+		g.Go(func() error {
+			hm, err := uc.fetchHeatmapUser(ctx, uid, start, end, false)
+			if err != nil {
+				log.Warnf("training report heatmap user=%d: %v", uid, err)
+				return nil // 单人失败不阻断整体
 			}
-			uSum += d.Count
-		}
-		submitByUser[uid] = uSum
+			acHm, acErr := uc.fetchHeatmapUser(ctx, uid, start, end, true)
+			prevHm, prevErr := uc.fetchHeatmapUser(ctx, uid, prevStart, prevEnd, false)
 
-		acHm, err := uc.fetchHeatmapUser(ctx, uid, start, end, true)
-		if err == nil {
-			var acSum int64
-			for i, d := range acHm {
-				if i < len(dayACTotals) {
-					dayACTotals[i].Count += d.Count
+			hmMu.Lock()
+			defer hmMu.Unlock()
+			var uSum int64
+			for i, d := range hm {
+				if i < len(dayTotals) {
+					dayTotals[i].Count += d.Count
 				}
-				acSum += d.Count
+				uSum += d.Count
 			}
-			acByUser[uid] = acSum
-		}
-
-		prevHm, err := uc.fetchHeatmapUser(ctx, uid, prevStart, prevEnd, false)
-		if err == nil {
-			prevTotal += sumDayCounts(prevHm)
-		}
+			submitByUser[uid] = uSum
+			if acErr == nil {
+				var acSum int64
+				for i, d := range acHm {
+					if i < len(dayACTotals) {
+						dayACTotals[i].Count += d.Count
+					}
+					acSum += d.Count
+				}
+				acByUser[uid] = acSum
+			}
+			if prevErr == nil {
+				prevTotal += sumDayCounts(prevHm)
+			}
+			return nil
+		})
 	}
+	_ = g.Wait()
 
 	idMap := uc.fetchIdentities(ctx, memberIDs, orgID)
 	nameMap := make(map[int64]string, len(idMap))
@@ -591,11 +592,11 @@ func (uc *SummaryUseCase) LoadTrainingReportData(ctx context.Context, orgID, gro
 
 	// 多维度预取（失败不阻断）
 	data.OrgSubmitSample = uc.fetchOrgSubmitSample(elevated, start, end, 60)
-	// 动态里若混入教练提交，剔除
-	if coaches := uc.fetchCoachUserIDSet(elevated, orgID); len(coaches) > 0 {
+	// 动态里若混入教练提交，剔除（复用开头拉取的教练名单）
+	if len(coachSet) > 0 {
 		feed := data.OrgSubmitSample[:0]
 		for _, f := range data.OrgSubmitSample {
-			if _, isCoach := coaches[f.UserID]; !isCoach {
+			if _, isCoach := coachSet[f.UserID]; !isCoach {
 				feed = append(feed, f)
 			}
 		}
@@ -781,7 +782,6 @@ func (uc *SummaryUseCase) fetchOrgSubmitSample(ctx context.Context, start, end t
 	if err != nil {
 		return nil
 	}
-	defer conn.Close()
 	cli := submit_log.NewSubmitClient(conn)
 	cursor := end.AddDate(0, 0, 1).Unix()
 	res, err := cli.GetSubmitLog(ctx, &submit_log.GetSubmitLogReq{
@@ -825,7 +825,6 @@ func (uc *SummaryUseCase) fetchOrgContests(ctx context.Context, start, end time.
 	if err != nil {
 		return nil
 	}
-	defer conn.Close()
 	cli := contest_log.NewContestClient(conn)
 
 	timeFrom := start.Unix()
@@ -995,7 +994,6 @@ func (uc *SummaryUseCase) fetchContestRankSnaps(ctx context.Context, contests []
 	if err != nil {
 		return nil
 	}
-	defer conn.Close()
 	cli := contest_log.NewContestClient(conn)
 	for _, c := range contests {
 		if c.ContestID == "" {

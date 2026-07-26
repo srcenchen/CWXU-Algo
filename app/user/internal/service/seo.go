@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -27,14 +28,48 @@ const (
 	maxSitemapArticles  = 5000
 )
 
+// seoPageCacheTTL resolvePage 结果进程内缓存 60s：
+// 爬虫抓取高频重复路径时避免每次都查库（站点品牌 + 文章/题面 meta）。
+const seoPageCacheTTL = 60 * time.Second
+
+// seoPageCacheMax 缓存条目上限，超过后整体清空，防止恶意路径撑爆内存
+const seoPageCacheMax = 1024
+
+type seoPageCacheEntry struct {
+	page seoPage
+	exp  time.Time
+}
+
 // SEOService serves crawler-friendly HTML meta for SPA public routes.
 // Does not increment blog view_count.
 type SEOService struct {
 	data *data.Data
+
+	pageCacheMu sync.Mutex
+	pageCache   map[string]seoPageCacheEntry
 }
 
 func NewSEOService(d *data.Data) *SEOService {
-	return &SEOService{data: d}
+	return &SEOService{data: d, pageCache: map[string]seoPageCacheEntry{}}
+}
+
+func (s *SEOService) cachedPage(key string) (seoPage, bool) {
+	s.pageCacheMu.Lock()
+	defer s.pageCacheMu.Unlock()
+	e, ok := s.pageCache[key]
+	if !ok || time.Now().After(e.exp) {
+		return seoPage{}, false
+	}
+	return e.page, true
+}
+
+func (s *SEOService) storePage(key string, p seoPage) {
+	s.pageCacheMu.Lock()
+	defer s.pageCacheMu.Unlock()
+	if len(s.pageCache) >= seoPageCacheMax {
+		s.pageCache = map[string]seoPageCacheEntry{}
+	}
+	s.pageCache[key] = seoPageCacheEntry{page: p, exp: time.Now().Add(seoPageCacheTTL)}
 }
 
 // RegisterSEORoutes public SEO endpoints (no JWT).
@@ -173,8 +208,18 @@ func normalizePath(raw string) string {
 
 func (s *SEOService) resolvePage(req *http.Request, path string) seoPage {
 	origin := publicOrigin(req)
-	siteTitle, siteLogo, siteFav := s.siteBrand()
 	path = normalizePath(path)
+	cacheKey := origin + "|" + path
+	if p, ok := s.cachedPage(cacheKey); ok {
+		return p
+	}
+	p := s.resolvePageUncached(req, origin, path)
+	s.storePage(cacheKey, p)
+	return p
+}
+
+func (s *SEOService) resolvePageUncached(req *http.Request, origin, path string) seoPage {
+	siteTitle, siteLogo, siteFav := s.siteBrand()
 
 	// split path and query
 	pathOnly := path

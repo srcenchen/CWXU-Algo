@@ -93,6 +93,8 @@ func newApp(logger log.Logger, gs *grpc.Server, hs *http.Server, reg *discovery.
 			log.Info("stopping background workers...")
 			close(stopCh)
 			cm.Stop()
+			pfc.Stop()
+			pac.Stop()
 			upc.Stop()
 			log.Info("stopping cron task...")
 			cron.Stop()

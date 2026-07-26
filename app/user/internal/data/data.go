@@ -124,22 +124,56 @@ func migrateModels(db *gorm.DB) {
 		&model.SchemaPatch{},
 		&model.BlogThemeFlag{},
 		&model.BlogSiteConfig{},
+		&model.Role{},
+		&model.RolePermission{},
+		&model.UserRole{},
 	)
 	if err != nil {
 		panic("数据库：数据库自动合并失败")
 	}
 	seedPlanQuotas(db)
 	seedGoAlgoFramework(db)
+	seedRbac(db)
 	backfillLastLoginAt(db)
 	ensureSiteInactiveDays(db)
+	ensureBackupActiveJobIndex(db)
 	backfillBlogModerationApproved(db)
 	backfillBlogActivationForExistingAuthors(db)
 	backfillBlogAutoSurfaceAndZeroViews(db)
 }
 
-// backfillBlogModerationApproved 旧文章默认视为已通过审核
+// claimSchemaPatch 认领一次性数据修补：以 key 唯一插入，成功者执行、失败者跳过。
+// 避免每次发版全表回填与多实例并发重复执行。
+func claimSchemaPatch(db *gorm.DB, key string) bool {
+	if db == nil || !db.Migrator().HasTable(&model.SchemaPatch{}) {
+		return false
+	}
+	res := db.Exec(`INSERT INTO schema_patches (key, applied_at) VALUES (?, NOW()) ON CONFLICT (key) DO NOTHING`, key)
+	if res.Error != nil {
+		log.Warnf("claim schema patch %s: %v", key, res.Error)
+		return false
+	}
+	return res.RowsAffected > 0
+}
+
+// ensureBackupActiveJobIndex 并发保护：同 kind 同时只允许一个 pending/running 备份任务。
+// 与 service 层 hasActiveJob 检查配合，消除「检查-创建」竞态。
+func ensureBackupActiveJobIndex(db *gorm.DB) {
+	if db == nil || !db.Migrator().HasTable(&model.BackupJob{}) {
+		return
+	}
+	if err := db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS uniq_backup_jobs_active_kind
+		ON backup_jobs (kind) WHERE status IN ('pending', 'running')`).Error; err != nil {
+		log.Warnf("ensure backup active job unique index: %v", err)
+	}
+}
+
+// backfillBlogModerationApproved 旧文章默认视为已通过审核（SchemaPatch 一次性执行）
 func backfillBlogModerationApproved(db *gorm.DB) {
 	if db == nil || !db.Migrator().HasColumn(&model.BlogArticle{}, "moderation_status") {
+		return
+	}
+	if !claimSchemaPatch(db, "blog_moderation_approved_backfill_v1") {
 		return
 	}
 	_ = db.Exec(`
@@ -149,9 +183,12 @@ func backfillBlogModerationApproved(db *gorm.DB) {
 	`).Error
 }
 
-// backfillBlogActivationForExistingAuthors 已有文章/主题配置的用户视为已开通（免二次签署）
+// backfillBlogActivationForExistingAuthors 已有文章/主题配置的用户视为已开通（免二次签署；SchemaPatch 一次性执行）
 func backfillBlogActivationForExistingAuthors(db *gorm.DB) {
 	if db == nil || !db.Migrator().HasTable(&model.BlogSiteConfig{}) {
+		return
+	}
+	if !claimSchemaPatch(db, "blog_activation_legacy_backfill_v1") {
 		return
 	}
 	// 已有 site_config 但未签协议
@@ -181,27 +218,30 @@ const (
 )
 
 // backfillBlogAutoSurfaceAndZeroViews:
-// 1) 公开文章自动 sync_to_main_profile（可重复）；recommend 改由站管/审核员手动设精选
-// 2) 为公开文补全作者所属组织的发现同步（可重复）
+// 1) 公开文章自动 sync_to_main_profile（历史回填，SchemaPatch 一次性）；recommend 改由站管/审核员手动设精选
+// 2) 为公开文补全作者所属组织的发现同步（历史回填，SchemaPatch 一次性；新文章由写入路径 applyAutoOrgSurface 保证）
 // 3) 浏览量按 UV 重计：历史 view_count 清零（一次性）
 // 4) 一次性清空历史自动 recommend，避免广场「精选」默认全量
 func backfillBlogAutoSurfaceAndZeroViews(db *gorm.DB) {
 	if db == nil || !db.Migrator().HasTable(&model.BlogArticle{}) {
 		return
 	}
-	// 资料同步仍自动；精选(recommend) 不再自动打开
-	_ = db.Exec(`
+	// 历史数据回填挂在 SchemaPatch 下：避免每次发版全表 UPDATE/INSERT-SELECT 与多实例并发执行；
+	// UPDATE 追加幂等 WHERE，仅改写需要变更的行
+	if claimSchemaPatch(db, "blog_auto_surface_backfill_v1") {
+		// 资料同步仍自动；精选(recommend) 不再自动打开
+		_ = db.Exec(`
 UPDATE blog_articles
 SET sync_to_main_profile = true
-WHERE visibility = 'public'
+WHERE visibility = 'public' AND sync_to_main_profile = false
 `).Error
-	_ = db.Exec(`
+		_ = db.Exec(`
 UPDATE blog_articles
 SET sync_to_main_profile = false, recommend = false
-WHERE visibility <> 'public'
+WHERE visibility <> 'public' AND (sync_to_main_profile = true OR recommend = true)
 `).Error
-	// ensure public articles have org sync rows for all author memberships
-	_ = db.Exec(`
+		// ensure public articles have org sync rows for all author memberships
+		_ = db.Exec(`
 INSERT INTO blog_article_orgs (created_at, article_id, org_id)
 SELECT NOW(), a.id, m.org_id
 FROM blog_articles a
@@ -212,8 +252,8 @@ WHERE a.visibility = 'public'
     WHERE o.article_id = a.id AND o.org_id = m.org_id
   )
 `).Error
-	// private org sync also implies public domain
-	_ = db.Exec(`
+		// private org sync also implies public domain
+		_ = db.Exec(`
 INSERT INTO blog_article_orgs (created_at, article_id, org_id)
 SELECT NOW(), o.article_id, pub.id
 FROM blog_article_orgs o
@@ -224,23 +264,15 @@ WHERE NOT EXISTS (
   WHERE x.article_id = o.article_id AND x.org_id = pub.id
 )
 `).Error
-
-	if !db.Migrator().HasTable(&model.SchemaPatch{}) {
-		return
 	}
+
 	// one-shot zero views for UV migration
-	var n int64
-	_ = db.Model(&model.SchemaPatch{}).Where("key = ?", patchBlogAutoSurfaceUV).Count(&n).Error
-	if n == 0 {
+	if claimSchemaPatch(db, patchBlogAutoSurfaceUV) {
 		_ = db.Exec(`UPDATE blog_articles SET view_count = 0`).Error
-		_ = db.Create(&model.SchemaPatch{Key: patchBlogAutoSurfaceUV, AppliedAt: time.Now()}).Error
 	}
 	// one-shot: clear auto-featured recommend so 精选 only after staff picks
-	n = 0
-	_ = db.Model(&model.SchemaPatch{}).Where("key = ?", patchBlogRecommendManualOnly).Count(&n).Error
-	if n == 0 {
+	if claimSchemaPatch(db, patchBlogRecommendManualOnly) {
 		_ = db.Exec(`UPDATE blog_articles SET recommend = false`).Error
-		_ = db.Create(&model.SchemaPatch{Key: patchBlogRecommendManualOnly, AppliedAt: time.Now()}).Error
 	}
 }
 

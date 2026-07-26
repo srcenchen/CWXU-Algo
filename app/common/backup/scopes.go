@@ -48,6 +48,10 @@ var AllTableSpecs = []TableSpec{
 	{File: "groups.ndjson", DB: "user", Table: "groups", Scope: ScopeOrgs, SeqCol: "id"},
 	{File: "org_members.ndjson", DB: "user", Table: "org_members", Scope: ScopeOrgs, SeqCol: "id"},
 	{File: "org_join_requests.ndjson", DB: "user", Table: "org_join_requests", Scope: ScopeOrgs, SeqCol: "id"},
+	// RBAC：roles 先于 role_permissions / user_roles（外键依赖顺序）
+	{File: "roles.ndjson", DB: "user", Table: "roles", Scope: ScopeOrgs, SeqCol: "id"},
+	{File: "role_permissions.ndjson", DB: "user", Table: "role_permissions", Scope: ScopeOrgs, SeqCol: "id"},
+	{File: "user_roles.ndjson", DB: "user", Table: "user_roles", Scope: ScopeOrgs, SeqCol: "id"},
 	{File: "pastes.ndjson", DB: "user", Table: "pastes", Scope: ScopePastes, SeqCol: "id"},
 	{File: "site_visit_dailies.ndjson", DB: "user", Table: "site_visit_dailies", Scope: ScopeVisits, SeqCol: "id"},
 	{File: "platforms.ndjson", DB: "core", Table: "platforms", Scope: ScopePlatforms, SeqCol: "id"},

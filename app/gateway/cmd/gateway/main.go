@@ -123,6 +123,16 @@ func main() {
 		log.Fatalf("failed to load config: %v", err)
 	}
 
+	// writeTimeout/readTimeout 至少覆盖配置中最长的端点超时（+30s 余量），
+	// 否则长端点（如 /v1/core/* 120s）会先被 HTTP server 超时切断。
+	maxEndpointTimeout := time.Duration(0)
+	for _, e := range bc.Endpoints {
+		if t := e.Timeout.AsDuration(); t > maxEndpointTimeout {
+			maxEndpointTimeout = t
+		}
+	}
+	server.EnsureTimeoutAtLeast(maxEndpointTimeout + 30*time.Second)
+
 	buildContext := client.NewBuildContext(bc)
 	circuitbreaker.Init(buildContext, clientFactory)
 	if err := p.Update(buildContext, bc); err != nil {

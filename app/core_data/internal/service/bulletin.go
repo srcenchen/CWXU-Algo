@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"cwxu-algo/api/core/v1/bulletin"
+	"cwxu-algo/app/common/rbac"
 	"cwxu-algo/app/common/utils/auth"
 	"cwxu-algo/app/core_data/internal/data/dal"
 	"cwxu-algo/app/core_data/internal/data/model"
@@ -43,25 +44,25 @@ func (s *BulletinService) modelToProto(m *model.Bulletin) *bulletin.BulletinInfo
 	return info
 }
 
-// canManageBulletin 站点公告仅站点管理员；组织公告为该组织教练及以上（或站管）
+// canManageBulletin 站点公告需全站公告权限；组织公告需该组织的组织公告权限（站管旁路）
 func canManageBulletin(ctx context.Context, user *auth.JwtPayload, m *model.Bulletin) bool {
 	if user == nil {
 		return false
 	}
-	if auth.VerifySiteAdmin(ctx) {
+	if auth.HasPerm(ctx, rbac.PermSiteBulletin) {
 		return true
 	}
 	scope := m.Scope
 	if scope == "" {
 		scope = model.BulletinScopeSite
 	}
-	// 全站公告仅站点管理员
+	// 全站公告需全站公告权限
 	if scope == model.BulletinScopeSite {
 		return false
 	}
-	// 组织公告：当前组织 staff 且 org 匹配
+	// 组织公告：对该组织具备组织公告权限（要求 JWT 当前组织匹配）
 	if scope == model.BulletinScopeOrg && m.OrgID != nil {
-		return auth.VerifyOrgCoach(ctx) && user.OrgID == *m.OrgID
+		return auth.HasOrgPerm(ctx, *m.OrgID, rbac.PermOrgBulletinManage)
 	}
 	return false
 }
@@ -77,8 +78,8 @@ func (s *BulletinService) Create(ctx context.Context, req *bulletin.CreateBullet
 
 	reqScope := req.Scope
 	if reqScope == "" {
-		// 默认：站管发站点公告；其余发组织公告
-		if auth.VerifySiteAdmin(ctx) {
+		// 默认：具备全站公告权限者发站点公告；其余发组织公告
+		if auth.HasPerm(ctx, rbac.PermSiteBulletin) {
 			reqScope = model.BulletinScopeSite
 		} else {
 			reqScope = model.BulletinScopeOrg
@@ -90,7 +91,7 @@ func (s *BulletinService) Create(ctx context.Context, req *bulletin.CreateBullet
 
 	switch reqScope {
 	case model.BulletinScopeSite:
-		if !auth.VerifySiteAdmin(ctx) {
+		if !auth.HasPerm(ctx, rbac.PermSiteBulletin) {
 			return &bulletin.CreateBulletinRes{
 				Code:    1,
 				Message: "权限不足，仅站点管理员可发布站点公告",
@@ -99,8 +100,8 @@ func (s *BulletinService) Create(ctx context.Context, req *bulletin.CreateBullet
 		scope = model.BulletinScopeSite
 		orgID = nil
 	case model.BulletinScopeOrg:
-		// 组织公告：组织教练及以上；站管也可代发当前组织公告
-		if !auth.VerifyOrgCoach(ctx) {
+		// 组织公告：需当前组织的组织公告权限；站管也可代发当前组织公告
+		if !auth.HasPerm(ctx, rbac.PermOrgBulletinManage) {
 			return &bulletin.CreateBulletinRes{
 				Code:    1,
 				Message: "权限不足，仅组织管理员或教练可发布组织公告",
@@ -241,7 +242,7 @@ func (s *BulletinService) Get(ctx context.Context, req *bulletin.GetBulletinReq)
 		scope = model.BulletinScopeSite
 	}
 	if scope == model.BulletinScopeOrg {
-		if !auth.VerifySiteAdmin(ctx) {
+		if !auth.HasPerm(ctx, rbac.PermSiteBulletin) {
 			u := auth.GetCurrentUser(ctx)
 			if u == nil || m.OrgID == nil || u.OrgID != *m.OrgID {
 				return &bulletin.GetBulletinRes{
