@@ -849,9 +849,10 @@ func renderSEOHTML(p seoPage) string {
 	b.WriteString("<link rel=\"canonical\" href=\"")
 	b.WriteString(pageURL)
 	b.WriteString("\" />\n")
-	b.WriteString("<link rel=\"icon\" href=\"/favicon.svg\" type=\"image/svg+xml\" />\n")
-	b.WriteString("<link rel=\"alternate icon\" href=\"/favicon.png\" type=\"image/png\" />\n")
-	b.WriteString("<link rel=\"apple-touch-icon\" href=\"/apple-touch-icon.png\" />\n")
+	// ?v=2 绕开 CDN 对旧图标的 immutable 缓存，与前端 index.html 保持一致
+	b.WriteString("<link rel=\"icon\" href=\"/favicon.svg?v=2\" type=\"image/svg+xml\" />\n")
+	b.WriteString("<link rel=\"alternate icon\" href=\"/favicon.png?v=2\" type=\"image/png\" />\n")
+	b.WriteString("<link rel=\"apple-touch-icon\" href=\"/apple-touch-icon.png?v=2\" />\n")
 	// Open Graph
 	b.WriteString("<meta property=\"og:site_name\" content=\"")
 	b.WriteString(site)
