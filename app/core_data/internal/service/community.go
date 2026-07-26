@@ -69,6 +69,9 @@ func RegisterCommunityRoutes(srv *khttp.Server, s *CommunityService) {
 	// 点赞 / 举报（评论 + 题解）
 	r.POST("/v1/core/problem/like", s.handleLikeToggle)
 	r.POST("/v1/core/problem/report", s.handleReport)
+	// 举报处理台（content.report.handle）
+	r.GET("/v1/core/problem/report/list", s.handleReportList)
+	r.POST("/v1/core/problem/report/handle", s.handleReportHandle)
 	// 发现流：公共域全站聚合；私有域按组织隔离
 	r.GET("/v1/core/activity/feed", s.handleActivityFeed)
 	// 资料页近期
@@ -845,6 +848,173 @@ func (s *CommunityService) handleReport(ctx khttp.Context) error {
 	writeJSON(ctx.Response(), 200, map[string]interface{}{
 		"success": true, "message": "已收到举报，我们会尽快处理",
 		"data": map[string]interface{}{"id": row.ID, "alreadyReported": false},
+	})
+	return nil
+}
+
+// handleReportList 举报处理台：题解/评论举报列表（需 content.report.handle）。
+// query: status=pending|resolved|dismissed|all（默认 pending）、targetType=comment|solution（默认全部）、page/pageSize
+func (s *CommunityService) handleReportList(ctx khttp.Context) error {
+	if !auth.HasPerm(ctx, rbac.PermContentReportHandle) {
+		writeJSON(ctx.Response(), 403, map[string]interface{}{"success": false, "message": "需要举报处理权限"})
+		return nil
+	}
+	status := strings.TrimSpace(ctx.Query().Get("status"))
+	if status == "" {
+		status = model.ReportStatusPending
+	}
+	if status != "all" && status != model.ReportStatusPending &&
+		status != model.ReportStatusResolved && status != model.ReportStatusDismissed {
+		writeJSON(ctx.Response(), 400, map[string]interface{}{"success": false, "message": "不支持的状态筛选"})
+		return nil
+	}
+	tt := strings.TrimSpace(ctx.Query().Get("targetType"))
+	if tt != "" && tt != model.CommunityTargetComment && tt != model.CommunityTargetSolution {
+		writeJSON(ctx.Response(), 400, map[string]interface{}{"success": false, "message": "不支持的举报类型"})
+		return nil
+	}
+	page, pageSize := pageParams(ctx, 1, 20, 50)
+	q := s.db.Model(&model.CommunityReport{})
+	if status != "all" {
+		q = q.Where("status = ?", status)
+	}
+	if tt != "" {
+		q = q.Where("target_type = ?", tt)
+	}
+	var total int64
+	_ = q.Count(&total).Error
+	var rows []model.CommunityReport
+	_ = q.Order("id desc").Offset((page - 1) * pageSize).Limit(pageSize).Find(&rows).Error
+
+	// 目标预览：题解取标题、评论取正文摘录；目标可能已被删除（exists=false）
+	solIDs := make([]uint, 0, len(rows))
+	cmtIDs := make([]uint, 0, len(rows))
+	for _, r := range rows {
+		if r.TargetType == model.CommunityTargetSolution {
+			solIDs = append(solIDs, r.TargetID)
+		} else {
+			cmtIDs = append(cmtIDs, r.TargetID)
+		}
+	}
+	solMap := map[uint]model.ProblemUserSolution{}
+	if len(solIDs) > 0 {
+		var sols []model.ProblemUserSolution
+		_ = s.db.Select("id", "problem_id", "user_id", "title").Where("id IN ?", solIDs).Find(&sols).Error
+		for _, v := range sols {
+			solMap[v.ID] = v
+		}
+	}
+	cmtMap := map[uint]model.ProblemComment{}
+	if len(cmtIDs) > 0 {
+		var cmts []model.ProblemComment
+		_ = s.db.Select("id", "problem_id", "solution_id", "user_id", "content").Where("id IN ?", cmtIDs).Find(&cmts).Error
+		for _, v := range cmts {
+			cmtMap[v.ID] = v
+		}
+	}
+	uidSet := map[uint]struct{}{}
+	uids := make([]uint, 0, len(rows)*2)
+	addUID := func(id uint) {
+		if id == 0 {
+			return
+		}
+		if _, ok := uidSet[id]; ok {
+			return
+		}
+		uidSet[id] = struct{}{}
+		uids = append(uids, id)
+	}
+	for _, r := range rows {
+		addUID(r.UserID)
+		if r.TargetType == model.CommunityTargetSolution {
+			addUID(solMap[r.TargetID].UserID)
+		} else {
+			addUID(cmtMap[r.TargetID].UserID)
+		}
+	}
+	users := s.batchUsers(ctx, uids)
+
+	list := make([]map[string]interface{}, 0, len(rows))
+	for _, r := range rows {
+		item := map[string]interface{}{
+			"id":         r.ID,
+			"createdAt":  r.CreatedAt.Format(time.RFC3339),
+			"status":     r.Status,
+			"reason":     r.Reason,
+			"targetType": r.TargetType,
+			"targetId":   r.TargetID,
+			"reporter": map[string]interface{}{
+				"userId":   r.UserID,
+				"username": users[r.UserID].username,
+			},
+		}
+		target := map[string]interface{}{"exists": false}
+		if r.TargetType == model.CommunityTargetSolution {
+			if sol, ok := solMap[r.TargetID]; ok {
+				target = map[string]interface{}{
+					"exists":         true,
+					"problemId":      sol.ProblemID,
+					"title":          sol.Title,
+					"authorUserId":   sol.UserID,
+					"authorUsername": users[sol.UserID].username,
+				}
+			}
+		} else if c, ok := cmtMap[r.TargetID]; ok {
+			target = map[string]interface{}{
+				"exists":         true,
+				"problemId":      c.ProblemID,
+				"solutionId":     c.SolutionID,
+				"excerpt":        truncateRunes(c.Content, 120),
+				"authorUserId":   c.UserID,
+				"authorUsername": users[c.UserID].username,
+			}
+		}
+		item["target"] = target
+		list = append(list, item)
+	}
+	writeJSON(ctx.Response(), 200, map[string]interface{}{
+		"success": true,
+		"data":    map[string]interface{}{"list": list, "total": total},
+	})
+	return nil
+}
+
+// handleReportHandle 处理举报：resolve=已处理 / dismiss=驳回（需 content.report.handle）
+func (s *CommunityService) handleReportHandle(ctx khttp.Context) error {
+	if !auth.HasPerm(ctx, rbac.PermContentReportHandle) {
+		writeJSON(ctx.Response(), 403, map[string]interface{}{"success": false, "message": "需要举报处理权限"})
+		return nil
+	}
+	var req struct {
+		ID     uint   `json:"id"`
+		Action string `json:"action"` // resolve|dismiss
+	}
+	if err := readJSONBody(ctx.Request(), &req); err != nil || req.ID == 0 {
+		writeJSON(ctx.Response(), 400, map[string]interface{}{"success": false, "message": "参数错误"})
+		return nil
+	}
+	var next string
+	switch req.Action {
+	case "resolve":
+		next = model.ReportStatusResolved
+	case "dismiss":
+		next = model.ReportStatusDismissed
+	default:
+		writeJSON(ctx.Response(), 400, map[string]interface{}{"success": false, "message": "不支持的操作"})
+		return nil
+	}
+	var row model.CommunityReport
+	if s.db.First(&row, req.ID).Error != nil {
+		writeJSON(ctx.Response(), 404, map[string]interface{}{"success": false, "message": "举报不存在"})
+		return nil
+	}
+	if err := s.db.Model(&row).Update("status", next).Error; err != nil {
+		writeJSON(ctx.Response(), 500, map[string]interface{}{"success": false, "message": "操作失败，请稍后重试"})
+		return nil
+	}
+	writeJSON(ctx.Response(), 200, map[string]interface{}{
+		"success": true,
+		"data":    map[string]interface{}{"id": row.ID, "status": next},
 	})
 	return nil
 }
@@ -1631,6 +1801,15 @@ func excerpt(s string, max int) string {
 		return blogtext.DefaultSummary(s)
 	}
 	return blogtext.Excerpt(s, max)
+}
+
+// truncateRunes 按 rune 截断，防切碎 UTF-8；超长补省略号
+func truncateRunes(s string, max int) string {
+	rs := []rune(strings.TrimSpace(s))
+	if len(rs) <= max {
+		return string(rs)
+	}
+	return string(rs[:max]) + "…"
 }
 
 func queryUint(ctx khttp.Context, key string) uint {

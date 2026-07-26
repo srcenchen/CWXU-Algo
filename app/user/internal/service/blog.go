@@ -100,6 +100,9 @@ func RegisterBlogRoutes(srv *khttp.Server, bs *BlogService) {
 
 	// 举报
 	r.POST("/v1/user/blog/report", bs.handleReport)
+	// 举报处理台（content.report.handle）
+	r.GET("/v1/user/blog/report/list", bs.handleReportList)
+	r.POST("/v1/user/blog/report/handle", bs.handleReportHandle)
 }
 
 // ---------- helpers ----------
@@ -2104,6 +2107,146 @@ func (s *BlogService) handleReport(ctx khttp.Context) error {
 	writeJSON(ctx.Response(), 200, map[string]interface{}{
 		"code": 0, "message": "已收到举报，我们会尽快处理",
 		"data": map[string]interface{}{"id": row.ID, "alreadyReported": false},
+	})
+	return nil
+}
+
+// handleReportList 举报处理台：博客文章举报列表（需 content.report.handle）。
+// query: status=pending|resolved|dismissed|all（默认 pending）、page/pageSize
+func (s *BlogService) handleReportList(ctx khttp.Context) error {
+	pd := auth.GetCurrentUser(ctx)
+	if !auth.PayloadHasPerm(pd, rbac.PermContentReportHandle) {
+		writeJSON(ctx.Response(), 403, map[string]interface{}{"code": 1, "message": "需要举报处理权限"})
+		return nil
+	}
+	status := strings.TrimSpace(ctx.Request().URL.Query().Get("status"))
+	if status == "" {
+		status = "pending"
+	}
+	if status != "all" && status != "pending" && status != "resolved" && status != "dismissed" {
+		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "不支持的状态筛选"})
+		return nil
+	}
+	page, pageSize := parsePage(ctx.Request())
+	q := s.db.Model(&model.BlogReport{})
+	if status != "all" {
+		q = q.Where("status = ?", status)
+	}
+	var total int64
+	_ = q.Count(&total).Error
+	var rows []model.BlogReport
+	_ = q.Order("id DESC").Offset((page - 1) * pageSize).Limit(pageSize).Find(&rows).Error
+
+	// 文章可能已被删除（exists=false）；作者与举报人一次批量取
+	artIDs := make([]uint, 0, len(rows))
+	for _, r := range rows {
+		artIDs = append(artIDs, r.ArticleID)
+	}
+	arts := map[uint]model.BlogArticle{}
+	if len(artIDs) > 0 {
+		var list []model.BlogArticle
+		_ = s.db.Select("id", "slug", "title", "user_id").Where("id IN ?", artIDs).Find(&list).Error
+		for _, a := range list {
+			arts[a.ID] = a
+		}
+	}
+	uidSet := map[uint]struct{}{}
+	uids := make([]uint, 0, len(rows)*2)
+	addUID := func(id uint) {
+		if id == 0 {
+			return
+		}
+		if _, ok := uidSet[id]; ok {
+			return
+		}
+		uidSet[id] = struct{}{}
+		uids = append(uids, id)
+	}
+	for _, r := range rows {
+		addUID(r.UserID)
+		addUID(arts[r.ArticleID].UserID)
+	}
+	users := map[uint]model.User{}
+	if len(uids) > 0 {
+		var list []model.User
+		_ = s.db.Select("id", "username", "name").Where("id IN ?", uids).Find(&list).Error
+		for _, u := range list {
+			users[u.ID] = u
+		}
+	}
+
+	out := make([]map[string]interface{}, 0, len(rows))
+	for _, r := range rows {
+		item := map[string]interface{}{
+			"id":        r.ID,
+			"createdAt": r.CreatedAt.Unix(),
+			"status":    r.Status,
+			"reason":    r.Reason,
+			"articleId": r.ArticleID,
+			"reporter": map[string]interface{}{
+				"userId":   r.UserID,
+				"username": users[r.UserID].Username,
+			},
+		}
+		target := map[string]interface{}{"exists": false}
+		if a, ok := arts[r.ArticleID]; ok {
+			target = map[string]interface{}{
+				"exists":         true,
+				"slug":           a.Slug,
+				"title":          a.Title,
+				"authorUserId":   a.UserID,
+				"authorUsername": users[a.UserID].Username,
+			}
+		}
+		item["target"] = target
+		out = append(out, item)
+	}
+	writeJSON(ctx.Response(), 200, map[string]interface{}{
+		"code": 0, "message": "success",
+		"data": map[string]interface{}{
+			"list": out, "total": total, "page": page, "pageSize": pageSize,
+		},
+	})
+	return nil
+}
+
+// handleReportHandle 处理博客举报：resolve=已处理 / dismiss=驳回（需 content.report.handle）
+func (s *BlogService) handleReportHandle(ctx khttp.Context) error {
+	pd := auth.GetCurrentUser(ctx)
+	if !auth.PayloadHasPerm(pd, rbac.PermContentReportHandle) {
+		writeJSON(ctx.Response(), 403, map[string]interface{}{"code": 1, "message": "需要举报处理权限"})
+		return nil
+	}
+	var body struct {
+		ID     uint   `json:"id"`
+		Action string `json:"action"` // resolve|dismiss
+	}
+	if err := json.NewDecoder(ctx.Request().Body).Decode(&body); err != nil || body.ID == 0 {
+		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "参数错误"})
+		return nil
+	}
+	var next string
+	switch body.Action {
+	case "resolve":
+		next = "resolved"
+	case "dismiss":
+		next = "dismissed"
+	default:
+		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "不支持的操作"})
+		return nil
+	}
+	var row model.BlogReport
+	if s.db.First(&row, body.ID).Error != nil {
+		writeJSON(ctx.Response(), 404, map[string]interface{}{"code": 1, "message": "举报不存在"})
+		return nil
+	}
+	if err := s.db.Model(&row).Update("status", next).Error; err != nil {
+		writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "操作失败，请稍后重试"})
+		return nil
+	}
+	writeJSON(ctx.Response(), 200, map[string]interface{}{
+		"code": 0, "message": "success",
+		"data": map[string]interface{}{"id": row.ID, "status": next},
 	})
 	return nil
 }

@@ -32,11 +32,12 @@ var reviewerPerms = []string{
 	PermContentProblemReview,
 	PermContentBlogModerate,
 	PermContentCommunityMod,
+	PermContentReportHandle,
 }
 
 var systemRoles = []SystemRole{
 	{RoleSiteAdmin, "站点管理员", "站点最高权限，旁路全部权限校验", ScopeSite, AllCodes()},
-	{RoleResourceReviewer, "资源审核员", "题库审查、博客审核与社区内容治理", ScopeSite, reviewerPerms},
+	{RoleResourceReviewer, "资源审核员", "题库审查、博客审核、社区内容治理与举报处理", ScopeSite, reviewerPerms},
 	{RoleOrgAdmin, "团队管理员", "本组织全部管理权限", ScopeOrg, CodesByScope(ScopeOrg)},
 	{RoleCoach, "教练", "本组织日常管理：分组、公告、训练报告", ScopeOrg, orgStaffPerms},
 	{RoleCaptain, "队长", "本组织日常管理：分组、公告、训练报告", ScopeOrg, orgStaffPerms},
@@ -81,7 +82,7 @@ func TemplateHas(roleCode, perm string) bool {
 }
 
 // LegacyHas 旧 token（无 pm claim）按旧 claims 推导权限：
-// 资源审核员 → 内容审核三项；orgRole → 对应模板。站点管理员在调用方旁路，不经此处。
+// 资源审核员 → 内容审核模板（reviewerPerms）；orgRole → 对应模板。站点管理员在调用方旁路，不经此处。
 func LegacyHas(perm string, isResourceReviewer bool, orgRole string) bool {
 	if isResourceReviewer {
 		for _, p := range reviewerPerms {

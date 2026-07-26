@@ -3,7 +3,7 @@ package rbac
 import "encoding/base64"
 
 // 权限位图：按 Perm.Bit 打包为小端字节序 bit 数组，base64url（无 padding）编码后放入 JWT `pm` claim。
-// 37 个权限 ≈ 5 字节 ≈ 7 字符，token 体积可忽略。
+// 38 个权限 ≈ 5 字节 ≈ 7 字符，token 体积可忽略。
 
 // Encode 权限 code 集合 → base64url 位图。未注册的 code 忽略。
 func Encode(codes []string) string {

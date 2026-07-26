@@ -44,6 +44,7 @@ const (
 	PermContentProblemReview    = "content.problem.review"
 	PermContentBlogModerate     = "content.blog.moderate"
 	PermContentCommunityMod     = "content.community.moderate"
+	PermContentReportHandle     = "content.report.handle"
 
 	// —— 组织 · 设置 ——
 	PermOrgInfoWrite    = "org.info.write"
@@ -112,7 +113,7 @@ var registry = []Perm{
 	{PermSiteEmergency, "紧急通知", "发布 / 管理全站紧急弹窗通知", "site_notice", ScopeSite, 19},
 
 	{PermContentProblemReview, "题库审查", "审核题面/标签修改申请；本人修改自动通过", "content", ScopeSite, 20},
-	{PermContentBlogModerate, "博客审核", "博客内容审核、精选与举报处理", "content", ScopeSite, 21},
+	{PermContentBlogModerate, "博客审核", "博客内容审核与精选", "content", ScopeSite, 21},
 	{PermContentCommunityMod, "社区内容治理", "删除违规题解与评论", "content", ScopeSite, 22},
 
 	{PermOrgInfoWrite, "组织信息设置", "组织品牌、名称、加入方式", "org_settings", ScopeOrg, 23},
@@ -131,6 +132,9 @@ var registry = []Perm{
 	{PermOrgBulletinManage, "组织公告", "发布 / 管理本组织公告", "org_daily", ScopeOrg, 34},
 	{PermOrgReportView, "训练报告与统计", "查看本组织训练报告与管理端统计", "org_daily", ScopeOrg, 35},
 	{PermOrgMemberEmail, "代管日报开关", "代成员管理日报邮件开关", "org_daily", ScopeOrg, 36},
+
+	// bit 只追加：content 组新增位排在末尾，分组展示顺序由 Groups() 决定，与 bit 无关
+	{PermContentReportHandle, "举报处理", "查看与处理用户举报（博客/题解/评论）", "content", ScopeSite, 37},
 }
 
 var groupMeta = []struct{ Key, Label, Scope string }{
