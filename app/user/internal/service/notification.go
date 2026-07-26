@@ -30,6 +30,7 @@ func RegisterNotificationRoutes(srv *khttp.Server, s *NotificationService) {
 	r.GET("/v1/user/notification/unread-count", s.handleUnreadCount)
 	r.POST("/v1/user/notification/read", s.handleRead)
 	r.POST("/v1/user/notification/read-all", s.handleReadAll)
+	r.POST("/v1/user/notification/clear-all", s.handleClearAll)
 }
 
 // CreateNotification 进程内写入（join review 等）
@@ -135,6 +136,26 @@ func (s *NotificationService) handleReadAll(ctx khttp.Context) error {
 		Where("user_id = ? AND is_read = false", pd.UserID).
 		Update("is_read", true).Error
 	writeJSON(ctx.Response(), 200, map[string]interface{}{"success": true, "message": "全部已读"})
+	return nil
+}
+
+// handleClearAll 硬删除当前用户全部站内信（不可恢复）
+func (s *NotificationService) handleClearAll(ctx khttp.Context) error {
+	pd := auth.GetCurrentUser(ctx)
+	if pd == nil || pd.UserID == 0 {
+		writeJSON(ctx.Response(), 401, map[string]interface{}{"success": false, "message": "请先登录"})
+		return nil
+	}
+	res := s.db.Where("user_id = ?", pd.UserID).Delete(&model.Notification{})
+	if res.Error != nil {
+		writeJSON(ctx.Response(), 500, map[string]interface{}{"success": false, "message": "清空失败"})
+		return nil
+	}
+	writeJSON(ctx.Response(), 200, map[string]interface{}{
+		"success": true,
+		"message": "已清空",
+		"deleted": res.RowsAffected,
+	})
 	return nil
 }
 
