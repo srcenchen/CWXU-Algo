@@ -273,6 +273,9 @@ func (p *ProfileService) GetList(ctx context.Context, req *profile.GetListReq) (
 		}
 	}
 
+	// 自定义站点角色名（管理端 badge）
+	siteRolesByUID := siteRoleNamesByUser(p.db, ids)
+
 	res := &profile.GetListRes{
 		List:  make([]*profile.GetListRes_List, 0),
 		Total: total,
@@ -323,6 +326,7 @@ func (p *ProfileService) GetList(ctx context.Context, req *profile.GetListReq) (
 			RoleId:                      int32(v.RoleID),
 			LastSubmit:                  t,
 			IsSiteAdmin:                 v.IsSiteAdmin,
+			SiteRoles:                   siteRolesByUID[uid],
 			GroupName:                   gName,
 			EmailEnabled:                v.EmailEnabled,
 			EmailWeeklyEnabled:          v.EmailWeeklyEnabled,

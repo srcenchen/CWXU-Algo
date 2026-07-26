@@ -92,6 +92,37 @@ func orgTemplateHas(db *gorm.DB, orgID uint, roleCode, perm string) bool {
 	return false
 }
 
+// siteRoleNamesByUser userId → 持有的自定义站点角色名（管理端 / 社交 badge 用）。
+// 内置角色不计入：站点管理员另有专属 badge。
+func siteRoleNamesByUser(db *gorm.DB, userIDs []int64) map[int64][]string {
+	out := make(map[int64][]string)
+	if db == nil || len(userIDs) == 0 {
+		return out
+	}
+	type row struct {
+		UserID int64  `gorm:"column:user_id"`
+		Name   string `gorm:"column:name"`
+	}
+	var rows []row
+	err := db.Table("user_roles AS ur").
+		Select("ur.user_id AS user_id, r.name AS name").
+		Joins("JOIN roles r ON r.id = ur.role_id AND r.scope = ? AND r.is_system = false", rbac.ScopeSite).
+		Where("ur.user_id IN ? AND ur.org_id = 0", userIDs).
+		Order("ur.user_id ASC, r.id ASC").
+		Scan(&rows).Error
+	if err != nil {
+		return out
+	}
+	for _, r := range rows {
+		name := strings.TrimSpace(r.Name)
+		if r.UserID == 0 || name == "" {
+			continue
+		}
+		out[r.UserID] = append(out[r.UserID], name)
+	}
+	return out
+}
+
 // —— 共享判定 / 同步助手（org.go / jwt_issue.go 复用）——
 
 // hasPermInOrgDB 指定组织内是否具备权限（查库，不信 JWT；跨组织操作的兜底）。
@@ -561,9 +592,9 @@ func (s *RbacService) handleRoleUpdate(ctx khttp.Context) error {
 		return nil
 	}
 	var req struct {
-		RoleID uint      `json:"roleId"`
-		OrgID  uint      `json:"orgId"`
-		Name   *string   `json:"name"`
+		RoleID      uint      `json:"roleId"`
+		OrgID       uint      `json:"orgId"`
+		Name        *string   `json:"name"`
 		Description *string   `json:"description"`
 		Permissions *[]string `json:"permissions"`
 		// ResetPermissions 内置角色专用：清除本组织的权限覆盖，恢复默认

@@ -4312,7 +4312,12 @@ components:
                     description: 账号是否被禁用（禁止登录）
                 isResourceReviewer:
                     type: boolean
-                    description: 资源审核员（可审举报/内容修改）
+                    description: 已废弃：资源审核员内置身份已下线，恒为 false（字段号保留不复用）
+                siteRoles:
+                    type: array
+                    items:
+                        type: string
+                    description: 持有的自定义站点角色名（管理端 badge；内置角色不在其中）
         api.user.v1.GetListRes_OrgBrief:
             type: object
             properties:

@@ -94,7 +94,9 @@ type SocialUser struct {
 	Name     string `gorm:"column:name"`
 	Avatar   string `gorm:"column:avatar"`
 	// 全站特殊身份（公共域 badge 用；列表 SQL 需选出）
-	IsSiteAdmin        bool `gorm:"column:is_site_admin"`
+	IsSiteAdmin bool `gorm:"column:is_site_admin"`
+	// SiteRoles 持有的自定义站点角色名（公共域 badge 用；EnrichDisplay 批量回填）
+	SiteRoles []string `gorm:"-"`
 	// InCurrentOrg 目标是否属于观众当前组织
 	InCurrentOrg bool `gorm:"-"`
 	// SharedOrgs 双方共属、且非当前域的组织称呼（含公共域；切换组织后仍返回）
@@ -104,22 +106,22 @@ type SocialUser struct {
 
 // socialUserRow 纯 DB 扫描行（无切片/派生字段，避免 Scan 崩溃）
 type socialUserRow struct {
-	UserID             uint   `gorm:"column:user_id"`
-	Username           string `gorm:"column:username"`
-	Name               string `gorm:"column:name"`
-	Avatar             string `gorm:"column:avatar"`
-	IsSiteAdmin        bool   `gorm:"column:is_site_admin"`
+	UserID      uint   `gorm:"column:user_id"`
+	Username    string `gorm:"column:username"`
+	Name        string `gorm:"column:name"`
+	Avatar      string `gorm:"column:avatar"`
+	IsSiteAdmin bool   `gorm:"column:is_site_admin"`
 }
 
 func rowsToSocialUsers(rows []socialUserRow) []SocialUser {
 	out := make([]SocialUser, 0, len(rows))
 	for _, r := range rows {
 		out = append(out, SocialUser{
-			UserID:             r.UserID,
-			Username:           r.Username,
-			Name:               r.Name,
-			Avatar:             r.Avatar,
-			IsSiteAdmin:        r.IsSiteAdmin,
+			UserID:      r.UserID,
+			Username:    r.Username,
+			Name:        r.Name,
+			Avatar:      r.Avatar,
+			IsSiteAdmin: r.IsSiteAdmin,
 		})
 	}
 	return out
@@ -250,9 +252,9 @@ func (d *SocialDal) FilterPublicFeedUserIDs(ctx context.Context, userIDs []int64
 		return []int64{}, nil
 	}
 	type row struct {
-		ID                 uint
-		PrivacyConfigured  bool
-		AllowPublicFeed    bool
+		ID                uint
+		PrivacyConfigured bool
+		AllowPublicFeed   bool
 	}
 	var rows []row
 	err := d.db.WithContext(ctx).Model(&model.User{}).
@@ -415,7 +417,47 @@ func (d *SocialDal) EnrichDisplay(ctx context.Context, viewerID, viewerOrgID uin
 			users[i].SharedOrgs = []SharedOrgAlias{}
 		}
 	}
+
+	// 自定义站点角色名（内置角色不进 badge：站管另有专属 badge）
+	siteRoles := d.siteRoleNameMap(ctx, uids)
+	for i := range users {
+		names := siteRoles[users[i].UserID]
+		if names == nil {
+			names = []string{}
+		}
+		users[i].SiteRoles = names
+	}
 	return users
+}
+
+// siteRoleNameMap userId → 持有的自定义站点角色名（按角色 id 升序，保证展示稳定）
+func (d *SocialDal) siteRoleNameMap(ctx context.Context, userIDs []uint) map[uint][]string {
+	out := make(map[uint][]string)
+	if len(userIDs) == 0 {
+		return out
+	}
+	type row struct {
+		UserID uint   `gorm:"column:user_id"`
+		Name   string `gorm:"column:name"`
+	}
+	var rows []row
+	err := d.db.WithContext(ctx).Table("user_roles AS ur").
+		Select("ur.user_id AS user_id, r.name AS name").
+		Joins("JOIN roles r ON r.id = ur.role_id AND r.scope = 'site' AND r.is_system = false").
+		Where("ur.user_id IN ? AND ur.org_id = 0", userIDs).
+		Order("ur.user_id ASC, r.id ASC").
+		Scan(&rows).Error
+	if err != nil {
+		return out
+	}
+	for _, r := range rows {
+		name := strings.TrimSpace(r.Name)
+		if r.UserID == 0 || name == "" {
+			continue
+		}
+		out[r.UserID] = append(out[r.UserID], name)
+	}
+	return out
 }
 
 func (d *SocialDal) orgDisplayNameMap(ctx context.Context, orgID uint, userIDs []uint) map[uint]string {

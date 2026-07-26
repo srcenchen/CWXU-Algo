@@ -44,6 +44,10 @@ func RegisterSocialRoutes(srv *khttp.Server, s *SocialService) {
 }
 
 func socialUserJSON(u dal.SocialUser) map[string]interface{} {
+	siteRoles := u.SiteRoles
+	if siteRoles == nil {
+		siteRoles = []string{}
+	}
 	shared := make([]map[string]interface{}, 0, len(u.SharedOrgs))
 	for _, a := range u.SharedOrgs {
 		shared = append(shared, map[string]interface{}{
@@ -53,13 +57,15 @@ func socialUserJSON(u dal.SocialUser) map[string]interface{} {
 		})
 	}
 	return map[string]interface{}{
-		"userId":             u.UserID,
-		"username":           u.Username,
-		"name":               u.Name,
-		"avatar":             u.Avatar,
-		"inCurrentOrg":       u.InCurrentOrg,
-		"sharedOrgs":         shared,
-		"isSiteAdmin":        u.IsSiteAdmin,
+		"userId":       u.UserID,
+		"username":     u.Username,
+		"name":         u.Name,
+		"avatar":       u.Avatar,
+		"inCurrentOrg": u.InCurrentOrg,
+		"sharedOrgs":   shared,
+		"isSiteAdmin":  u.IsSiteAdmin,
+		// 自定义站点角色名（公共域 badge）
+		"siteRoles": siteRoles,
 	}
 }
 
@@ -234,11 +240,11 @@ func (s *SocialService) handleIdentity(ctx khttp.Context) error {
 		return nil
 	}
 	var u struct {
-		UserID             uint   `gorm:"column:user_id"`
-		Username           string
-		Name               string
-		Avatar             string
-		IsSiteAdmin        bool `gorm:"column:is_site_admin"`
+		UserID      uint `gorm:"column:user_id"`
+		Username    string
+		Name        string
+		Avatar      string
+		IsSiteAdmin bool `gorm:"column:is_site_admin"`
 	}
 	err := s.dbData.DB.WithContext(ctx).Table("users").
 		Select("id AS user_id, username, name, avatar, is_site_admin").

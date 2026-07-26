@@ -248,8 +248,10 @@ message GetListRes {
     bool adminForceDormant = 26;
     // 账号是否被禁用（禁止登录）
     bool disabled = 27;
-    // 资源审核员（可审举报/内容修改）
-    bool isResourceReviewer = 28;
+    // 已废弃：资源审核员内置身份已下线，恒为 false（字段号保留不复用）
+    bool isResourceReviewer = 28 [deprecated = true];
+    // 持有的自定义站点角色名（管理端 badge；内置角色不在其中）
+    repeated string siteRoles = 29;
   }
   repeated List list = 1;
   int64 total = 2;
