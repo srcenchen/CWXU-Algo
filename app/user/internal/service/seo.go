@@ -849,8 +849,9 @@ func renderSEOHTML(p seoPage) string {
 	b.WriteString("<link rel=\"canonical\" href=\"")
 	b.WriteString(pageURL)
 	b.WriteString("\" />\n")
-	b.WriteString("<link rel=\"icon\" href=\"/favicon.png\" type=\"image/png\" />\n")
-	b.WriteString("<link rel=\"apple-touch-icon\" href=\"/favicon.png\" />\n")
+	b.WriteString("<link rel=\"icon\" href=\"/favicon.svg\" type=\"image/svg+xml\" />\n")
+	b.WriteString("<link rel=\"alternate icon\" href=\"/favicon.png\" type=\"image/png\" />\n")
+	b.WriteString("<link rel=\"apple-touch-icon\" href=\"/apple-touch-icon.png\" />\n")
 	// Open Graph
 	b.WriteString("<meta property=\"og:site_name\" content=\"")
 	b.WriteString(site)

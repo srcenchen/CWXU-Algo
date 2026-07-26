@@ -28,7 +28,87 @@ const (
 	staticRoutePrefix = "/v1/user/static"
 )
 
-var imageExts = []string{".jpg", ".jpeg", ".png", ".gif", ".webp", ".ico"}
+var imageExts = []string{".jpg", ".jpeg", ".png", ".gif", ".webp", ".ico", ".svg"}
+
+// svgDangerous 是 svg 里可用于执行脚本 / 外链的构造，命中即拒收。
+// 静态服务已带 CSP(default-src 'none'; sandbox)，这里再做一层入库前过滤。
+var svgDangerous = []string{
+	"<script", "<foreignobject", "<iframe", "<embed", "<object",
+	"javascript:", "data:text/html", "<set", "<handler",
+}
+
+// looksLikeSVG 判断字节流是否为 svg 文档（允许 BOM / xml 声明 / 注释 / DOCTYPE 前缀）。
+func looksLikeSVG(data []byte) bool {
+	head := data
+	if len(head) > 1024 {
+		head = head[:1024]
+	}
+	s := strings.ToLower(string(bytes.TrimPrefix(head, []byte("\xef\xbb\xbf"))))
+	i := strings.Index(s, "<svg")
+	if i < 0 {
+		return false
+	}
+	// <svg 之前只允许出现空白、xml 声明、注释、DOCTYPE
+	prefix := strings.TrimSpace(s[:i])
+	for prefix != "" {
+		switch {
+		case strings.HasPrefix(prefix, "<?xml"):
+			end := strings.Index(prefix, "?>")
+			if end < 0 {
+				return false
+			}
+			prefix = strings.TrimSpace(prefix[end+2:])
+		case strings.HasPrefix(prefix, "<!--"):
+			end := strings.Index(prefix, "-->")
+			if end < 0 {
+				return false
+			}
+			prefix = strings.TrimSpace(prefix[end+3:])
+		case strings.HasPrefix(prefix, "<!doctype"):
+			end := strings.Index(prefix, ">")
+			if end < 0 {
+				return false
+			}
+			prefix = strings.TrimSpace(prefix[end+1:])
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// safeSVG 拒绝含脚本 / 事件处理器 / 外部引用的 svg。
+func safeSVG(data []byte) bool {
+	s := strings.ToLower(string(data))
+	for _, bad := range svgDangerous {
+		if strings.Contains(s, bad) {
+			return false
+		}
+	}
+	// on* 事件处理器：onload= / onclick= 等。
+	// 必须处在属性名起始位置，否则 font="..." 这类合法属性会被误杀。
+	isBoundary := func(c byte) bool {
+		return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '<' || c == '/' || c == '"' || c == '\''
+	}
+	for i := 0; i+2 < len(s); i++ {
+		if s[i] == 'o' && s[i+1] == 'n' && (i == 0 || isBoundary(s[i-1])) {
+			j := i + 2
+			for j < len(s) && s[j] >= 'a' && s[j] <= 'z' {
+				j++
+			}
+			if j == i+2 { // "on" 后没有事件名，不是处理器
+				continue
+			}
+			for j < len(s) && (s[j] == ' ' || s[j] == '\t' || s[j] == '\n' || s[j] == '\r') {
+				j++
+			}
+			if j < len(s) && s[j] == '=' {
+				return false
+			}
+		}
+	}
+	return true
+}
 
 func UploadDir() string {
 	if d := os.Getenv("CWXU_UPLOAD_DIR"); d != "" {
@@ -50,7 +130,7 @@ func randomName() string {
 func extFromContentType(ct, filename string) string {
 	ext := strings.ToLower(filepath.Ext(filename))
 	switch ext {
-	case ".jpg", ".jpeg", ".png", ".gif", ".webp", ".ico":
+	case ".jpg", ".jpeg", ".png", ".gif", ".webp", ".ico", ".svg":
 		return ext
 	}
 	if exts, _ := mime.ExtensionsByType(ct); len(exts) > 0 {
@@ -63,7 +143,7 @@ func allowedImage(ct string) bool {
 	ct = strings.ToLower(strings.TrimSpace(strings.Split(ct, ";")[0]))
 	switch ct {
 	case "image/jpeg", "image/png", "image/gif", "image/webp",
-		"image/x-icon", "image/vnd.microsoft.icon":
+		"image/x-icon", "image/vnd.microsoft.icon", "image/svg+xml":
 		return true
 	default:
 		return false
@@ -82,6 +162,8 @@ func contentTypeFromExt(ext string) string {
 		return "image/webp"
 	case ".ico":
 		return "image/x-icon"
+	case ".svg":
+		return "image/svg+xml"
 	default:
 		return ""
 	}
@@ -97,6 +179,8 @@ func validImageData(data []byte, ct string) bool {
 		return len(data) >= 12 && string(data[:4]) == "RIFF" && string(data[8:12]) == "WEBP"
 	case "image/x-icon", "image/vnd.microsoft.icon":
 		return len(data) >= 6 && data[0] == 0 && data[1] == 0 && data[2] == 1 && data[3] == 0
+	case "image/svg+xml":
+		return looksLikeSVG(data) && safeSVG(data)
 	default:
 		return false
 	}
@@ -247,10 +331,14 @@ func RegisterUploadRoutes(srv *khttp.Server) {
 				"code": 1, "message": "文件过大，最大 3MB",
 			})
 		}
+		// DetectContentType 对 svg 只会给出 text/xml|text/plain，需单独识别
 		ct := http.DetectContentType(data)
+		if looksLikeSVG(data) {
+			ct = "image/svg+xml"
+		}
 		if !allowedImage(ct) || !validImageData(data, ct) {
 			return ctx.JSON(http.StatusBadRequest, map[string]interface{}{
-				"code": 1, "message": "仅支持有效的 jpg/png/gif/webp/ico 图片",
+				"code": 1, "message": "仅支持有效的 jpg/png/gif/webp/ico/svg 图片（svg 不得含脚本或事件处理器）",
 			})
 		}
 
