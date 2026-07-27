@@ -321,7 +321,8 @@ func (uc *StatisticUseCase) PeriodCount(ctx context.Context, req *statistic.Peri
 	// schema v6：个人 AC 去重走 user_ac_problem_* 预聚合
 	// s9：生涯 total 力扣优先官方 acTotal 合成键（与平台过题一致，避免 recentAC 双计）
 	// s10：时段今日/本周排除 e:LeetCode:ac-*（与 lc-prob 同题双计修复）
-	const periodCacheSchema = "10"
+	// s11：累计 AC 次数=非力扣实际次数 + 力扣(模拟历史每题1 + 真实多次超出)
+	const periodCacheSchema = "11"
 	ttl := data2.DefaultCacheTTL
 	var cacheKey string
 

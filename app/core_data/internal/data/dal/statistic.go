@@ -307,6 +307,7 @@ func (d *StatisticDal) periodAcDistinctFromSubmitLogs(userId int64, now time.Tim
 		if n, e := CountUserLifetimeAC(d.db, userId); e == nil && n > 0 {
 			ac.Total = n
 		}
+		ac.TotalRaw = ComputeLifetimeACRaw(d.db, userId, ac.Total)
 	}
 	return ac, err
 }

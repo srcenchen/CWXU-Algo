@@ -1147,6 +1147,22 @@ func (s *BlogService) handlePlaza(ctx khttp.Context) error {
 		q = q.Where("title ILIKE ? OR summary ILIKE ?", like, like)
 	}
 
+	// optional org filter: 与 recommend 一致——公共域/缺省=全站；私有域=仅该组织成员作者
+	orgID, _ := strconv.ParseUint(strings.TrimSpace(ctx.Request().URL.Query().Get("orgId")), 10, 64)
+	if orgID > 0 {
+		var o model.Org
+		if s.db.Select("id", "is_system").First(&o, uint(orgID)).Error == nil && !o.IsSystem {
+			q = q.Where(
+				"user_id IN (SELECT user_id FROM org_members WHERE org_id = ?)",
+				uint(orgID),
+			)
+		}
+	}
+	// 发现页去重：排除题解镜像文（题解走 activity/feed）
+	if strings.TrimSpace(ctx.Request().URL.Query().Get("excludeSolutions")) == "1" {
+		q = q.Where("source_solution_id IS NULL OR source_solution_id = 0")
+	}
+
 	switch sort {
 	case "recommend":
 		q = q.Where("recommend = ?", true)

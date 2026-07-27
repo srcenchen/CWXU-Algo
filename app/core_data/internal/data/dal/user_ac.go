@@ -265,18 +265,79 @@ func PeriodAcDistinctFromPreagg(db *gorm.DB, userId int64, now time.Time) (Perio
 			Count(&ac.Total).Error
 	}
 
-	var raw struct{ Total int64 }
-	_ = db.Table("daily_user_stats").
-		Select("COALESCE(SUM(ac_cnt),0) AS total").
-		Where("user_id = ?", userId).
-		Scan(&raw).Error
-	ac.TotalRaw = raw.Total
-	// 不变量：累计 AC 次数 ≥ 去重题数（每题至少 1 次 AC）
-	// 日汇总与 user_ac 短暂不一致（清洗/重爬中）时以题数为下界，避免前端出现「557 次 / 1339 题」
-	if ac.TotalRaw < ac.Total {
-		ac.TotalRaw = ac.Total
-	}
+	// 累计 AC 次数：力扣模拟历史每题 1 次；有真实 AC 明细则用实际次数（含一题多次）
+	ac.TotalRaw = ComputeLifetimeACRaw(db, userId, ac.Total)
 	return ac, nil
+}
+
+// acProblemKeySQLExpr 与 statistic.acProblemKeySQL 对齐（避免跨包循环依赖，表达式复制）
+const acProblemKeySQLExpr = `COALESCE(
+	CASE WHEN problem_id IS NOT NULL AND problem_id <> 0 THEN 'p:' || problem_id::text END,
+	CASE WHEN external_id IS NOT NULL AND btrim(external_id) <> '' THEN 'e:' || platform || ':' || external_id END,
+	'n:' || platform || ':' || COALESCE(problem, '')
+)`
+
+// ComputeLifetimeACRaw 累计 AC 次数（个人）：
+//   - 非力扣：submit_logs 中每次 is_ac 都计（一题多次全算）
+//   - 力扣：有官方 acTotal 合成键时，模拟历史每题计 1；若有 lc-prob 等真实明细，
+//     同一题的多次 AC 在「超出 1 次」的部分叠加；无官方键时只计真实明细
+//   - 保证 TotalRaw >= Total（去重题数）
+func ComputeLifetimeACRaw(db *gorm.DB, userID, lifetimeUnique int64) int64 {
+	if db == nil || userID <= 0 {
+		return lifetimeUnique
+	}
+
+	// 非力扣：全部真实 AC 次数
+	var nonLC int64
+	_ = db.Table("submit_logs").
+		Where("user_id = ? AND is_ac = true AND platform IS DISTINCT FROM ?", userID, "LeetCode").
+		Count(&nonLC).Error
+
+	// 力扣真实明细（排除 lc-ac 合成）
+	type lcAgg struct {
+		Events   int64 `gorm:"column:events"`
+		Distinct int64 `gorm:"column:distinct_cnt"`
+	}
+	var lc lcAgg
+	_ = db.Raw(`
+		SELECT
+			COUNT(*)::bigint AS events,
+			COUNT(DISTINCT `+acProblemKeySQLExpr+`)::bigint AS distinct_cnt
+		FROM submit_logs
+		WHERE user_id = ?
+		  AND is_ac = true
+		  AND platform = 'LeetCode'
+		  AND `+model.SQLExcludeLeetCodeOfficialACSubmit+`
+	`, userID).Scan(&lc).Error
+
+	// 官方合成题数（生涯对齐 acTotal）
+	var lcOfficial int64
+	_ = db.Table("user_ac_problems").
+		Where("user_id = ? AND problem_key LIKE 'e:LeetCode:ac-%'", userID).
+		Count(&lcOfficial).Error
+
+	var lcPart int64
+	if lcOfficial > 0 {
+		// 模拟历史：每题 1 次；真实明细若同一题多次，把「多出来的次数」叠加上
+		extras := lc.Events - lc.Distinct
+		if extras < 0 {
+			extras = 0
+		}
+		lcPart = lcOfficial + extras
+		// 异常：真实事件比「官方底 + 多次」还多时，以真实为准
+		if lc.Events > lcPart {
+			lcPart = lc.Events
+		}
+	} else {
+		// 无官方键：力扣只靠明细
+		lcPart = lc.Events
+	}
+
+	raw := nonLC + lcPart
+	if raw < lifetimeUnique {
+		raw = lifetimeUnique
+	}
+	return raw
 }
 
 // RebuildUserPreaggFromSubmits 按该用户当前 submit_logs 全量重建预聚合（运维/修复用）。
