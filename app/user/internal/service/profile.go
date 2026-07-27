@@ -530,10 +530,13 @@ func (p *ProfileService) buildGetByIdRes(ctx context.Context, pf *model.User) (*
 		} else if sp != nil {
 			for _, v := range sp.Data {
 				spiders = append(spiders, &profile.GetByIdRes_Spiders{
-					Platform:  v.Platform,
-					Username:  v.Username,
-					Rating:    v.GetRating(),
-					HasRating: v.GetHasRating(),
+					Platform:   v.Platform,
+					Username:   v.Username,
+					Rating:     v.GetRating(),
+					HasRating:  v.GetHasRating(),
+					LastSyncAt: v.GetLastSyncAt(),
+					LastFailAt: v.GetLastFailAt(),
+					LastError:  v.GetLastError(),
 				})
 			}
 			lastSyncAt = sp.GetLastSyncAt()

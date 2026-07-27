@@ -172,6 +172,12 @@ message GetByIdRes {
     // 平台当前 rating（整数）；hasRating=false 时忽略
     int32 rating = 3;
     bool hasRating = 4;
+    // 该平台最近一次同步成功时间（unix 秒；0=尚无）
+    int64 lastSyncAt = 5;
+    // 该平台最近一次同步失败时间（unix 秒；0=无或已恢复）
+    int64 lastFailAt = 6;
+    // 最近一次失败短文案
+    string lastError = 7;
   }
   repeated Spiders spiders = 7;
   // 最近一次 OJ 数据同步成功时间（unix 秒；0=尚无记录）

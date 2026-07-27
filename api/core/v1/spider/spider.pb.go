@@ -181,7 +181,7 @@ func (x *GetSpiderReq) GetUserId() int64 {
 type GetSpiderRep struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	Data  []*GetSpiderRep_Data   `protobuf:"bytes,1,rep,name=data,proto3" json:"data,omitempty"`
-	// 最近一次爬虫成功时间（unix 秒；0=尚无成功同步记录）
+	// 最近一次爬虫成功时间（unix 秒；0=尚无成功同步记录；任意平台成功都会刷新）
 	LastSyncAt    int64 `protobuf:"varint,2,opt,name=lastSyncAt,proto3" json:"lastSyncAt,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -909,7 +909,13 @@ type GetSpiderRep_Data struct {
 	// 平台当前 rating（整数）；hasRating=false 时忽略
 	Rating int32 `protobuf:"varint,3,opt,name=rating,proto3" json:"rating,omitempty"`
 	// 是否已抓到有效 rating
-	HasRating     bool `protobuf:"varint,4,opt,name=hasRating,proto3" json:"hasRating,omitempty"`
+	HasRating bool `protobuf:"varint,4,opt,name=hasRating,proto3" json:"hasRating,omitempty"`
+	// 该平台最近一次爬虫成功时间（unix 秒；0=尚无成功记录）
+	LastSyncAt int64 `protobuf:"varint,5,opt,name=lastSyncAt,proto3" json:"lastSyncAt,omitempty"`
+	// 该平台最近一次爬虫失败时间（unix 秒；0=无失败记录或已被成功覆盖）
+	LastFailAt int64 `protobuf:"varint,6,opt,name=lastFailAt,proto3" json:"lastFailAt,omitempty"`
+	// 最近一次失败的短错误文案（成功后清空）
+	LastError     string `protobuf:"bytes,7,opt,name=lastError,proto3" json:"lastError,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -972,6 +978,27 @@ func (x *GetSpiderRep_Data) GetHasRating() bool {
 	return false
 }
 
+func (x *GetSpiderRep_Data) GetLastSyncAt() int64 {
+	if x != nil {
+		return x.LastSyncAt
+	}
+	return 0
+}
+
+func (x *GetSpiderRep_Data) GetLastFailAt() int64 {
+	if x != nil {
+		return x.LastFailAt
+	}
+	return 0
+}
+
+func (x *GetSpiderRep_Data) GetLastError() string {
+	if x != nil {
+		return x.LastError
+	}
+	return ""
+}
+
 var File_core_v1_spider_spider_proto protoreflect.FileDescriptor
 
 const file_core_v1_spider_spider_proto_rawDesc = "" +
@@ -985,17 +1012,24 @@ const file_core_v1_spider_spider_proto_rawDesc = "" +
 	"\x04code\x18\x01 \x01(\x05R\x04code\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\"&\n" +
 	"\fGetSpiderReq\x12\x16\n" +
-	"\x06userId\x18\x01 \x01(\x03R\x06userId\"\xdf\x01\n" +
+	"\x06userId\x18\x01 \x01(\x03R\x06userId\"\xbe\x02\n" +
 	"\fGetSpiderRep\x129\n" +
 	"\x04data\x18\x01 \x03(\v2%.api.core.v1.spider.GetSpiderRep.DataR\x04data\x12\x1e\n" +
 	"\n" +
 	"lastSyncAt\x18\x02 \x01(\x03R\n" +
-	"lastSyncAt\x1at\n" +
+	"lastSyncAt\x1a\xd2\x01\n" +
 	"\x04Data\x12\x1a\n" +
 	"\bplatform\x18\x01 \x01(\tR\bplatform\x12\x1a\n" +
 	"\busername\x18\x02 \x01(\tR\busername\x12\x16\n" +
 	"\x06rating\x18\x03 \x01(\x05R\x06rating\x12\x1c\n" +
-	"\thasRating\x18\x04 \x01(\bR\thasRating\"$\n" +
+	"\thasRating\x18\x04 \x01(\bR\thasRating\x12\x1e\n" +
+	"\n" +
+	"lastSyncAt\x18\x05 \x01(\x03R\n" +
+	"lastSyncAt\x12\x1e\n" +
+	"\n" +
+	"lastFailAt\x18\x06 \x01(\x03R\n" +
+	"lastFailAt\x12\x1c\n" +
+	"\tlastError\x18\a \x01(\tR\tlastError\"$\n" +
 	"\tUpdateReq\x12\x17\n" +
 	"\auser_id\x18\x01 \x01(\x03R\x06userId\"9\n" +
 	"\tUpdateRes\x12\x12\n" +

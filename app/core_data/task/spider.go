@@ -67,6 +67,21 @@ func LastOKKey(userId int64) string {
 	return fmt.Sprintf("spider:last_ok:%d", userId)
 }
 
+// LastOKPlatformKey 用户×平台最近一次爬虫成功时间
+func LastOKPlatformKey(userId int64, platform string) string {
+	return fmt.Sprintf("spider:last_ok:%d:%s", userId, platform)
+}
+
+// LastFailPlatformKey 用户×平台最近一次爬虫失败时间
+func LastFailPlatformKey(userId int64, platform string) string {
+	return fmt.Sprintf("spider:last_fail:%d:%s", userId, platform)
+}
+
+// LastErrPlatformKey 用户×平台最近一次失败原因（短文本）
+func LastErrPlatformKey(userId int64, platform string) string {
+	return fmt.Sprintf("spider:last_err:%d:%s", userId, platform)
+}
+
 // EnqueueResult 单次入队结果（供 cron claim 是否保留判断）
 type EnqueueResult struct {
 	Published int // MQ 成功条数
@@ -194,12 +209,41 @@ func (t *SpiderTask) ClearInflight(userId int64, platform string) {
 	_ = t.rdb.Del(context.Background(), InflightKey(userId, platform)).Err()
 }
 
-// MarkLastOK 记录该用户最近一次爬虫成功时间（unix 秒，TTL 90 天防 key 膨胀）
-func (t *SpiderTask) MarkLastOK(userId int64) {
+// MarkLastOK 记录该用户最近一次爬虫成功时间（unix 秒，TTL 90 天防 key 膨胀）。
+// platform 非空时同时写入用户×平台成功时间。
+func (t *SpiderTask) MarkLastOK(userId int64, platform string) {
 	if t.rdb == nil || userId <= 0 {
 		return
 	}
-	_ = t.rdb.Set(context.Background(), LastOKKey(userId), time.Now().Unix(), 90*24*time.Hour).Err()
+	ctx := context.Background()
+	now := time.Now().Unix()
+	ttl := 90 * 24 * time.Hour
+	_ = t.rdb.Set(ctx, LastOKKey(userId), now, ttl).Err()
+	if platform != "" {
+		_ = t.rdb.Set(ctx, LastOKPlatformKey(userId, platform), now, ttl).Err()
+		// 成功后清掉该平台失败标记，避免 UI 一直显示异常
+		_ = t.rdb.Del(ctx, LastFailPlatformKey(userId, platform), LastErrPlatformKey(userId, platform)).Err()
+	}
+}
+
+// MarkLastFail 记录用户×平台最近一次爬虫失败时间与短错误（供资料页展示）
+func (t *SpiderTask) MarkLastFail(userId int64, platform string, errMsg string) {
+	if t.rdb == nil || userId <= 0 || platform == "" {
+		return
+	}
+	ctx := context.Background()
+	now := time.Now().Unix()
+	_ = t.rdb.Set(ctx, LastFailPlatformKey(userId, platform), now, 90*24*time.Hour).Err()
+	msg := strings.TrimSpace(errMsg)
+	if msg == "" {
+		msg = "同步失败"
+	}
+	// 控制长度，避免 Redis 塞进整段堆栈
+	runes := []rune(msg)
+	if len(runes) > 200 {
+		msg = string(runes[:200])
+	}
+	_ = t.rdb.Set(ctx, LastErrPlatformKey(userId, platform), msg, 7*24*time.Hour).Err()
 }
 
 // GetLastOK 读取最近成功同步时间（unix 秒；无记录返回 0）
@@ -212,6 +256,24 @@ func (t *SpiderTask) GetLastOK(userId int64) int64 {
 		return 0
 	}
 	return v
+}
+
+// GetPlatformSyncHealth 读取用户×平台的成功/失败时间与错误文案
+func (t *SpiderTask) GetPlatformSyncHealth(userId int64, platform string) (lastOK, lastFail int64, lastErr string) {
+	if t.rdb == nil || userId <= 0 || platform == "" {
+		return 0, 0, ""
+	}
+	ctx := context.Background()
+	if v, err := t.rdb.Get(ctx, LastOKPlatformKey(userId, platform)).Int64(); err == nil {
+		lastOK = v
+	}
+	if v, err := t.rdb.Get(ctx, LastFailPlatformKey(userId, platform)).Int64(); err == nil {
+		lastFail = v
+	}
+	if s, err := t.rdb.Get(ctx, LastErrPlatformKey(userId, platform)).Result(); err == nil {
+		lastErr = s
+	}
+	return lastOK, lastFail, lastErr
 }
 
 // ClearLastOK 删除用户时清除上次同步标记

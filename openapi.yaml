@@ -4180,6 +4180,15 @@ components:
                     format: int32
                 hasRating:
                     type: boolean
+                lastSyncAt:
+                    type: string
+                    description: 该平台最近一次同步成功时间（unix 秒；0=尚无）
+                lastFailAt:
+                    type: string
+                    description: 该平台最近一次同步失败时间（unix 秒；0=无或已恢复）
+                lastError:
+                    type: string
+                    description: 最近一次失败短文案
         api.user.v1.GetByIdsReq:
             type: object
             properties:

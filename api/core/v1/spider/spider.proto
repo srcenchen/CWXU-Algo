@@ -70,9 +70,15 @@ message GetSpiderRep {
     int32 rating = 3;
     // 是否已抓到有效 rating
     bool hasRating = 4;
+    // 该平台最近一次爬虫成功时间（unix 秒；0=尚无成功记录）
+    int64 lastSyncAt = 5;
+    // 该平台最近一次爬虫失败时间（unix 秒；0=无失败记录或已被成功覆盖）
+    int64 lastFailAt = 6;
+    // 最近一次失败的短错误文案（成功后清空）
+    string lastError = 7;
   }
   repeated Data data = 1;
-  // 最近一次爬虫成功时间（unix 秒；0=尚无成功同步记录）
+  // 最近一次爬虫成功时间（unix 秒；0=尚无成功同步记录；任意平台成功都会刷新）
   int64 lastSyncAt = 2;
 }
 

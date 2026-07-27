@@ -63,11 +63,15 @@ func (c *Consumer) Consume() {
 			spidermetrics.RecordEnd(start, err)
 			if err != nil {
 				log.Errorf("RabbitMQ(Spider): %v", err)
+				// 记录平台级失败，供资料页展示（仍 return err 走 MQ 重试）
+				if c.spiderTask != nil {
+					c.spiderTask.MarkLastFail(msg.UserId, msg.Platform, err.Error())
+				}
 				return err
 			}
-			// 任一平台抓取成功即更新「上次同步」时间（个人资料页展示）
+			// 成功：更新用户级 + 平台级「上次同步」
 			if c.spiderTask != nil {
-				c.spiderTask.MarkLastOK(msg.UserId)
+				c.spiderTask.MarkLastOK(msg.UserId, msg.Platform)
 			}
 			return nil
 		},

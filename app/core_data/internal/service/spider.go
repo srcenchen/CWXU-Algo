@@ -201,12 +201,19 @@ func (s SpiderService) GetSpider(ctx context.Context, req *spider.GetSpiderReq) 
 	}
 	res := make([]*spider.GetSpiderRep_Data, 0)
 	for _, v := range plats {
-		res = append(res, &spider.GetSpiderRep_Data{
+		item := &spider.GetSpiderRep_Data{
 			Platform:  v.Platform,
 			Username:  v.Username,
 			Rating:    int32(v.Rating),
 			HasRating: v.HasRating,
-		})
+		}
+		if s.spider != nil {
+			ok, fail, errMsg := s.spider.GetPlatformSyncHealth(req.UserId, v.Platform)
+			item.LastSyncAt = ok
+			item.LastFailAt = fail
+			item.LastError = errMsg
+		}
+		res = append(res, item)
 	}
 	var lastSync int64
 	if s.spider != nil {
@@ -214,7 +221,7 @@ func (s SpiderService) GetSpider(ctx context.Context, req *spider.GetSpiderReq) 
 	}
 	return &spider.GetSpiderRep{
 		LastSyncAt: lastSync,
-		Data: res,
+		Data:       res,
 	}, nil
 }
 
