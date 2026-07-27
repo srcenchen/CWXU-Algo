@@ -380,14 +380,10 @@ func (s *OrgService) handleSquadMemberSet(ctx khttp.Context) error {
 		return nil
 	}
 	if req.In {
-		// 同一组织内先退出其它分队，再加入
-		_ = s.db.Exec(`
-			DELETE FROM squad_members WHERE user_id = ? AND squad_id IN (
-				SELECT id FROM squads WHERE org_id = ?
-			)`, req.UserID, sq.OrgID).Error
-		// 同步分组成员到该分队所属分组
+		// 允许多分队：不再踢出其它分队（一人可兼多队队长/队员）
+		// 若当前无分组或在默认组，同步到该分队所属分组
 		_ = s.db.Model(&model.OrgMember{}).
-			Where("org_id = ? AND user_id = ?", sq.OrgID, req.UserID).
+			Where("org_id = ? AND user_id = ? AND (group_id IS NULL OR group_id = 0)", sq.OrgID, req.UserID).
 			Update("group_id", sq.GroupID).Error
 		sm := model.SquadMember{SquadID: sq.ID, UserID: req.UserID}
 		if err := s.db.Where("squad_id = ? AND user_id = ?", sq.ID, req.UserID).

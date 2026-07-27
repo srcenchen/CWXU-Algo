@@ -114,6 +114,12 @@ func TestLegacyHas(t *testing.T) {
 	if LegacyHas(PermOrgMemberRole, "captain") {
 		t.Fatal("队长不应有成员任命")
 	}
+	if !LegacyHas(PermOrgMemberEmail, "captain") {
+		t.Fatal("队长默认可代管日报")
+	}
+	if !LegacyHas(PermOrgBulletinManage, "group_leader") {
+		t.Fatal("组长默认可发组织公告")
+	}
 	if !LegacyHas(PermOrgMemberRole, "org_admin") {
 		t.Fatal("组织管理员应有成员任命")
 	}

@@ -1317,7 +1317,7 @@ func (s *OrgService) handleMembers(ctx khttp.Context) error {
 		Limit(pageSize).
 		Scan(&rows).Error
 
-	// 批量加载管理范围（组长/队长绑定的分组或分队）
+	// 批量加载管理范围（组长/队长绑定的分组或分队），并解析可读名称
 	uids := make([]uint, 0, len(rows))
 	for _, r := range rows {
 		uids = append(uids, r.UserID)
@@ -1326,11 +1326,102 @@ func (s *OrgService) handleMembers(ctx khttp.Context) error {
 	if len(uids) > 0 {
 		var grants []model.OrgScopeGrant
 		_ = s.db.Where("org_id = ? AND user_id IN ?", orgID, uids).Find(&grants).Error
+		groupIDs := map[uint]struct{}{}
+		squadIDs := map[uint]struct{}{}
 		for _, g := range grants {
-			scopeByUser[g.UserID] = append(scopeByUser[g.UserID], map[string]interface{}{
+			if g.ScopeType == model.ScopeTypeGroup {
+				groupIDs[g.ScopeID] = struct{}{}
+			} else if g.ScopeType == model.ScopeTypeSquad {
+				squadIDs[g.ScopeID] = struct{}{}
+			}
+		}
+		groupName := map[uint]string{}
+		if len(groupIDs) > 0 {
+			ids := make([]uint, 0, len(groupIDs))
+			for id := range groupIDs {
+				ids = append(ids, id)
+			}
+			var gs []model.Group
+			_ = s.db.Where("id IN ?", ids).Find(&gs).Error
+			for _, g := range gs {
+				n := ""
+				if g.Name != nil {
+					n = *g.Name
+				}
+				if n == "" {
+					n = "未命名分组"
+				}
+				groupName[g.ID] = n
+			}
+		}
+		type squadRow struct {
+			ID      uint
+			Name    string
+			GroupID uint
+		}
+		squadMeta := map[uint]squadRow{}
+		if len(squadIDs) > 0 {
+			ids := make([]uint, 0, len(squadIDs))
+			for id := range squadIDs {
+				ids = append(ids, id)
+			}
+			var sqs []model.Squad
+			_ = s.db.Where("id IN ?", ids).Find(&sqs).Error
+			needG := map[uint]struct{}{}
+			for _, sq := range sqs {
+				squadMeta[sq.ID] = squadRow{ID: sq.ID, Name: sq.Name, GroupID: sq.GroupID}
+				if _, ok := groupName[sq.GroupID]; !ok {
+					needG[sq.GroupID] = struct{}{}
+				}
+			}
+			if len(needG) > 0 {
+				ids := make([]uint, 0, len(needG))
+				for id := range needG {
+					ids = append(ids, id)
+				}
+				var gs []model.Group
+				_ = s.db.Where("id IN ?", ids).Find(&gs).Error
+				for _, g := range gs {
+					n := ""
+					if g.Name != nil {
+						n = *g.Name
+					}
+					if n == "" {
+						n = "未命名分组"
+					}
+					groupName[g.ID] = n
+				}
+			}
+		}
+		for _, g := range grants {
+			item := map[string]interface{}{
 				"scopeType": g.ScopeType,
 				"scopeId":   g.ScopeID,
-			})
+			}
+			switch g.ScopeType {
+			case model.ScopeTypeGroup:
+				name := groupName[g.ScopeID]
+				if name == "" {
+					name = "未知分组"
+				}
+				item["scopeName"] = name
+				item["label"] = "组长 · " + name
+			case model.ScopeTypeSquad:
+				sq := squadMeta[g.ScopeID]
+				sname := sq.Name
+				if sname == "" {
+					sname = "未知分队"
+				}
+				gname := groupName[sq.GroupID]
+				item["scopeName"] = sname
+				if gname != "" {
+					item["groupName"] = gname
+					item["label"] = "队长 · " + gname + " / " + sname
+				} else {
+					item["label"] = "队长 · " + sname
+				}
+			}
+			scopeByUser[g.UserID] = append(scopeByUser[g.UserID], item)
 		}
 	}
 
@@ -1542,6 +1633,8 @@ func (s *OrgService) handleSetRole(ctx khttp.Context) error {
 		Role      string `json:"role"`
 		ScopeType string `json:"scopeType"` // captain→squad；group_leader→group
 		ScopeID   uint   `json:"scopeId"`
+		// RemoveScope=true：卸任某一范围（须带 scopeType+scopeId），可与 role=member 联用卸全部
+		RemoveScope bool `json:"removeScope"`
 	}
 	if err := readJSON(ctx.Request(), &req); err != nil || req.OrgID == 0 || req.UserID == 0 {
 		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "参数错误"})
@@ -1552,14 +1645,12 @@ func (s *OrgService) handleSetRole(ctx khttp.Context) error {
 		return nil
 	}
 
-	// 权限：站管 / 持有 org.member.role（教练、组长、组织管理员默认模板含此权限）
 	isSite := auth.VerifySiteAdmin(ctx)
 	if !isSite && !verifyOrgPerm(ctx, s.db, pd.UserID, req.OrgID, rbac.PermOrgMemberRole) {
 		writeJSON(ctx.Response(), 403, map[string]interface{}{"code": 1, "message": "权限不足"})
 		return nil
 	}
 
-	// 操作者在本组织的角色（站管视为最高，可任命任意）
 	actorRole := model.OrgRoleMember
 	if isSite {
 		actorRole = model.OrgRoleOrgAdmin
@@ -1570,7 +1661,6 @@ func (s *OrgService) handleSetRole(ctx khttp.Context) error {
 		}
 	}
 
-	// 目标当前角色
 	targetCurrent := model.OrgRoleMember
 	var m model.OrgMember
 	inOrg := s.db.Where("org_id = ? AND user_id = ?", req.OrgID, req.UserID).First(&m).Error == nil
@@ -1578,15 +1668,24 @@ func (s *OrgService) handleSetRole(ctx khttp.Context) error {
 		targetCurrent = m.Role
 	}
 
-	// 等级：只能任命严格低于自己的角色，且不能改同级或更高
-	if !isSite && !model.CanAppointOrgRole(actorRole, targetCurrent, req.Role) {
-		writeJSON(ctx.Response(), 403, map[string]interface{}{
-			"code": 1, "message": "只能任命低于自己的角色，且不能修改同级或更高身份的成员",
-		})
-		return nil
+	if !isSite && !model.CanAppointOrgRole(actorRole, targetCurrent, req.Role) &&
+		!(req.RemoveScope && model.CanAppointOrgRole(actorRole, model.OrgRoleMember, req.Role)) {
+		// 卸任某一范围时，用 member 作目标档再验一次（允许卸下级领导职务）
+		if !req.RemoveScope {
+			writeJSON(ctx.Response(), 403, map[string]interface{}{
+				"code": 1, "message": "只能任命低于自己的角色，且不能修改同级或更高身份的成员",
+			})
+			return nil
+		}
+		if !model.CanAppointOrgRole(actorRole, targetCurrent, model.OrgRoleCaptain) &&
+			!model.CanAppointOrgRole(actorRole, targetCurrent, model.OrgRoleGroupLeader) {
+			writeJSON(ctx.Response(), 403, map[string]interface{}{
+				"code": 1, "message": "只能任命低于自己的角色，且不能修改同级或更高身份的成员",
+			})
+			return nil
+		}
 	}
 
-	// 最后一位组织管理员不可降权
 	if req.Role != model.OrgRoleOrgAdmin && targetCurrent == model.OrgRoleOrgAdmin {
 		var admins int64
 		s.db.Model(&model.OrgMember{}).Where("org_id = ? AND role = ?", req.OrgID, model.OrgRoleOrgAdmin).Count(&admins)
@@ -1596,9 +1695,38 @@ func (s *OrgService) handleSetRole(ctx khttp.Context) error {
 		}
 	}
 
-	// 组长/队长必须绑定范围；教练/组织管理员/成员清空范围
-	var grants []model.OrgScopeGrant
-	if needType, need := model.RoleNeedsScope(req.Role); need {
+	// —— 卸任某一管理范围（多组长/多队长）——
+	if req.RemoveScope {
+		st := strings.TrimSpace(req.ScopeType)
+		if !model.ValidScopeType(st) || req.ScopeID == 0 {
+			writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "请指定要卸任的分组或分队"})
+			return nil
+		}
+		if !inOrg {
+			writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "对方不在本组织"})
+			return nil
+		}
+		if st == model.ScopeTypeSquad {
+			var sq model.Squad
+			if s.db.Where("id = ? AND org_id = ?", req.ScopeID, req.OrgID).First(&sq).Error == nil &&
+				!isSite && actorRole == model.OrgRoleGroupLeader &&
+				!s.actorControlsGroup(req.OrgID, pd.UserID, sq.GroupID) {
+				writeJSON(ctx.Response(), 403, map[string]interface{}{"code": 1, "message": "只能管理自己分组内的队长"})
+				return nil
+			}
+		}
+		_ = s.db.Where("org_id = ? AND user_id = ? AND scope_type = ? AND scope_id = ?",
+			req.OrgID, req.UserID, st, req.ScopeID).Delete(&model.OrgScopeGrant{}).Error
+		finalRole := s.syncRoleFromGrants(req.OrgID, req.UserID, targetCurrent)
+		writeJSON(ctx.Response(), 200, map[string]interface{}{
+			"code": 0, "message": "已卸任该范围", "role": finalRole,
+			"scopes": s.listScopeMaps(req.OrgID, req.UserID),
+		})
+		return nil
+	}
+
+	needType, needsScope := model.RoleNeedsScope(req.Role)
+	if needsScope {
 		st := strings.TrimSpace(req.ScopeType)
 		if st == "" {
 			st = needType
@@ -1611,7 +1739,6 @@ func (s *OrgService) handleSetRole(ctx khttp.Context) error {
 			writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": msg})
 			return nil
 		}
-		// scope 须属本组织
 		if st == model.ScopeTypeGroup {
 			var n int64
 			_ = s.db.Model(&model.Group{}).Where("id = ? AND org_id = ?", req.ScopeID, req.OrgID).Count(&n).Error
@@ -1625,7 +1752,6 @@ func (s *OrgService) handleSetRole(ctx khttp.Context) error {
 				writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "分队不存在或不属于本组织"})
 				return nil
 			}
-			// 组长任命队长：分队必须落在自己管理的分组内
 			if !isSite && actorRole == model.OrgRoleGroupLeader {
 				if !s.actorControlsGroup(req.OrgID, pd.UserID, sq.GroupID) {
 					writeJSON(ctx.Response(), 403, map[string]interface{}{"code": 1, "message": "只能任命自己管理分组内的队长"})
@@ -1633,24 +1759,60 @@ func (s *OrgService) handleSetRole(ctx khttp.Context) error {
 				}
 			}
 		}
-		// 组长任命组长：只能指定自己管理的分组（一般不应发生，等级已禁止；双保险）
 		if !isSite && actorRole == model.OrgRoleGroupLeader && req.Role == model.OrgRoleGroupLeader {
-			if !s.actorControlsGroup(req.OrgID, pd.UserID, req.ScopeID) {
-				writeJSON(ctx.Response(), 403, map[string]interface{}{"code": 1, "message": "只能在自己管理的分组内操作"})
-				return nil
-			}
-		}
-		grants = []model.OrgScopeGrant{{
-			OrgID: req.OrgID, UserID: req.UserID, ScopeType: st, ScopeID: req.ScopeID,
-		}}
-	}
-
-	if !inOrg {
-		var roleOrg model.Org
-		if s.db.First(&roleOrg, req.OrgID).Error != nil {
-			writeJSON(ctx.Response(), 404, map[string]interface{}{"code": 1, "message": "组织不存在"})
+			writeJSON(ctx.Response(), 403, map[string]interface{}{"code": 1, "message": "组长不能任命其他组长"})
 			return nil
 		}
+
+		if !inOrg {
+			displayName := ""
+			var u model.User
+			if s.db.Select("name", "username").First(&u, req.UserID).Error == nil {
+				displayName = strings.TrimSpace(u.Name)
+				if displayName == "" {
+					displayName = u.Username
+				}
+			}
+			// 先以 member 入组，再叠加领导职务
+			if err := s.addOrgMemberAtomic(req.OrgID, req.UserID, model.OrgRoleMember, displayName); err != nil {
+				log.Errorf("org set role ensure member: %v", err)
+				writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": err.Error()})
+				return nil
+			}
+			s.setDefaultOrg(req.UserID, req.OrgID)
+			inOrg = true
+		}
+
+		// 叠加写入（一人可多组组长 / 多队队长 / 同时组长+队长）
+		if err := s.addUserScopeGrant(req.OrgID, req.UserID, st, req.ScopeID); err != nil {
+			log.Errorf("org add scope: %v", err)
+			writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "更新管理范围失败"})
+			return nil
+		}
+
+		// 任命队长时加入该分队（不踢出其他分队，支持多队）
+		if req.Role == model.OrgRoleCaptain {
+			var sq model.Squad
+			if s.db.First(&sq, req.ScopeID).Error == nil {
+				sm := model.SquadMember{SquadID: sq.ID, UserID: req.UserID}
+				_ = s.db.Where("squad_id = ? AND user_id = ?", sq.ID, req.UserID).FirstOrCreate(&sm).Error
+			}
+		}
+
+		base := targetCurrent
+		if base == model.OrgRoleMember || base == model.OrgRoleCaptain || base == model.OrgRoleGroupLeader {
+			base = req.Role
+		}
+		finalRole := s.syncRoleFromGrants(req.OrgID, req.UserID, base)
+		writeJSON(ctx.Response(), 200, map[string]interface{}{
+			"code": 0, "message": "已更新角色",
+			"role": finalRole, "scopes": s.listScopeMaps(req.OrgID, req.UserID),
+		})
+		return nil
+	}
+
+	// 教练 / 组织管理员 / 成员：清空领导范围
+	if !inOrg {
 		displayName := ""
 		var u model.User
 		if s.db.Select("name", "username").First(&u, req.UserID).Error == nil {
@@ -1672,47 +1834,70 @@ func (s *OrgService) handleSetRole(ctx khttp.Context) error {
 		}
 		syncOrgMemberSystemRole(s.db, req.OrgID, req.UserID)
 	}
+	_ = s.replaceUserScopeGrants(req.OrgID, req.UserID, nil)
 
-	// 覆盖写入管理范围（教练/组织管理员/成员 → 清空）
-	if err := s.replaceUserScopeGrants(req.OrgID, req.UserID, grants); err != nil {
-		log.Errorf("org set role scopes: %v", err)
-		writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "更新管理范围失败"})
+	writeJSON(ctx.Response(), 200, map[string]interface{}{
+		"code": 0, "message": "已更新角色",
+		"role": req.Role, "scopes": []map[string]interface{}{},
+	})
+	return nil
+}
+
+// addUserScopeGrant 追加一条管理范围（已存在则忽略）
+func (s *OrgService) addUserScopeGrant(orgID, userID uint, scopeType string, scopeID uint) error {
+	var n int64
+	_ = s.db.Model(&model.OrgScopeGrant{}).
+		Where("org_id = ? AND user_id = ? AND scope_type = ? AND scope_id = ?",
+			orgID, userID, scopeType, scopeID).Count(&n).Error
+	if n > 0 {
 		return nil
 	}
+	return s.db.Create(&model.OrgScopeGrant{
+		OrgID: orgID, UserID: userID, ScopeType: scopeType, ScopeID: scopeID,
+	}).Error
+}
 
-	// 任命组长时，将其 org_members.group_id 同步到所管分组（便于列表展示）
-	if req.Role == model.OrgRoleGroupLeader && req.ScopeID > 0 {
-		_ = s.db.Model(&model.OrgMember{}).
-			Where("org_id = ? AND user_id = ?", req.OrgID, req.UserID).
-			Update("group_id", req.ScopeID).Error
+// syncRoleFromGrants 按现有 grant 重算 org_members.role（保留 coach/org_admin）
+func (s *OrgService) syncRoleFromGrants(orgID, userID uint, currentHint string) string {
+	var cur string
+	_ = s.db.Model(&model.OrgMember{}).Select("role").
+		Where("org_id = ? AND user_id = ?", orgID, userID).Scan(&cur).Error
+	if cur == "" {
+		cur = currentHint
 	}
-	// 任命队长时，同步到分队所属分组并加入该分队
-	if req.Role == model.OrgRoleCaptain && req.ScopeID > 0 {
-		var sq model.Squad
-		if s.db.First(&sq, req.ScopeID).Error == nil {
-			_ = s.db.Model(&model.OrgMember{}).
-				Where("org_id = ? AND user_id = ?", req.OrgID, req.UserID).
-				Update("group_id", sq.GroupID).Error
-			_ = s.db.Exec(`
-				DELETE FROM squad_members WHERE user_id = ? AND squad_id IN (
-					SELECT id FROM squads WHERE org_id = ?
-				)`, req.UserID, req.OrgID).Error
-			sm := model.SquadMember{SquadID: sq.ID, UserID: req.UserID}
-			_ = s.db.Where("squad_id = ? AND user_id = ?", sq.ID, req.UserID).FirstOrCreate(&sm).Error
+	var grants []model.OrgScopeGrant
+	_ = s.db.Where("org_id = ? AND user_id = ?", orgID, userID).Find(&grants).Error
+	hasGroup, hasSquad := false, false
+	for _, g := range grants {
+		if g.ScopeType == model.ScopeTypeGroup {
+			hasGroup = true
+		}
+		if g.ScopeType == model.ScopeTypeSquad {
+			hasSquad = true
 		}
 	}
+	final := model.EffectiveRoleFromGrants(cur, hasGroup, hasSquad)
+	if final != cur {
+		_ = s.db.Model(&model.OrgMember{}).
+			Where("org_id = ? AND user_id = ?", orgID, userID).
+			Update("role", final).Error
+		syncOrgMemberSystemRole(s.db, orgID, userID)
+	} else {
+		syncOrgMemberSystemRole(s.db, orgID, userID)
+	}
+	return final
+}
 
-	outScopes := make([]map[string]interface{}, 0, len(grants))
+func (s *OrgService) listScopeMaps(orgID, userID uint) []map[string]interface{} {
+	var grants []model.OrgScopeGrant
+	_ = s.db.Where("org_id = ? AND user_id = ?", orgID, userID).Find(&grants).Error
+	out := make([]map[string]interface{}, 0, len(grants))
 	for _, g := range grants {
-		outScopes = append(outScopes, map[string]interface{}{
+		out = append(out, map[string]interface{}{
 			"scopeType": g.ScopeType, "scopeId": g.ScopeID,
 		})
 	}
-	writeJSON(ctx.Response(), 200, map[string]interface{}{
-		"code": 0, "message": "已更新角色",
-		"role": req.Role, "scopes": outScopes,
-	})
-	return nil
+	return out
 }
 
 // actorControlsGroup 操作者是否管理该分组（组长 grant 含该 group，或全组织角色）

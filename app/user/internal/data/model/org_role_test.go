@@ -73,3 +73,21 @@ func TestIsOrgFullScopeRole(t *testing.T) {
 		t.Fatal("group_leader/captain not full scope")
 	}
 }
+
+func TestEffectiveRoleFromGrants(t *testing.T) {
+	if EffectiveRoleFromGrants(OrgRoleCoach, true, true) != OrgRoleCoach {
+		t.Fatal("coach stays coach")
+	}
+	if EffectiveRoleFromGrants(OrgRoleMember, true, true) != OrgRoleGroupLeader {
+		t.Fatal("group grant wins over squad")
+	}
+	if EffectiveRoleFromGrants(OrgRoleMember, false, true) != OrgRoleCaptain {
+		t.Fatal("squad only → captain")
+	}
+	if EffectiveRoleFromGrants(OrgRoleCaptain, false, false) != OrgRoleMember {
+		t.Fatal("no grant demotes captain")
+	}
+	if EffectiveRoleFromGrants(OrgRoleGroupLeader, false, true) != OrgRoleCaptain {
+		t.Fatal("lost group keep squad → captain")
+	}
+}

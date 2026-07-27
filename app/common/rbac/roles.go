@@ -38,24 +38,30 @@ var coachPerms = []string{
 	PermOrgMemberDisplayName,
 }
 
-// groupLeaderPerms 组长：组内数据 + 报告；分队写/有限任命由 service 按 scope 判定
+// groupLeaderPerms 组长：本组训练数据 + 可任命本组队长 + 改称呼
+// 组内分队增删/队员调整由 service 按 scope 判定（不依赖 org.group.manage，避免越权管全组织分组）
+// 组织可在「角色与权限」中为本组织覆盖下列勾选项
 var groupLeaderPerms = []string{
 	PermOrgReportView,
-	PermOrgMemberRole, // 仅能任命本组队长/成员（handleSetRole 等级+范围校验）
+	PermOrgMemberRole,
 	PermOrgMemberDisplayName,
+	PermOrgBulletinManage, // 默认可发组织公告；组织可关掉
+	PermOrgMemberEmail,    // 默认可代管日报；组织可关掉
 }
 
-// captainPerms 队长：仅本分队数据与报告；分队成员调整由 service 按 scope 判定
+// captainPerms 队长：本分队训练数据；分队队员调整由 service 按 scope 判定
+// 默认不含任命/分组管理；组织可在「角色与权限」中为本组织打开更多项
 var captainPerms = []string{
 	PermOrgReportView,
+	PermOrgMemberEmail,
 }
 
 var systemRoles = []SystemRole{
 	{RoleSiteAdmin, "站点管理员", "站点最高权限，旁路全部权限校验", ScopeSite, AllCodes()},
 	{RoleOrgAdmin, "组织管理员", "本组织全部管理权限", ScopeOrg, CodesByScope(ScopeOrg)},
-	{RoleCoach, "教练", "全组织数据与日常管理；可任命组长/队长", ScopeOrg, coachPerms},
-	{RoleGroupLeader, "组长", "管理指定分组及组内分队；可任命本组队长", ScopeOrg, groupLeaderPerms},
-	{RoleCaptain, "队长", "管理指定分队；查看本分队训练数据", ScopeOrg, captainPerms},
+	{RoleCoach, "教练", "全组织数据与日常管理；可任命组长/队长（可兼多组/多队）", ScopeOrg, coachPerms},
+	{RoleGroupLeader, "组长", "管理一个或多个分组及组内分队；可任命本组队长；可同时兼任队长", ScopeOrg, groupLeaderPerms},
+	{RoleCaptain, "队长", "管理一个或多个分队；查看所管分队训练数据；可同时兼任组长", ScopeOrg, captainPerms},
 	{RoleMember, "成员", "普通成员，无管理权限", ScopeOrg, nil},
 }
 

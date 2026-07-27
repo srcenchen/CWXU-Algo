@@ -134,21 +134,45 @@ func RoleNeedsScope(role string) (scopeType string, ok bool) {
 // CanAppointOrgRole 操作者能否把目标设为 newRole（严格低于自己；站管另议）
 // actorRole / targetCurrentRole / newRole 均为 org_members.role。
 // 队长及以下无任命权；组长及以上才可任命。
+// 叠加领导职务：给已是组长的人再加队长、或再加另一组组长时，
+// 只要目标当前等级 < 操作者，且新职务等级 < 操作者即可（不要求降权）。
 func CanAppointOrgRole(actorRole, targetCurrentRole, newRole string) bool {
 	ar := OrgRoleRank(actorRole)
 	// 仅组长及以上可任命
 	if ar < OrgRoleRankGroupLeader {
 		return false
 	}
-	// 不能任命同级或更高
+	// 不能任命同级或更高职务
 	if OrgRoleRank(newRole) >= ar {
 		return false
 	}
-	// 不能改同级或更高的人
+	// 不能改同级或更高的人（教练不可动组织管理员/其他教练）
 	if OrgRoleRank(targetCurrentRole) >= ar {
 		return false
 	}
 	return true
+}
+
+// EffectiveRoleFromGrants 根据管理范围与当前角色推算展示/JWT 用角色。
+// 组织管理员、教练保持不变；否则有分组 grant→组长，有分队 grant→队长，否则成员。
+// 一人可同时有多组/多队 grant，角色取最高领导档。
+func EffectiveRoleFromGrants(currentRole string, hasGroupGrant, hasSquadGrant bool) string {
+	if currentRole == OrgRoleOrgAdmin || currentRole == OrgRoleCoach {
+		return currentRole
+	}
+	if hasGroupGrant {
+		return OrgRoleGroupLeader
+	}
+	if hasSquadGrant {
+		return OrgRoleCaptain
+	}
+	if currentRole == OrgRoleGroupLeader || currentRole == OrgRoleCaptain {
+		return OrgRoleMember
+	}
+	if currentRole == "" {
+		return OrgRoleMember
+	}
+	return currentRole
 }
 
 // OrgJoinRequest 团队识别码加入申请（join_mode=review）
