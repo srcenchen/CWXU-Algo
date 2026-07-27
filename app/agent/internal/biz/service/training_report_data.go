@@ -122,6 +122,7 @@ type ProblemTouch struct {
 type TrainingReportData struct {
 	OrgID            int64       `json:"orgId"`
 	GroupID          int64       `json:"groupId"`
+	SquadID          int64       `json:"squadId"`
 	GroupName        string      `json:"groupName,omitempty"`
 	ScopeLabel       string      `json:"scopeLabel"`
 	StartDate        string      `json:"startDate"`
@@ -220,60 +221,40 @@ func (uc *SummaryUseCase) dialCoreCtx(_ context.Context) (*grpc2.ClientConn, err
 
 // resolveMemberIDs 组织成员（排除教练），可选按组过滤。
 // coachSet 由调用方一次拉取后传入，避免重复请求成员列表。
-func (uc *SummaryUseCase) resolveMemberIDs(ctx context.Context, orgID, groupID int64, coachSet map[int64]struct{}) ([]int64, error) {
+func (uc *SummaryUseCase) resolveMemberIDs(ctx context.Context, orgID, groupID, squadID int64, coachSet map[int64]struct{}) ([]int64, error) {
 	conn, err := uc.dialUserCtx(ctx)
 	if err != nil {
 		return nil, err
 	}
 	cli := profile2.NewProfileClient(conn)
 
-	var ids []int64
-	if groupID > 0 {
-		res, err := cli.GetUserIdsByGroup(ctx, &profile2.GetUserIdsByGroupReq{GroupId: groupID})
-		if err != nil {
-			return nil, fmt.Errorf("按组取成员失败: %w", err)
-		}
-		ids = res.GetUserIds()
-		if orgID > 0 {
-			orgRes, err := cli.GetUserIdsByOrg(ctx, &profile2.GetUserIdsByOrgReq{OrgId: orgID})
-			if err == nil && orgRes != nil {
-				orgSet := make(map[int64]struct{}, len(orgRes.UserIds))
-				for _, id := range orgRes.UserIds {
-					orgSet[id] = struct{}{}
-				}
-				filtered := make([]int64, 0, len(ids))
-				for _, id := range ids {
-					if _, ok := orgSet[id]; ok {
-						filtered = append(filtered, id)
-					}
-				}
-				ids = filtered
-			}
-		}
-	} else {
-		res, err := cli.GetUserIdsByOrg(ctx, &profile2.GetUserIdsByOrgReq{OrgId: orgID})
-		if err != nil {
-			return nil, fmt.Errorf("取组织成员失败: %w", err)
-		}
-		ids = res.GetUserIds()
+	// 统一走 GetUserIdsByOrg：支持 group/squad，并与 staff 范围兼容（elevated 站管不受限）
+	res, err := cli.GetUserIdsByOrg(ctx, &profile2.GetUserIdsByOrgReq{
+		OrgId:   orgID,
+		GroupId: groupID,
+		SquadId: squadID,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("取组织成员失败: %w", err)
 	}
+	ids := res.GetUserIds()
 	if ids == nil {
 		ids = []int64{}
 	}
-	// 教练不计入任何统计
+	// 排除教练（训练报告只统计队员）
 	if len(coachSet) > 0 {
-		filtered := make([]int64, 0, len(ids))
+		out := make([]int64, 0, len(ids))
 		for _, id := range ids {
 			if _, isCoach := coachSet[id]; !isCoach {
-				filtered = append(filtered, id)
+				out = append(out, id)
 			}
 		}
-		ids = filtered
+		ids = out
 	}
 	return ids, nil
 }
 
-// fetchCoachUserIDSet 组织内 role=coach 的用户（HTTP 成员列表，elevated 站管可拉）
+
 func (uc *SummaryUseCase) fetchCoachUserIDSet(ctx context.Context, orgID int64) map[int64]struct{} {
 	out := map[int64]struct{}{}
 	if orgID <= 0 || uc == nil || uc.reg == nil {
@@ -420,7 +401,7 @@ func (uc *SummaryUseCase) fetchHeatmapUser(ctx context.Context, userId int64, st
 }
 
 // LoadTrainingReportData 拉取组织/组在日期区间的训练数据（排除教练）
-func (uc *SummaryUseCase) LoadTrainingReportData(ctx context.Context, orgID, groupID, initiatorID int64, start, end time.Time) (*TrainingReportData, error) {
+func (uc *SummaryUseCase) LoadTrainingReportData(ctx context.Context, orgID, groupID, squadID, initiatorID int64, start, end time.Time) (*TrainingReportData, error) {
 	if orgID <= 0 {
 		return nil, fmt.Errorf("缺少组织 id")
 	}
@@ -432,7 +413,7 @@ func (uc *SummaryUseCase) LoadTrainingReportData(ctx context.Context, orgID, gro
 	// 教练名单只拉一次：成员过滤与提交动态过滤共用
 	coachSet := uc.fetchCoachUserIDSet(elevated, orgID)
 	// 用 elevated 上下文解析成员并排除教练
-	memberIDs, err := uc.resolveMemberIDs(elevated, orgID, groupID, coachSet)
+	memberIDs, err := uc.resolveMemberIDs(elevated, orgID, groupID, squadID, coachSet)
 	if err != nil {
 		return nil, err
 	}
@@ -549,8 +530,10 @@ func (uc *SummaryUseCase) LoadTrainingReportData(ctx context.Context, orgID, gro
 	}
 
 	scopeLabel := "整组织"
-	if groupID > 0 {
-		scopeLabel = fmt.Sprintf("组#%d", groupID)
+	if squadID > 0 {
+		scopeLabel = fmt.Sprintf("分队#%d", squadID)
+	} else if groupID > 0 {
+		scopeLabel = fmt.Sprintf("分组#%d", groupID)
 	}
 
 	initName := ""
@@ -568,6 +551,7 @@ func (uc *SummaryUseCase) LoadTrainingReportData(ctx context.Context, orgID, gro
 	data := &TrainingReportData{
 		OrgID:            orgID,
 		GroupID:          groupID,
+		SquadID:          squadID,
 		ScopeLabel:       scopeLabel,
 		StartDate:        start.Format(dateLayout),
 		EndDate:          end.Format(dateLayout),

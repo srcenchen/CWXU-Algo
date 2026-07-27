@@ -137,7 +137,9 @@ type StartTrainingReportRequest struct {
 	// 是否启用 AI 分析
 	UseAi bool `protobuf:"varint,4,opt,name=useAi,proto3" json:"useAi,omitempty"`
 	// 可选：组织 ID，默认取 JWT 当前组织
-	OrgId         int64 `protobuf:"varint,5,opt,name=orgId,proto3" json:"orgId,omitempty"`
+	OrgId int64 `protobuf:"varint,5,opt,name=orgId,proto3" json:"orgId,omitempty"`
+	// 可选：分队 ID；优先于 groupId
+	SquadId       int64 `protobuf:"varint,6,opt,name=squadId,proto3" json:"squadId,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -203,6 +205,13 @@ func (x *StartTrainingReportRequest) GetUseAi() bool {
 func (x *StartTrainingReportRequest) GetOrgId() int64 {
 	if x != nil {
 		return x.OrgId
+	}
+	return 0
+}
+
+func (x *StartTrainingReportRequest) GetSquadId() int64 {
+	if x != nil {
+		return x.SquadId
 	}
 	return 0
 }
@@ -329,6 +338,7 @@ type TrainingReportJob struct {
 	Downloadable  bool                   `protobuf:"varint,14,opt,name=downloadable,proto3" json:"downloadable,omitempty"`
 	ErrorDetail   string                 `protobuf:"bytes,15,opt,name=errorDetail,proto3" json:"errorDetail,omitempty"`
 	FileName      string                 `protobuf:"bytes,16,opt,name=fileName,proto3" json:"fileName,omitempty"`
+	SquadId       int64                  `protobuf:"varint,17,opt,name=squadId,proto3" json:"squadId,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -473,6 +483,13 @@ func (x *TrainingReportJob) GetFileName() string {
 		return x.FileName
 	}
 	return ""
+}
+
+func (x *TrainingReportJob) GetSquadId() int64 {
+	if x != nil {
+		return x.SquadId
+	}
+	return 0
 }
 
 type GetTrainingReportJobReply struct {
@@ -657,19 +674,20 @@ const file_agent_v1_summary_summary_proto_rawDesc = "" +
 	"\x0fGetSummaryReply\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\x03R\x04code\x12\x10\n" +
 	"\x03msg\x18\x02 \x01(\tR\x03msg\x12\x12\n" +
-	"\x04resp\x18\x03 \x01(\tR\x04resp\"\x9a\x01\n" +
+	"\x04resp\x18\x03 \x01(\tR\x04resp\"\xb4\x01\n" +
 	"\x1aStartTrainingReportRequest\x12\x1c\n" +
 	"\tstartDate\x18\x01 \x01(\tR\tstartDate\x12\x18\n" +
 	"\aendDate\x18\x02 \x01(\tR\aendDate\x12\x18\n" +
 	"\agroupId\x18\x03 \x01(\x03R\agroupId\x12\x14\n" +
 	"\x05useAi\x18\x04 \x01(\bR\x05useAi\x12\x14\n" +
-	"\x05orgId\x18\x05 \x01(\x03R\x05orgId\"V\n" +
+	"\x05orgId\x18\x05 \x01(\x03R\x05orgId\x12\x18\n" +
+	"\asquadId\x18\x06 \x01(\x03R\asquadId\"V\n" +
 	"\x18StartTrainingReportReply\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\x03R\x04code\x12\x10\n" +
 	"\x03msg\x18\x02 \x01(\tR\x03msg\x12\x14\n" +
 	"\x05jobId\x18\x03 \x01(\tR\x05jobId\"3\n" +
 	"\x1bGetTrainingReportJobRequest\x12\x14\n" +
-	"\x05jobId\x18\x01 \x01(\tR\x05jobId\"\xd1\x03\n" +
+	"\x05jobId\x18\x01 \x01(\tR\x05jobId\"\xeb\x03\n" +
 	"\x11TrainingReportJob\x12\x14\n" +
 	"\x05jobId\x18\x01 \x01(\tR\x05jobId\x12\x16\n" +
 	"\x06status\x18\x02 \x01(\tR\x06status\x12\x1a\n" +
@@ -689,7 +707,8 @@ const file_agent_v1_summary_summary_proto_rawDesc = "" +
 	"\texpiresAt\x18\r \x01(\x03R\texpiresAt\x12\"\n" +
 	"\fdownloadable\x18\x0e \x01(\bR\fdownloadable\x12 \n" +
 	"\verrorDetail\x18\x0f \x01(\tR\verrorDetail\x12\x1a\n" +
-	"\bfileName\x18\x10 \x01(\tR\bfileName\"|\n" +
+	"\bfileName\x18\x10 \x01(\tR\bfileName\x12\x18\n" +
+	"\asquadId\x18\x11 \x01(\x03R\asquadId\"|\n" +
 	"\x19GetTrainingReportJobReply\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\x03R\x04code\x12\x10\n" +
 	"\x03msg\x18\x02 \x01(\tR\x03msg\x129\n" +

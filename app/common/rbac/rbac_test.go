@@ -105,16 +105,28 @@ func TestLegacyHas(t *testing.T) {
 	if !LegacyHas(PermOrgBulletinManage, "coach") {
 		t.Fatal("教练应有组织公告")
 	}
-	if LegacyHas(PermOrgMemberRole, "coach") {
-		t.Fatal("教练不应有成员任命")
+	if !LegacyHas(PermOrgMemberRole, "coach") {
+		t.Fatal("教练应有成员任命（任命时再按等级裁剪）")
+	}
+	if !LegacyHas(PermOrgMemberRole, "group_leader") {
+		t.Fatal("组长应有有限任命权限")
+	}
+	if LegacyHas(PermOrgMemberRole, "captain") {
+		t.Fatal("队长不应有成员任命")
 	}
 	if !LegacyHas(PermOrgMemberRole, "org_admin") {
-		t.Fatal("团队管理员应有成员任命")
+		t.Fatal("组织管理员应有成员任命")
 	}
 	if LegacyHas(PermOrgGroupManage, "member") {
 		t.Fatal("成员不应有分组管理")
 	}
+	if LegacyHas(PermOrgGroupManage, "group_leader") {
+		t.Fatal("组长默认不持有全组织分组管理")
+	}
 	if LegacyHas(PermOrgGroupManage, "") {
 		t.Fatal("无组织角色不应有权限")
+	}
+	if !IsSystemRoleCode(RoleGroupLeader) {
+		t.Fatal("group_leader 应为内置角色")
 	}
 }

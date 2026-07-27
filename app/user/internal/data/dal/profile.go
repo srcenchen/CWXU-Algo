@@ -446,7 +446,7 @@ func (d *ProfileDal) applyCurrentlyDormantFilter(ctx context.Context, q *gorm.DB
 			)
 		)
 	)`, cutoff, model.OrgStatusActive,
-		model.OrgRoleCoach, model.OrgRoleCaptain, model.OrgRoleOrgAdmin,
+		model.OrgRoleCoach, model.OrgRoleGroupLeader, model.OrgRoleCaptain, model.OrgRoleOrgAdmin,
 		"team", "pro")
 }
 
@@ -571,16 +571,45 @@ func (d *ProfileDal) GetOrgBriefsByUserIDs(ctx context.Context, userIDs []uint) 
 }
 
 func (d *ProfileDal) MoveGroup(ctx context.Context, userID uint64, groupID int64, orgID uint) error {
-	result := d.db.WithContext(ctx).Model(&model.OrgMember{}).
-		Where("user_id = ? AND org_id = ?", userID, orgID).
-		Update("group_id", groupID)
-	if result.Error != nil {
-		return fmt.Errorf("移动用户组失败: %w", result.Error)
-	}
-	if result.RowsAffected == 0 {
-		return fmt.Errorf("用户不属于当前组织")
-	}
-	return nil
+	return d.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		result := tx.Model(&model.OrgMember{}).
+			Where("user_id = ? AND org_id = ?", userID, orgID).
+			Update("group_id", groupID)
+		if result.Error != nil {
+			return fmt.Errorf("移动用户组失败: %w", result.Error)
+		}
+		if result.RowsAffected == 0 {
+			return fmt.Errorf("用户不属于当前组织")
+		}
+		// 移组后退出本组织全部旧分队（避免人在 A 组却挂在 B 组分队）
+		if err := tx.Exec(`
+			DELETE FROM squad_members WHERE user_id = ? AND squad_id IN (
+				SELECT id FROM squads WHERE org_id = ?
+			)`, userID, orgID).Error; err != nil {
+			return fmt.Errorf("清理分队成员失败: %w", err)
+		}
+		// 若该用户是队长且所管分队已不在新组：卸任队长并清 squad grant
+		var role string
+		_ = tx.Model(&model.OrgMember{}).Select("role").
+			Where("org_id = ? AND user_id = ?", orgID, userID).Scan(&role).Error
+		if role == model.OrgRoleCaptain {
+			var grants []model.OrgScopeGrant
+			_ = tx.Where("org_id = ? AND user_id = ? AND scope_type = ?",
+				orgID, userID, model.ScopeTypeSquad).Find(&grants).Error
+			for _, g := range grants {
+				var sq model.Squad
+				if tx.First(&sq, g.ScopeID).Error != nil || uint(groupID) != sq.GroupID {
+					_ = tx.Model(&model.OrgMember{}).
+						Where("org_id = ? AND user_id = ?", orgID, userID).
+						Update("role", model.OrgRoleMember).Error
+					_ = tx.Where("org_id = ? AND user_id = ?", orgID, userID).
+						Delete(&model.OrgScopeGrant{}).Error
+					break
+				}
+			}
+		}
+		return nil
+	})
 }
 
 // GroupBelongsToOrg verifies the tenant boundary before assigning a member.
@@ -639,7 +668,7 @@ func (d *ProfileDal) UserHasOrgWeeklyEmailGrant(ctx context.Context, userID int6
 		Where(`m.user_id = ? AND o.status = ?
 			AND o.enable_ai_weekly_email = ? AND m.role IN ?`,
 			userID, model.OrgStatusActive, true,
-			[]string{model.OrgRoleCoach, model.OrgRoleCaptain, model.OrgRoleOrgAdmin}).
+			[]string{model.OrgRoleCoach, model.OrgRoleGroupLeader, model.OrgRoleCaptain, model.OrgRoleOrgAdmin}).
 		Count(&n)
 	return n > 0
 }
@@ -652,7 +681,7 @@ func (d *ProfileDal) StaffOrgIDsForWeekly(ctx context.Context, userID int64) ([]
 		Where(`m.user_id = ? AND o.status = ?
 			AND o.enable_ai_weekly_email = ? AND m.role IN ?`,
 			userID, model.OrgStatusActive, true,
-			[]string{model.OrgRoleCoach, model.OrgRoleCaptain, model.OrgRoleOrgAdmin}).
+			[]string{model.OrgRoleCoach, model.OrgRoleGroupLeader, model.OrgRoleCaptain, model.OrgRoleOrgAdmin}).
 		Pluck("m.org_id", &ids).Error
 	return ids, err
 }
@@ -842,7 +871,7 @@ type UserSyncPolicy struct {
 	EnableAISummary      bool
 	EnableAIEmail        bool // 组织授权日报（任一）
 	EnableAIWeeklyEmail  bool // 组织授权周报且本人为 staff
-	IsOrgStaff           bool // coach/captain/org_admin 任一
+	IsOrgStaff           bool // coach/group_leader/captain/org_admin 任一
 	EmailEnabled         bool // 个人日报偏好
 	EmailWeeklyEnabled   bool // 个人周报偏好
 	SpiderIntervalMin    int
@@ -917,7 +946,7 @@ func (d *ProfileDal) GetSyncPolicies(ctx context.Context, userIDs []int64) ([]Us
 			a = &acc{spiderMin: 0, aiMin: 0}
 			byUser[r.UserID] = a
 		}
-		isStaff := r.Role == model.OrgRoleCoach || r.Role == model.OrgRoleCaptain || r.Role == model.OrgRoleOrgAdmin
+		isStaff := model.IsOrgStaffRole(r.Role)
 		if isStaff {
 			a.staff = true
 		}
@@ -1242,7 +1271,7 @@ func (d *ProfileDal) BatchEmailGrants(ctx context.Context, userIDs []int64) (dai
 		Where(`m.user_id IN ? AND o.status = ?
 			AND o.enable_ai_weekly_email = ? AND m.role IN ?`,
 			userIDs, model.OrgStatusActive, true,
-			[]string{model.OrgRoleCoach, model.OrgRoleCaptain, model.OrgRoleOrgAdmin}).
+			[]string{model.OrgRoleCoach, model.OrgRoleGroupLeader, model.OrgRoleCaptain, model.OrgRoleOrgAdmin}).
 		Distinct("m.user_id").
 		Pluck("m.user_id", &weeklyIDs)
 	for _, id := range weeklyIDs {

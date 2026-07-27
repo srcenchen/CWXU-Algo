@@ -2315,6 +2315,9 @@ components:
                 orgId:
                     type: string
                     description: 可选：组织 ID，默认取 JWT 当前组织
+                squadId:
+                    type: string
+                    description: 可选：分队 ID；优先于 groupId
         api.agent.v1.summary.TrainingReportJob:
             type: object
             properties:
@@ -2349,6 +2352,8 @@ components:
                 errorDetail:
                     type: string
                 fileName:
+                    type: string
+                squadId:
                     type: string
         api.core.v1.bulletin.BulletinInfo:
             type: object

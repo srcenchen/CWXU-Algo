@@ -5,7 +5,7 @@ import "time"
 // RBAC：角色 / 角色权限 / 用户角色。
 // 权限点目录在 app/common/rbac（代码即权威）；DB 只存关联。
 // 系统角色（is_system）权限集由代码锁定，启动时同步；自定义角色权限集存 role_permissions。
-// 系统组织角色（member|coach|captain|org_admin）以 org_members.role 为镜像源，双写保持一致。
+// 系统组织角色（member|captain|group_leader|coach|org_admin）以 org_members.role 为镜像源，双写保持一致。
 
 // Role 角色（站点级 / 组织级；内置模板 / 自定义）
 type Role struct {
@@ -35,7 +35,7 @@ type OrgRolePerm struct {
 	CreatedAt time.Time
 	UpdatedAt time.Time
 	OrgID     uint   `gorm:"uniqueIndex:idx_org_role_perm;not null;comment:组织ID"`
-	RoleCode  string `gorm:"size:64;uniqueIndex:idx_org_role_perm;not null;comment:内置组织角色code(coach|captain)"`
+	RoleCode  string `gorm:"size:64;uniqueIndex:idx_org_role_perm;not null;comment:内置组织角色code(coach|group_leader|captain)"`
 	PermCodes string `gorm:"type:text;comment:权限code列表,逗号分隔;空串=本组织该角色无权限"`
 }
 

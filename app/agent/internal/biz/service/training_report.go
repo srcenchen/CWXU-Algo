@@ -29,6 +29,7 @@ const maxActiveTrainingJobsPerOrg = 2
 type StartTrainingReportParams struct {
 	OrgID     int64
 	GroupID   int64
+	SquadID   int64
 	StartDate string
 	EndDate   string
 	UseAI     bool
@@ -79,6 +80,7 @@ func (uc *SummaryUseCase) StartTrainingReport(ctx context.Context, p StartTraini
 		StartDate: p.StartDate,
 		EndDate:   p.EndDate,
 		GroupID:   p.GroupID,
+		SquadID:   p.SquadID,
 		UseAI:     p.UseAI,
 		OrgID:     p.OrgID,
 		CreatedBy: p.CreatedBy,
@@ -113,7 +115,7 @@ func (uc *SummaryUseCase) findActiveTrainingJob(ctx context.Context, p StartTrai
 			continue
 		}
 		if j.StartDate == p.StartDate && j.EndDate == p.EndDate &&
-			j.GroupID == p.GroupID && j.UseAI == p.UseAI {
+			j.GroupID == p.GroupID && j.SquadID == p.SquadID && j.UseAI == p.UseAI {
 			js := j.Source
 			if js == "" {
 				js = "manual"
@@ -175,7 +177,7 @@ func (uc *SummaryUseCase) runTrainingReportJob(jobID string) {
 		return
 	}
 
-	data, err := uc.LoadTrainingReportData(ctx, job.OrgID, job.GroupID, job.CreatedBy, start, end)
+	data, err := uc.LoadTrainingReportData(ctx, job.OrgID, job.GroupID, job.SquadID, job.CreatedBy, start, end)
 	if err != nil {
 		uc.failJob(ctx, jobID, "加载数据失败: "+err.Error())
 		return
@@ -400,7 +402,7 @@ func (uc *SummaryUseCase) GenerateTrainingReportSync(ctx context.Context, p Star
 	if err := ValidateAIDateRange(start, end, p.UseAI); err != nil {
 		return "", nil, err
 	}
-	data, err = uc.LoadTrainingReportData(ctx, p.OrgID, p.GroupID, p.CreatedBy, start, end)
+	data, err = uc.LoadTrainingReportData(ctx, p.OrgID, p.GroupID, p.SquadID, p.CreatedBy, start, end)
 	if err != nil {
 		return "", nil, err
 	}

@@ -26,9 +26,11 @@ type SquadMember struct {
 
 func (SquadMember) TableName() string { return "squad_members" }
 
-// OrgScopeGrant 组织内管理范围（教练/队长可被限制为只看某组/某分队）
-// 若某 staff 在该组织没有任何 grant，则视为全组织可见（兼容旧数据）。
-// org_admin / 站点管理员始终全组织。
+// OrgScopeGrant 组织内管理范围
+// - 组长(group_leader)：绑定 group
+// - 队长(captain)：绑定 squad
+// - 教练 / 组织管理员：始终全组织，不使用 grant（有也忽略）
+// - 旧数据：captain 无 grant 时兼容为全组织可见，直至重新任命
 type OrgScopeGrant struct {
 	ID        uint `gorm:"primaryKey"`
 	CreatedAt time.Time

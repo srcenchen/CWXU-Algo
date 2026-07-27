@@ -81,20 +81,70 @@ func (d *GroupDal) Delete(ctx context.Context, id int64) error {
 	if err != nil {
 		return fmt.Errorf("准备默认分组失败: %w", err)
 	}
-	if err := d.db.WithContext(ctx).Model(&model.OrgMember{}).
-		Where("group_id = ?", id).
-		Update("group_id", defaultID).Error; err != nil {
-		return fmt.Errorf("迁移成员到默认分组失败: %w", err)
-	}
 
-	result := d.db.WithContext(ctx).Delete(&model.Group{}, id)
-	if result.Error != nil {
-		return fmt.Errorf("删除组失败: %w", result.Error)
-	}
-	if result.RowsAffected == 0 {
-		return fmt.Errorf("组不存在")
-	}
-	return nil
+	return d.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// 1. 成员迁回默认分组
+		if err := tx.Model(&model.OrgMember{}).
+			Where("group_id = ?", id).
+			Update("group_id", defaultID).Error; err != nil {
+			return fmt.Errorf("迁移成员到默认分组失败: %w", err)
+		}
+
+		// 2. 解散组内分队：先卸任队长 → 清成员/scope → 删分队
+		var squadIDs []uint
+		_ = tx.Model(&model.Squad{}).Where("group_id = ? AND org_id = ?", id, g.OrgID).
+			Pluck("id", &squadIDs).Error
+		if len(squadIDs) > 0 {
+			var captainUIDs []uint
+			_ = tx.Model(&model.OrgScopeGrant{}).
+				Where("org_id = ? AND scope_type = ? AND scope_id IN ?",
+					g.OrgID, model.ScopeTypeSquad, squadIDs).
+				Pluck("user_id", &captainUIDs).Error
+			if len(captainUIDs) > 0 {
+				_ = tx.Model(&model.OrgMember{}).
+					Where("org_id = ? AND user_id IN ? AND role = ?",
+						g.OrgID, captainUIDs, model.OrgRoleCaptain).
+					Update("role", model.OrgRoleMember).Error
+			}
+			if err := tx.Where("squad_id IN ?", squadIDs).Delete(&model.SquadMember{}).Error; err != nil {
+				return fmt.Errorf("清理分队成员失败: %w", err)
+			}
+			if err := tx.Where("org_id = ? AND scope_type = ? AND scope_id IN ?",
+				g.OrgID, model.ScopeTypeSquad, squadIDs).
+				Delete(&model.OrgScopeGrant{}).Error; err != nil {
+				return fmt.Errorf("清理分队管理范围失败: %w", err)
+			}
+			if err := tx.Where("id IN ?", squadIDs).Delete(&model.Squad{}).Error; err != nil {
+				return fmt.Errorf("删除分队失败: %w", err)
+			}
+		}
+
+		// 3. 卸任本组组长 → 清指向本分组的 scope
+		var leaderUIDs []uint
+		_ = tx.Model(&model.OrgScopeGrant{}).
+			Where("org_id = ? AND scope_type = ? AND scope_id = ?", g.OrgID, model.ScopeTypeGroup, id).
+			Pluck("user_id", &leaderUIDs).Error
+		if len(leaderUIDs) > 0 {
+			_ = tx.Model(&model.OrgMember{}).
+				Where("org_id = ? AND user_id IN ? AND role = ?", g.OrgID, leaderUIDs, model.OrgRoleGroupLeader).
+				Update("role", model.OrgRoleMember).Error
+		}
+		if err := tx.Where("org_id = ? AND scope_type = ? AND scope_id = ?",
+			g.OrgID, model.ScopeTypeGroup, id).
+			Delete(&model.OrgScopeGrant{}).Error; err != nil {
+			return fmt.Errorf("清理分组管理范围失败: %w", err)
+		}
+
+		// 4. 删分组
+		result := tx.Delete(&model.Group{}, id)
+		if result.Error != nil {
+			return fmt.Errorf("删除组失败: %w", result.Error)
+		}
+		if result.RowsAffected == 0 {
+			return fmt.Errorf("组不存在")
+		}
+		return nil
+	})
 }
 
 func (d *GroupDal) Get(ctx context.Context, id int64) (*model.Group, error) {

@@ -3,10 +3,11 @@ package model
 import "time"
 
 const (
-	OrgRoleMember   = "member"
-	OrgRoleCoach    = "coach"
-	OrgRoleCaptain  = "captain"
-	OrgRoleOrgAdmin = "org_admin"
+	OrgRoleMember      = "member"
+	OrgRoleCaptain     = "captain"
+	OrgRoleGroupLeader = "group_leader" // 组长：绑定分组
+	OrgRoleCoach       = "coach"
+	OrgRoleOrgAdmin    = "org_admin"
 
 	OrgJoinAuto   = "auto"
 	OrgJoinReview = "review"
@@ -20,6 +21,15 @@ const (
 	JoinReqPending  = "pending"
 	JoinReqApproved = "approved"
 	JoinReqRejected = "rejected"
+)
+
+// 组织内角色等级：组织管理员 > 教练 > 组长 > 队长 > 成员
+const (
+	OrgRoleRankMember      = 0
+	OrgRoleRankCaptain     = 10
+	OrgRoleRankGroupLeader = 20
+	OrgRoleRankCoach       = 30
+	OrgRoleRankOrgAdmin    = 40
 )
 
 // Org 组织/校队（含系统「公共域」）
@@ -65,7 +75,7 @@ type OrgMember struct {
 	UpdatedAt      time.Time
 	OrgID          uint      `gorm:"uniqueIndex:idx_org_user;not null;comment:组织ID"`
 	UserID         uint      `gorm:"uniqueIndex:idx_org_user;index;not null;comment:用户ID"`
-	Role           string    `gorm:"size:16;default:member;comment:member|coach|captain|org_admin"`
+	Role           string    `gorm:"size:16;default:member;comment:member|captain|group_leader|coach|org_admin"`
 	GroupID        *uint     `gorm:"index;comment:组织内分组"`
 	OrgDisplayName string    `gorm:"size:64;comment:组织内名称(仅本组织展示)"`
 	JoinedAt       time.Time `gorm:"comment:加入时间"`
@@ -74,16 +84,71 @@ type OrgMember struct {
 // ValidOrgRole 组织内角色是否合法
 func ValidOrgRole(role string) bool {
 	switch role {
-	case OrgRoleMember, OrgRoleCoach, OrgRoleCaptain, OrgRoleOrgAdmin:
+	case OrgRoleMember, OrgRoleCaptain, OrgRoleGroupLeader, OrgRoleCoach, OrgRoleOrgAdmin:
 		return true
 	default:
 		return false
 	}
 }
 
-// IsOrgStaffRole 组织内可进管理端的角色（教练/队长/组织管理员）
+// OrgRoleRank 角色等级（越高权限越大）
+func OrgRoleRank(role string) int {
+	switch role {
+	case OrgRoleOrgAdmin:
+		return OrgRoleRankOrgAdmin
+	case OrgRoleCoach:
+		return OrgRoleRankCoach
+	case OrgRoleGroupLeader:
+		return OrgRoleRankGroupLeader
+	case OrgRoleCaptain:
+		return OrgRoleRankCaptain
+	default:
+		return OrgRoleRankMember
+	}
+}
+
+// IsOrgStaffRole 组织内可进管理端的角色（教练/组长/队长/组织管理员）
 func IsOrgStaffRole(role string) bool {
-	return role == OrgRoleCoach || role == OrgRoleCaptain || role == OrgRoleOrgAdmin
+	return role == OrgRoleCoach || role == OrgRoleGroupLeader ||
+		role == OrgRoleCaptain || role == OrgRoleOrgAdmin
+}
+
+// IsOrgFullScopeRole 全组织数据可见、不受分组/分队 scope 限制
+func IsOrgFullScopeRole(role string) bool {
+	return role == OrgRoleOrgAdmin || role == OrgRoleCoach
+}
+
+// RoleNeedsScope 任命该角色时必须绑定管理范围
+// captain → squad；group_leader → group
+func RoleNeedsScope(role string) (scopeType string, ok bool) {
+	switch role {
+	case OrgRoleCaptain:
+		return ScopeTypeSquad, true
+	case OrgRoleGroupLeader:
+		return ScopeTypeGroup, true
+	default:
+		return "", false
+	}
+}
+
+// CanAppointOrgRole 操作者能否把目标设为 newRole（严格低于自己；站管另议）
+// actorRole / targetCurrentRole / newRole 均为 org_members.role。
+// 队长及以下无任命权；组长及以上才可任命。
+func CanAppointOrgRole(actorRole, targetCurrentRole, newRole string) bool {
+	ar := OrgRoleRank(actorRole)
+	// 仅组长及以上可任命
+	if ar < OrgRoleRankGroupLeader {
+		return false
+	}
+	// 不能任命同级或更高
+	if OrgRoleRank(newRole) >= ar {
+		return false
+	}
+	// 不能改同级或更高的人
+	if OrgRoleRank(targetCurrentRole) >= ar {
+		return false
+	}
+	return true
 }
 
 // OrgJoinRequest 团队识别码加入申请（join_mode=review）

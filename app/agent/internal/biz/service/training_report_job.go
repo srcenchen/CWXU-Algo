@@ -36,6 +36,7 @@ type TrainingReportJob struct {
 	StartDate   string `json:"startDate"`
 	EndDate     string `json:"endDate"`
 	GroupID     int64  `json:"groupId"`
+	SquadID     int64  `json:"squadId"`
 	UseAI       bool   `json:"useAi"`
 	OrgID       int64  `json:"orgId"`
 	CreatedBy   int64  `json:"createdBy"`

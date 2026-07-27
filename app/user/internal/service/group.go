@@ -73,8 +73,9 @@ func (g *GroupService) Delete(ctx context.Context, request *group.DeleteRequest)
 }
 
 func (g *GroupService) Get(ctx context.Context, request *group.GetRequest) (*group.GetReply, error) {
-	if !auth.HasPerm(ctx, rbac.PermOrgGroupManage) {
-		return nil, errors.Forbidden("权限不足", "需要分组管理权限")
+	// 读：分组管理 或 训练报告（组长/队长需看组内结构）
+	if !auth.HasPerm(ctx, rbac.PermOrgGroupManage) && !auth.HasPerm(ctx, rbac.PermOrgReportView) {
+		return nil, errors.Forbidden("权限不足", "需要分组管理或训练报告权限")
 	}
 	if err := g.assertGroupInCurrentOrg(ctx, request.Id); err != nil {
 		return nil, err
@@ -156,8 +157,9 @@ func (g *GroupService) Get(ctx context.Context, request *group.GetRequest) (*gro
 }
 
 func (g *GroupService) List(ctx context.Context, request *group.ListRequest) (*group.ListReply, error) {
-	if !auth.HasPerm(ctx, rbac.PermOrgGroupManage) {
-		return nil, errors.Forbidden("权限不足", "需要分组管理权限")
+	// 读：分组管理 或 训练报告（教练/组长/队长任命与筛选需要列表）
+	if !auth.HasPerm(ctx, rbac.PermOrgGroupManage) && !auth.HasPerm(ctx, rbac.PermOrgReportView) {
+		return nil, errors.Forbidden("权限不足", "需要分组管理或训练报告权限")
 	}
 	page := request.Page
 	if page < 1 {

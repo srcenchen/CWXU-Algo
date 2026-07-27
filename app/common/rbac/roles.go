@@ -1,13 +1,15 @@
 package rbac
 
-// 系统内置角色。权限集在代码中锁定；组织可对「教练 / 队长」按组织覆盖权限（见 OrgEditableSystemRole）。
+// 系统内置角色。权限集在代码中锁定；组织可对「教练 / 组长 / 队长」按组织覆盖权限（见 OrgEditableSystemRole）。
 // code 与存量数据对齐：org 模板 code == org_members.role 取值；site 角色映射 users 布尔位。
+// 组织内层级：org_admin > coach > group_leader > captain > member
 const (
-	RoleSiteAdmin = "site_admin"
-	RoleOrgAdmin  = "org_admin"
-	RoleCoach     = "coach"
-	RoleCaptain   = "captain"
-	RoleMember    = "member"
+	RoleSiteAdmin   = "site_admin"
+	RoleOrgAdmin    = "org_admin"
+	RoleCoach       = "coach"
+	RoleGroupLeader = "group_leader"
+	RoleCaptain     = "captain"
+	RoleMember      = "member"
 
 	// RoleResourceReviewer 已下线的「资源审核员」内置身份；仅存量清理仍引用该 code。
 	// Deprecated: 内容审核权限改由站点自定义角色授予。
@@ -26,27 +28,43 @@ type SystemRole struct {
 	Perms []string
 }
 
-// orgStaffPerms 教练/队长的默认权限（组织可在本组织内覆盖）
-var orgStaffPerms = []string{
+// coachPerms 教练：全组织数据 + 分组/公告/报告 + 可任命组长/队长（任命时再按等级裁剪）
+var coachPerms = []string{
 	PermOrgGroupManage,
 	PermOrgBulletinManage,
 	PermOrgReportView,
 	PermOrgMemberEmail,
+	PermOrgMemberRole,
+	PermOrgMemberDisplayName,
+}
+
+// groupLeaderPerms 组长：组内数据 + 报告；分队写/有限任命由 service 按 scope 判定
+var groupLeaderPerms = []string{
+	PermOrgReportView,
+	PermOrgMemberRole, // 仅能任命本组队长/成员（handleSetRole 等级+范围校验）
+	PermOrgMemberDisplayName,
+}
+
+// captainPerms 队长：仅本分队数据与报告；分队成员调整由 service 按 scope 判定
+var captainPerms = []string{
+	PermOrgReportView,
 }
 
 var systemRoles = []SystemRole{
 	{RoleSiteAdmin, "站点管理员", "站点最高权限，旁路全部权限校验", ScopeSite, AllCodes()},
-	{RoleOrgAdmin, "团队管理员", "本组织全部管理权限", ScopeOrg, CodesByScope(ScopeOrg)},
-	{RoleCoach, "教练", "本组织日常管理：分组、公告、训练报告", ScopeOrg, orgStaffPerms},
-	{RoleCaptain, "队长", "本组织日常管理：分组、公告、训练报告", ScopeOrg, orgStaffPerms},
+	{RoleOrgAdmin, "组织管理员", "本组织全部管理权限", ScopeOrg, CodesByScope(ScopeOrg)},
+	{RoleCoach, "教练", "全组织数据与日常管理；可任命组长/队长", ScopeOrg, coachPerms},
+	{RoleGroupLeader, "组长", "管理指定分组及组内分队；可任命本组队长", ScopeOrg, groupLeaderPerms},
+	{RoleCaptain, "队长", "管理指定分队；查看本分队训练数据", ScopeOrg, captainPerms},
 	{RoleMember, "成员", "普通成员，无管理权限", ScopeOrg, nil},
 }
 
 // orgEditableSystemRoles 组织可在本组织内改权限的内置角色。
-// 团队管理员 / 成员是组织的基本盘（最高与最低档），权限固定，不可改也不可删。
+// 组织管理员 / 成员是组织的基本盘（最高与最低档），权限固定，不可改也不可删。
 var orgEditableSystemRoles = map[string]bool{
-	RoleCoach:   true,
-	RoleCaptain: true,
+	RoleCoach:       true,
+	RoleGroupLeader: true,
+	RoleCaptain:     true,
 }
 
 // OrgEditableSystemRole 该内置组织角色是否允许组织覆盖权限

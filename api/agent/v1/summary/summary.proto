@@ -58,6 +58,8 @@ message StartTrainingReportRequest {
   bool useAi = 4;
   // 可选：组织 ID，默认取 JWT 当前组织
   int64 orgId = 5;
+  // 可选：分队 ID；优先于 groupId
+  int64 squadId = 6;
 }
 
 message StartTrainingReportReply {
@@ -87,6 +89,7 @@ message TrainingReportJob {
   bool downloadable = 14;
   string errorDetail = 15;
   string fileName = 16;
+  int64 squadId = 17;
 }
 
 message GetTrainingReportJobReply {

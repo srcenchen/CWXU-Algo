@@ -894,21 +894,24 @@ func (p *ProfileService) GetUserIdsByOrg(ctx context.Context, req *profile.GetUs
 }
 
 // intersectStaffScope 将候选成员与 staff 的管理范围求交。
-// 无 grant = 全组织（兼容旧任命）；有 grant 则只能看到授权组/分队内成员。
+// - 组织管理员 / 教练：始终全组织（不受分组控制）
+// - 组长 / 队长：按 OrgScopeGrant 求交；有 grant 才限制
+// - 旧 captain 无 grant：兼容全组织可见（需重新指定分队后收紧）
 func (p *ProfileService) intersectStaffScope(ctx context.Context, orgID, staffUID uint, candidates []int64) []int64 {
 	if staffUID == 0 || orgID == 0 {
 		return candidates
 	}
-	// org_admin 全组织
 	var role string
 	_ = p.profileDal.DB().WithContext(ctx).Model(&model.OrgMember{}).
 		Select("role").Where("org_id = ? AND user_id = ?", orgID, staffUID).
 		Scan(&role).Error
-	if role == model.OrgRoleOrgAdmin {
+	// 教练与组织管理员：全组织数据，忽略 grants
+	if model.IsOrgFullScopeRole(role) {
 		return candidates
 	}
 	grants, err := p.profileDal.ListScopeGrants(ctx, orgID, staffUID)
 	if err != nil || len(grants) == 0 {
+		// 无 grant：组长/队长新任命必有；旧数据兼容全组织
 		return candidates
 	}
 	allowed := map[int64]struct{}{}

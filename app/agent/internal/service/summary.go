@@ -76,6 +76,7 @@ func (s SummaryService) StartTrainingReport(ctx context.Context, req *summary.St
 	jobID, err := s.uc.StartTrainingReport(ctx, biz.StartTrainingReportParams{
 		OrgID:     orgID,
 		GroupID:   req.GetGroupId(),
+		SquadID:   req.GetSquadId(),
 		StartDate: req.GetStartDate(),
 		EndDate:   req.GetEndDate(),
 		UseAI:     req.GetUseAi(),
@@ -159,6 +160,7 @@ func toProtoJob(j *biz.TrainingReportJob) *summary.TrainingReportJob {
 		StartDate:    j.StartDate,
 		EndDate:      j.EndDate,
 		GroupId:      j.GroupID,
+		SquadId:      j.SquadID,
 		UseAi:        j.UseAI,
 		OrgId:        j.OrgID,
 		CreatedBy:    j.CreatedBy,

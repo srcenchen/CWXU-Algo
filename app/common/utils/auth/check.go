@@ -78,7 +78,7 @@ type JwtPayload struct {
 	RoleID             int    `json:"roleId"` // 兼容旧字段
 	IsSiteAdmin        bool   `json:"isSiteAdmin"`
 	OrgID              uint   `json:"orgId"`
-	OrgRole            string `json:"orgRole"` // member | coach | captain | org_admin
+	OrgRole            string `json:"orgRole"` // member | captain | group_leader | coach | org_admin
 	Pm                 string `json:"pm,omitempty"` // 权限位图（站点权限 ∪ 当前组织权限），见 app/common/rbac
 }
 
@@ -218,7 +218,7 @@ func VerifyMinRole(ctx context.Context, minRole int) bool {
 	if pd.IsSiteAdmin {
 		return true
 	}
-	// 组织 staff（教练/队长/组织管理员）≈ 旧教练级（管理端）
+	// 组织 staff（教练/组长/队长/组织管理员）≈ 旧教练级（管理端）
 	if isOrgStaffRole(pd.OrgRole) && permission.RoleRank(minRole) <= permission.RoleRank(permission.RoleCoach) {
 		return true
 	}
@@ -226,7 +226,7 @@ func VerifyMinRole(ctx context.Context, minRole int) bool {
 }
 
 func isOrgStaffRole(role string) bool {
-	return role == "coach" || role == "captain" || role == "org_admin"
+	return role == "coach" || role == "group_leader" || role == "captain" || role == "org_admin"
 }
 
 // VerifySelfOrAbove 自己或站点管理员

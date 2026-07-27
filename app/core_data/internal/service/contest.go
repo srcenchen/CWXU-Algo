@@ -167,7 +167,7 @@ func (c ContestLogService) attachViewerPersonalStats(ctx context.Context, items 
 				seed = append(seed, m)
 				break
 			}
-			if names := c.fetchUserNames(ctx, cli, seed); len(names) > 0 {
+			if names, _ := c.fetchUserNames(ctx, cli, seed); len(names) > 0 {
 				viewerName = names[viewerID].Name
 			}
 		}
@@ -370,7 +370,7 @@ func (c ContestLogService) GetContestRanking(ctx context.Context, req *contest_l
 	}
 
 	// 批量获取用户信息，一次 RPC 替代原来的 N 次 GetById
-	nameMap := c.fetchUserNames(ctx, userClient, logs)
+	nameMap, _ := c.fetchUserNames(ctx, userClient, logs)
 
 	// 站内榜：有官方 rank 用官方；整页全是 0（未出分/爬失败）则按 AC 排序后模拟 1..n
 	allZeroRank := true
@@ -408,8 +408,9 @@ func (c ContestLogService) GetContestRanking(ctx context.Context, req *contest_l
 }
 
 type userInfo struct {
-	Avatar string
-	Name   string
+	Avatar   string
+	Name     string
+	Username string
 }
 
 // displayNameFromProfile 组织昵称 → 用户名；绝不回落到「用户{id}」（那是内部编号，不是给人看的）
@@ -420,19 +421,23 @@ func displayNameFromProfile(name, username string) string {
 	return strings.TrimSpace(username)
 }
 
-// fetchUserNames 批量获取用户展示名和头像，一次 RPC 调用
-func (c ContestLogService) fetchUserNames(ctx context.Context, client profile.ProfileClient, logs []model.ContestLog) map[int64]userInfo {
+// fetchUserNames 批量获取用户展示名和头像。
+// 使用独立超时上下文，避免请求尾部 deadline 把名字 RPC 掐掉后整榜变成「未知选手」并被 Redis 缓存。
+// complete=true 表示每个非 0 userId 都解析到了非空展示名（可安全写榜单缓存）。
+func (c ContestLogService) fetchUserNames(ctx context.Context, client profile.ProfileClient, logs []model.ContestLog) (map[int64]userInfo, bool) {
 	result := map[int64]userInfo{}
 	if client == nil || len(logs) == 0 {
-		return result
+		return result, true
 	}
 
-	// 去重收集 userId
 	idSet := map[int64]struct{}{}
 	for _, v := range logs {
 		if v.UserID != 0 {
 			idSet[v.UserID] = struct{}{}
 		}
+	}
+	if len(idSet) == 0 {
+		return result, true
 	}
 	userIds := make([]int64, 0, len(idSet))
 	for id := range idSet {
@@ -443,18 +448,66 @@ func (c ContestLogService) fetchUserNames(ctx context.Context, client profile.Pr
 	if pd := auth.GetCurrentUser(ctx); pd != nil {
 		orgID = int64(pd.OrgID)
 	}
-	res, err := client.GetByIds(ctx, &profile.GetByIdsReq{UserIds: userIds, OrgId: orgID})
-	if err != nil {
-		log.Errorf("GetByIds batch failed: %v", err)
-		return result
+
+	// 脱离 HTTP 请求 cancel/deadline；仍用短超时避免挂死
+	rpcCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	fill := func(org int64) error {
+		res, err := client.GetByIds(rpcCtx, &profile.GetByIdsReq{UserIds: userIds, OrgId: org})
+		if err != nil {
+			return err
+		}
+		for _, p := range res.Profiles {
+			name := displayNameFromProfile(p.Name, p.Username)
+			// 已有非空名不覆盖（org 优先解析，公共域仅补缺）
+			if prev, ok := result[p.UserId]; ok && strings.TrimSpace(prev.Name) != "" {
+				continue
+			}
+			result[p.UserId] = userInfo{
+				Name:     name,
+				Avatar:   p.Avatar,
+				Username: strings.TrimSpace(p.Username),
+			}
+		}
+		return nil
 	}
-	for _, p := range res.Profiles {
-		result[p.UserId] = userInfo{
-			Name:   displayNameFromProfile(p.Name, p.Username),
-			Avatar: p.Avatar,
+
+	if err := fill(orgID); err != nil {
+		log.Errorf("GetByIds batch failed (org=%d): %v", orgID, err)
+		// 立刻重试一次
+		if err2 := fill(orgID); err2 != nil {
+			log.Errorf("GetByIds batch retry failed (org=%d): %v", orgID, err2)
 		}
 	}
-	return result
+	hasDisplay := func(u userInfo) bool {
+		return strings.TrimSpace(u.Name) != "" || strings.TrimSpace(u.Username) != ""
+	}
+	// 仍有缺口：用公共域/org0 补一次（展示名至少回落到 username）
+	missing := false
+	for _, id := range userIds {
+		if u, ok := result[id]; !ok || !hasDisplay(u) {
+			missing = true
+			break
+		}
+	}
+	if missing && orgID != 0 {
+		if err := fill(0); err != nil {
+			log.Warnf("GetByIds public fallback failed: %v", err)
+		}
+	}
+
+	complete := true
+	for _, id := range userIds {
+		if u, ok := result[id]; !ok || !hasDisplay(u) {
+			complete = false
+			break
+		}
+	}
+	if !complete {
+		log.Warnf("fetchUserNames incomplete: want=%d got=%d org=%d", len(userIds), len(result), orgID)
+	}
+	return result, complete
 }
 
 func (c ContestLogService) GetUserContestHistory(ctx context.Context, req *contest_log.GetUserContestHistoryReq) (*contest_log.GetUserContestHistoryRes, error) {
@@ -661,28 +714,42 @@ func (c *ContestLogService) handleContestBoard(ctx khttp.Context) error {
 		}
 	}
 
-	// groupId 可选
-	var groupID int64
+	// groupId / squadId 可选（分队优先）
+	var groupID, squadID int64
+	if sStr := strings.TrimSpace(ctx.Query().Get("squadId")); sStr != "" {
+		if sid, err := strconv.ParseInt(sStr, 10, 64); err == nil {
+			squadID = sid
+		}
+	}
 	if gStr := strings.TrimSpace(ctx.Query().Get("groupId")); gStr != "" {
 		if gid, err := strconv.ParseInt(gStr, 10, 64); err == nil {
 			groupID = gid
-			if cli, err := userrpc.ProfileClient(c.reg); err == nil {
-				if res, err := cli.GetUserIdsByGroup(ctx, &profile.GetUserIdsByGroupReq{GroupId: gid}); err == nil {
-					if memberIDs == nil {
-						memberIDs = res.UserIds
-					} else {
-						gset := map[int64]struct{}{}
-						for _, u := range res.UserIds {
-							gset[u] = struct{}{}
-						}
-						var inter []int64
-						for _, u := range memberIDs {
-							if _, ok := gset[u]; ok {
-								inter = append(inter, u)
-							}
-						}
-						memberIDs = inter
+		}
+	}
+	if squadID > 0 || groupID > 0 {
+		if cli, err := userrpc.ProfileClient(c.reg); err == nil {
+			// 用当前 JWT org；0 回落
+			var orgID int64
+			if pd := auth.GetCurrentUser(ctx); pd != nil {
+				orgID = int64(pd.OrgID)
+			}
+			if res, err := cli.GetUserIdsByOrg(ctx, &profile.GetUserIdsByOrgReq{
+				OrgId: orgID, GroupId: groupID, SquadId: squadID,
+			}); err == nil {
+				if memberIDs == nil {
+					memberIDs = res.UserIds
+				} else {
+					gset := map[int64]struct{}{}
+					for _, u := range res.UserIds {
+						gset[u] = struct{}{}
 					}
+					var inter []int64
+					for _, u := range memberIDs {
+						if _, ok := gset[u]; ok {
+							inter = append(inter, u)
+						}
+					}
+					memberIDs = inter
 				}
 			}
 		}
@@ -697,17 +764,19 @@ func (c *ContestLogService) handleContestBoard(ctx khttp.Context) error {
 			ver = v
 		}
 		scope := fmt.Sprintf("org%d", resolvedOrg)
-		if groupID > 0 {
+		if squadID > 0 {
+			scope = fmt.Sprintf("org%d:s%d", resolvedOrg, squadID)
+		} else if groupID > 0 {
 			scope = fmt.Sprintf("org%d:g%d", resolvedOrg, groupID)
 		} else if memberIDs != nil {
 			scope = fmt.Sprintf("org%d:n%d", resolvedOrg, len(memberIDs))
 		}
-		// v5：补题推导可纠正误标 AC（未参赛赛后绿钩）
-		boardCacheKey = fmt.Sprintf("core:contest:board:v5:%s:%s:%s:v%s",
+		// v6：名字 RPC 失败时不写缓存，避免整榜「未知选手」被 90s 固化
+		boardCacheKey = fmt.Sprintf("core:contest:board:v6:%s:%s:%s:v%s",
 			seed.Platform, seed.ContestId, scope, ver)
 		if b, e := c.rdb.Get(reqCtx, boardCacheKey).Bytes(); e == nil && len(b) > 0 {
 			var cached map[string]interface{}
-			if json.Unmarshal(b, &cached) == nil && cached != nil {
+			if json.Unmarshal(b, &cached) == nil && cached != nil && boardCacheNamesOK(cached) {
 				writeContestJSON(ctx, 200, cached)
 				return nil
 			}
@@ -793,7 +862,7 @@ func (c *ContestLogService) handleContestBoard(ctx khttp.Context) error {
 	if cli, err := userrpc.ProfileClient(c.reg); err == nil {
 		userClient = cli
 	}
-	nameMap := c.fetchUserNames(ctx, userClient, logs)
+	nameMap, namesComplete := c.fetchUserNames(ctx, userClient, logs)
 
 	scoring := "icpc"
 	if seed.Platform == "LeetCode" {
@@ -1021,9 +1090,14 @@ func (c *ContestLogService) handleContestBoard(ctx khttp.Context) error {
 		if !boardHasDetail || !d.hasDetail {
 			cells = []map[string]interface{}{}
 		}
+		displayName := strings.TrimSpace(u.Name)
+		if displayName == "" {
+			displayName = strings.TrimSpace(u.Username)
+		}
 		row := map[string]interface{}{
 			"userId":       d.log.UserID,
-			"name":         u.Name,
+			"name":         displayName,
+			"username":     u.Username,
 			"avatar":       u.Avatar,
 			"rankOfficial": rankOff,
 			"rankLocal":    rankLocal,
@@ -1068,8 +1142,8 @@ func (c *ContestLogService) handleContestBoard(ctx khttp.Context) error {
 			"total":         len(rows),
 		},
 	}
-	// 只读快照，统一缓存 90s（不再因「等 Infer」而缩短 TTL）
-	if boardCacheKey != "" && c.rdb != nil {
+	// 只读快照，统一缓存 90s；名字未齐时不写缓存，避免「未知选手」被固化
+	if boardCacheKey != "" && c.rdb != nil && namesComplete {
 		if b, e := json.Marshal(resp); e == nil {
 			_ = c.rdb.Set(reqCtx, boardCacheKey, b, 90*time.Second).Err()
 		}
@@ -1254,4 +1328,38 @@ func writeContestJSON(ctx khttp.Context, status int, v interface{}) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(v)
+}
+
+// boardCacheNamesOK 缓存里若出现 userId>0 且 name 为空，视为脏缓存（GetByIds 失败时写入的旧数据）
+func boardCacheNamesOK(cached map[string]interface{}) bool {
+	data, _ := cached["data"].(map[string]interface{})
+	if data == nil {
+		return true
+	}
+	rows, _ := data["rows"].([]interface{})
+	for _, raw := range rows {
+		row, _ := raw.(map[string]interface{})
+		if row == nil {
+			continue
+		}
+		uid := int64(0)
+		switch v := row["userId"].(type) {
+		case float64:
+			uid = int64(v)
+		case int64:
+			uid = v
+		case json.Number:
+			if n, err := v.Int64(); err == nil {
+				uid = n
+			}
+		}
+		if uid <= 0 {
+			continue
+		}
+		name, _ := row["name"].(string)
+		if strings.TrimSpace(name) == "" {
+			return false
+		}
+	}
+	return true
 }
