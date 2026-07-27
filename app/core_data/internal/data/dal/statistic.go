@@ -44,6 +44,12 @@ func (d *StatisticDal) HeatmapQueryScoped(ctx context.Context, startDate, endDat
 		return []DailyCount{}, nil
 	}
 
+	// 个人 AC 热力：按「去重真题」计（排除力扣官方 ac-* 合成键），与 period.ac.today / 提交记录一致。
+	// 组织/全站 AC 仍用 daily_user_stats.ac_cnt 条数。
+	if isAc && userId > 0 {
+		return d.heatmapPersonalACFromDays(ctx, startDate, endDate, userId)
+	}
+
 	// 日汇总：行数 = 用户×活跃天，比明细少 1–2 个数量级
 	cntCol := "submit_cnt"
 	if isAc {
@@ -81,6 +87,28 @@ func (d *StatisticDal) HeatmapQueryScoped(ctx context.Context, startDate, endDat
 	return result, nil
 }
 
+// heatmapPersonalACFromDays 个人 AC 热力：每日去重题数（排除 e:LeetCode:ac-*）
+func (d *StatisticDal) heatmapPersonalACFromDays(ctx context.Context, startDate, endDate string, userId int64) ([]DailyCount, error) {
+	var result []DailyCount
+	err := d.db.WithContext(ctx).
+		Table("user_ac_problem_days").
+		Select("day, COUNT(DISTINCT problem_key) AS cnt").
+		Where("user_id = ? AND day >= ?::date AND day <= ?::date AND "+model.SQLExcludeLeetCodeOfficialACKey,
+			userId, startDate, endDate).
+		Group("day").
+		Having("COUNT(DISTINCT problem_key) > 0").
+		Order("day").
+		Scan(&result).Error
+	if err != nil {
+		return nil, err
+	}
+	if len(result) == 0 {
+		// 日表空时回退明细（同样排除 lc-ac）
+		return d.heatmapFromSubmitLogs(ctx, startDate, endDate, userId, true, nil)
+	}
+	return result, nil
+}
+
 // heatmapFromSubmitLogs 回退路径（汇总表空）；同样只返回 cnt>0 的天
 func (d *StatisticDal) heatmapFromSubmitLogs(ctx context.Context, startDate, endDate string, userId int64, isAc bool, memberIDs []int64) ([]DailyCount, error) {
 	q := d.db.WithContext(ctx).
@@ -88,7 +116,8 @@ func (d *StatisticDal) heatmapFromSubmitLogs(ctx context.Context, startDate, end
 		Select("date_trunc('day', time)::date AS day, COUNT(*) AS cnt").
 		Where("time >= ?::date AND time < (?::date + INTERVAL '1 day')", startDate, endDate)
 	if isAc {
-		q = q.Where("is_ac = true")
+		// 排除力扣官方合成 AC，避免与 lc-prob 同题双计
+		q = q.Where("is_ac = true").Where(model.SQLExcludeLeetCodeOfficialACSubmit)
 	} else {
 		q = q.Where(model.SQLExcludeLeetCodeNonSubmit)
 	}
@@ -258,19 +287,27 @@ func (d *StatisticDal) periodAcDistinctFromSubmitLogs(userId int64, now time.Tim
 		thisMonthStart, now, lastMonthStart, thisMonthStart,
 		thisYearStart, now, lastYearStart, thisYearStart,
 	}
+	// 排除 lc-ac 官方合成，时段与记录列表对齐；total 仍走 CountUserLifetimeAC 优先
+	keyExpr := acProblemKeySQL
+	dayKey := `CASE WHEN ` + model.SQLExcludeLeetCodeOfficialACSubmit + ` THEN ` + keyExpr + ` END`
 	distinctSelect := `
-		COUNT(DISTINCT CASE WHEN time >= ? AND time < ? THEN ` + acProblemKeySQL + ` END) AS today,
-		COUNT(DISTINCT CASE WHEN time >= ? AND time < ? THEN ` + acProblemKeySQL + ` END) AS this_week,
-		COUNT(DISTINCT CASE WHEN time >= ? AND time < ? THEN ` + acProblemKeySQL + ` END) AS last_week,
-		COUNT(DISTINCT CASE WHEN time >= ? AND time < ? THEN ` + acProblemKeySQL + ` END) AS this_month,
-		COUNT(DISTINCT CASE WHEN time >= ? AND time < ? THEN ` + acProblemKeySQL + ` END) AS last_month,
-		COUNT(DISTINCT CASE WHEN time >= ? AND time < ? THEN ` + acProblemKeySQL + ` END) AS this_year,
-		COUNT(DISTINCT CASE WHEN time >= ? AND time < ? THEN ` + acProblemKeySQL + ` END) AS last_year,
-		COUNT(DISTINCT ` + acProblemKeySQL + `) AS total,
+		COUNT(DISTINCT CASE WHEN time >= ? AND time < ? THEN ` + dayKey + ` END) AS today,
+		COUNT(DISTINCT CASE WHEN time >= ? AND time < ? THEN ` + dayKey + ` END) AS this_week,
+		COUNT(DISTINCT CASE WHEN time >= ? AND time < ? THEN ` + dayKey + ` END) AS last_week,
+		COUNT(DISTINCT CASE WHEN time >= ? AND time < ? THEN ` + dayKey + ` END) AS this_month,
+		COUNT(DISTINCT CASE WHEN time >= ? AND time < ? THEN ` + dayKey + ` END) AS last_month,
+		COUNT(DISTINCT CASE WHEN time >= ? AND time < ? THEN ` + dayKey + ` END) AS this_year,
+		COUNT(DISTINCT CASE WHEN time >= ? AND time < ? THEN ` + dayKey + ` END) AS last_year,
+		COUNT(DISTINCT ` + keyExpr + `) AS total,
 		COUNT(*) AS total_raw`
 	var ac PeriodAcCount
 	err := d.db.Table("submit_logs").Where("user_id = ? AND is_ac = true", userId).
 		Select(distinctSelect, periodArgs...).Scan(&ac).Error
+	if err == nil {
+		if n, e := CountUserLifetimeAC(d.db, userId); e == nil && n > 0 {
+			ac.Total = n
+		}
+	}
 	return ac, err
 }
 
@@ -391,7 +428,9 @@ func (d *StatisticDal) GetRankByRangeScoped(ctx context.Context, startTime, endT
 		scoreSelect = "user_id, (" + lifetimeACScoreSQL + ") AS score"
 	} else {
 		base = d.db.WithContext(ctx).Table("user_ac_problem_days").
-			Where("day >= ?::date AND day <= ?::date", startDay.Format("2006-01-02"), endDay.Format("2006-01-02"))
+			Where("day >= ?::date AND day <= ?::date", startDay.Format("2006-01-02"), endDay.Format("2006-01-02")).
+			Where(model.SQLExcludeLeetCodeOfficialACKey)
+		// 与 period 时段一致：排除力扣官方合成键
 		scoreSelect = "user_id, COUNT(DISTINCT problem_key) AS score"
 	}
 	if memberIDs != nil {

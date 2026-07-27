@@ -38,8 +38,9 @@ func TestAggregateSubmitDeltas(t *testing.T) {
 	if lc.SubmitCnt != 1 { // 仅 lc-cal；排除 lc-ac / lc-prob
 		t.Fatalf("LC submit_cnt=%d want 1", lc.SubmitCnt)
 	}
-	if lc.AcCnt != 2 { // lc-ac + lc-prob
-		t.Fatalf("LC ac_cnt=%d want 2", lc.AcCnt)
+	// 日 AC 只计 lc-prob；lc-ac 仅服务生涯 total，不进日统计
+	if lc.AcCnt != 1 {
+		t.Fatalf("LC ac_cnt=%d want 1 (lc-prob only, not lc-ac)", lc.AcCnt)
 	}
 }
 

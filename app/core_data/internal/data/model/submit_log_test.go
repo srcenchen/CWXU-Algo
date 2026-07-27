@@ -55,6 +55,20 @@ func TestIsLeetCodeSyntheticSubmit(t *testing.T) {
 	}
 }
 
+func TestCountsTowardDailyAC(t *testing.T) {
+	// 官方合成不进日 AC
+	if CountsTowardDailyAC("LeetCode", "lc-ac-2-100") {
+		t.Fatal("lc-ac must not count toward daily AC")
+	}
+	// 最近通过进日 AC（与记录列表一致）
+	if !CountsTowardDailyAC("LeetCode", "lc-prob-123") {
+		t.Fatal("lc-prob should count toward daily AC")
+	}
+	if !CountsTowardDailyAC("CodeForces", "999") {
+		t.Fatal("real OJ AC should count")
+	}
+}
+
 func TestIsUOJSyntheticAC(t *testing.T) {
 	if !IsUOJSyntheticAC("UOJ", "uoj-ac-1-42") {
 		t.Fatal("uoj-ac should be synthetic")

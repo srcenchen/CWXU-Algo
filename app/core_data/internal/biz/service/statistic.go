@@ -68,7 +68,8 @@ const (
 	heatmapMaxDaysPersonal  = 365 * 20 // ~20 年
 	heatmapMaxDaysAggregate = 400
 	// heatmapCacheSchema 稀疏日行 + 个人稳定 career key；改序列化/语义时 bump
-	heatmapCacheSchema = "2"
+	// s3：个人 isAc 热力改走 user_ac_problem_days 去重（排除力扣官方 ac-*）
+	heatmapCacheSchema = "3"
 )
 
 // clampHeatmapRange 规范化并限制日期跨度；入参支持 20060102 / 2006-01-02
@@ -319,7 +320,8 @@ func (uc *StatisticUseCase) PeriodCount(ctx context.Context, req *statistic.Peri
 	queryUserId := req.UserId
 	// schema v6：个人 AC 去重走 user_ac_problem_* 预聚合
 	// s9：生涯 total 力扣优先官方 acTotal 合成键（与平台过题一致，避免 recentAC 双计）
-	const periodCacheSchema = "9"
+	// s10：时段今日/本周排除 e:LeetCode:ac-*（与 lc-prob 同题双计修复）
+	const periodCacheSchema = "10"
 	ttl := data2.DefaultCacheTTL
 	var cacheKey string
 

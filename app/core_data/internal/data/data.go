@@ -160,6 +160,8 @@ func migrateModels(db *gorm.DB) {
 	backfillUserTagACIfEmpty(db)
 	// one-shot: zero solution view counts for UV migration
 	zeroSolutionViewsOnce(db)
+	// 力扣官方 ac-* 不再进日表/日 ac_cnt（与 lc-prob 双计修复）
+	purgeLeetCodeOfficialACFromDailyOnce(db)
 }
 
 // schemaPatch one-shot migration markers (core DB).
@@ -169,6 +171,53 @@ type schemaPatch struct {
 }
 
 func (schemaPatch) TableName() string { return "schema_patches" }
+
+// purgeLeetCodeOfficialACFromDailyOnce 一次性清理：
+// 1) user_ac_problem_days 中 e:LeetCode:ac-* 行（官方合成不应进「今日 AC」）
+// 2) 重算力扣 daily_user_stats.ac_cnt（排除 lc-ac-*，保留 lc-prob 等）
+func purgeLeetCodeOfficialACFromDailyOnce(db *gorm.DB) {
+	if db == nil {
+		return
+	}
+	const key = "lc_official_ac_daily_dedupe_v1"
+	var n int64
+	_ = db.Model(&schemaPatch{}).Where("key = ?", key).Count(&n).Error
+	if n > 0 {
+		return
+	}
+	if db.Migrator().HasTable(&model.UserACProblemDay{}) {
+		res := db.Exec(`DELETE FROM user_ac_problem_days WHERE problem_key LIKE 'e:LeetCode:ac-%'`)
+		if res.Error != nil {
+			log.Warnf("purge lc official ac days: %v", res.Error)
+		} else if res.RowsAffected > 0 {
+			log.Infof("purged user_ac_problem_days official ac keys rows=%d", res.RowsAffected)
+		}
+	}
+	// 重算所有用户的 LeetCode 日 ac_cnt（仅 ac 列；submit_cnt 不变）
+	if db.Migrator().HasTable(&model.DailyUserStat{}) && db.Migrator().HasTable(&model.SubmitLog{}) {
+		res := db.Exec(`
+			UPDATE daily_user_stats d
+			SET ac_cnt = COALESCE((
+				SELECT COUNT(*)::bigint
+				FROM submit_logs s
+				WHERE s.user_id = d.user_id
+				  AND date_trunc('day', s.time)::date = d.day
+				  AND COALESCE(NULLIF(btrim(s.platform), ''), '?') = d.platform
+				  AND s.is_ac = true
+				  AND NOT (s.platform = 'LeetCode' AND s.submit_id LIKE 'lc-ac-%')
+			), 0)
+			WHERE d.platform = 'LeetCode'
+		`)
+		if res.Error != nil {
+			log.Warnf("recompute leetcode daily ac_cnt: %v", res.Error)
+		} else {
+			log.Infof("recomputed leetcode daily ac_cnt rows=%d", res.RowsAffected)
+		}
+	}
+	// 个人 period/heatmap 缓存靠 ver 自然失效；bump 全站 period ver 加速
+	// （无 redis 句柄时跳过；下次爬虫也会 INCR）
+	_ = db.Create(&schemaPatch{Key: key, AppliedAt: time.Now()}).Error
+}
 
 func zeroSolutionViewsOnce(db *gorm.DB) {
 	if db == nil {
@@ -341,12 +390,12 @@ func backfillDailyUserStatsIfEmpty(db *gorm.DB) {
 			COUNT(*) FILTER (
 				WHERE ` + model.SQLExcludeLeetCodeNonSubmit + `
 			) AS submit_cnt,
-			COUNT(*) FILTER (WHERE is_ac = true) AS ac_cnt
+			COUNT(*) FILTER (WHERE is_ac = true AND ` + model.SQLExcludeLeetCodeOfficialACSubmit + `) AS ac_cnt
 		FROM submit_logs
 		GROUP BY user_id, date_trunc('day', time)::date, COALESCE(NULLIF(btrim(platform), ''), '?')
 		HAVING
 			COUNT(*) FILTER (WHERE ` + model.SQLExcludeLeetCodeNonSubmit + `) > 0
-			OR COUNT(*) FILTER (WHERE is_ac = true) > 0
+			OR COUNT(*) FILTER (WHERE is_ac = true AND ` + model.SQLExcludeLeetCodeOfficialACSubmit + `) > 0
 		ON CONFLICT (user_id, day, platform) DO NOTHING
 	`)
 	if res.Error != nil {
@@ -432,14 +481,23 @@ func backfillUserACIfEmpty(db *gorm.DB) {
 		SELECT DISTINCT
 			user_id,
 			date_trunc('day', time)::date AS day,
-			COALESCE(
-				CASE WHEN problem_id IS NOT NULL AND problem_id <> 0 THEN 'p:' || problem_id::text END,
-				CASE WHEN external_id IS NOT NULL AND btrim(external_id) <> '' THEN 'e:' || platform || ':' || external_id END,
-				'n:' || platform || ':' || COALESCE(problem, '')
-			) AS problem_key,
-			COALESCE(NULLIF(btrim(platform), ''), '?') AS platform
-		FROM submit_logs
-		WHERE is_ac = true
+			problem_key,
+			platform
+		FROM (
+			SELECT
+				user_id,
+				time,
+				COALESCE(NULLIF(btrim(platform), ''), '?') AS platform,
+				COALESCE(
+					CASE WHEN problem_id IS NOT NULL AND problem_id <> 0 THEN 'p:' || problem_id::text END,
+					CASE WHEN external_id IS NOT NULL AND btrim(external_id) <> '' THEN 'e:' || platform || ':' || external_id END,
+					'n:' || platform || ':' || COALESCE(problem, '')
+				) AS problem_key
+			FROM submit_logs
+			WHERE is_ac = true
+			  AND NOT (platform = 'LeetCode' AND submit_id LIKE 'lc-ac-%')
+		) t
+		WHERE problem_key NOT LIKE 'e:LeetCode:ac-%'
 		ON CONFLICT (user_id, day, problem_key) DO NOTHING
 	`)
 	if res.Error != nil {

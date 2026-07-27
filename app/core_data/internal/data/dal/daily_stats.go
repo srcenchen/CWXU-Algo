@@ -46,7 +46,8 @@ func AggregateSubmitDeltas(logs []model.SubmitLog) []DailyDelta {
 		if model.CountsTowardSubmitStat(l.Platform, l.SubmitID) {
 			d.SubmitCnt++
 		}
-		if l.IsAC {
+		// 日 AC：lc-ac 不计入（仅生涯）；lc-prob 与其它平台真实 AC 计入
+		if l.IsAC && model.CountsTowardDailyAC(l.Platform, l.SubmitID) {
 			d.AcCnt++
 		}
 	}
@@ -180,12 +181,12 @@ func BackfillDailyUserStatsIfEmpty(db *gorm.DB) {
 			COUNT(*) FILTER (
 				WHERE ` + model.SQLExcludeLeetCodeNonSubmit + `
 			) AS submit_cnt,
-			COUNT(*) FILTER (WHERE is_ac = true) AS ac_cnt
+			COUNT(*) FILTER (WHERE is_ac = true AND ` + model.SQLExcludeLeetCodeOfficialACSubmit + `) AS ac_cnt
 		FROM submit_logs
 		GROUP BY user_id, date_trunc('day', time)::date, COALESCE(NULLIF(btrim(platform), ''), '?')
 		HAVING
 			COUNT(*) FILTER (WHERE ` + model.SQLExcludeLeetCodeNonSubmit + `) > 0
-			OR COUNT(*) FILTER (WHERE is_ac = true) > 0
+			OR COUNT(*) FILTER (WHERE is_ac = true AND ` + model.SQLExcludeLeetCodeOfficialACSubmit + `) > 0
 		ON CONFLICT (user_id, day, platform) DO NOTHING
 	`)
 	if res.Error != nil {

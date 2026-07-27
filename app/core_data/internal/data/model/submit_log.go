@@ -97,6 +97,23 @@ func CountsTowardSubmitStat(platform, submitID string) bool {
 	return !IsLeetCodeNonSubmitCountID(submitID)
 }
 
+// CountsTowardDailyAC 是否计入「日 AC」：热力 ac_cnt、时段今日/本周等。
+// 力扣 lc-ac-* 官方合成题仅用于生涯 acTotal 对齐，不进日统计，
+// 避免与同日 lc-prob（最近通过）对同一道真题双计。
+func CountsTowardDailyAC(platform, submitID string) bool {
+	if platform == "LeetCode" && strings.HasPrefix(submitID, "lc-ac-") {
+		return false
+	}
+	return true
+}
+
+// SQLExcludeLeetCodeOfficialAC 日 AC / 时段去重：排除力扣官方合成键与 submit_id。
+// 用于 user_ac_problem_days 读路径、rebuild 写路径。
+const SQLExcludeLeetCodeOfficialACKey = `problem_key NOT LIKE 'e:LeetCode:ac-%'`
+
+// SQLExcludeLeetCodeOfficialACSubmit 从 submit_logs 计日 AC 时排除 lc-ac-*
+const SQLExcludeLeetCodeOfficialACSubmit = `NOT (platform = 'LeetCode' AND submit_id LIKE 'lc-ac-%')`
+
 // IsLeetCodeNonSubmitCountID 力扣不计入提交数的 submit_id（合成 AC + 最近通过明细）
 func IsLeetCodeNonSubmitCountID(submitID string) bool {
 	return strings.HasPrefix(submitID, "lc-ac-") || strings.HasPrefix(submitID, "lc-prob-")

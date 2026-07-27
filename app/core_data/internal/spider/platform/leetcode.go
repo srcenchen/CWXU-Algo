@@ -191,13 +191,11 @@ func (p NewLeetCode) FetchSubmitLog(ctx context.Context, userId int64, username 
 		})
 	}
 
-	// 4) 累计 AC 题数 → 合成 AC（status=AC，进「AC 热力图 / 做题数」）
-	//    力扣接口只给已去重的 acTotal；稳定 submit_id，全量锚 baseline，增量新行记今天。
+	// 4) 累计 AC 题数 → 合成 AC（仅对齐生涯 acTotal / user_ac_problems）
+	//    不进日 AC 热力、不进 user_ac_problem_days、不进动态（见 CountsTowardDailyAC）。
+	//    力扣接口只给已去重的 acTotal；稳定 submit_id；时间锚 baseline（增量也不标今天，避免虚增「今日 AC」）。
 	for i := 0; i < prog.AcTotal; i++ {
 		t := baselineDay
-		if !needAll {
-			t = today
-		}
 		ext := fmt.Sprintf("ac-%d", i)
 		res = append(res, model.SubmitLog{
 			UserID:     userId,

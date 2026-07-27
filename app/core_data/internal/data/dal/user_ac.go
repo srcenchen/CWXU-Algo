@@ -39,11 +39,16 @@ func ApplyUserACFromSubmits(ctx context.Context, db *gorm.DB, logs []model.Submi
 		plat := strings.TrimSpace(l.Platform)
 		day := time.Date(l.Time.Year(), l.Time.Month(), l.Time.Day(), 0, 0, 0, 0, l.Time.Location())
 
+		// 生涯表：官方 ac-* 与 recent 明细都写（total 读侧优先官方键）
 		fk := fmt.Sprintf("%d\x00%s", l.UserID, key)
 		if prev, ok := firstMap[fk]; !ok || l.Time.Before(prev.at) {
 			firstMap[fk] = &firstRec{userID: l.UserID, key: key, platform: plat, at: l.Time}
 		}
 
+		// 日表：力扣官方合成键不进「今日/本周」——避免与同日 lc-prob 双计
+		if model.IsLeetCodeOfficialACKey(key) {
+			continue
+		}
 		dk := fmt.Sprintf("%d\x00%s\x00%s", l.UserID, day.Format("2006-01-02"), key)
 		dayMap[dk] = model.UserACProblemDay{
 			UserID:     l.UserID,
@@ -225,17 +230,19 @@ func PeriodAcDistinctFromPreagg(db *gorm.DB, userId int64, now time.Time) (Perio
 	yearDay := thisYearStart.Format("2006-01-02")
 	lastYearDay := lastYearStart.Format("2006-01-02")
 
+	// 时段去重排除 e:LeetCode:ac-*（官方合成仅服务生涯 total，不进今日/本周…）
+	ex := model.SQLExcludeLeetCodeOfficialACKey
 	var ac PeriodAcCount
 	err := db.Table("user_ac_problem_days").
 		Where("user_id = ?", userId).
 		Select(`
-			COUNT(DISTINCT problem_key) FILTER (WHERE day = ?::date) AS today,
-			COUNT(DISTINCT problem_key) FILTER (WHERE day >= ?::date AND day <= ?::date) AS this_week,
-			COUNT(DISTINCT problem_key) FILTER (WHERE day >= ?::date AND day < ?::date) AS last_week,
-			COUNT(DISTINCT problem_key) FILTER (WHERE day >= ?::date AND day <= ?::date) AS this_month,
-			COUNT(DISTINCT problem_key) FILTER (WHERE day >= ?::date AND day < ?::date) AS last_month,
-			COUNT(DISTINCT problem_key) FILTER (WHERE day >= ?::date AND day <= ?::date) AS this_year,
-			COUNT(DISTINCT problem_key) FILTER (WHERE day >= ?::date AND day < ?::date) AS last_year
+			COUNT(DISTINCT problem_key) FILTER (WHERE day = ?::date AND `+ex+`) AS today,
+			COUNT(DISTINCT problem_key) FILTER (WHERE day >= ?::date AND day <= ?::date AND `+ex+`) AS this_week,
+			COUNT(DISTINCT problem_key) FILTER (WHERE day >= ?::date AND day < ?::date AND `+ex+`) AS last_week,
+			COUNT(DISTINCT problem_key) FILTER (WHERE day >= ?::date AND day <= ?::date AND `+ex+`) AS this_month,
+			COUNT(DISTINCT problem_key) FILTER (WHERE day >= ?::date AND day < ?::date AND `+ex+`) AS last_month,
+			COUNT(DISTINCT problem_key) FILTER (WHERE day >= ?::date AND day <= ?::date AND `+ex+`) AS this_year,
+			COUNT(DISTINCT problem_key) FILTER (WHERE day >= ?::date AND day < ?::date AND `+ex+`) AS last_year
 		`,
 			todayDay,
 			weekDay, todayDay,
@@ -294,13 +301,13 @@ func RebuildUserPreaggFromSubmits(ctx context.Context, db *gorm.DB, userId int64
 				COUNT(*) FILTER (
 					WHERE `+model.SQLExcludeLeetCodeNonSubmit+`
 				) AS submit_cnt,
-				COUNT(*) FILTER (WHERE is_ac = true) AS ac_cnt
+				COUNT(*) FILTER (WHERE is_ac = true AND `+model.SQLExcludeLeetCodeOfficialACSubmit+`) AS ac_cnt
 			FROM submit_logs
 			WHERE user_id = ?
 			GROUP BY user_id, date_trunc('day', time)::date, COALESCE(NULLIF(btrim(platform), ''), '?')
 			HAVING
 				COUNT(*) FILTER (WHERE `+model.SQLExcludeLeetCodeNonSubmit+`) > 0
-				OR COUNT(*) FILTER (WHERE is_ac = true) > 0
+				OR COUNT(*) FILTER (WHERE is_ac = true AND `+model.SQLExcludeLeetCodeOfficialACSubmit+`) > 0
 		`, userId).Error; err != nil {
 			return err
 		}
@@ -341,14 +348,23 @@ func RebuildUserPreaggFromSubmits(ctx context.Context, db *gorm.DB, userId int64
 			SELECT DISTINCT
 				user_id,
 				date_trunc('day', time)::date AS day,
-				COALESCE(
-					CASE WHEN problem_id IS NOT NULL AND problem_id <> 0 THEN 'p:' || problem_id::text END,
-					CASE WHEN external_id IS NOT NULL AND btrim(external_id) <> '' THEN 'e:' || platform || ':' || external_id END,
-					'n:' || platform || ':' || COALESCE(problem, '')
-				) AS problem_key,
-				COALESCE(NULLIF(btrim(platform), ''), '?') AS platform
-			FROM submit_logs
-			WHERE user_id = ? AND is_ac = true
+				problem_key,
+				platform
+			FROM (
+				SELECT
+					user_id,
+					time,
+					COALESCE(NULLIF(btrim(platform), ''), '?') AS platform,
+					COALESCE(
+						CASE WHEN problem_id IS NOT NULL AND problem_id <> 0 THEN 'p:' || problem_id::text END,
+						CASE WHEN external_id IS NOT NULL AND btrim(external_id) <> '' THEN 'e:' || platform || ':' || external_id END,
+						'n:' || platform || ':' || COALESCE(problem, '')
+					) AS problem_key
+				FROM submit_logs
+				WHERE user_id = ? AND is_ac = true
+				  AND `+model.SQLExcludeLeetCodeOfficialACSubmit+`
+			) t
+			WHERE `+model.SQLExcludeLeetCodeOfficialACKey+`
 		`, userId).Error; err != nil {
 			return err
 		}

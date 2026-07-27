@@ -21,7 +21,7 @@ const (
 	heatWarmThreshold = 5
 	// heatZSetTTL 热度集合过期
 	heatZSetTTL = 7 * 24 * time.Hour
-	// 与 PeriodCount 缓存 schema 对齐（statistic.go periodCacheSchema）
+	// 与 PeriodCount 缓存 schema 对齐（statistic.go periodCacheSchema=s10）
 	periodWarmSchema = "9"
 )
 
