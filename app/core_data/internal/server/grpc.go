@@ -1,6 +1,7 @@
 package server
 
 import (
+	"cwxu-algo/api/core/v1/contest_log"
 	"cwxu-algo/api/core/v1/spider"
 	statistic2 "cwxu-algo/api/core/v1/statistic"
 	"cwxu-algo/api/core/v1/submit_log"
@@ -15,7 +16,15 @@ import (
 )
 
 // NewGRPCServer new a gRPC server.
-func NewGRPCServer(c *conf.Server, logger log.Logger, spiderService *service.SpiderService, submitLogService *service.SubmitLogService, statisticService *service.StatisticService) *grpc.Server {
+// Contest 必须注册：agent 训练报告/日报通过 gRPC 拉比赛列表与历史，漏注册会导致「比赛表现」全空。
+func NewGRPCServer(
+	c *conf.Server,
+	logger log.Logger,
+	spiderService *service.SpiderService,
+	submitLogService *service.SubmitLogService,
+	statisticService *service.StatisticService,
+	contestLogService *service.ContestLogService,
+) *grpc.Server {
 	var opts = []grpc.ServerOption{
 		grpc.Middleware(
 			recovery.Recovery(),
@@ -35,5 +44,6 @@ func NewGRPCServer(c *conf.Server, logger log.Logger, spiderService *service.Spi
 	spider.RegisterSpiderServer(srv, spiderService)
 	submit_log.RegisterSubmitServer(srv, submitLogService)
 	statistic2.RegisterStatisticServer(srv, statisticService)
+	contest_log.RegisterContestServer(srv, contestLogService)
 	return srv
 }

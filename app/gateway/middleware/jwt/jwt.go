@@ -95,10 +95,16 @@ var publicExact = map[string]struct{}{
 	// Core 公开读
 	"/v1/core/submit-log/get-by-id": {},
 	"/v1/core/contest/list":         {},
+	"/v1/core/contest/history":      {},
 	"/v1/core/contest/ranking":      {},
 	"/v1/core/contest/problems":     {},
 	"/v1/core/contest/board":        {},
 	"/v1/core/contest/cell-submits": {},
+	// 比赛日历公开读（与 core 白名单 / api.md Auth:否 对齐）
+	"/v1/core/contest-calendar/list":      {},
+	"/v1/core/contest-calendar/platforms": {},
+	// AI 近期总结公开读缓存
+	"/v1/agent/summary/recent": {},
 	"/v1/core/statistic/heatmap":    {},
 	"/v1/core/statistic/period":     {},
 	"/v1/core/statistic/rank":       {},
