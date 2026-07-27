@@ -18,10 +18,16 @@ import (
 // orgScopeMembersCacheTTL 组织成员列表进程内短缓存（动态流/比赛列表每请求都要成员列表）
 const orgScopeMembersCacheTTL = 60 * time.Second
 
+// orgScopeMembersFailBackoff user 服务抖动时的重试间隔：期间直接用上一次成功值，
+// 避免每个请求都去撞一次超时的 RPC（比赛列表等会因此整页变空 / 变慢）。
+const orgScopeMembersFailBackoff = 15 * time.Second
+
 type orgScopeMembersEntry struct {
 	ids   []int64
 	orgID uint
 	at    time.Time
+	// failAt 最近一次 RPC 失败时刻；ids/at 仍是上一次成功的值
+	failAt time.Time
 }
 
 var (
@@ -46,21 +52,44 @@ func ResolveOrgMemberIDs(ctx context.Context, reg *registry.Registrar, orgID uin
 		}
 	}
 	orgScopeMembersMu.Lock()
-	if e, ok := orgScopeMembersCache[orgID]; ok && time.Since(e.at) < orgScopeMembersCacheTTL {
-		ids, resolved := e.ids, e.orgID
+	cached, hasCached := orgScopeMembersCache[orgID]
+	if hasCached && time.Since(cached.at) < orgScopeMembersCacheTTL {
+		ids, resolved := cached.ids, cached.orgID
+		orgScopeMembersMu.Unlock()
+		return ids, resolved, false, nil
+	}
+	// 刚失败过且手上有旧值：先用旧值，别把请求堵在超时的 RPC 上
+	if hasCached && cached.ids != nil && time.Since(cached.failAt) < orgScopeMembersFailBackoff {
+		ids, resolved := cached.ids, cached.orgID
 		orgScopeMembersMu.Unlock()
 		return ids, resolved, false, nil
 	}
 	orgScopeMembersMu.Unlock()
 
+	// staleFallback RPC 失败时回落上一次成功的成员列表（宁可稍旧，也不要整页空数据）
+	staleFallback := func(err error) ([]int64, uint, bool, error) {
+		orgScopeMembersMu.Lock()
+		e, ok := orgScopeMembersCache[orgID]
+		if ok {
+			e.failAt = time.Now()
+			orgScopeMembersCache[orgID] = e
+		}
+		orgScopeMembersMu.Unlock()
+		if ok && e.ids != nil {
+			log.Warnf("org members fallback to stale (org=%d, age=%s): %v", orgID, time.Since(e.at).Truncate(time.Second), err)
+			return e.ids, e.orgID, false, nil
+		}
+		return nil, orgID, false, err
+	}
+
 	client, err := userrpc.ProfileClient(reg)
 	if err != nil {
-		return nil, orgID, false, err
+		return staleFallback(err)
 	}
 	res, err := client.GetUserIdsByOrg(ctx, &profile.GetUserIdsByOrgReq{OrgId: int64(orgID)})
 	if err != nil {
 		log.Warnf("GetUserIdsByOrg: %v", err)
-		return nil, orgID, false, err
+		return staleFallback(err)
 	}
 	ids := res.GetUserIds()
 	if ids == nil {

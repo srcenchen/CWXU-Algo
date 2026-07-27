@@ -197,7 +197,15 @@ func windowFromHint(platform string, hintTime time.Time, withEndBuffer bool) (st
 // ResolveContestDisplayWindow 给人看的起止时间（无赛后缓冲）。
 // 1) 日历 2) 牛客官方实时 start/end 3) hint/粗估。
 // 返回的 ok 表示至少有可信开赛时间。
+//
+// 会同步抓牛客比赛页，只允许在爬虫/后台路径使用；
+// HTTP 读路径请用 ResolveContestDisplayWindowCached。
 func ResolveContestDisplayWindow(db *gorm.DB, platform, contestID string, hintTime time.Time) (start, end time.Time, ok bool) {
+	return resolveContestDisplayWindow(db, platform, contestID, hintTime, true)
+}
+
+// resolveContestDisplayWindow allowFetch=false 时牛客缺窗只排队后台补，不阻塞调用方。
+func resolveContestDisplayWindow(db *gorm.DB, platform, contestID string, hintTime time.Time, allowFetch bool) (start, end time.Time, ok bool) {
 	platform = strings.TrimSpace(platform)
 	contestID = strings.TrimSpace(contestID)
 	dur := platformDuration(platform)
@@ -218,9 +226,15 @@ func ResolveContestDisplayWindow(db *gorm.DB, platform, contestID string, hintTi
 
 	// 2) 牛客：无日历时拉官方实时（history end / 比赛页），禁止直接用固定 3h 当真相
 	if NormalizeCalendarPlatform(platform) == spider.NowCoder && contestID != "" {
-		name, url, hintEnd := nowCoderHintsFromLogs(db, contestID, &hintTime)
-		if s, e, okNC := EnsureNowCoderContestCalendar(db, contestID, name, url, hintTime, hintEnd); okNC {
-			return s, e, true
+		if allowFetch {
+			name, url, hintEnd := nowCoderHintsFromLogs(db, contestID, &hintTime)
+			if s, e, okNC := EnsureNowCoderContestCalendar(db, contestID, name, url, hintTime, hintEnd); okNC {
+				return s, e, true
+			}
+		} else {
+			scheduleNowCoderCalendarBackfill(db, []model.ContestLog{{
+				Platform: spider.NowCoder, ContestId: contestID, Time: hintTime,
+			}})
 		}
 	}
 
@@ -244,7 +258,13 @@ func ResolveContestDisplayWindow(db *gorm.DB, platform, contestID string, hintTi
 // ResolveContestWindow 解析比赛时间窗 [start, end]（end 含赛后缓冲，供 Infer 扫提交）。
 // hintTime：contest_logs.time 等提示；AtCoder 为结束时间，不可当开赛。
 // 牛客：日历/官方实时优先；默认 3h 仅在拉官方失败时兜底。
+//
+// 同 ResolveContestDisplayWindow：会同步抓牛客比赛页，HTTP 读路径请用 ResolveContestWindowCached。
 func ResolveContestWindow(db *gorm.DB, platform, contestID string, hintTime time.Time) (start, end time.Time) {
+	return resolveContestWindow(db, platform, contestID, hintTime, true)
+}
+
+func resolveContestWindow(db *gorm.DB, platform, contestID string, hintTime time.Time, allowFetch bool) (start, end time.Time) {
 	platform = strings.TrimSpace(platform)
 	contestID = strings.TrimSpace(contestID)
 	dur := platformDuration(platform)
@@ -263,11 +283,17 @@ func ResolveContestWindow(db *gorm.DB, platform, contestID string, hintTime time
 		}
 	}
 
-	// 2) 牛客：无日历 → 官方实时 start/end（再加缓冲）
+	// 2) 牛客：无日历 → 官方实时 start/end（再加缓冲）；读路径改为排队后台补
 	if NormalizeCalendarPlatform(platform) == spider.NowCoder && contestID != "" {
-		name, url, hintEnd := nowCoderHintsFromLogs(db, contestID, &hintTime)
-		if s, e, okNC := EnsureNowCoderContestCalendar(db, contestID, name, url, hintTime, hintEnd); okNC {
-			return s, e.Add(contestInferEndBuffer)
+		if allowFetch {
+			name, url, hintEnd := nowCoderHintsFromLogs(db, contestID, &hintTime)
+			if s, e, okNC := EnsureNowCoderContestCalendar(db, contestID, name, url, hintTime, hintEnd); okNC {
+				return s, e.Add(contestInferEndBuffer)
+			}
+		} else {
+			scheduleNowCoderCalendarBackfill(db, []model.ContestLog{{
+				Platform: spider.NowCoder, ContestId: contestID, Time: hintTime,
+			}})
 		}
 	}
 
@@ -312,20 +338,24 @@ func nowCoderHintsFromLogs(db *gorm.DB, contestID string, hintStart *time.Time) 
 
 // BatchContestDisplayTimes 批量解析 (platform, contestId) → (start, end) unix。
 // 先一次查出相关日历行，缺的再按默认赛长用 hint 估算。
-// 牛客缺官方窗时限量补日历（history endTime / 比赛页），避免默认 3h 截断 4h 赛。
+//
+// 读路径（比赛列表/榜单）不做任何外网 I/O：牛客缺官方窗的场次只排队后台补
+// （见 scheduleNowCoderCalendarBackfill），本次先用兜底窗展示，补到后自动翻新。
+// 从前这里同步抓比赛页，一页最多 8 次 30s 超时的串行请求，是列表偶发超时的主因。
 func BatchContestDisplayTimes(db *gorm.DB, logs []model.ContestLog) map[string][2]int64 {
 	out := map[string][2]int64{}
 	if len(logs) == 0 {
 		return out
 	}
-	ensureNowCoderCalendarsFromContestLogs(db, logs, 8)
 
 	type key struct{ p, c string }
 	need := map[key]time.Time{}
+	seed := map[key]model.ContestLog{}
 	for _, l := range logs {
 		k := key{p: l.Platform, c: l.ContestId}
 		if _, ok := need[k]; !ok {
 			need[k] = l.Time
+			seed[k] = l
 		}
 	}
 	// 日历批量：按平台别名分组查（atcoder ↔ AtCoder）
@@ -353,6 +383,8 @@ func BatchContestDisplayTimes(db *gorm.DB, logs []model.ContestLog) map[string][
 			}
 		}
 	}
+	// 缺有效日历的牛客场次：本轮统一排队后台补官方赛长
+	var ncBackfill []model.ContestLog
 	for k, hint := range need {
 		mapKey := k.p + "\x00" + k.c
 		if cal, ok := calByExt[k.c]; ok && cal.StartTime > 0 {
@@ -366,11 +398,15 @@ func BatchContestDisplayTimes(db *gorm.DB, logs []model.ContestLog) map[string][
 				continue
 			}
 		}
-		start, end, ok := ResolveContestDisplayWindow(db, k.p, k.c, hint)
+		if NormalizeCalendarPlatform(k.p) == spider.NowCoder && strings.TrimSpace(k.c) != "" {
+			ncBackfill = append(ncBackfill, seed[k])
+		}
+		start, end, ok := ResolveContestDisplayWindowCached(db, k.p, k.c, hint)
 		if ok {
 			out[mapKey] = [2]int64{start.Unix(), end.Unix()}
 		}
 	}
+	scheduleNowCoderCalendarBackfill(db, ncBackfill)
 	return out
 }
 
@@ -892,7 +928,8 @@ func ListContestPracticeCells(db *gorm.DB, platform, contestID string, userIDs [
 	if db == nil || strings.TrimSpace(platform) == "" || strings.TrimSpace(contestID) == "" {
 		return nil, nil
 	}
-	start, end := ResolveContestWindow(db, platform, contestID, hintTime)
+	// 站内榜读路径：窗口解析不得同步抓牛客比赛页（缺窗时后台补）
+	start, end := ResolveContestWindowCached(db, platform, contestID, hintTime)
 	if end.IsZero() {
 		return nil, nil
 	}
@@ -1222,8 +1259,8 @@ func resolveCellSubmitWindow(db *gorm.DB, platform, contestID string, hintTime t
 		return windowFromHint(platform, hintTime, true)
 	}
 
-	// 5) 兜底
-	return ResolveContestWindow(db, platform, contestID, hintTime)
+	// 5) 兜底（格子弹窗是读路径，不打 OJ）
+	return ResolveContestWindowCached(db, platform, contestID, hintTime)
 }
 
 // deriveStartFromRelativeCells 多样本 FirstACAt−RelativeSec 取最早；样本不足或与 minAC 矛盾则失败。
@@ -1357,7 +1394,7 @@ func ListContestCellSubmits(
 	// 否则 22:00 结束后 22:01 会被误标成「赛时」。
 	start, endBuffered := resolveCellSubmitWindow(db, platform, contestID, hintTime)
 	endOfficial := time.Time{}
-	if ds, de, ok := ResolveContestDisplayWindow(db, platform, contestID, hintTime); ok {
+	if ds, de, ok := ResolveContestDisplayWindowCached(db, platform, contestID, hintTime); ok {
 		if start.IsZero() {
 			start = ds
 		}

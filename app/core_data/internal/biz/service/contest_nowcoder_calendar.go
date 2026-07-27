@@ -37,6 +37,10 @@ func UpsertNowCoderContestCalendar(db *gorm.DB, contestID, name, url string, sta
 		EndTime:      endSec,
 		Source:       model.CalSourceNowCoder,
 	}})
+	if err == nil {
+		// 展示窗 memo 里可能还是兜底值，写入真实赛长后立刻作废
+		ForgetContestDisplayWindow(spider.NowCoder, contestID)
+	}
 	return err
 }
 

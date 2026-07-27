@@ -30,6 +30,9 @@ import (
 	"gorm.io/gorm"
 )
 
+// contestListCacheMaxOffset 「全部比赛」列表短缓存覆盖的最大 offset（再深就直接查库）
+const contestListCacheMaxOffset = 500
+
 type ContestLogService struct {
 	contest_log.UnimplementedContestServer
 	sbDal *dal.SpiderDal
@@ -76,9 +79,10 @@ func (c ContestLogService) GetContestList(ctx context.Context, req *contest_log.
 		TimeTo:    req.TimeTo,
 		MemberIDs: memberIDs,
 	}
-	// 有关键字/时间筛选时跳过短缓存，避免 key 爆炸
+	// 有关键字/时间筛选时跳过短缓存，避免 key 爆炸；翻页前几屏也缓存（key 含 offset，数量可控）
 	useCache := req.UserId == -1 && c.rdb != nil &&
-		req.Offset == 0 && req.Limit > 0 && req.Limit <= 50 &&
+		req.Offset >= 0 && req.Offset <= contestListCacheMaxOffset &&
+		req.Limit > 0 && req.Limit <= 50 &&
 		strings.TrimSpace(req.Keyword) == "" && req.TimeFrom == 0 && req.TimeTo == 0
 
 	// 组织首页短缓存（90s + global ver）
@@ -218,7 +222,8 @@ func (c ContestLogService) contestLogsToProto(ctx context.Context, logs []model.
 	if len(logs) == 0 {
 		return items
 	}
-	times := bizservice.BatchContestDisplayTimes(c.db, logs)
+	// 绑定请求 ctx：客户端断开/网关超时能及时取消这里的库查询
+	times := bizservice.BatchContestDisplayTimes(c.db.WithContext(ctx), logs)
 	for _, v := range logs {
 		p := contestLogToProto(v)
 		key := v.Platform + "\x00" + v.ContestId
@@ -595,7 +600,8 @@ func contestMapWithTimes(db *gorm.DB, cl model.ContestLog) map[string]interface{
 			return m
 		}
 	}
-	start, end, ok := bizservice.ResolveContestDisplayWindow(db, cl.Platform, cl.ContestId, cl.Time)
+	// 读路径用 Cached 变体：只查库 + 进程内 memo，缺日历的牛客场次异步补，绝不同步打 OJ
+	start, end, ok := bizservice.ResolveContestDisplayWindowCached(db, cl.Platform, cl.ContestId, cl.Time)
 	if ok {
 		m["startTime"] = start.Unix()
 		m["endTime"] = end.Unix()
