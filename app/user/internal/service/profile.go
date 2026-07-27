@@ -848,6 +848,7 @@ func (p *ProfileService) SetDisabled(ctx context.Context, req *profile.SetDisabl
 }
 
 // GetUserIdsByOrg 组织成员 ID（数据隔离）
+// 可选 groupId / squadId 缩小范围；若调用方是受限 staff，再与其管理范围求交。
 func (p *ProfileService) GetUserIdsByOrg(ctx context.Context, req *profile.GetUserIdsByOrgReq) (*profile.GetUserIdsByOrgRes, error) {
 	orgID := uint(req.OrgId)
 	if orgID == 0 {
@@ -865,11 +866,71 @@ func (p *ProfileService) GetUserIdsByOrg(ctx context.Context, req *profile.GetUs
 	if orgID == 0 {
 		return &profile.GetUserIdsByOrgRes{UserIds: []int64{}, OrgId: 0}, nil
 	}
-	ids, err := p.profileDal.GetUserIdsByOrgCached(ctx, orgID)
+
+	var ids []int64
+	var err error
+	squadID := req.GetSquadId()
+	groupID := req.GetGroupId()
+	switch {
+	case squadID > 0:
+		ids, err = p.profileDal.GetUserIdsBySquad(ctx, squadID)
+	case groupID > 0:
+		ids, err = p.profileDal.GetUserIdsByOrgGroup(ctx, orgID, groupID)
+	default:
+		ids, err = p.profileDal.GetUserIdsByOrgCached(ctx, orgID)
+	}
 	if err != nil {
 		return nil, errors.InternalServer("内部错误", err.Error())
 	}
+
+	// staff 范围限制（站管 / 组织管理员不受限）
+	if pd := auth.GetCurrentUser(ctx); pd != nil && !pd.IsSiteAdmin {
+		ids = p.intersectStaffScope(ctx, orgID, pd.UserID, ids)
+	}
+	if ids == nil {
+		ids = []int64{}
+	}
 	return &profile.GetUserIdsByOrgRes{UserIds: ids, OrgId: int64(orgID)}, nil
+}
+
+// intersectStaffScope 将候选成员与 staff 的管理范围求交。
+// 无 grant = 全组织（兼容旧任命）；有 grant 则只能看到授权组/分队内成员。
+func (p *ProfileService) intersectStaffScope(ctx context.Context, orgID, staffUID uint, candidates []int64) []int64 {
+	if staffUID == 0 || orgID == 0 {
+		return candidates
+	}
+	// org_admin 全组织
+	var role string
+	_ = p.profileDal.DB().WithContext(ctx).Model(&model.OrgMember{}).
+		Select("role").Where("org_id = ? AND user_id = ?", orgID, staffUID).
+		Scan(&role).Error
+	if role == model.OrgRoleOrgAdmin {
+		return candidates
+	}
+	grants, err := p.profileDal.ListScopeGrants(ctx, orgID, staffUID)
+	if err != nil || len(grants) == 0 {
+		return candidates
+	}
+	allowed := map[int64]struct{}{}
+	for _, g := range grants {
+		var part []int64
+		switch g.ScopeType {
+		case model.ScopeTypeSquad:
+			part, _ = p.profileDal.GetUserIdsBySquad(ctx, int64(g.ScopeID))
+		case model.ScopeTypeGroup:
+			part, _ = p.profileDal.GetUserIdsByOrgGroup(ctx, orgID, int64(g.ScopeID))
+		}
+		for _, id := range part {
+			allowed[id] = struct{}{}
+		}
+	}
+	out := make([]int64, 0, len(candidates))
+	for _, id := range candidates {
+		if _, ok := allowed[id]; ok {
+			out = append(out, id)
+		}
+	}
+	return out
 }
 
 // GetStaffOrgIds 用户作为 coach/captain/org_admin 且组织开启周报的组织列表

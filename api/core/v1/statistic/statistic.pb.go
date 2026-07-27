@@ -23,11 +23,14 @@ const (
 )
 
 type HeatmapReq struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	UserId        int64                  `protobuf:"varint,1,opt,name=userId,proto3" json:"userId,omitempty"`
-	StartDate     string                 `protobuf:"bytes,2,opt,name=startDate,proto3" json:"startDate,omitempty"`
-	EndDate       string                 `protobuf:"bytes,3,opt,name=endDate,proto3" json:"endDate,omitempty"`
-	IsAc          bool                   `protobuf:"varint,4,opt,name=isAc,proto3" json:"isAc,omitempty"`
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	UserId    int64                  `protobuf:"varint,1,opt,name=userId,proto3" json:"userId,omitempty"`
+	StartDate string                 `protobuf:"bytes,2,opt,name=startDate,proto3" json:"startDate,omitempty"`
+	EndDate   string                 `protobuf:"bytes,3,opt,name=endDate,proto3" json:"endDate,omitempty"`
+	IsAc      bool                   `protobuf:"varint,4,opt,name=isAc,proto3" json:"isAc,omitempty"`
+	// 组织聚合时可选：缩小到分组 / 分队（个人 userId>0 时忽略）
+	GroupId       int64 `protobuf:"varint,5,opt,name=groupId,proto3" json:"groupId,omitempty"`
+	SquadId       int64 `protobuf:"varint,6,opt,name=squadId,proto3" json:"squadId,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -90,6 +93,20 @@ func (x *HeatmapReq) GetIsAc() bool {
 	return false
 }
 
+func (x *HeatmapReq) GetGroupId() int64 {
+	if x != nil {
+		return x.GroupId
+	}
+	return 0
+}
+
+func (x *HeatmapReq) GetSquadId() int64 {
+	if x != nil {
+		return x.SquadId
+	}
+	return 0
+}
+
 type HeatmapResp struct {
 	state         protoimpl.MessageState     `protogen:"open.v1"`
 	Code          int64                      `protobuf:"varint,1,opt,name=code,proto3" json:"code,omitempty"`
@@ -145,6 +162,8 @@ func (x *HeatmapResp) GetData() []*HeatmapResp_HeatmapItem {
 type PeriodCountReq struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	UserId        int64                  `protobuf:"varint,1,opt,name=userId,proto3" json:"userId,omitempty"`
+	GroupId       int64                  `protobuf:"varint,2,opt,name=groupId,proto3" json:"groupId,omitempty"`
+	SquadId       int64                  `protobuf:"varint,3,opt,name=squadId,proto3" json:"squadId,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -182,6 +201,20 @@ func (*PeriodCountReq) Descriptor() ([]byte, []int) {
 func (x *PeriodCountReq) GetUserId() int64 {
 	if x != nil {
 		return x.UserId
+	}
+	return 0
+}
+
+func (x *PeriodCountReq) GetGroupId() int64 {
+	if x != nil {
+		return x.GroupId
+	}
+	return 0
+}
+
+func (x *PeriodCountReq) GetSquadId() int64 {
+	if x != nil {
+		return x.SquadId
 	}
 	return 0
 }
@@ -512,8 +545,10 @@ type RankReq struct {
 	// 分页，默认 page=1 pageSize=10
 	Page     int64 `protobuf:"varint,4,opt,name=page,proto3" json:"page,omitempty"`
 	PageSize int64 `protobuf:"varint,5,opt,name=pageSize,proto3" json:"pageSize,omitempty"`
-	// 分组筛选，-1 或不传表示全部
-	GroupId       int64 `protobuf:"varint,6,opt,name=groupId,proto3" json:"groupId,omitempty"`
+	// 分组筛选，0 或不传表示全部（走成员集合过滤）
+	GroupId int64 `protobuf:"varint,6,opt,name=groupId,proto3" json:"groupId,omitempty"`
+	// 分队筛选；优先于 groupId
+	SquadId       int64 `protobuf:"varint,7,opt,name=squadId,proto3" json:"squadId,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -586,6 +621,13 @@ func (x *RankReq) GetPageSize() int64 {
 func (x *RankReq) GetGroupId() int64 {
 	if x != nil {
 		return x.GroupId
+	}
+	return 0
+}
+
+func (x *RankReq) GetSquadId() int64 {
+	if x != nil {
+		return x.SquadId
 	}
 	return 0
 }
@@ -774,21 +816,25 @@ var File_core_v1_statistic_statistic_proto protoreflect.FileDescriptor
 
 const file_core_v1_statistic_statistic_proto_rawDesc = "" +
 	"\n" +
-	"!core/v1/statistic/statistic.proto\x12\x15api.core.v1.statistic\x1a\x1cgoogle/api/annotations.proto\"p\n" +
+	"!core/v1/statistic/statistic.proto\x12\x15api.core.v1.statistic\x1a\x1cgoogle/api/annotations.proto\"\xa4\x01\n" +
 	"\n" +
 	"HeatmapReq\x12\x16\n" +
 	"\x06userId\x18\x01 \x01(\x03R\x06userId\x12\x1c\n" +
 	"\tstartDate\x18\x02 \x01(\tR\tstartDate\x12\x18\n" +
 	"\aendDate\x18\x03 \x01(\tR\aendDate\x12\x12\n" +
-	"\x04isAc\x18\x04 \x01(\bR\x04isAc\"\x9e\x01\n" +
+	"\x04isAc\x18\x04 \x01(\bR\x04isAc\x12\x18\n" +
+	"\agroupId\x18\x05 \x01(\x03R\agroupId\x12\x18\n" +
+	"\asquadId\x18\x06 \x01(\x03R\asquadId\"\x9e\x01\n" +
 	"\vHeatmapResp\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\x03R\x04code\x12B\n" +
 	"\x04data\x18\x02 \x03(\v2..api.core.v1.statistic.HeatmapResp.HeatmapItemR\x04data\x1a7\n" +
 	"\vHeatmapItem\x12\x12\n" +
 	"\x04date\x18\x01 \x01(\tR\x04date\x12\x14\n" +
-	"\x05count\x18\x02 \x01(\x03R\x05count\"(\n" +
+	"\x05count\x18\x02 \x01(\x03R\x05count\"\\\n" +
 	"\x0ePeriodCountReq\x12\x16\n" +
-	"\x06userId\x18\x01 \x01(\x03R\x06userId\"\\\n" +
+	"\x06userId\x18\x01 \x01(\x03R\x06userId\x12\x18\n" +
+	"\agroupId\x18\x02 \x01(\x03R\agroupId\x12\x18\n" +
+	"\asquadId\x18\x03 \x01(\x03R\asquadId\"\\\n" +
 	"\x0fPeriodCountResp\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\x03R\x04code\x125\n" +
 	"\x04data\x18\x02 \x01(\v2!.api.core.v1.statistic.PeriodDataR\x04data\"x\n" +
@@ -814,14 +860,15 @@ const file_core_v1_statistic_statistic_proto_rawDesc = "" +
 	"\bthisYear\x18\x06 \x01(\x03R\bthisYear\x12\x1a\n" +
 	"\blastYear\x18\a \x01(\x03R\blastYear\x12\x14\n" +
 	"\x05total\x18\b \x01(\x03R\x05total\x12\x1a\n" +
-	"\btotalRaw\x18\t \x01(\x03R\btotalRaw\"\xa9\x01\n" +
+	"\btotalRaw\x18\t \x01(\x03R\btotalRaw\"\xc3\x01\n" +
 	"\aRankReq\x12\x1c\n" +
 	"\tstartDate\x18\x01 \x01(\tR\tstartDate\x12\x18\n" +
 	"\aendDate\x18\x02 \x01(\tR\aendDate\x12\x1c\n" +
 	"\tscoreType\x18\x03 \x01(\tR\tscoreType\x12\x12\n" +
 	"\x04page\x18\x04 \x01(\x03R\x04page\x12\x1a\n" +
 	"\bpageSize\x18\x05 \x01(\x03R\bpageSize\x12\x18\n" +
-	"\agroupId\x18\x06 \x01(\x03R\agroupId\"`\n" +
+	"\agroupId\x18\x06 \x01(\x03R\agroupId\x12\x18\n" +
+	"\asquadId\x18\a \x01(\x03R\asquadId\"`\n" +
 	"\bRankItem\x12\x12\n" +
 	"\x04rank\x18\x01 \x01(\x03R\x04rank\x12\x16\n" +
 	"\x06userId\x18\x02 \x01(\x03R\x06userId\x12\x12\n" +

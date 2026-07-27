@@ -145,6 +145,7 @@ func NewHTTPServer(
 	site.RegisterSiteHTTPServer(srv, siteService)
 	service.RegisterUploadRoutes(srv)
 	service.RegisterOrgRoutes(srv, orgService)
+	service.RegisterSquadRoutes(srv, orgService)
 	service.RegisterRbacRoutes(srv, rbacService)
 	service.RegisterPasteRoutes(srv, pasteService)
 	service.RegisterSocialRoutes(srv, socialService)

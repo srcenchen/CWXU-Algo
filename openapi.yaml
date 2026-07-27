@@ -1344,6 +1344,15 @@ paths:
                   in: query
                   schema:
                     type: boolean
+                - name: groupId
+                  in: query
+                  description: 组织聚合时可选：缩小到分组 / 分队（个人 userId>0 时忽略）
+                  schema:
+                    type: string
+                - name: squadId
+                  in: query
+                  schema:
+                    type: string
             responses:
                 "200":
                     description: OK
@@ -1358,6 +1367,14 @@ paths:
             operationId: Statistic_PeriodCount
             parameters:
                 - name: userId
+                  in: query
+                  schema:
+                    type: string
+                - name: groupId
+                  in: query
+                  schema:
+                    type: string
+                - name: squadId
                   in: query
                   schema:
                     type: string
@@ -1401,7 +1418,12 @@ paths:
                     type: string
                 - name: groupId
                   in: query
-                  description: 分组筛选，-1 或不传表示全部
+                  description: 分组筛选，0 或不传表示全部（走成员集合过滤）
+                  schema:
+                    type: string
+                - name: squadId
+                  in: query
+                  description: 分队筛选；优先于 groupId
                   schema:
                     type: string
             responses:
@@ -1844,6 +1866,16 @@ paths:
             parameters:
                 - name: orgId
                   in: query
+                  schema:
+                    type: string
+                - name: groupId
+                  in: query
+                  description: 可选：缩小到分组（org_members.group_id）
+                  schema:
+                    type: string
+                - name: squadId
+                  in: query
+                  description: 可选：缩小到分队（squad_members）；优先于 groupId
                   schema:
                     type: string
             responses:

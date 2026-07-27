@@ -1562,8 +1562,12 @@ func (x *GetUserIdsByGroupRes) GetUserIds() []int64 {
 }
 
 type GetUserIdsByOrgReq struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	OrgId         int64                  `protobuf:"varint,1,opt,name=orgId,proto3" json:"orgId,omitempty"` // 0 = 调用方 JWT 当前组织
+	state protoimpl.MessageState `protogen:"open.v1"`
+	OrgId int64                  `protobuf:"varint,1,opt,name=orgId,proto3" json:"orgId,omitempty"` // 0 = 调用方 JWT 当前组织
+	// 可选：缩小到分组（org_members.group_id）
+	GroupId int64 `protobuf:"varint,2,opt,name=groupId,proto3" json:"groupId,omitempty"`
+	// 可选：缩小到分队（squad_members）；优先于 groupId
+	SquadId       int64 `protobuf:"varint,3,opt,name=squadId,proto3" json:"squadId,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1601,6 +1605,20 @@ func (*GetUserIdsByOrgReq) Descriptor() ([]byte, []int) {
 func (x *GetUserIdsByOrgReq) GetOrgId() int64 {
 	if x != nil {
 		return x.OrgId
+	}
+	return 0
+}
+
+func (x *GetUserIdsByOrgReq) GetGroupId() int64 {
+	if x != nil {
+		return x.GroupId
+	}
+	return 0
+}
+
+func (x *GetUserIdsByOrgReq) GetSquadId() int64 {
+	if x != nil {
+		return x.SquadId
 	}
 	return 0
 }
@@ -3282,9 +3300,11 @@ const file_user_v1_profile_profile_proto_rawDesc = "" +
 	"\x14GetUserIdsByGroupReq\x12\x18\n" +
 	"\agroupId\x18\x01 \x01(\x03R\agroupId\"0\n" +
 	"\x14GetUserIdsByGroupRes\x12\x18\n" +
-	"\auserIds\x18\x01 \x03(\x03R\auserIds\"*\n" +
+	"\auserIds\x18\x01 \x03(\x03R\auserIds\"^\n" +
 	"\x12GetUserIdsByOrgReq\x12\x14\n" +
-	"\x05orgId\x18\x01 \x01(\x03R\x05orgId\"D\n" +
+	"\x05orgId\x18\x01 \x01(\x03R\x05orgId\x12\x18\n" +
+	"\agroupId\x18\x02 \x01(\x03R\agroupId\x12\x18\n" +
+	"\asquadId\x18\x03 \x01(\x03R\asquadId\"D\n" +
 	"\x12GetUserIdsByOrgRes\x12\x18\n" +
 	"\auserIds\x18\x01 \x03(\x03R\auserIds\x12\x14\n" +
 	"\x05orgId\x18\x02 \x01(\x03R\x05orgId\"+\n" +

@@ -22,6 +22,8 @@ type ProfileDal struct {
 	rdb *redis.Client
 }
 
+func (d *ProfileDal) DB() *gorm.DB { return d.db }
+
 func NewProfileDal(data *data.Data) *ProfileDal {
 	return &ProfileDal{db: data.DB, rdb: data.RDB}
 }
@@ -1366,3 +1368,48 @@ func (d *ProfileDal) Delete(ctx context.Context, userId int64) error {
 		})
 	})
 }
+
+// GetUserIdsBySquad 分队成员 userId 列表
+func (d *ProfileDal) GetUserIdsBySquad(ctx context.Context, squadID int64) ([]int64, error) {
+	if squadID <= 0 {
+		return nil, nil
+	}
+	var ids []int64
+	err := d.db.WithContext(ctx).Table("squad_members").
+		Where("squad_id = ?", squadID).
+		Pluck("user_id", &ids).Error
+	return ids, err
+}
+
+// GetUserIdsByOrgGroup 组织内某分组成员
+func (d *ProfileDal) GetUserIdsByOrgGroup(ctx context.Context, orgID uint, groupID int64) ([]int64, error) {
+	if orgID == 0 || groupID <= 0 {
+		return nil, nil
+	}
+	var ids []int64
+	err := d.db.WithContext(ctx).Model(&model.OrgMember{}).
+		Where("org_id = ? AND group_id = ?", orgID, groupID).
+		Pluck("user_id", &ids).Error
+	return ids, err
+}
+
+// ListScopeGrants 用户在组织内的管理范围
+func (d *ProfileDal) ListScopeGrants(ctx context.Context, orgID, userID uint) ([]model.OrgScopeGrant, error) {
+	var rows []model.OrgScopeGrant
+	err := d.db.WithContext(ctx).Where("org_id = ? AND user_id = ?", orgID, userID).Find(&rows).Error
+	return rows, err
+}
+
+// ReplaceScopeGrants 覆盖写入管理范围
+func (d *ProfileDal) ReplaceScopeGrants(ctx context.Context, orgID, userID uint, grants []model.OrgScopeGrant) error {
+	return d.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("org_id = ? AND user_id = ?", orgID, userID).Delete(&model.OrgScopeGrant{}).Error; err != nil {
+			return err
+		}
+		if len(grants) == 0 {
+			return nil
+		}
+		return tx.Create(&grants).Error
+	})
+}
+

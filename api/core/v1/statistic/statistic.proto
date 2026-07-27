@@ -30,6 +30,9 @@ message HeatmapReq {
   string startDate = 2;
   string endDate = 3;
   bool isAc = 4;
+  // 组织聚合时可选：缩小到分组 / 分队（个人 userId>0 时忽略）
+  int64 groupId = 5;
+  int64 squadId = 6;
 }
 
 message HeatmapResp {
@@ -43,6 +46,8 @@ message HeatmapResp {
 
 message PeriodCountReq {
   int64 userId = 1;
+  int64 groupId = 2;
+  int64 squadId = 3;
 }
 
 message PeriodCountResp {
@@ -91,8 +96,10 @@ message RankReq {
   // 分页，默认 page=1 pageSize=10
   int64 page = 4;
   int64 pageSize = 5;
-  // 分组筛选，-1 或不传表示全部
+  // 分组筛选，0 或不传表示全部（走成员集合过滤）
   int64 groupId = 6;
+  // 分队筛选；优先于 groupId
+  int64 squadId = 7;
 }
 
 message RankItem {

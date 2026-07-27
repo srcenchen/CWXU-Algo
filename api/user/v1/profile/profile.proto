@@ -393,6 +393,10 @@ message GetUserIdsByGroupRes {
 
 message GetUserIdsByOrgReq {
   int64 orgId = 1; // 0 = 调用方 JWT 当前组织
+  // 可选：缩小到分组（org_members.group_id）
+  int64 groupId = 2;
+  // 可选：缩小到分队（squad_members）；优先于 groupId
+  int64 squadId = 3;
 }
 
 message GetUserIdsByOrgRes {

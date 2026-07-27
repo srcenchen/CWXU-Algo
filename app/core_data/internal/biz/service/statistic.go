@@ -35,10 +35,15 @@ func NewStatisticUseCase(dal *dal.StatisticDal, rdb *redis.Client, reg *discover
 
 // resolveMembers 当前组织成员；siteWide=true 时返回 nil（全站不限制，公开聚合）
 func (uc *StatisticUseCase) resolveMembers(ctx context.Context, siteWide bool) (memberIDs []int64, orgID uint) {
+	return uc.resolveMembersScoped(ctx, siteWide, 0, 0)
+}
+
+// resolveMembersScoped 支持 groupId / squadId 缩小成员集合
+func (uc *StatisticUseCase) resolveMembersScoped(ctx context.Context, siteWide bool, groupID, squadID int64) (memberIDs []int64, orgID uint) {
 	if siteWide {
 		return nil, 0
 	}
-	ids, resolvedOrgID, _, err := fetchOrgMemberIDs(ctx, uc.reg, 0)
+	ids, resolvedOrgID, err := fetchOrgMemberIDsScoped(ctx, uc.reg, 0, groupID, squadID)
 	if err != nil {
 		log.Warnf("statistic org members: %v", err)
 		return []int64{}, resolvedOrgID
@@ -179,7 +184,7 @@ func (uc *StatisticUseCase) Heatmap(ctx context.Context, req *statistic.HeatmapR
 	if req.UserId == 0 || isSiteWideUserId(req.UserId) {
 		siteWide := isSiteWideUserId(req.UserId)
 		var resolvedOrgID uint
-		memberIDs, resolvedOrgID = uc.resolveMembers(ctx, siteWide)
+		memberIDs, resolvedOrgID = uc.resolveMembersScoped(ctx, siteWide, req.GetGroupId(), req.GetSquadId())
 		queryUserId = 0
 		globalVer := uc.redisVer(ctx, "statistic:heatmap:global:ver")
 		ttl = data2.OrgStatsCacheTTL // 短 TTL，补 global ver 节流下的即时性
@@ -237,12 +242,11 @@ func (uc *StatisticUseCase) Rank(ctx context.Context, req *statistic.RankReq) (*
 	if scoreType == "" {
 		scoreType = "submit"
 	}
-	groupId := req.GroupId
-	if groupId == 0 {
-		groupId = -1
-	}
-
-	memberIDs, orgID := uc.resolveMembers(ctx, false)
+	groupId := req.GetGroupId()
+	squadId := req.GetSquadId()
+	// 成员集合已按 group/squad 过滤；预聚合表无 group 列，DAL 传 -1
+	memberIDs, orgID := uc.resolveMembersScoped(ctx, false, groupId, squadId)
+	groupId = -1
 	// 公共域 / 未登录回落公共域：全站聚合（nil），避免对全体成员做巨型 IN，
 	// 也避免 resolve 失败时空列表导致「无法加载」。私有域仍按成员隔离。
 	if isPublicOrgID(ctx, uc.reg, orgID) {
@@ -328,7 +332,7 @@ func (uc *StatisticUseCase) PeriodCount(ctx context.Context, req *statistic.Peri
 		// -2=全站公开聚合；-1=当前组织时段
 		siteWide := isSiteWideUserId(req.UserId)
 		var resolvedOrgID uint
-		memberIDs, resolvedOrgID = uc.resolveMembers(ctx, siteWide)
+		memberIDs, resolvedOrgID = uc.resolveMembersScoped(ctx, siteWide, req.GetGroupId(), req.GetSquadId())
 		queryUserId = -1
 		globalVer := uc.redisVer(ctx, "statistic:period:global:ver")
 		ttl = data2.OrgStatsCacheTTL

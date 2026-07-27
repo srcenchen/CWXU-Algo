@@ -131,3 +131,38 @@ func fetchDisplayNames(ctx context.Context, reg *registry.Registrar, userIDs []i
 	}
 	return out
 }
+
+
+// fetchOrgMemberIDsScoped 组织成员，可选 groupId / squadId（透传 user 服务）
+// 缓存 key 含 group/squad；无过滤时与 fetchOrgMemberIDs 共用 org 缓存。
+func fetchOrgMemberIDsScoped(ctx context.Context, reg *registry.Registrar, orgID uint, groupID, squadID int64) ([]int64, uint, error) {
+	if groupID <= 0 && squadID <= 0 {
+		ids, resolved, _, err := fetchOrgMemberIDs(ctx, reg, orgID)
+		return ids, resolved, err
+	}
+	if reg == nil {
+		return nil, 0, fmt.Errorf("registry nil")
+	}
+	if orgID == 0 {
+		if pd := auth.GetCurrentUser(ctx); pd != nil && pd.OrgID > 0 {
+			orgID = pd.OrgID
+		}
+	}
+	client, err := userrpc.ProfileClient(reg)
+	if err != nil {
+		return nil, orgID, err
+	}
+	res, err := client.GetUserIdsByOrg(ctx, &profile.GetUserIdsByOrgReq{
+		OrgId:   int64(orgID),
+		GroupId: groupID,
+		SquadId: squadID,
+	})
+	if err != nil {
+		return nil, orgID, err
+	}
+	ids := res.GetUserIds()
+	if ids == nil {
+		ids = []int64{}
+	}
+	return ids, uint(res.GetOrgId()), nil
+}

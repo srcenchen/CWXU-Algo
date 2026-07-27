@@ -1341,7 +1341,8 @@ func (s *OrgService) handleMembers(ctx khttp.Context) error {
 }
 
 func (s *OrgService) handleMemberIds(ctx khttp.Context) error {
-	id64, _ := strconv.ParseUint(ctx.Request().URL.Query().Get("orgId"), 10, 64)
+	q := ctx.Request().URL.Query()
+	id64, _ := strconv.ParseUint(q.Get("orgId"), 10, 64)
 	orgID := uint(id64)
 	pd := auth.GetCurrentUser(ctx)
 	if orgID == 0 && pd != nil {
@@ -1355,13 +1356,23 @@ func (s *OrgService) handleMemberIds(ctx khttp.Context) error {
 		writeJSON(ctx.Response(), 403, map[string]interface{}{"code": 1, "message": "权限不足"})
 		return nil
 	}
+	groupID, _ := strconv.ParseInt(q.Get("groupId"), 10, 64)
+	squadID, _ := strconv.ParseInt(q.Get("squadId"), 10, 64)
 	var ids []int64
-	_ = s.db.Table("org_members AS m").
-		Joins("JOIN users u ON u.id = m.user_id").
-		Where("m.org_id = ?", orgID).
-		Pluck("m.user_id", &ids)
+	switch {
+	case squadID > 0:
+		_ = s.db.Table("squad_members").Where("squad_id = ?", squadID).Pluck("user_id", &ids)
+	case groupID > 0:
+		_ = s.db.Table("org_members").Where("org_id = ? AND group_id = ?", orgID, groupID).Pluck("user_id", &ids)
+	default:
+		_ = s.db.Table("org_members AS m").
+			Joins("JOIN users u ON u.id = m.user_id").
+			Where("m.org_id = ?", orgID).
+			Pluck("m.user_id", &ids)
+	}
 	writeJSON(ctx.Response(), 200, map[string]interface{}{
 		"code": 0, "message": "success", "userIds": ids, "orgId": orgID,
+		"groupId": groupID, "squadId": squadID,
 	})
 	return nil
 }
