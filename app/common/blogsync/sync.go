@@ -8,6 +8,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"cwxu-algo/app/common/blogimg"
 	"cwxu-algo/app/common/blogtext"
 	"gorm.io/gorm"
 )
@@ -151,6 +152,8 @@ func UpsertFromSolutionWithProblem(db *gorm.DB, userID, solutionID, problemID, a
 		}
 		_ = db.Model(a).Updates(updates).Error
 		_ = autoSurfaceOrgs(db, a.ID, userID)
+		// 题解内容变更后 GC 未再引用的又拍云图（与博客保存路径一致）
+		blogimg.ScheduleGCUserImages(db, userID)
 		return a.ID, a.Slug, nil
 	}
 
@@ -197,6 +200,8 @@ func UpsertFromSolutionWithProblem(db *gorm.DB, userID, solutionID, problemID, a
 		return 0, "", err
 	}
 	_ = autoSurfaceOrgs(db, a.ID, userID)
+	// 新建镜像也可能引用已上传图；跑一次 GC 清理历史孤儿
+	blogimg.ScheduleGCUserImages(db, userID)
 	return a.ID, a.Slug, nil
 }
 
@@ -249,24 +254,40 @@ func autoSurfaceOrgs(db *gorm.DB, articleID, userID uint) error {
 }
 
 // DeleteBySolution 删除题解对应的博客文章（及组织同步行；评论/点赞由 FK 或残留可接受，尽量清）。
+// 删除后对作者触发又拍云未引用图 GC。
 func DeleteBySolution(db *gorm.DB, userID, solutionID, articleID uint) {
 	if db == nil {
 		return
 	}
 	var ids []uint
+	ownerIDs := map[uint]struct{}{}
+	if userID > 0 {
+		ownerIDs[userID] = struct{}{}
+	}
 	if articleID > 0 {
 		ids = append(ids, articleID)
+		var owner uint
+		_ = db.Model(&Article{}).Select("user_id").Where("id = ?", articleID).Scan(&owner).Error
+		if owner > 0 {
+			ownerIDs[owner] = struct{}{}
+		}
 	}
 	if solutionID > 0 {
 		var bySrc []Article
-		_ = db.Select("id").Where("source_solution_id = ?", solutionID).Find(&bySrc).Error
+		_ = db.Select("id", "user_id").Where("source_solution_id = ?", solutionID).Find(&bySrc).Error
 		for _, a := range bySrc {
 			ids = append(ids, a.ID)
+			if a.UserID > 0 {
+				ownerIDs[a.UserID] = struct{}{}
+			}
 		}
 		if userID > 0 {
 			var bySlug Article
-			if db.Select("id").Where("user_id = ? AND slug = ?", userID, solutionSlug(solutionID)).First(&bySlug).Error == nil {
+			if db.Select("id", "user_id").Where("user_id = ? AND slug = ?", userID, solutionSlug(solutionID)).First(&bySlug).Error == nil {
 				ids = append(ids, bySlug.ID)
+				if bySlug.UserID > 0 {
+					ownerIDs[bySlug.UserID] = struct{}{}
+				}
 			}
 		}
 	}
@@ -283,6 +304,10 @@ func DeleteBySolution(db *gorm.DB, userID, solutionID, articleID uint) {
 		_ = db.Where("article_id = ?", id).Delete(&articleComment{}).Error
 		_ = db.Where("article_id = ?", id).Delete(&articleLike{}).Error
 		_ = db.Where("id = ?", id).Delete(&Article{}).Error
+	}
+	// 题解删文后清理不再被引用的又拍云对象
+	for oid := range ownerIDs {
+		blogimg.ScheduleGCUserImages(db, oid)
 	}
 }
 

@@ -9,34 +9,15 @@ import (
 	"cwxu-algo/app/common/rbac"
 	"cwxu-algo/app/common/upyun"
 	"cwxu-algo/app/common/utils/auth"
-	secretutil "cwxu-algo/app/common/utils/secret"
 	"cwxu-algo/app/user/internal/data/model"
 
-	"github.com/go-kratos/kratos/v2/log"
 	khttp "github.com/go-kratos/kratos/v2/transport/http"
 	"gorm.io/gorm"
 )
 
 // loadUpyunFromDB builds an UpYun client from site_configs id=1.
 func loadUpyunFromDB(db *gorm.DB) *upyun.Client {
-	if db == nil {
-		return upyun.New(upyun.Config{})
-	}
-	var row model.SiteConfig
-	if err := db.First(&row, 1).Error; err != nil {
-		return upyun.New(upyun.Config{})
-	}
-	pass, err := secretutil.Decrypt(row.UpyunPassword)
-	if err != nil {
-		pass = ""
-	}
-	return upyun.New(upyun.Config{
-		Bucket:   strings.TrimSpace(row.UpyunBucket),
-		Operator: strings.TrimSpace(row.UpyunOperator),
-		Password: pass,
-		Domain:   strings.TrimSpace(row.UpyunDomain),
-		Scheme:   strings.TrimSpace(row.UpyunScheme),
-	})
+	return blogimg.LoadUpyunClient(db)
 }
 
 func (s *BlogService) loadUpyunClient() *upyun.Client {
@@ -55,46 +36,9 @@ func (s *BlogService) userImageUploadEnabled(userID uint) bool {
 }
 
 // gcUserBlogImages deletes UpYun objects registered for user that are no longer
-// referenced by any of their articles (content + cover).
+// referenced by any of their articles (content + cover). Shared with blogsync.
 func (s *BlogService) gcUserBlogImages(userID uint) {
-	if userID == 0 {
-		return
-	}
-	client := s.loadUpyunClient()
-	if !client.Configured() {
-		return
-	}
-	base := client.PublicBaseURL()
-	if base == "" {
-		return
-	}
-
-	var articles []model.BlogArticle
-	_ = s.db.Select("content", "cover_url").Where("user_id = ?", userID).Find(&articles).Error
-	used := map[string]struct{}{}
-	for _, a := range articles {
-		for k := range blogimg.KeysFromContent(a.Content, a.CoverURL, base) {
-			used[k] = struct{}{}
-		}
-	}
-
-	var assets []model.BlogImageAsset
-	_ = s.db.Where("user_id = ?", userID).Find(&assets).Error
-	var registered []string
-	keyToID := map[string]uint{}
-	for _, a := range assets {
-		k := "/" + strings.TrimPrefix(a.ObjectKey, "/")
-		registered = append(registered, k)
-		keyToID[k] = a.ID
-	}
-	for _, key := range blogimg.OrphanKeys(registered, used) {
-		if err := client.Delete(key); err != nil {
-			log.Warnf("blog image gc delete %s: %v", key, err)
-		}
-		if id, ok := keyToID[key]; ok {
-			_ = s.db.Delete(&model.BlogImageAsset{}, id).Error
-		}
-	}
+	blogimg.GCUserImagesFromSite(s.db, userID)
 }
 
 // registerBlogImageAsset records an uploaded object for later GC.
