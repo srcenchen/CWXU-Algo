@@ -200,7 +200,7 @@ func (uc *ProblemUseCase) resolveOneWithCache(sl *model.SubmitLog, highPriority 
 			_ = uc.data.DB.Model(&existing).Update("last_submitted_at", sl.Time).Error
 			existing.LastSubmittedAt = &sl.Time
 		}
-		if existing.Title == "" && parsed.Title != "" {
+		if shouldReplaceProblemTitle(existing.Platform, existing.Title, parsed.Title) {
 			_ = uc.data.DB.Model(&existing).Update("title", parsed.Title).Error
 			existing.Title = parsed.Title
 		}
@@ -561,7 +561,15 @@ func (uc *ProblemUseCase) ProcessFetch(ctx context.Context, ev event.ProblemFetc
 
 	title := p.Title
 	if fetched.Title != "" {
-		title = fetched.Title
+		// 拒绝用站点品牌名（QOJ.ac）覆盖已有/更好标题
+		if !isBadFetchedTitle(p.Platform, fetched.Title) {
+			title = fetched.Title
+		} else if isBadFetchedTitle(p.Platform, title) {
+			// 旧标题也是品牌垃圾时，至少落到题号
+			if p.ExternalID != "" {
+				title = "#" + p.ExternalID
+			}
+		}
 	}
 	// 已有标签/AI 解法：只补题面，不重跑分析、不碰 tags/solutions_meta
 	hasAnalysis := len(nonEmptyTags(p.Tags)) > 0 || len(p.SolutionsMeta) > 0
@@ -944,7 +952,7 @@ func (uc *ProblemUseCase) UpsertProblemFromParsedForUser(parsed *ParsedProblem, 
 	} else if err != nil {
 		return nil, err
 	} else {
-		if existing.Title == "" && parsed.Title != "" {
+		if shouldReplaceProblemTitle(existing.Platform, existing.Title, parsed.Title) {
 			_ = uc.data.DB.Model(&existing).Update("title", parsed.Title).Error
 			existing.Title = parsed.Title
 		}
@@ -1105,6 +1113,18 @@ func (uc *ProblemUseCase) ProcessAnalyze(ctx context.Context, ev event.ProblemAn
 	// AI 顺手优化排版后的题面
 	if strings.TrimSpace(result.ContentMD) != "" {
 		updates["content_md"] = result.ContentMD
+	}
+	// QOJ 等：爬取误把站点品牌当标题时，用 AI 整理后的一级标题回填
+	if isBadFetchedTitle(p.Platform, p.Title) {
+		md := result.ContentMD
+		if strings.TrimSpace(md) == "" {
+			md = p.ContentMD
+		}
+		if t := titleFromMarkdownH1(md); t != "" {
+			updates["title"] = t
+		} else if p.ExternalID != "" {
+			updates["title"] = "#" + p.ExternalID
+		}
 	}
 	if err := uc.data.DB.Model(&p).Updates(updates).Error; err != nil {
 		return err
@@ -1462,6 +1482,114 @@ func (uc *ProblemUseCase) ClearNowCoderContentAndRefetch(requeue bool) (cleared,
 	}
 	log.Infof("ClearNowCoderContent: enqueued fetch %d / %d", enqueued, len(list))
 	return cleared, enqueued, nil
+}
+
+// isBadFetchedTitle 爬取/解析得到的「站点品牌」伪标题（QOJ 首 h1 常为 QOJ.ac）
+func isBadFetchedTitle(platform, title string) bool {
+	if strings.EqualFold(strings.TrimSpace(platform), spider.QOJ) {
+		return problem_fetch.IsQOJBrandTitle(title)
+	}
+	return false
+}
+
+// shouldReplaceProblemTitle 空标题或品牌垃圾标题可被更好的新标题替换
+func shouldReplaceProblemTitle(platform, oldTitle, newTitle string) bool {
+	newTitle = strings.TrimSpace(newTitle)
+	if newTitle == "" || isBadFetchedTitle(platform, newTitle) {
+		return false
+	}
+	oldTitle = strings.TrimSpace(oldTitle)
+	if oldTitle == "" || isBadFetchedTitle(platform, oldTitle) {
+		return true
+	}
+	return false
+}
+
+// titleFromMarkdownH1 取 Markdown 首个一级标题（AI 整理题面常用「# 题名」）
+func titleFromMarkdownH1(md string) string {
+	for _, line := range strings.Split(md, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if strings.HasPrefix(line, "##") {
+			continue
+		}
+		if strings.HasPrefix(line, "# ") || strings.HasPrefix(line, "#\t") {
+			t := strings.TrimSpace(strings.TrimPrefix(line, "#"))
+			if t != "" && !problem_fetch.IsQOJBrandTitle(t) {
+				return t
+			}
+		}
+		// 首行非标题则不再往下找（避免误取正文中的 #）
+		if !strings.HasPrefix(line, "#") {
+			break
+		}
+	}
+	return ""
+}
+
+// RepairQOJBrandTitles 全量修复 QOJ 题目标题被识别为「QOJ.ac」的脏数据。
+// 策略：优先从已有 content_md 一级标题回填；不足时可选 refetch 拉官方题头；再退回 #题号。
+// refetch=true 时对仍无好标题的题访问 qoj.ac（有间隔，避免打爆）。
+func (uc *ProblemUseCase) RepairQOJBrandTitles(limit int, refetch bool) (scanned, fixed, failed, skipped int64, err error) {
+	if uc == nil || uc.data == nil || uc.data.DB == nil {
+		return 0, 0, 0, 0, fmt.Errorf("usecase not ready")
+	}
+	q := uc.data.DB.Model(&model.Problem{}).
+		Where("platform = ?", spider.QOJ).
+		Where(`title IS NULL OR BTRIM(title) = '' OR LOWER(BTRIM(title)) IN ('qoj.ac','qoj','qoj ac')`)
+	if limit > 0 {
+		q = q.Limit(limit)
+	}
+	var list []model.Problem
+	if err = q.Find(&list).Error; err != nil {
+		return
+	}
+	log.Infof("RepairQOJBrandTitles: candidates=%d limit=%d refetch=%v", len(list), limit, refetch)
+	for i := range list {
+		p := list[i]
+		scanned++
+		newTitle := titleFromMarkdownH1(p.ContentMD)
+		if newTitle == "" && refetch {
+			fetched, ferr := problem_fetch.Fetch(spider.QOJ, p.ExternalID, p.URL)
+			if ferr != nil {
+				log.Warnf("RepairQOJBrandTitles fetch id=%d ext=%s: %v", p.ID, p.ExternalID, ferr)
+				failed++
+				time.Sleep(400 * time.Millisecond)
+				continue
+			}
+			if fetched != nil {
+				t := strings.TrimSpace(fetched.Title)
+				if t != "" && !problem_fetch.IsQOJBrandTitle(t) {
+					newTitle = t
+				}
+			}
+			time.Sleep(400 * time.Millisecond)
+		}
+		if newTitle == "" && strings.TrimSpace(p.ExternalID) != "" {
+			newTitle = "#" + strings.TrimSpace(p.ExternalID)
+		}
+		if newTitle == "" || problem_fetch.IsQOJBrandTitle(newTitle) || newTitle == strings.TrimSpace(p.Title) {
+			skipped++
+			continue
+		}
+		if e := uc.data.DB.Model(&model.Problem{}).Where("id = ?", p.ID).Update("title", newTitle).Error; e != nil {
+			log.Warnf("RepairQOJBrandTitles update id=%d: %v", p.ID, e)
+			failed++
+			continue
+		}
+		uc.BumpProblemDetailVer(p.ID)
+		fixed++
+		if fixed%100 == 0 {
+			log.Infof("RepairQOJBrandTitles progress fixed=%d/%d", fixed, len(list))
+		}
+	}
+	if fixed > 0 {
+		uc.BumpProblemListVer()
+	}
+	log.Infof("RepairQOJBrandTitles done scanned=%d fixed=%d failed=%d skipped=%d", scanned, fixed, failed, skipped)
+	return scanned, fixed, failed, skipped, nil
 }
 
 // ClearRecentFailed 清空近期失败：近 6 月有提交且状态为 FAILED 的题 → FAILED_PERM，

@@ -209,6 +209,25 @@ func stripTags(s string) string {
 	return strings.TrimSpace(re.ReplaceAllString(s, ""))
 }
 
+// qojProblemLinkRe 提交表「题目」列：<a href="/problem/19004">#19004. Title</a>
+var qojProblemLinkRe = regexp.MustCompile(`(?is)<a[^>]+href=["'][^"']*/problem/(\d+)["'][^>]*>(.*?)</a>`)
+
+// qojProblemFromCell 从提交列表题目单元格提取「#id. 题名」文本。
+func qojProblemFromCell(cellHTML string) string {
+	if m := qojProblemLinkRe.FindStringSubmatch(cellHTML); len(m) >= 3 {
+		text := strings.Join(strings.Fields(stripTags(m[2])), " ")
+		if text != "" {
+			// 链接文本只有题号时补全 #id
+			if text == m[1] || text == "#"+m[1] {
+				return "#" + m[1]
+			}
+			return text
+		}
+		return "#" + m[1]
+	}
+	return strings.Join(strings.Fields(stripTags(cellHTML)), " ")
+}
+
 func (q *NewQOJ) FetchSubmitLog(ctx context.Context, userId int64, username string, needAll bool) ([]model.SubmitLog, error) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -269,7 +288,8 @@ func (q *NewQOJ) FetchSubmitLog(ctx context.Context, userId int64, username stri
 			}
 
 			submitID := strings.TrimLeft(stripTags(cells[0][1]), "#")
-			problem := stripTags(cells[1][1])
+			// 题名优先取 /problem/{id} 链接文本（「#19004. Title」），避免单元格杂讯
+			problem := qojProblemFromCell(cells[1][1])
 			rawStatus := stripTags(cells[3][1])
 			lang := stripTags(cells[6][1])
 			timeStr := stripTags(cells[8][1])

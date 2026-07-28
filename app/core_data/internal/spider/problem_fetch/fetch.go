@@ -1430,16 +1430,128 @@ func fetchQOJ(externalID, problemURL string) (*FetchedContent, error) {
 	if err != nil {
 		return nil, err
 	}
-	title := strings.TrimSpace(doc.Find("h1").First().Text())
-	if title == "" {
-		title = strings.TrimSpace(doc.Find("title").Text())
+	title := extractQOJTitle(doc, externalID)
+	// 题面优先取 UOJ 系正文区，避免导航/页脚噪声
+	contentSel := doc.Find(".problem-content, #problem-content, .uoj-content article, article").First()
+	if contentSel.Length() == 0 {
+		contentSel = doc.Find(".uoj-content").First()
 	}
-	doc.Find("script,style,nav,footer,header").Remove()
-	text := collapseBlankLines(strings.TrimSpace(doc.Find("body").Text()))
+	var text string
+	if contentSel.Length() > 0 {
+		contentSel.Find("script,style").Remove()
+		text = collapseBlankLines(strings.TrimSpace(contentSel.Text()))
+	}
+	if text == "" {
+		doc.Find("script,style,nav,footer,header").Remove()
+		text = collapseBlankLines(strings.TrimSpace(doc.Find("body").Text()))
+	}
 	if text == "" {
 		return nil, fmt.Errorf("empty page")
 	}
+	if title == "" {
+		title = externalID
+	}
 	return &FetchedContent{Title: title, ContentMD: truncate(text, 15000)}, nil
+}
+
+// qojBrandTitles 站点品牌/导航 h1，不能当作题目标题。
+// QOJ 页结构：首个 h1 常为品牌「QOJ.ac」，真正题名在 h1.page-header（如「# 19004. Foo」）。
+var qojBrandTitleSet = map[string]struct{}{
+	"qoj.ac": {},
+	"qoj":    {},
+	"qoj ac": {},
+}
+
+// IsQOJBrandTitle 是否站点品牌名（误当标题的脏数据）
+func IsQOJBrandTitle(title string) bool {
+	t := strings.ToLower(normalizeSpace(title))
+	t = strings.Trim(t, ".-–—_|")
+	if t == "" {
+		return true
+	}
+	_, ok := qojBrandTitleSet[t]
+	return ok
+}
+
+var (
+	reQOJTitlePage = regexp.MustCompile(`(?i)^#?\s*(\d+)\s*[\.．]?\s*(.+)$`)
+	reQOJHTMLTitle = regexp.MustCompile(`(?i)^(.+?)\s*[-–—|]\s*Problem\b`)
+)
+
+// extractQOJTitle 从 QOJ 题面 HTML 提取真实标题（跳过品牌 h1）。
+func extractQOJTitle(doc *goquery.Document, externalID string) string {
+	if doc == nil {
+		return ""
+	}
+	// 1) 题头：h1.page-header / .page-header
+	for _, sel := range []string{"h1.page-header", ".page-header", "h1.page-header.text-center"} {
+		if t := normalizeSpace(doc.Find(sel).First().Text()); t != "" && !IsQOJBrandTitle(t) {
+			return normalizeQOJTitle(t, externalID)
+		}
+	}
+	// 2) 任一非品牌 h1：优先匹配「#N. 题名」
+	var fallback string
+	doc.Find("h1").EachWithBreak(func(_ int, s *goquery.Selection) bool {
+		t := normalizeSpace(s.Text())
+		if t == "" || IsQOJBrandTitle(t) {
+			return true
+		}
+		if reQOJTitlePage.MatchString(t) || strings.Contains(t, "#") {
+			fallback = t
+			return false
+		}
+		if fallback == "" {
+			fallback = t
+		}
+		return true
+	})
+	if fallback != "" {
+		return normalizeQOJTitle(fallback, externalID)
+	}
+	// 3) <title>：「I/O Test - Problem - QOJ.ac」
+	raw := normalizeSpace(doc.Find("title").First().Text())
+	if raw != "" {
+		if m := reQOJHTMLTitle.FindStringSubmatch(raw); m != nil {
+			raw = strings.TrimSpace(m[1])
+		} else {
+			for _, sep := range []string{" - QOJ.ac", " – QOJ.ac", " | QOJ.ac", " - QOJ", " | QOJ"} {
+				if i := strings.LastIndex(strings.ToLower(raw), strings.ToLower(sep)); i > 0 {
+					raw = strings.TrimSpace(raw[:i])
+					break
+				}
+			}
+		}
+		if raw != "" && !IsQOJBrandTitle(raw) && !strings.EqualFold(raw, "Just a moment...") {
+			return normalizeQOJTitle(raw, externalID)
+		}
+	}
+	if externalID != "" {
+		return "#" + externalID
+	}
+	return ""
+}
+
+// normalizeQOJTitle 折叠空白；保留「#N. 名」形态。
+func normalizeQOJTitle(raw, externalID string) string {
+	t := normalizeSpace(raw)
+	if IsQOJBrandTitle(t) {
+		if externalID != "" {
+			return "#" + externalID
+		}
+		return ""
+	}
+	if m := reQOJTitlePage.FindStringSubmatch(t); m != nil {
+		num, name := m[1], strings.TrimSpace(m[2])
+		if name != "" && !IsQOJBrandTitle(name) {
+			return "#" + num + ". " + name
+		}
+		return "#" + num
+	}
+	// 仅有题名、有 externalID 时补题号前缀，便于辨认
+	if externalID != "" && !strings.Contains(t, externalID) && !strings.HasPrefix(t, "#") {
+		return "#" + externalID + ". " + t
+	}
+	return t
 }
 
 // fetchLeetCode 通过 GraphQL 拉中文题面；付费题无公开 content → 永久错误

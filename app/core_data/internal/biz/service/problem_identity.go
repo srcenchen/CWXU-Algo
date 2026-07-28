@@ -322,7 +322,7 @@ func normalizeNowCoderUUID(s string) string {
 }
 
 func parseQOJ(problem string) (*ParsedProblem, error) {
-	title := problem
+	problem = strings.TrimSpace(problem)
 	ext := sanitizeExternalID(problem)
 	if m := reQOJNum.FindStringSubmatch(problem); m != nil {
 		ext = m[1]
@@ -330,12 +330,45 @@ func parseQOJ(problem string) (*ParsedProblem, error) {
 	if ext == "" {
 		return nil, fmt.Errorf("qoj parse fail")
 	}
+	title := cleanQOJSubmitTitle(problem, ext)
 	return &ParsedProblem{
 		Platform:   spider.QOJ,
 		ExternalID: ext,
 		Title:      title,
 		URL:        "https://qoj.ac/problem/" + ext,
 	}, nil
+}
+
+// cleanQOJSubmitTitle 从提交列表题名（如「#19004. Foo」）得到展示标题；过滤站点品牌「QOJ.ac」。
+func cleanQOJSubmitTitle(problem, ext string) string {
+	t := strings.Join(strings.Fields(strings.TrimSpace(problem)), " ")
+	if t == "" || isQOJBrandTitleLocal(t) {
+		if ext != "" {
+			return "#" + ext
+		}
+		return t
+	}
+	// 「#19004. Real Title」/「# 19004 Real Title」
+	re := regexp.MustCompile(`(?i)^#?\s*` + regexp.QuoteMeta(ext) + `\s*[\.．]?\s*(.*)$`)
+	if m := re.FindStringSubmatch(t); m != nil {
+		rest := strings.TrimSpace(m[1])
+		if rest != "" && !isQOJBrandTitleLocal(rest) {
+			return "#" + ext + ". " + rest
+		}
+		return "#" + ext
+	}
+	return t
+}
+
+func isQOJBrandTitleLocal(title string) bool {
+	t := strings.ToLower(strings.Join(strings.Fields(strings.TrimSpace(title)), " "))
+	t = strings.Trim(t, ".-–—_|")
+	switch t {
+	case "", "qoj.ac", "qoj", "qoj ac":
+		return true
+	default:
+		return false
+	}
 }
 
 func parseLOJ(problem string) (*ParsedProblem, error) {
