@@ -178,6 +178,7 @@ const (
 
 // BlogSiteConfig is per-author blog shell settings (theme + social links).
 // ThemeID: mizuki (default) | chirpy | simple
+// ColorScheme: light | dark | system（读者默认明暗；未设/空=system 跟随系统）
 // SocialLinks: JSON array of {type,url,label?}
 // Activation: AgreementAcceptedAt 非空表示已签署开通协议并激活博客。
 type BlogSiteConfig struct {
@@ -186,7 +187,9 @@ type BlogSiteConfig struct {
 	UpdatedAt time.Time
 	UserID    uint   `gorm:"not null;uniqueIndex;comment:作者"`
 	ThemeID   string `gorm:"size:32;not null;default:mizuki;comment:主题 mizuki|chirpy|simple"`
-	Subtitle  string `gorm:"size:200;comment:侧栏副标题"`
+	// ColorScheme 博客默认明暗：light|dark|system（默认 system）
+	ColorScheme string `gorm:"size:16;not null;default:system;comment:默认明暗 light|dark|system"`
+	Subtitle    string `gorm:"size:200;comment:侧栏副标题"`
 	// SocialLinks JSON: [{"type":"github","url":"https://...","label":"GitHub"},...]
 	SocialLinks string `gorm:"type:text;comment:侧栏社交链接JSON"`
 

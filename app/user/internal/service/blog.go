@@ -486,6 +486,7 @@ func (s *BlogService) handleListByUsername(ctx khttp.Context) error {
 			"pageSize":     pageSize,
 			"themeEnabled": themeOn,
 			"themeId":      siteCfg.ThemeID,
+			"colorScheme":  siteCfg.ColorScheme,
 			"subtitle":     siteCfg.Subtitle,
 			"socialLinks":  siteCfg.SocialLinks,
 			"isOwner":      isOwner,
@@ -2332,6 +2333,10 @@ const (
 	blogThemeChirpy = "chirpy"
 	blogThemeSimple = "simple"
 	blogThemeMizuki = "mizuki"
+	// 博客默认明暗（读者侧可覆盖）
+	blogColorLight  = "light"
+	blogColorDark   = "dark"
+	blogColorSystem = "system"
 	maxSocialLinks  = 12
 	maxSocialURL    = 512
 	maxSubtitle     = 200
@@ -2345,6 +2350,7 @@ type blogSocialLink struct {
 
 type blogSiteConfigView struct {
 	ThemeID     string           `json:"themeId"`
+	ColorScheme string           `json:"colorScheme"`
 	Subtitle    string           `json:"subtitle"`
 	SocialLinks []blogSocialLink `json:"socialLinks"`
 }
@@ -2359,6 +2365,20 @@ func normalizeThemeID(raw string) string {
 		return blogThemeMizuki
 	default:
 		return blogThemeMizuki
+	}
+}
+
+// normalizeColorScheme 默认 system（跟随系统）；仅接受 light|dark|system。
+func normalizeColorScheme(raw string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case blogColorLight:
+		return blogColorLight
+	case blogColorDark:
+		return blogColorDark
+	case blogColorSystem, "", "auto":
+		return blogColorSystem
+	default:
+		return blogColorSystem
 	}
 }
 
@@ -2396,6 +2416,7 @@ func parseSocialLinksJSON(raw string) []blogSocialLink {
 func (s *BlogService) loadSiteConfig(userID uint) blogSiteConfigView {
 	view := blogSiteConfigView{
 		ThemeID:     blogThemeMizuki,
+		ColorScheme: blogColorSystem,
 		Subtitle:    "",
 		SocialLinks: []blogSocialLink{},
 	}
@@ -2407,6 +2428,7 @@ func (s *BlogService) loadSiteConfig(userID uint) blogSiteConfigView {
 		return view
 	}
 	view.ThemeID = normalizeThemeID(cfg.ThemeID)
+	view.ColorScheme = normalizeColorScheme(cfg.ColorScheme)
 	view.Subtitle = strings.TrimSpace(cfg.Subtitle)
 	view.SocialLinks = parseSocialLinksJSON(cfg.SocialLinks)
 	return view
@@ -2449,6 +2471,7 @@ func (s *BlogService) handleThemeStatus(ctx khttp.Context) error {
 		"data": map[string]interface{}{
 			"enabled":     enabled,
 			"themeId":     siteCfg.ThemeID,
+			"colorScheme": siteCfg.ColorScheme,
 			"subtitle":    siteCfg.Subtitle,
 			"socialLinks": siteCfg.SocialLinks,
 			"customTheme": nil, // reserved extension point
@@ -2457,7 +2480,7 @@ func (s *BlogService) handleThemeStatus(ctx khttp.Context) error {
 	return nil
 }
 
-// handleThemeConfigSave owner saves theme id + subtitle + social links.
+// handleThemeConfigSave owner saves theme id + color scheme + subtitle + social links.
 func (s *BlogService) handleThemeConfigSave(ctx khttp.Context) error {
 	pd := auth.GetCurrentUser(ctx)
 	if pd == nil || pd.UserID == 0 {
@@ -2469,6 +2492,7 @@ func (s *BlogService) handleThemeConfigSave(ctx khttp.Context) error {
 	}
 	var body struct {
 		ThemeID     string           `json:"themeId"`
+		ColorScheme string           `json:"colorScheme"`
 		Subtitle    string           `json:"subtitle"`
 		SocialLinks []blogSocialLink `json:"socialLinks"`
 	}
@@ -2477,6 +2501,7 @@ func (s *BlogService) handleThemeConfigSave(ctx khttp.Context) error {
 		return nil
 	}
 	themeID := normalizeThemeID(body.ThemeID)
+	colorScheme := normalizeColorScheme(body.ColorScheme)
 	subtitle := strings.TrimSpace(body.Subtitle)
 	if utf8.RuneCountInString(subtitle) > maxSubtitle {
 		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "副标题过长"})
@@ -2513,6 +2538,7 @@ func (s *BlogService) handleThemeConfigSave(ctx khttp.Context) error {
 		cfg = model.BlogSiteConfig{
 			UserID:      pd.UserID,
 			ThemeID:     themeID,
+			ColorScheme: colorScheme,
 			Subtitle:    subtitle,
 			SocialLinks: string(linksJSON),
 		}
@@ -2522,6 +2548,7 @@ func (s *BlogService) handleThemeConfigSave(ctx khttp.Context) error {
 		}
 	} else {
 		cfg.ThemeID = themeID
+		cfg.ColorScheme = colorScheme
 		cfg.Subtitle = subtitle
 		cfg.SocialLinks = string(linksJSON)
 		if err := s.db.Save(&cfg).Error; err != nil {
@@ -2534,6 +2561,7 @@ func (s *BlogService) handleThemeConfigSave(ctx khttp.Context) error {
 		"code": 0, "message": "success",
 		"data": map[string]interface{}{
 			"themeId":     view.ThemeID,
+			"colorScheme": view.ColorScheme,
 			"subtitle":    view.Subtitle,
 			"socialLinks": view.SocialLinks,
 		},
