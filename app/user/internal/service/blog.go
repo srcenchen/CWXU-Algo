@@ -1428,10 +1428,15 @@ func (s *BlogService) handleListCategoriesPublic(ctx khttp.Context) error {
 	var list []model.BlogCategory
 	_ = s.db.Where("user_id = ?", u.ID).Order("is_default DESC, sort_order ASC, id ASC").Find(&list).Error
 	counts := s.categoryArticleCounts(list, true)
+	// 前台不展示 0 篇公开文章的分类（访客侧仿佛不存在）
 	out := make([]map[string]interface{}, 0, len(list))
 	for _, c := range list {
+		n := counts[c.ID]
+		if n <= 0 {
+			continue
+		}
 		out = append(out, map[string]interface{}{
-			"id": c.ID, "name": c.Name, "sortOrder": c.SortOrder, "articleCount": counts[c.ID], "isDefault": c.IsDefault,
+			"id": c.ID, "name": c.Name, "sortOrder": c.SortOrder, "articleCount": n, "isDefault": c.IsDefault,
 		})
 	}
 	writeJSON(ctx.Response(), 200, map[string]interface{}{"code": 0, "message": "success", "list": out})
