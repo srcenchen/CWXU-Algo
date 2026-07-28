@@ -427,6 +427,7 @@ func (d *ProfileDal) applyCurrentlyDormantFilter(ctx context.Context, q *gorm.DB
 	idCol := userTable + ".id"
 	// 强制冻结或禁用 → 一律算已冻结
 	// 否则：超时 + 无豁免（与 IsDormant 对齐）
+	// 占位符须与参数一一对应：cutoff + status + 4 角色 + team/pro = 8
 	return q.Where(`(
 		`+userTable+`.admin_force_dormant = true
 		OR `+userTable+`.disabled = true
@@ -439,7 +440,7 @@ func (d *ProfileDal) applyCurrentlyDormantFilter(ctx context.Context, q *gorm.DB
 				JOIN orgs o ON o.id = m.org_id
 				WHERE m.user_id = `+idCol+` AND o.status = ?
 				  AND (
-					m.role IN (?, ?, ?)
+					m.role IN (?, ?, ?, ?)
 					OR o.force_sync = true
 					OR o.plan IN (?, ?)
 				  )
