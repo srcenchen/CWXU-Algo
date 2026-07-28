@@ -92,6 +92,10 @@ func RegisterBlogRoutes(srv *khttp.Server, bs *BlogService) {
 	r.POST("/v1/user/blog/activate", bs.handleActivate)
 	r.POST("/v1/user/blog/notify-pref", bs.handleNotifyPref)
 
+	// 图片上传能力（又拍云；需站管授权 + 站点配置）
+	r.GET("/v1/user/blog/image-upload/status", bs.handleImageUploadStatus)
+	r.POST("/v1/user/blog/admin/image-upload", bs.handleAdminImageUpload)
+
 	// 站管：博客管理
 	r.GET("/v1/user/blog/admin/overview", bs.handleAdminOverview)
 	r.GET("/v1/user/blog/admin/authors", bs.handleAdminAuthors)
@@ -670,6 +674,7 @@ func (s *BlogService) handleCreate(ctx khttp.Context) error {
 		return nil
 	}
 	_ = s.applyAutoOrgSurface(a.ID, a.UserID, a.Visibility)
+	go s.gcUserBlogImages(a.UserID)
 	d := blogaccess.Evaluate(blogaccess.ArticleAccess{
 		Visibility:  a.Visibility,
 		OwnerID:     a.UserID,
@@ -747,6 +752,8 @@ func (s *BlogService) handleUpdate(ctx khttp.Context) error {
 		return nil
 	}
 	_ = s.applyAutoOrgSurface(a.ID, a.UserID, a.Visibility)
+	// 保存后清理未写入正文/头图的又拍云图
+	go s.gcUserBlogImages(a.UserID)
 	d := blogaccess.Evaluate(blogaccess.ArticleAccess{
 		Visibility:  a.Visibility,
 		OwnerID:     a.UserID,
@@ -1011,6 +1018,7 @@ func (s *BlogService) handleDelete(ctx khttp.Context) error {
 		writeJSON(ctx.Response(), 403, map[string]interface{}{"code": 1, "message": "只能删除自己的文章"})
 		return nil
 	}
+	ownerID := a.UserID
 	_ = s.db.Transaction(func(tx *gorm.DB) error {
 		_ = tx.Where("article_id = ?", a.ID).Delete(&model.BlogArticleOrg{}).Error
 		// 先清评论点赞再删评论
@@ -1021,8 +1029,11 @@ func (s *BlogService) handleDelete(ctx khttp.Context) error {
 		}
 		_ = tx.Where("article_id = ?", a.ID).Delete(&model.BlogComment{}).Error
 		_ = tx.Where("article_id = ?", a.ID).Delete(&model.BlogLike{}).Error
+		_ = tx.Where("article_id = ?", a.ID).Delete(&model.BlogArticleViewUV{}).Error
 		return tx.Delete(&a).Error
 	})
+	// 删文后清理不再被引用的又拍云图
+	go s.gcUserBlogImages(ownerID)
 	writeJSON(ctx.Response(), 200, map[string]interface{}{"code": 0, "message": "已删除"})
 	return nil
 }

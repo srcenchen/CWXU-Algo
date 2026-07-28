@@ -90,6 +90,15 @@ message GetAdminConfigRes {
   int32 inactive_days = 20;
   // 审核/举报邮件收件人（逗号或换行分隔）；空则发给全部站管账号邮箱
   string admin_notify_emails = 21;
+  // 又拍云（博客/题解图床）
+  string upyun_bucket = 22;
+  string upyun_operator = 23;
+  string upyun_password_masked = 24;
+  bool upyun_password_set = 25;
+  // 用户侧访问域名（可含协议，如 http://zhiyuansofts.cn 或 zhiyuansofts.cn）
+  string upyun_domain = 26;
+  // 可选协议前缀 http / https；空则按 domain 自带或默认 http
+  string upyun_scheme = 27;
 }
 
 message UpdateConfigReq {
@@ -120,6 +129,13 @@ message UpdateConfigReq {
   bool set_inactive_days = 19;
   // 审核/举报邮件收件人；始终覆盖保存（可清空）
   string admin_notify_emails = 20;
+  // 又拍云
+  string upyun_bucket = 21;
+  string upyun_operator = 22;
+  string upyun_password = 23;
+  bool clear_upyun_password = 24;
+  string upyun_domain = 25;
+  string upyun_scheme = 26;
 }
 
 message UpdateConfigRes {

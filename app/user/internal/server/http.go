@@ -143,7 +143,7 @@ func NewHTTPServer(
 	group.RegisterGroupHTTPServer(srv, groupService)
 	role.RegisterRoleHTTPServer(srv, roleService)
 	site.RegisterSiteHTTPServer(srv, siteService)
-	service.RegisterUploadRoutes(srv)
+	service.RegisterUploadRoutes(srv, d)
 	service.RegisterOrgRoutes(srv, orgService)
 	service.RegisterSquadRoutes(srv, orgService)
 	service.RegisterRbacRoutes(srv, rbacService)

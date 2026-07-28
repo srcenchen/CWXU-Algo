@@ -198,6 +198,27 @@ type BlogSiteConfig struct {
 	// 互动邮件通知（默认关）
 	EmailNotifyEnabled  bool   `gorm:"not null;default:false;comment:互动邮件通知"`
 	EmailNotifyStrategy string `gorm:"size:32;not null;default:off;comment:off|immediate|digest_daily|random"`
+
+	// ImageUploadEnabled 站管在 /admin/blog 授权后，该作者可上传又拍云图片（默认关）
+	ImageUploadEnabled bool `gorm:"not null;default:false;comment:是否允许图片上传"`
 }
 
 func (BlogSiteConfig) TableName() string { return "blog_site_configs" }
+
+// BlogImageAsset 用户经又拍云上传的图片资产登记，供未引用 GC。
+type BlogImageAsset struct {
+	ID        uint `gorm:"primaryKey"`
+	CreatedAt time.Time
+	UpdatedAt time.Time
+	UserID    uint   `gorm:"not null;index:idx_blog_img_user,priority:1;comment:上传者"`
+	// ObjectKey 又拍云对象路径，如 /blog/12/20260728_xxx.webp
+	ObjectKey string `gorm:"size:512;not null;uniqueIndex;comment:对象key"`
+	// URL 对外访问完整 URL
+	URL string `gorm:"size:1024;not null;comment:访问URL"`
+	// ArticleID 最近一次关联文章（可选，GC 以正文引用为准）
+	ArticleID *uint `gorm:"index;comment:关联文章"`
+	// Purpose cover | content | misc
+	Purpose string `gorm:"size:32;not null;default:content;comment:用途"`
+}
+
+func (BlogImageAsset) TableName() string { return "blog_image_assets" }

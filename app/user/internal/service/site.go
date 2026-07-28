@@ -118,6 +118,7 @@ func (s *SiteService) protectStoredSecrets(ctx context.Context, row *model.SiteC
 		"smtp_password":     &row.SMTPPassword,
 		"agent_secret":      &row.AgentSecret,
 		"ai_analyze_secret": &row.AiAnalyzeSecret,
+		"upyun_password":    &row.UpyunPassword,
 	}
 	updates := make(map[string]interface{})
 	for column, value := range values {
@@ -230,7 +231,21 @@ func (s *SiteService) GetAdminConfig(ctx context.Context, _ *site.GetAdminConfig
 		FooterIcp:             row.FooterIcp,
 		InactiveDays:          int32(dormancy.ClampInactiveDays(row.InactiveDays)),
 		AdminNotifyEmails:     row.AdminNotifyEmails,
+		UpyunBucket:           strings.TrimSpace(row.UpyunBucket),
+		UpyunOperator:         strings.TrimSpace(row.UpyunOperator),
+		UpyunPasswordMasked:   sitesettings.MaskSecret(decryptSiteSecret(row.UpyunPassword)),
+		UpyunPasswordSet:      strings.TrimSpace(decryptSiteSecret(row.UpyunPassword)) != "",
+		UpyunDomain:           strings.TrimSpace(row.UpyunDomain),
+		UpyunScheme:           strings.TrimSpace(row.UpyunScheme),
 	}, nil
+}
+
+func decryptSiteSecret(value string) string {
+	plain, err := secretutil.Decrypt(value)
+	if err != nil {
+		return ""
+	}
+	return plain
 }
 
 func (s *SiteService) UpdateConfig(ctx context.Context, req *site.UpdateConfigReq) (*site.UpdateConfigRes, error) {
@@ -272,6 +287,11 @@ func (s *SiteService) UpdateConfig(ctx context.Context, req *site.UpdateConfigRe
 	}
 	// 审核/举报邮件收件人：整页保存时始终覆盖（允许清空）
 	updates["admin_notify_emails"] = strings.TrimSpace(req.AdminNotifyEmails)
+	// 又拍云：整页保存非密钥字段
+	updates["upyun_bucket"] = strings.TrimSpace(req.UpyunBucket)
+	updates["upyun_operator"] = strings.TrimSpace(req.UpyunOperator)
+	updates["upyun_domain"] = strings.TrimSpace(req.UpyunDomain)
+	updates["upyun_scheme"] = strings.TrimSpace(req.UpyunScheme)
 
 	if req.ClearSmtpPassword {
 		updates["smtp_password"] = ""
@@ -302,6 +322,16 @@ func (s *SiteService) UpdateConfig(ctx context.Context, req *site.UpdateConfigRe
 			return &site.UpdateConfigRes{Code: 1, Message: "服务器尚未配置配置加密密钥"}, nil
 		}
 		updates["ai_analyze_secret"] = encrypted
+	}
+	if req.ClearUpyunPassword {
+		updates["upyun_password"] = ""
+	} else if isRealSecret(req.UpyunPassword) {
+		encrypted, encryptErr := secretutil.Encrypt(req.UpyunPassword)
+		if encryptErr != nil {
+			log.Errorf("encrypt upyun password: %v", encryptErr)
+			return &site.UpdateConfigRes{Code: 1, Message: "服务器尚未配置配置加密密钥"}, nil
+		}
+		updates["upyun_password"] = encrypted
 	}
 
 	if e := s.data.DB.WithContext(ctx).Model(&model.SiteConfig{}).Where("id = ?", 1).Updates(updates).Error; e != nil {

@@ -208,8 +208,17 @@ type GetAdminConfigRes struct {
 	InactiveDays int32 `protobuf:"varint,20,opt,name=inactive_days,json=inactiveDays,proto3" json:"inactive_days,omitempty"`
 	// 审核/举报邮件收件人（逗号或换行分隔）；空则发给全部站管账号邮箱
 	AdminNotifyEmails string `protobuf:"bytes,21,opt,name=admin_notify_emails,json=adminNotifyEmails,proto3" json:"admin_notify_emails,omitempty"`
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	// 又拍云（博客/题解图床）
+	UpyunBucket         string `protobuf:"bytes,22,opt,name=upyun_bucket,json=upyunBucket,proto3" json:"upyun_bucket,omitempty"`
+	UpyunOperator       string `protobuf:"bytes,23,opt,name=upyun_operator,json=upyunOperator,proto3" json:"upyun_operator,omitempty"`
+	UpyunPasswordMasked string `protobuf:"bytes,24,opt,name=upyun_password_masked,json=upyunPasswordMasked,proto3" json:"upyun_password_masked,omitempty"`
+	UpyunPasswordSet    bool   `protobuf:"varint,25,opt,name=upyun_password_set,json=upyunPasswordSet,proto3" json:"upyun_password_set,omitempty"`
+	// 用户侧访问域名（可含协议，如 http://zhiyuansofts.cn 或 zhiyuansofts.cn）
+	UpyunDomain string `protobuf:"bytes,26,opt,name=upyun_domain,json=upyunDomain,proto3" json:"upyun_domain,omitempty"`
+	// 可选协议前缀 http / https；空则按 domain 自带或默认 http
+	UpyunScheme   string `protobuf:"bytes,27,opt,name=upyun_scheme,json=upyunScheme,proto3" json:"upyun_scheme,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *GetAdminConfigRes) Reset() {
@@ -389,6 +398,48 @@ func (x *GetAdminConfigRes) GetAdminNotifyEmails() string {
 	return ""
 }
 
+func (x *GetAdminConfigRes) GetUpyunBucket() string {
+	if x != nil {
+		return x.UpyunBucket
+	}
+	return ""
+}
+
+func (x *GetAdminConfigRes) GetUpyunOperator() string {
+	if x != nil {
+		return x.UpyunOperator
+	}
+	return ""
+}
+
+func (x *GetAdminConfigRes) GetUpyunPasswordMasked() string {
+	if x != nil {
+		return x.UpyunPasswordMasked
+	}
+	return ""
+}
+
+func (x *GetAdminConfigRes) GetUpyunPasswordSet() bool {
+	if x != nil {
+		return x.UpyunPasswordSet
+	}
+	return false
+}
+
+func (x *GetAdminConfigRes) GetUpyunDomain() string {
+	if x != nil {
+		return x.UpyunDomain
+	}
+	return ""
+}
+
+func (x *GetAdminConfigRes) GetUpyunScheme() string {
+	if x != nil {
+		return x.UpyunScheme
+	}
+	return ""
+}
+
 type UpdateConfigReq struct {
 	state     protoimpl.MessageState `protogen:"open.v1"`
 	SiteTitle string                 `protobuf:"bytes,1,opt,name=site_title,json=siteTitle,proto3" json:"site_title,omitempty"`
@@ -418,8 +469,15 @@ type UpdateConfigReq struct {
 	SetInactiveDays bool `protobuf:"varint,19,opt,name=set_inactive_days,json=setInactiveDays,proto3" json:"set_inactive_days,omitempty"`
 	// 审核/举报邮件收件人；始终覆盖保存（可清空）
 	AdminNotifyEmails string `protobuf:"bytes,20,opt,name=admin_notify_emails,json=adminNotifyEmails,proto3" json:"admin_notify_emails,omitempty"`
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	// 又拍云
+	UpyunBucket        string `protobuf:"bytes,21,opt,name=upyun_bucket,json=upyunBucket,proto3" json:"upyun_bucket,omitempty"`
+	UpyunOperator      string `protobuf:"bytes,22,opt,name=upyun_operator,json=upyunOperator,proto3" json:"upyun_operator,omitempty"`
+	UpyunPassword      string `protobuf:"bytes,23,opt,name=upyun_password,json=upyunPassword,proto3" json:"upyun_password,omitempty"`
+	ClearUpyunPassword bool   `protobuf:"varint,24,opt,name=clear_upyun_password,json=clearUpyunPassword,proto3" json:"clear_upyun_password,omitempty"`
+	UpyunDomain        string `protobuf:"bytes,25,opt,name=upyun_domain,json=upyunDomain,proto3" json:"upyun_domain,omitempty"`
+	UpyunScheme        string `protobuf:"bytes,26,opt,name=upyun_scheme,json=upyunScheme,proto3" json:"upyun_scheme,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *UpdateConfigReq) Reset() {
@@ -588,6 +646,48 @@ func (x *UpdateConfigReq) GetSetInactiveDays() bool {
 func (x *UpdateConfigReq) GetAdminNotifyEmails() string {
 	if x != nil {
 		return x.AdminNotifyEmails
+	}
+	return ""
+}
+
+func (x *UpdateConfigReq) GetUpyunBucket() string {
+	if x != nil {
+		return x.UpyunBucket
+	}
+	return ""
+}
+
+func (x *UpdateConfigReq) GetUpyunOperator() string {
+	if x != nil {
+		return x.UpyunOperator
+	}
+	return ""
+}
+
+func (x *UpdateConfigReq) GetUpyunPassword() string {
+	if x != nil {
+		return x.UpyunPassword
+	}
+	return ""
+}
+
+func (x *UpdateConfigReq) GetClearUpyunPassword() bool {
+	if x != nil {
+		return x.ClearUpyunPassword
+	}
+	return false
+}
+
+func (x *UpdateConfigReq) GetUpyunDomain() string {
+	if x != nil {
+		return x.UpyunDomain
+	}
+	return ""
+}
+
+func (x *UpdateConfigReq) GetUpyunScheme() string {
+	if x != nil {
+		return x.UpyunScheme
 	}
 	return ""
 }
@@ -1523,7 +1623,7 @@ const file_user_v1_site_site_proto_rawDesc = "" +
 	"\afavicon\x18\x05 \x01(\tR\afavicon\x12\x1d\n" +
 	"\n" +
 	"footer_icp\x18\x06 \x01(\tR\tfooterIcp\"\x13\n" +
-	"\x11GetAdminConfigReq\"\xa6\x06\n" +
+	"\x11GetAdminConfigReq\"\x98\b\n" +
 	"\x11GetAdminConfigRes\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\x03R\x04code\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12\x1d\n" +
@@ -1549,7 +1649,13 @@ const file_user_v1_site_site_proto_rawDesc = "" +
 	"\n" +
 	"footer_icp\x18\x13 \x01(\tR\tfooterIcp\x12#\n" +
 	"\rinactive_days\x18\x14 \x01(\x05R\finactiveDays\x12.\n" +
-	"\x13admin_notify_emails\x18\x15 \x01(\tR\x11adminNotifyEmails\"\x87\x06\n" +
+	"\x13admin_notify_emails\x18\x15 \x01(\tR\x11adminNotifyEmails\x12!\n" +
+	"\fupyun_bucket\x18\x16 \x01(\tR\vupyunBucket\x12%\n" +
+	"\x0eupyun_operator\x18\x17 \x01(\tR\rupyunOperator\x122\n" +
+	"\x15upyun_password_masked\x18\x18 \x01(\tR\x13upyunPasswordMasked\x12,\n" +
+	"\x12upyun_password_set\x18\x19 \x01(\bR\x10upyunPasswordSet\x12!\n" +
+	"\fupyun_domain\x18\x1a \x01(\tR\vupyunDomain\x12!\n" +
+	"\fupyun_scheme\x18\x1b \x01(\tR\vupyunScheme\"\xf0\a\n" +
 	"\x0fUpdateConfigReq\x12\x1d\n" +
 	"\n" +
 	"site_title\x18\x01 \x01(\tR\tsiteTitle\x12\x1b\n" +
@@ -1574,7 +1680,13 @@ const file_user_v1_site_site_proto_rawDesc = "" +
 	"footer_icp\x18\x11 \x01(\tR\tfooterIcp\x12#\n" +
 	"\rinactive_days\x18\x12 \x01(\x05R\finactiveDays\x12*\n" +
 	"\x11set_inactive_days\x18\x13 \x01(\bR\x0fsetInactiveDays\x12.\n" +
-	"\x13admin_notify_emails\x18\x14 \x01(\tR\x11adminNotifyEmails\"\xb4\x01\n" +
+	"\x13admin_notify_emails\x18\x14 \x01(\tR\x11adminNotifyEmails\x12!\n" +
+	"\fupyun_bucket\x18\x15 \x01(\tR\vupyunBucket\x12%\n" +
+	"\x0eupyun_operator\x18\x16 \x01(\tR\rupyunOperator\x12%\n" +
+	"\x0eupyun_password\x18\x17 \x01(\tR\rupyunPassword\x120\n" +
+	"\x14clear_upyun_password\x18\x18 \x01(\bR\x12clearUpyunPassword\x12!\n" +
+	"\fupyun_domain\x18\x19 \x01(\tR\vupyunDomain\x12!\n" +
+	"\fupyun_scheme\x18\x1a \x01(\tR\vupyunScheme\"\xb4\x01\n" +
 	"\x0fUpdateConfigRes\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\x03R\x04code\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12\x1d\n" +

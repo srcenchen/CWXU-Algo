@@ -4884,6 +4884,21 @@ components:
                 adminNotifyEmails:
                     type: string
                     description: 审核/举报邮件收件人（逗号或换行分隔）；空则发给全部站管账号邮箱
+                upyunBucket:
+                    type: string
+                    description: 又拍云（博客/题解图床）
+                upyunOperator:
+                    type: string
+                upyunPasswordMasked:
+                    type: string
+                upyunPasswordSet:
+                    type: boolean
+                upyunDomain:
+                    type: string
+                    description: 用户侧访问域名（可含协议，如 http://zhiyuansofts.cn 或 zhiyuansofts.cn）
+                upyunScheme:
+                    type: string
+                    description: 可选协议前缀 http / https；空则按 domain 自带或默认 http
         api.user.v1.site.GetConfigRes:
             type: object
             properties:
@@ -4977,6 +4992,19 @@ components:
                 adminNotifyEmails:
                     type: string
                     description: 审核/举报邮件收件人；始终覆盖保存（可清空）
+                upyunBucket:
+                    type: string
+                    description: 又拍云
+                upyunOperator:
+                    type: string
+                upyunPassword:
+                    type: string
+                clearUpyunPassword:
+                    type: boolean
+                upyunDomain:
+                    type: string
+                upyunScheme:
+                    type: string
         api.user.v1.site.UpdateConfigRes:
             type: object
             properties:

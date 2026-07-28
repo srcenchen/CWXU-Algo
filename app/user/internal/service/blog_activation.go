@@ -128,6 +128,7 @@ func (s *BlogService) activationJSON(cfg *model.BlogSiteConfig, username string)
 		out["emailNotifyStrategy"] = normalizeEmailNotifyStrategy(cfg.EmailNotifyStrategy)
 		out["themeId"] = normalizeThemeID(cfg.ThemeID)
 		out["subtitle"] = strings.TrimSpace(cfg.Subtitle)
+		out["imageUploadEnabled"] = cfg.ImageUploadEnabled
 	}
 	if username != "" {
 		out["username"] = username
@@ -389,6 +390,7 @@ func (s *BlogService) handleAdminAuthors(ctx khttp.Context) error {
 		EmailNotifyEnabled  bool
 		EmailNotifyStrategy string
 		ThemeID             string
+		ImageUploadEnabled  bool
 		ArticleCount        int64
 		ViewCount           int64
 		LikeCount           int64
@@ -398,6 +400,7 @@ func (s *BlogService) handleAdminAuthors(ctx khttp.Context) error {
 		Select(`c.user_id, u.username, u.name, u.avatar,
 			c.activated_at, c.agreement_accepted_at, c.agreement_version,
 			c.email_notify_enabled, c.email_notify_strategy, c.theme_id,
+			c.image_upload_enabled,
 			(SELECT COUNT(*) FROM blog_articles a WHERE a.user_id = c.user_id) AS article_count,
 			(SELECT COALESCE(SUM(view_count),0) FROM blog_articles a WHERE a.user_id = c.user_id) AS view_count,
 			(SELECT COALESCE(SUM(like_count),0) FROM blog_articles a WHERE a.user_id = c.user_id) AS like_count,
@@ -434,6 +437,7 @@ func (s *BlogService) handleAdminAuthors(ctx khttp.Context) error {
 			"emailNotifyEnabled":  r.EmailNotifyEnabled,
 			"emailNotifyStrategy": normalizeEmailNotifyStrategy(r.EmailNotifyStrategy),
 			"themeId":             normalizeThemeID(r.ThemeID),
+			"imageUploadEnabled":  r.ImageUploadEnabled,
 			"articleCount":        r.ArticleCount,
 			"viewCount":           r.ViewCount,
 			"likeCount":           r.LikeCount,

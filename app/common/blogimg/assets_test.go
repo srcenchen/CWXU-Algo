@@ -1,0 +1,109 @@
+package blogimg
+
+import (
+	"bytes"
+	"image"
+	"image/color"
+	"image/png"
+	"testing"
+)
+
+func TestExtractImageURLs(t *testing.T) {
+	md := `hello ![a|550](https://cdn.example.com/a.webp) and ![b](http://x.test/b.png)
+<img src="https://cdn.example.com/c.jpg">`
+	urls := ExtractImageURLs(md, "https://cdn.example.com/cover.png")
+	if len(urls) != 4 {
+		t.Fatalf("got %v", urls)
+	}
+}
+
+func TestObjectKeyFromURL(t *testing.T) {
+	base := "http://zhiyuansofts.cn"
+	k := ObjectKeyFromURL("http://zhiyuansofts.cn/blog/12/x.webp", base)
+	if k != "/blog/12/x.webp" {
+		t.Fatalf("got %q", k)
+	}
+	if ObjectKeyFromURL("https://free.picui.cn/x.webp", base) != "" {
+		t.Fatal("third-party should be empty")
+	}
+}
+
+func TestOrphanKeys(t *testing.T) {
+	used := KeysFromContent(
+		`![x](http://zhiyuansofts.cn/blog/1/keep.webp)`,
+		"",
+		"http://zhiyuansofts.cn",
+	)
+	reg := []string{"/blog/1/keep.webp", "/blog/1/orphan.webp", "blog/1/also.webp"}
+	orphans := OrphanKeys(reg, used)
+	// keep should not be orphan; orphan + also should
+	found := map[string]bool{}
+	for _, o := range orphans {
+		found[o] = true
+	}
+	if found["/blog/1/keep.webp"] {
+		t.Fatal("keep should not be orphan")
+	}
+	if !found["/blog/1/orphan.webp"] {
+		t.Fatal("orphan missing")
+	}
+}
+
+func TestCanUpload(t *testing.T) {
+	if CanUpload(false, true) {
+		t.Fatal("need both")
+	}
+	if CanUpload(true, false) {
+		t.Fatal("need both")
+	}
+	if !CanUpload(true, true) {
+		t.Fatal("should allow")
+	}
+}
+
+func TestCompressPassthroughSmallPNG(t *testing.T) {
+	img := image.NewRGBA(image.Rect(0, 0, 8, 8))
+	img.Set(0, 0, color.RGBA{R: 255, A: 255})
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		t.Fatal(err)
+	}
+	res, err := CompressForUpload(buf.Bytes(), "image/png")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.Passthrough {
+		t.Fatal("small png should passthrough")
+	}
+	if len(res.Data) == 0 {
+		t.Fatal("empty")
+	}
+}
+
+func TestCompressLargeJPEGUnderCap(t *testing.T) {
+	// large solid image → re-encode
+	img := image.NewRGBA(image.Rect(0, 0, 400, 400))
+	for y := 0; y < 400; y++ {
+		for x := 0; x < 400; x++ {
+			img.Set(x, y, color.RGBA{R: uint8(x), G: uint8(y), B: 80, A: 255})
+		}
+	}
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		t.Fatal(err)
+	}
+	// force non-passtrough by size path: use image/jpeg content type with png bytes still decodable? 
+	// Compress decodes via image.Decode which handles png magic.
+	res, err := CompressForUpload(buf.Bytes(), "image/png")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Data) == 0 || len(res.Data) > MaxUploadBytes {
+		t.Fatalf("bad size %d", len(res.Data))
+	}
+	// output must still be valid image bytes (jpeg or png)
+	_, _, err = image.Decode(bytes.NewReader(res.Data))
+	if err != nil {
+		t.Fatalf("output not decodable: %v", err)
+	}
+}

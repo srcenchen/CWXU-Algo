@@ -3,8 +3,11 @@ package service
 import (
 	"bytes"
 	"crypto/rand"
+	"cwxu-algo/app/common/blogimg"
 	"cwxu-algo/app/common/rbac"
 	"cwxu-algo/app/common/utils/auth"
+	"cwxu-algo/app/user/internal/data"
+	"cwxu-algo/app/user/internal/data/model"
 	"encoding/hex"
 	"fmt"
 	"image"
@@ -19,13 +22,15 @@ import (
 	"strings"
 	"time"
 
+	"github.com/go-kratos/kratos/v2/log"
 	khttp "github.com/go-kratos/kratos/v2/transport/http"
 )
 
 const (
-	maxUploadBytes    = 3 << 20 // 3MB
-	staticURLPrefix   = "/api/user/static"
-	staticRoutePrefix = "/v1/user/static"
+	maxUploadBytes     = 3 << 20  // 3MB local avatar/site/etc
+	maxBlogUploadBytes = 12 << 20 // raw form before compress (blog/upyun)
+	staticURLPrefix    = "/api/user/static"
+	staticRoutePrefix  = "/v1/user/static"
 )
 
 var imageExts = []string{".jpg", ".jpeg", ".png", ".gif", ".webp", ".ico", ".svg"}
@@ -293,8 +298,9 @@ func serveUploadFile(w http.ResponseWriter, r *http.Request, prefix string) {
 	http.ServeContent(w, r, filepath.Base(abs), st.ModTime(), f)
 }
 
-// RegisterUploadRoutes 注册 multipart 上传与静态文件
-func RegisterUploadRoutes(srv *khttp.Server) {
+// RegisterUploadRoutes 注册 multipart 上传与静态文件。
+// d 可为 nil（仅本地上传；博客又拍云路径将拒绝）。
+func RegisterUploadRoutes(srv *khttp.Server, d *data.Data) {
 	_ = ensureUploadDir()
 	r := srv.Route("/")
 
@@ -307,11 +313,19 @@ func RegisterUploadRoutes(srv *khttp.Server) {
 		}
 
 		req := ctx.Request()
-		if err := req.ParseMultipartForm(maxUploadBytes); err != nil {
+		// 表单尚未解析时 purpose 为空，用更大 limit 兜底再读 purpose
+		if err := req.ParseMultipartForm(maxBlogUploadBytes); err != nil {
 			return ctx.JSON(http.StatusBadRequest, map[string]interface{}{
-				"code": 1, "message": "解析表单失败或文件过大(≤3MB)",
+				"code": 1, "message": "解析表单失败或文件过大",
 			})
 		}
+		purpose := strings.TrimSpace(req.FormValue("purpose"))
+		switch purpose {
+		case "avatar", "site", "bulletin", "misc", "blog", "blog_cover":
+		default:
+			purpose = "misc"
+		}
+
 		file, hdr, err := req.FormFile("file")
 		if err != nil {
 			return ctx.JSON(http.StatusBadRequest, map[string]interface{}{
@@ -320,34 +334,36 @@ func RegisterUploadRoutes(srv *khttp.Server) {
 		}
 		defer file.Close()
 
-		data, err := io.ReadAll(io.LimitReader(file, maxUploadBytes+1))
+		limit := int64(maxUploadBytes)
+		if purpose == "blog" || purpose == "blog_cover" {
+			limit = maxBlogUploadBytes
+		}
+		raw, err := io.ReadAll(io.LimitReader(file, limit+1))
 		if err != nil {
 			return ctx.JSON(http.StatusBadRequest, map[string]interface{}{
 				"code": 1, "message": "读取文件失败",
 			})
 		}
-		if int64(len(data)) > maxUploadBytes {
+		if int64(len(raw)) > limit {
+			msg := "文件过大，最大 3MB"
+			if purpose == "blog" || purpose == "blog_cover" {
+				msg = fmt.Sprintf("文件过大，最大 %dMB", maxBlogUploadBytes>>20)
+			}
 			return ctx.JSON(http.StatusBadRequest, map[string]interface{}{
-				"code": 1, "message": "文件过大，最大 3MB",
+				"code": 1, "message": msg,
 			})
 		}
 		// DetectContentType 对 svg 只会给出 text/xml|text/plain，需单独识别
-		ct := http.DetectContentType(data)
-		if looksLikeSVG(data) {
+		ct := http.DetectContentType(raw)
+		if looksLikeSVG(raw) {
 			ct = "image/svg+xml"
 		}
-		if !allowedImage(ct) || !validImageData(data, ct) {
+		if !allowedImage(ct) || !validImageData(raw, ct) {
 			return ctx.JSON(http.StatusBadRequest, map[string]interface{}{
 				"code": 1, "message": "仅支持有效的 jpg/png/gif/webp/ico/svg 图片（svg 不得含脚本或事件处理器）",
 			})
 		}
 
-		purpose := strings.TrimSpace(req.FormValue("purpose"))
-		switch purpose {
-		case "avatar", "site", "bulletin", "misc":
-		default:
-			purpose = "misc"
-		}
 		if purpose == "site" && !auth.HasPerm(ctx, rbac.PermSiteConfigWrite) {
 			return ctx.JSON(http.StatusForbidden, map[string]interface{}{
 				"code": 1, "message": "需要修改站点配置权限",
@@ -357,6 +373,11 @@ func RegisterUploadRoutes(srv *khttp.Server) {
 			return ctx.JSON(http.StatusForbidden, map[string]interface{}{
 				"code": 1, "message": "需要组织公告管理权限",
 			})
+		}
+
+		// —— 博客/题解图：又拍云（需站点配置 + 用户授权）——
+		if purpose == "blog" || purpose == "blog_cover" {
+			return handleBlogUpyunUpload(ctx, d, pd.UserID, raw, ct, purpose, hdr.Filename)
 		}
 
 		ext := extFromContentType(ct, hdr.Filename)
@@ -374,7 +395,7 @@ func RegisterUploadRoutes(srv *khttp.Server) {
 			})
 		}
 		absPath := filepath.Join(absDir, diskName)
-		if err := os.WriteFile(absPath, data, 0o644); err != nil {
+		if err := os.WriteFile(absPath, raw, 0o644); err != nil {
 			return ctx.JSON(http.StatusInternalServerError, map[string]interface{}{
 				"code": 1, "message": "保存失败",
 			})
@@ -404,4 +425,78 @@ func RegisterUploadRoutes(srv *khttp.Server) {
 	})
 	srv.HandlePrefix(staticRoutePrefix+"/", handler)
 	srv.HandlePrefix(staticURLPrefix+"/", handler)
+}
+
+// handleBlogUpyunUpload compresses (clarity-first) and PUTs to UpYun.
+func handleBlogUpyunUpload(
+	ctx khttp.Context,
+	d *data.Data,
+	userID uint,
+	raw []byte,
+	ct string,
+	purpose string,
+	filename string,
+) error {
+	if d == nil || d.DB == nil {
+		return ctx.JSON(http.StatusServiceUnavailable, map[string]interface{}{
+			"code": 1, "message": "上传服务暂不可用",
+		})
+	}
+	// 拒绝 svg 上云（XSS 风险）；博客正文用栅格图
+	if strings.Contains(strings.ToLower(ct), "svg") {
+		return ctx.JSON(http.StatusBadRequest, map[string]interface{}{
+			"code": 1, "message": "博客图片暂不支持 SVG，请使用 jpg/png/gif/webp",
+		})
+	}
+
+	client := loadUpyunFromDB(d.DB)
+	if !client.Configured() || client.PublicBaseURL() == "" {
+		return ctx.JSON(http.StatusForbidden, map[string]interface{}{
+			"code": 1, "message": "站点尚未配置图床，请联系管理员",
+		})
+	}
+	var cfg model.BlogSiteConfig
+	authorized := false
+	if err := d.DB.Select("image_upload_enabled").Where("user_id = ?", userID).First(&cfg).Error; err == nil {
+		authorized = cfg.ImageUploadEnabled
+	}
+	if !blogimg.CanUpload(true, authorized) {
+		return ctx.JSON(http.StatusForbidden, map[string]interface{}{
+			"code": 1, "message": "尚未开通图片上传，请联系站点管理员在博客管理中授权",
+		})
+	}
+
+	compressed, err := blogimg.CompressForUpload(raw, ct)
+	if err != nil {
+		return ctx.JSON(http.StatusBadRequest, map[string]interface{}{
+			"code": 1, "message": err.Error(),
+		})
+	}
+	ext := compressed.Ext
+	if ext == "" || ext == ".bin" {
+		ext = extFromContentType(compressed.ContentType, filename)
+	}
+	if ext == "" {
+		ext = ".jpg"
+	}
+	objectKey := fmt.Sprintf("/blog/%d/%s%s", userID, randomName(), ext)
+	if err := client.Put(objectKey, compressed.Data, compressed.ContentType); err != nil {
+		log.Errorf("upyun put: %v", err)
+		return ctx.JSON(http.StatusBadGateway, map[string]interface{}{
+			"code": 1, "message": "图床上传失败，请稍后重试",
+		})
+	}
+	publicURL := client.PublicURL(objectKey)
+	assetPurpose := "content"
+	if purpose == "blog_cover" {
+		assetPurpose = "cover"
+	}
+	if err := registerBlogImageAsset(d.DB, userID, objectKey, publicURL, assetPurpose, nil); err != nil {
+		log.Warnf("register blog image asset: %v", err)
+	}
+	return ctx.JSON(http.StatusOK, map[string]interface{}{
+		"code":    0,
+		"message": "success",
+		"url":     publicURL,
+	})
 }

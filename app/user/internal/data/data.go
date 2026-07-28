@@ -127,6 +127,7 @@ func migrateModels(db *gorm.DB) {
 		&model.SchemaPatch{},
 		&model.BlogThemeFlag{},
 		&model.BlogSiteConfig{},
+		&model.BlogImageAsset{},
 		&model.Role{},
 		&model.RolePermission{},
 		&model.UserRole{},
