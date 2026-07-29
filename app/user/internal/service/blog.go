@@ -823,7 +823,16 @@ func (s *BlogService) buildArticleFromReq(userID, existingID uint, req *blogArti
 
 	slug := strings.TrimSpace(req.Slug)
 	if slug == "" {
-		slug = slugifyTitle(title)
+		// 更新时缺省 slug：保留原短链，禁止随标题重算（slug 为文章稳定标识）
+		if !isCreate && existingID > 0 {
+			var prev model.BlogArticle
+			if err := s.db.Select("slug").First(&prev, existingID).Error; err == nil && strings.TrimSpace(prev.Slug) != "" {
+				slug = prev.Slug
+			}
+		}
+		if slug == "" {
+			slug = slugifyTitle(title)
+		}
 	}
 	slug = strings.ToLower(slug)
 	// sanitize slug
