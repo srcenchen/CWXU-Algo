@@ -1,6 +1,7 @@
 package service
 
 import (
+	"cwxu-algo/app/common/utils/sqllike"
 	"encoding/json"
 	"strconv"
 	"strings"
@@ -408,7 +409,7 @@ func (s *BlogService) handleAdminAuthors(ctx khttp.Context) error {
 		Joins("JOIN users u ON u.id = c.user_id").
 		Where("c.agreement_accepted_at IS NOT NULL")
 	if keyword != "" {
-		like := "%" + keyword + "%"
+		like := sqllike.Pattern(keyword)
 		q = q.Where("u.username ILIKE ? OR u.name ILIKE ?", like, like)
 	}
 	var total int64
@@ -416,7 +417,7 @@ func (s *BlogService) handleAdminAuthors(ctx khttp.Context) error {
 		Joins("JOIN users u ON u.id = c.user_id").
 		Where("c.agreement_accepted_at IS NOT NULL")
 	if keyword != "" {
-		like := "%" + keyword + "%"
+		like := sqllike.Pattern(keyword)
 		countQ = countQ.Where("u.username ILIKE ? OR u.name ILIKE ?", like, like)
 	}
 	_ = countQ.Count(&total).Error
@@ -480,7 +481,7 @@ func (s *BlogService) handleAdminArticles(ctx khttp.Context) error {
 		q = q.Where("visibility = ?", visibility)
 	}
 	if keyword != "" {
-		like := "%" + keyword + "%"
+		like := sqllike.Pattern(keyword)
 		q = q.Where("title ILIKE ? OR summary ILIKE ?", like, like)
 	}
 	var total int64

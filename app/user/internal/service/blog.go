@@ -1,6 +1,7 @@
 package service
 
 import (
+	"cwxu-algo/app/common/utils/sqllike"
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
@@ -428,7 +429,7 @@ func (s *BlogService) handleListByUsername(ctx khttp.Context) error {
 		q = q.Where("category_id = ?", categoryID)
 	}
 	if keyword != "" {
-		like := "%" + keyword + "%"
+		like := sqllike.Pattern(keyword)
 		q = q.Where("title ILIKE ? OR summary ILIKE ?", like, like)
 	}
 
@@ -1049,7 +1050,7 @@ func (s *BlogService) handleMine(ctx khttp.Context) error {
 	keyword := strings.TrimSpace(ctx.Request().URL.Query().Get("keyword"))
 	q := s.db.Model(&model.BlogArticle{}).Where("user_id = ?", pd.UserID)
 	if keyword != "" {
-		like := "%" + keyword + "%"
+		like := sqllike.Pattern(keyword)
 		q = q.Where("title ILIKE ? OR summary ILIKE ?", like, like)
 	}
 	var total int64
@@ -1155,7 +1156,7 @@ func (s *BlogService) handlePlaza(ctx khttp.Context) error {
 		Where("visibility = ?", blogaccess.VisibilityPublic).
 		Where("(moderation_status = ? OR moderation_status = '' OR moderation_status IS NULL)", model.BlogModerationApproved)
 	if keyword != "" {
-		like := "%" + keyword + "%"
+		like := sqllike.Pattern(keyword)
 		q = q.Where("title ILIKE ? OR summary ILIKE ?", like, like)
 	}
 
@@ -1243,7 +1244,7 @@ func (s *BlogService) handleAuthors(ctx khttp.Context) error {
 	var total int64
 	countQ := s.db.Table("(?) as author_agg", base)
 	if keyword != "" {
-		like := "%" + keyword + "%"
+		like := sqllike.Pattern(keyword)
 		countQ = s.db.Table("(?) as author_agg", base).
 			Joins("JOIN users ON users.id = author_agg.user_id").
 			Where("users.username ILIKE ? OR users.name ILIKE ?", like, like)
@@ -1257,7 +1258,7 @@ func (s *BlogService) handleAuthors(ctx khttp.Context) error {
 	listQ := s.db.Table("(?) as author_agg", base).
 		Select("author_agg.user_id, author_agg.article_count, author_agg.last_published_at")
 	if keyword != "" {
-		like := "%" + keyword + "%"
+		like := sqllike.Pattern(keyword)
 		listQ = listQ.Joins("JOIN users ON users.id = author_agg.user_id").
 			Where("users.username ILIKE ? OR users.name ILIKE ?", like, like)
 	}
@@ -1960,51 +1961,69 @@ func (s *BlogService) handleCommentLikeToggle(ctx khttp.Context) error {
 		return nil
 	}
 
-	var existing model.BlogCommentLike
-	err := s.db.Where("comment_id = ? AND user_id = ?", body.CommentID, pd.UserID).First(&existing).Error
 	liked := false
-	if err == nil {
-		_ = s.db.Delete(&existing).Error
-		_ = s.db.Model(&model.BlogComment{}).Where("id = ? AND like_count > 0", body.CommentID).
-			UpdateColumn("like_count", gorm.Expr("like_count - 1")).Error
-		liked = false
-	} else {
-		if err := s.db.Create(&model.BlogCommentLike{CommentID: body.CommentID, UserID: pd.UserID}).Error; err != nil {
-			// 并发唯一冲突：视为已赞
-			liked = true
-		} else {
-			_ = s.db.Model(&model.BlogComment{}).Where("id = ?", body.CommentID).
-				UpdateColumn("like_count", gorm.Expr("like_count + 1")).Error
-			liked = true
-			// 通知评论作者（取消不通知、不通知自己）
-			if c.UserID > 0 && c.UserID != pd.UserID {
-				actorName := pd.Name
-				if actorName == "" {
-					actorName = pd.Username
-				}
-				var authorU model.User
-				_ = s.db.Select("username").First(&authorU, a.UserID).Error
-				_ = CreateNotification(s.db, model.Notification{
-					UserID:  c.UserID,
-					Type:    model.NotifTypeBlogCommentLike,
-					Title:   "有人赞了你的博客评论",
-					Body:    actorName + " 赞了你在《" + a.Title + "》下的评论",
-					ActorID: pd.UserID,
-					RefType: "blog_comment",
-					RefID:   c.ID,
-					Payload: mustJSON(map[string]interface{}{
-						"blogUsername": authorU.Username,
-						"blogSlug":     a.Slug,
-						"articleId":    a.ID,
-						"articleTitle": a.Title,
-						"commentId":    c.ID,
-					}),
-				})
-			}
-		}
-	}
 	var likeCount int
-	_ = s.db.Model(&model.BlogComment{}).Select("like_count").Where("id = ?", body.CommentID).Scan(&likeCount).Error
+	notifyAuthor := false
+	err := s.db.Transaction(func(tx *gorm.DB) error {
+		var existing model.BlogCommentLike
+		qerr := tx.Where("comment_id = ? AND user_id = ?", body.CommentID, pd.UserID).First(&existing).Error
+		if qerr == nil {
+			if err := tx.Delete(&existing).Error; err != nil {
+				return err
+			}
+			if err := tx.Model(&model.BlogComment{}).Where("id = ? AND like_count > 0", body.CommentID).
+				UpdateColumn("like_count", gorm.Expr("like_count - 1")).Error; err != nil {
+				return err
+			}
+			liked = false
+		} else if qerr == gorm.ErrRecordNotFound {
+			if err := tx.Create(&model.BlogCommentLike{CommentID: body.CommentID, UserID: pd.UserID}).Error; err != nil {
+				// 并发唯一冲突：视为已赞
+				if strings.Contains(err.Error(), "duplicate") || strings.Contains(err.Error(), "unique") {
+					liked = true
+					return nil
+				}
+				return err
+			}
+			if err := tx.Model(&model.BlogComment{}).Where("id = ?", body.CommentID).
+				UpdateColumn("like_count", gorm.Expr("like_count + 1")).Error; err != nil {
+				return err
+			}
+			liked = true
+			notifyAuthor = c.UserID > 0 && c.UserID != pd.UserID
+		} else {
+			return qerr
+		}
+		return tx.Model(&model.BlogComment{}).Select("like_count").Where("id = ?", body.CommentID).Scan(&likeCount).Error
+	})
+	if err != nil {
+		writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "操作失败，请稍后重试"})
+		return nil
+	}
+	if notifyAuthor {
+		actorName := pd.Name
+		if actorName == "" {
+			actorName = pd.Username
+		}
+		var authorU model.User
+		_ = s.db.Select("username").First(&authorU, a.UserID).Error
+		_ = CreateNotification(s.db, model.Notification{
+			UserID:  c.UserID,
+			Type:    model.NotifTypeBlogCommentLike,
+			Title:   "有人赞了你的博客评论",
+			Body:    actorName + " 赞了你在《" + a.Title + "》下的评论",
+			ActorID: pd.UserID,
+			RefType: "blog_comment",
+			RefID:   c.ID,
+			Payload: mustJSON(map[string]interface{}{
+				"blogUsername": authorU.Username,
+				"blogSlug":     a.Slug,
+				"articleId":    a.ID,
+				"articleTitle": a.Title,
+				"commentId":    c.ID,
+			}),
+		})
+	}
 	writeJSON(ctx.Response(), 200, map[string]interface{}{
 		"code": 0, "message": "success",
 		"data": map[string]interface{}{"liked": liked, "likeCount": likeCount, "commentId": body.CommentID},
@@ -2037,46 +2056,67 @@ func (s *BlogService) handleLikeToggle(ctx khttp.Context) error {
 		writeJSON(ctx.Response(), 404, map[string]interface{}{"code": 1, "message": "文章不存在"})
 		return nil
 	}
-	var existing model.BlogLike
-	err := s.db.Where("article_id = ? AND user_id = ?", body.ArticleID, pd.UserID).First(&existing).Error
 	liked := false
-	if err == nil {
-		_ = s.db.Delete(&existing).Error
-		_ = s.db.Model(&model.BlogArticle{}).Where("id = ? AND like_count > 0", body.ArticleID).
-			UpdateColumn("like_count", gorm.Expr("like_count - 1")).Error
-		liked = false
-	} else {
-		_ = s.db.Create(&model.BlogLike{ArticleID: body.ArticleID, UserID: pd.UserID}).Error
-		_ = s.db.Model(&model.BlogArticle{}).Where("id = ?", body.ArticleID).
-			UpdateColumn("like_count", gorm.Expr("like_count + 1")).Error
-		liked = true
-		// 点赞同步主站通知（取消不通知）
-		if a.UserID > 0 && a.UserID != pd.UserID {
-			actorName := pd.Name
-			if actorName == "" {
-				actorName = pd.Username
-			}
-			var authorU model.User
-			_ = s.db.Select("username").First(&authorU, a.UserID).Error
-			_ = CreateNotification(s.db, model.Notification{
-				UserID:  a.UserID,
-				Type:    model.NotifTypeBlogArticleLike,
-				Title:   "有人赞了你的博客文章",
-				Body:    actorName + " 赞了《" + a.Title + "》",
-				ActorID: pd.UserID,
-				RefType: "blog_article",
-				RefID:   a.ID,
-				Payload: mustJSON(map[string]interface{}{
-					"blogUsername": authorU.Username,
-					"blogSlug":     a.Slug,
-					"articleId":    a.ID,
-					"articleTitle": a.Title,
-				}),
-			})
-		}
-	}
 	var likeCount int
-	_ = s.db.Model(&model.BlogArticle{}).Select("like_count").Where("id = ?", body.ArticleID).Scan(&likeCount).Error
+	notifyAuthor := false
+	err := s.db.Transaction(func(tx *gorm.DB) error {
+		var existing model.BlogLike
+		qerr := tx.Where("article_id = ? AND user_id = ?", body.ArticleID, pd.UserID).First(&existing).Error
+		if qerr == nil {
+			if err := tx.Delete(&existing).Error; err != nil {
+				return err
+			}
+			if err := tx.Model(&model.BlogArticle{}).Where("id = ? AND like_count > 0", body.ArticleID).
+				UpdateColumn("like_count", gorm.Expr("like_count - 1")).Error; err != nil {
+				return err
+			}
+			liked = false
+		} else if qerr == gorm.ErrRecordNotFound {
+			if err := tx.Create(&model.BlogLike{ArticleID: body.ArticleID, UserID: pd.UserID}).Error; err != nil {
+				if strings.Contains(err.Error(), "duplicate") || strings.Contains(err.Error(), "unique") {
+					liked = true
+					return nil
+				}
+				return err
+			}
+			if err := tx.Model(&model.BlogArticle{}).Where("id = ?", body.ArticleID).
+				UpdateColumn("like_count", gorm.Expr("like_count + 1")).Error; err != nil {
+				return err
+			}
+			liked = true
+			notifyAuthor = a.UserID > 0 && a.UserID != pd.UserID
+		} else {
+			return qerr
+		}
+		return tx.Model(&model.BlogArticle{}).Select("like_count").Where("id = ?", body.ArticleID).Scan(&likeCount).Error
+	})
+	if err != nil {
+		writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "操作失败，请稍后重试"})
+		return nil
+	}
+	if notifyAuthor {
+		actorName := pd.Name
+		if actorName == "" {
+			actorName = pd.Username
+		}
+		var authorU model.User
+		_ = s.db.Select("username").First(&authorU, a.UserID).Error
+		_ = CreateNotification(s.db, model.Notification{
+			UserID:  a.UserID,
+			Type:    model.NotifTypeBlogArticleLike,
+			Title:   "有人赞了你的博客文章",
+			Body:    actorName + " 赞了《" + a.Title + "》",
+			ActorID: pd.UserID,
+			RefType: "blog_article",
+			RefID:   a.ID,
+			Payload: mustJSON(map[string]interface{}{
+				"blogUsername": authorU.Username,
+				"blogSlug":     a.Slug,
+				"articleId":    a.ID,
+				"articleTitle": a.Title,
+			}),
+		})
+	}
 	writeJSON(ctx.Response(), 200, map[string]interface{}{
 		"code": 0, "message": "success",
 		"data": map[string]interface{}{"liked": liked, "likeCount": likeCount},

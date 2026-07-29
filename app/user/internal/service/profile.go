@@ -162,6 +162,9 @@ func (p *ProfileService) GetList(ctx context.Context, req *profile.GetListReq) (
 	if pageSize < 1 {
 		pageSize = 20
 	}
+	if pageSize > 100 {
+		pageSize = 100
+	}
 	if pageNum < 1 {
 		pageNum = 1
 	}

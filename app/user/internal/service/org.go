@@ -1,6 +1,7 @@
 package service
 
 import (
+	"cwxu-algo/app/common/utils/sqllike"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -533,8 +534,7 @@ func (s *OrgService) handleDiscover(ctx khttp.Context) error {
 	kw := strings.TrimSpace(q.Get("q"))
 
 	dbq := s.db.Model(&model.Org{}).Where("status = ?", model.OrgStatusActive)
-	if kw != "" {
-		like := "%" + kw + "%"
+	if like := sqllike.Pattern(kw); like != "" {
 		dbq = dbq.Where("name ILIKE ? OR brand_title ILIKE ?", like, like)
 	}
 	var total int64
@@ -1288,8 +1288,7 @@ func (s *OrgService) handleMembers(ctx khttp.Context) error {
 			u.avatar AS avatar, m.role AS role, m.group_id AS group_id, m.joined_at AS joined_at`).
 		Joins("JOIN users u ON u.id = m.user_id").
 		Where("m.org_id = ?", orgID)
-	if keyword != "" {
-		like := "%" + keyword + "%"
+	if like := sqllike.Pattern(keyword); like != "" {
 		base = base.Where("u.name ILIKE ? OR u.username ILIKE ? OR m.org_display_name ILIKE ?", like, like, like)
 	}
 
@@ -1297,8 +1296,7 @@ func (s *OrgService) handleMembers(ctx khttp.Context) error {
 	countQ := s.db.Table("org_members AS m").
 		Joins("JOIN users u ON u.id = m.user_id").
 		Where("m.org_id = ?", orgID)
-	if keyword != "" {
-		like := "%" + keyword + "%"
+	if like := sqllike.Pattern(keyword); like != "" {
 		countQ = countQ.Where("u.name ILIKE ? OR u.username ILIKE ? OR m.org_display_name ILIKE ?", like, like, like)
 	}
 	_ = countQ.Count(&total).Error

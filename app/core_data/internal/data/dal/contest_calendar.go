@@ -1,6 +1,7 @@
 package dal
 
 import (
+	"cwxu-algo/app/common/utils/sqllike"
 	"fmt"
 	"strings"
 	"time"
@@ -140,7 +141,7 @@ func (d *ContestCalendarDal) List(q CalendarListQuery) ([]model.ContestCalendar,
 		db = db.Where("platform = ?", calspider.NormalizePlatform(p))
 	}
 	if kw := strings.TrimSpace(q.Keyword); kw != "" {
-		db = db.Where("name ILIKE ?", "%"+kw+"%")
+		db = db.Where("name ILIKE ?", sqllike.Pattern(kw))
 	}
 	switch strings.ToLower(strings.TrimSpace(q.Status)) {
 	case "ongoing":

@@ -1,6 +1,7 @@
 package service
 
 import (
+	"cwxu-algo/app/common/utils/sqllike"
 	"context"
 	"crypto/rand"
 	"encoding/json"
@@ -1916,7 +1917,7 @@ func (uc *ProblemUseCase) listProblemsDB(f ListProblemFilter) ([]model.Problem, 
 		}
 	}
 	if kw := strings.TrimSpace(f.Keyword); kw != "" {
-		like := "%" + kw + "%"
+		like := sqllike.Pattern(kw)
 		q = q.Where("(title ILIKE ? OR external_id ILIKE ?)", like, like)
 	}
 	if d := strings.TrimSpace(f.Difficulty); d != "" {

@@ -1,6 +1,7 @@
 package dal
 
 import (
+	"cwxu-algo/app/common/utils/sqllike"
 	"context"
 	"fmt"
 	"strings"
@@ -199,13 +200,14 @@ func (d *SocialDal) SearchUsers(ctx context.Context, keyword string, page, pageS
 	if pageSize < 1 || pageSize > 50 {
 		pageSize = 20
 	}
-	// 空关键词不扫全表，避免枚举
-	if kw == "" {
+	// 空关键词 / 仅通配符不扫全表，避免枚举
+	like := sqllike.Pattern(kw)
+	if like == "" {
 		return []SocialUser{}, 0, nil
 	}
 	q := d.db.WithContext(ctx).Model(&model.User{}).
 		Where("(privacy_configured = false OR allow_public_profile = true)").
-		Where("username ILIKE ? OR name ILIKE ?", "%"+kw+"%", "%"+kw+"%")
+		Where("username ILIKE ? OR name ILIKE ?", like, like)
 	var total int64
 	if err := q.Count(&total).Error; err != nil {
 		return nil, 0, err
@@ -538,10 +540,10 @@ func (d *SocialDal) SearchUsersInContext(ctx context.Context, keyword string, pa
 	if pageSize < 1 || pageSize > 50 {
 		pageSize = 20
 	}
-	if kw == "" {
+	like := sqllike.Pattern(kw)
+	if like == "" {
 		return []SocialUser{}, 0, nil
 	}
-	like := "%" + kw + "%"
 	publicID := d.PublicOrgID(ctx)
 	isPublicView := viewerOrgID == 0 || d.IsPublicOrg(ctx, viewerOrgID)
 

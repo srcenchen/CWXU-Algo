@@ -367,14 +367,20 @@ func (t *SpiderTask) DoBatchPlatform(ctx context.Context, platform string, needA
 }
 
 // DoBatch 为给定用户的每个绑定平台各入队一条消息（一次 Publish = 一个平台）。
-// batchSize / interval 保留兼容，已忽略：按调用方要求一次灌满 MQ。
+// batchSize：每批平台任务数（≤0 默认 30）；interval：批间休眠（≤0 默认 200ms），削峰防 MQ/DB 尖刺。
 // ctx 取消时提前结束（进程停机）。
-func (t *SpiderTask) DoBatch(ctx context.Context, userIds []int64, needAll bool, _ int, _ time.Duration) {
+func (t *SpiderTask) DoBatch(ctx context.Context, userIds []int64, needAll bool, batchSize int, interval time.Duration) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	if len(userIds) == 0 {
 		return
+	}
+	if batchSize <= 0 {
+		batchSize = 30
+	}
+	if interval <= 0 {
+		interval = 200 * time.Millisecond
 	}
 	// 一次查出所有绑定，避免 per-user 查库
 	type bind struct {
@@ -401,6 +407,13 @@ func (t *SpiderTask) DoBatch(ctx context.Context, userIds []int64, needAll bool,
 				default:
 				}
 				n += t.Do(uid, needAll).Published
+				if (i+1)%batchSize == 0 && i+1 < len(userIds) {
+					select {
+					case <-ctx.Done():
+						return
+					case <-time.After(interval):
+					}
+				}
 			}
 			log.Infof("SpiderTask: DoBatch (fallback) published=%d users=%d needAll=%v", n, len(userIds), needAll)
 			return
@@ -418,6 +431,63 @@ func (t *SpiderTask) DoBatch(ctx context.Context, userIds []int64, needAll bool,
 			continue
 		}
 		published += t.DoPlatform(b.UserID, b.Platform, needAll).Published
+		if (i+1)%batchSize == 0 && i+1 < len(binds) {
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(interval):
+			}
+		}
 	}
-	log.Infof("SpiderTask: DoBatch published=%d platform jobs for %d users needAll=%v", published, len(userIds), needAll)
+	log.Infof("SpiderTask: DoBatch published=%d platform jobs for %d users needAll=%v batch=%d interval=%v",
+		published, len(userIds), needAll, batchSize, interval)
+}
+
+// pending 评测重爬：与 biz/service 共用 Redis key（进程重启后 cron 仍可扫）。
+const (
+	pendingVerdictDueZKey     = "spider:pending_retry_due"
+	pendingVerdictSchedulePfx = "spider:pending_retry:"
+)
+
+// DrainPendingVerdictRetries 处理 ZSET 中已到期的 pending 重爬；返回入队次数。
+func (t *SpiderTask) DrainPendingVerdictRetries(limit int64) int {
+	if t == nil || t.rdb == nil {
+		return 0
+	}
+	if limit <= 0 {
+		limit = 50
+	}
+	ctx := context.Background()
+	now := float64(time.Now().Unix())
+	members, err := t.rdb.ZRangeByScore(ctx, pendingVerdictDueZKey, &redis.ZRangeBy{
+		Min: "-inf", Max: fmt.Sprintf("%f", now), Offset: 0, Count: limit,
+	}).Result()
+	if err != nil || len(members) == 0 {
+		return 0
+	}
+	n := 0
+	for _, m := range members {
+		removed, rerr := t.rdb.ZRem(ctx, pendingVerdictDueZKey, m).Result()
+		if rerr != nil || removed == 0 {
+			continue
+		}
+		i := strings.IndexByte(m, ':')
+		if i <= 0 || i+1 >= len(m) {
+			continue
+		}
+		var uid int64
+		if _, err := fmt.Sscanf(m[:i], "%d", &uid); err != nil || uid <= 0 {
+			continue
+		}
+		plat := m[i+1:]
+		if plat == "" {
+			continue
+		}
+		_ = t.rdb.Del(ctx, fmt.Sprintf("%s%d:%s", pendingVerdictSchedulePfx, uid, plat)).Err()
+		res := t.DoPlatform(uid, plat, false)
+		log.Infof("SpiderTask: pending-verdict retry enqueue user=%d platform=%s published=%d deduped=%d failed=%d",
+			uid, plat, res.Published, res.Deduped, res.Failed)
+		n++
+	}
+	return n
 }

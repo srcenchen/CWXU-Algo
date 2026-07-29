@@ -1,3 +1,5 @@
+// Package biz 的 ProfileUseCase：列表 / 按组 ID 的薄封装；复杂逻辑在 service/profile.go
+//（刻意保留，避免半吊子下沉）。
 package biz
 
 import (
@@ -6,6 +8,7 @@ import (
 	"cwxu-algo/app/user/internal/data/model"
 )
 
+// ProfileUseCase 列表/按组 ID 等薄封装；复杂资料逻辑在 service/profile.go（刻意保留本层）。
 type ProfileUseCase struct {
 	profileDal *dal.ProfileDal
 }

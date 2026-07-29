@@ -1,6 +1,7 @@
 package service
 
 import (
+	"cwxu-algo/app/common/utils/sqllike"
 	"context"
 	"crypto/hmac"
 	"crypto/rand"
@@ -219,7 +220,7 @@ func (s *ProblemsetService) handleSquare(ctx khttp.Context) error {
 	q := s.db.Model(&model.Problemset{}).
 		Where("visibility = ? AND kind = ?", model.ProblemsetVisPublic, model.ProblemsetKindCustom)
 	if keyword != "" {
-		like := "%" + keyword + "%"
+		like := sqllike.Pattern(keyword)
 		q = q.Where("title ILIKE ? OR description ILIKE ?", like, like)
 	}
 	var total int64
@@ -232,7 +233,7 @@ func (s *ProblemsetService) handleSquare(ctx khttp.Context) error {
 		if keyword != "" {
 			q2 := s.db.Model(&model.Problemset{}).
 				Where("visibility = ? AND kind = ?", model.ProblemsetVisPublic, model.ProblemsetKindCustom).
-				Where("title LIKE ? OR description LIKE ?", "%"+keyword+"%", "%"+keyword+"%")
+				Where("title LIKE ? OR description LIKE ?", sqllike.Pattern(keyword), sqllike.Pattern(keyword))
 			_ = q2.Count(&total).Error
 			_ = q2.Order("like_count DESC, updated_at DESC").
 				Offset((page - 1) * pageSize).Limit(pageSize).Find(&list).Error

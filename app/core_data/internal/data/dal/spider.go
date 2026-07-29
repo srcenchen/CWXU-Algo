@@ -1,6 +1,7 @@
 package dal
 
 import (
+	"cwxu-algo/app/common/utils/sqllike"
 	"context"
 	"cwxu-algo/app/common/utils"
 	"cwxu-algo/app/core_data/internal/data"
@@ -252,7 +253,7 @@ func (s *SpiderDal) GetContestListScoped(ctx context.Context, q ContestListQuery
 		}
 		if kw := strings.TrimSpace(q.Keyword); kw != "" {
 			// 名称或 contest_id 模糊匹配
-			like := "%" + kw + "%"
+			like := sqllike.Pattern(kw)
 			db = db.Where("(contest_name ILIKE ? OR contest_id ILIKE ?)", like, like)
 		}
 		if q.TimeFrom > 0 {

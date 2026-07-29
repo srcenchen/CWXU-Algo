@@ -14,6 +14,7 @@ import (
 	"cwxu-algo/app/core_data/task"
 
 	"github.com/go-kratos/kratos/v2/log"
+	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -250,48 +251,61 @@ func (uc *SpiderUseCase) maybeSchedulePendingVerdictRetry(userId int64, platform
 	uc.schedulePendingVerdictRetry(userId, platform, n)
 }
 
-// schedulePendingVerdictRetry 用 Redis 占坑防叠 timer，延迟后 needAll=false 增量入队。
+// pendingVerdictDueZKey Redis ZSET：member=userId:platform，score=到期 unix 秒。
+// 进程重启后 cron 仍可扫出到期项，避免 time.AfterFunc 丢失。
+const pendingVerdictDueZKey = "spider:pending_retry_due"
+
+func pendingVerdictMember(userId int64, platform string) string {
+	return fmt.Sprintf("%d:%s", userId, platform)
+}
+
+// schedulePendingVerdictRetry 用 Redis 占坑 + ZSET 到期表；cron 扫到期后 needAll=false 增量入队。
 func (uc *SpiderUseCase) schedulePendingVerdictRetry(userId int64, platform string, pendingN int) {
 	if uc.spiderTask == nil {
 		return
 	}
 	ctx := context.Background()
-	if uc.data != nil && uc.data.RDB != nil {
-		// 已有未触发的调度则跳过（同用户同平台只挂一个 timer）
-		ok, err := uc.data.RDB.SetNX(ctx, pendingVerdictScheduleKey(userId, platform), "1", pendingVerdictScheduleTTL).Result()
-		if err != nil {
-			log.Warnf("Spider: pending-verdict schedule SetNX user=%d platform=%s: %v", userId, platform, err)
-			// Redis 异常仍尝试调度，正确性优先
-		} else if !ok {
-			log.Debugf("Spider: pending-verdict retry already scheduled user=%d platform=%s pending=%d",
-				userId, platform, pendingN)
+	if uc.data == nil || uc.data.RDB == nil {
+		// 无 Redis 时无法持久化调度，退化为进程内 timer（重启会丢）
+		log.Warnf("Spider: pending-verdict no redis, AfterFunc fallback user=%d platform=%s", userId, platform)
+		uid, plat := userId, platform
+		time.AfterFunc(pendingVerdictRetryDelay, func() {
+			res := uc.spiderTask.DoPlatform(uid, plat, false)
+			log.Infof("Spider: pending-verdict retry enqueue (fallback) user=%d platform=%s published=%d",
+				uid, plat, res.Published)
+		})
+		return
+	}
+	// 已有未触发的调度则跳过（同用户同平台只挂一个）
+	ok, err := uc.data.RDB.SetNX(ctx, pendingVerdictScheduleKey(userId, platform), "1", pendingVerdictScheduleTTL).Result()
+	if err != nil {
+		log.Warnf("Spider: pending-verdict schedule SetNX user=%d platform=%s: %v", userId, platform, err)
+	} else if !ok {
+		log.Debugf("Spider: pending-verdict retry already scheduled user=%d platform=%s pending=%d",
+			userId, platform, pendingN)
+		return
+	}
+	// 占坑成功后再计轮次（OJ 永久卡死保护）
+	rk := pendingVerdictRoundKey(userId, platform)
+	round, err := uc.data.RDB.Incr(ctx, rk).Result()
+	if err == nil {
+		_ = uc.data.RDB.Expire(ctx, rk, pendingVerdictMaxAge).Err()
+		if round > pendingVerdictMaxRounds {
+			_ = uc.data.RDB.Del(ctx, pendingVerdictScheduleKey(userId, platform)).Err()
+			log.Warnf("Spider: pending-verdict retry cap reached user=%d platform=%s rounds=%d pending=%d",
+				userId, platform, round, pendingN)
 			return
 		}
-		// 占坑成功后再计轮次（OJ 永久卡死保护）
-		rk := pendingVerdictRoundKey(userId, platform)
-		round, err := uc.data.RDB.Incr(ctx, rk).Result()
-		if err == nil {
-			_ = uc.data.RDB.Expire(ctx, rk, pendingVerdictMaxAge).Err()
-			if round > pendingVerdictMaxRounds {
-				_ = uc.data.RDB.Del(ctx, pendingVerdictScheduleKey(userId, platform)).Err()
-				log.Warnf("Spider: pending-verdict retry cap reached user=%d platform=%s rounds=%d pending=%d",
-					userId, platform, round, pendingN)
-				return
-			}
-		}
 	}
-	log.Infof("Spider: schedule pending-verdict retry user=%d platform=%s pending=%d after %v",
+	dueAt := float64(time.Now().Add(pendingVerdictRetryDelay).Unix())
+	member := pendingVerdictMember(userId, platform)
+	if err := uc.data.RDB.ZAdd(ctx, pendingVerdictDueZKey, redis.Z{Score: dueAt, Member: member}).Err(); err != nil {
+		log.Warnf("Spider: pending-verdict ZAdd user=%d platform=%s: %v", userId, platform, err)
+		// ZAdd 失败仍保留 schedule key TTL，到期后自然释放；正确性靠周期爬兜底
+		return
+	}
+	log.Infof("Spider: schedule pending-verdict retry user=%d platform=%s pending=%d after %v (redis zset)",
 		userId, platform, pendingN, pendingVerdictRetryDelay)
-	uid, plat := userId, platform
-	time.AfterFunc(pendingVerdictRetryDelay, func() {
-		if uc.data != nil && uc.data.RDB != nil {
-			_ = uc.data.RDB.Del(context.Background(), pendingVerdictScheduleKey(uid, plat)).Err()
-		}
-		// 不 ResetDedup：若正常周期爬正 inflight，让其覆盖即可
-		res := uc.spiderTask.DoPlatform(uid, plat, false)
-		log.Infof("Spider: pending-verdict retry enqueue user=%d platform=%s published=%d deduped=%d failed=%d",
-			uid, plat, res.Published, res.Deduped, res.Failed)
-	})
 }
 
 // tryPlatformWriteLock 获取 user+platform 写入锁；短轮询等待，避免重绑后新任务与旧任务交接时直接失败。
@@ -330,7 +344,11 @@ func (uc *SpiderUseCase) tryPlatformWriteLock(ctx context.Context, userId int64,
 }
 
 // fetchAndSaveContest 拉取并写入比赛记录；返回是否有写入尝试（Save 无法可靠区分 RowsAffected，有数据即视为可能变更）
-func (uc *SpiderUseCase) fetchAndSaveContest(userId int64, plat model.Platform, needAll bool) (bool, error) {
+// ctx 与 loadDataTimeout 对齐：超时后不再发起 OJ 拉取（平台插件暂无透传 ctx，至少在入口尊重取消）。
+func (uc *SpiderUseCase) fetchAndSaveContest(ctx context.Context, userId int64, plat model.Platform, needAll bool) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, fmt.Errorf("contest fetch cancelled: %w", err)
+	}
 	p, ok := spider.Get(plat.Platform)
 	if !ok {
 		return false, fmt.Errorf("平台插件不存在")
@@ -557,7 +575,10 @@ func (uc *SpiderUseCase) loadOnePlatform(ctx context.Context, userId int64, plat
 		if rows > 0 {
 			anyChange = true
 		}
-		if contestChanged, contestErr := uc.fetchAndSaveContest(userId, plat, needAll); contestErr != nil {
+		if err := ctx.Err(); err != nil {
+			return anyChange, fmt.Errorf("load platform timeout user=%d platform=%s: %w", userId, plat.Platform, err)
+		}
+		if contestChanged, contestErr := uc.fetchAndSaveContest(ctx, userId, plat, needAll); contestErr != nil {
 			log.Errorf("Spider: fetchAndSaveContest %s %s 失败: %v", plat.Platform, plat.Username, contestErr)
 		} else if contestChanged {
 			anyChange = true

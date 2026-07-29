@@ -1,6 +1,7 @@
 package dal
 
 import (
+	"cwxu-algo/app/common/utils/sqllike"
 	"context"
 	"errors"
 	"fmt"
@@ -46,11 +47,10 @@ func (d *ProfileDal) GetById(ctx context.Context, userId int64) (*model.User, er
 // GetByName 按姓名或用户名模糊查询（ILIKE，忽略大小写）
 func (d *ProfileDal) GetByName(ctx context.Context, name string) ([]*model.User, error) {
 	var userList []*model.User
-	kw := strings.TrimSpace(name)
-	if kw == "" {
+	like := sqllike.Pattern(name)
+	if like == "" {
 		return userList, nil
 	}
-	like := "%" + kw + "%"
 	err := d.db.WithContext(ctx).
 		Select("id, name, username").
 		Where("name ILIKE ? OR username ILIKE ?", like, like).
@@ -360,8 +360,7 @@ func (d *ProfileDal) OrgDisplayNamesByUserIDs(ctx context.Context, orgID uint, u
 func (d *ProfileDal) GetList(ctx context.Context, pageSize, pageNum int64, keyword string, dormantOnly bool, inactiveDays int) ([]model.User, int64, error) {
 	kw := strings.TrimSpace(keyword)
 	q := d.db.WithContext(ctx).Model(&model.User{})
-	if kw != "" {
-		like := "%" + kw + "%"
+	if like := sqllike.Pattern(kw); like != "" {
 		// 站内昵称 ≡ 公共域 org_display_name；一并模糊匹配
 		if pubID, e := d.PublicOrgID(ctx); e == nil && pubID > 0 {
 			q = q.Where(`username ILIKE ? OR name ILIKE ? OR EXISTS (
@@ -1207,8 +1206,7 @@ func (d *ProfileDal) GetListByOrg(ctx context.Context, orgID uint, pageSize, pag
 		Table("org_members AS m").
 		Joins("JOIN users AS u ON u.id = m.user_id").
 		Where("m.org_id = ?", orgID)
-	if kw != "" {
-		like := "%" + kw + "%"
+	if like := sqllike.Pattern(kw); like != "" {
 		countQ = countQ.Where("u.username ILIKE ? OR u.name ILIKE ? OR m.org_display_name ILIKE ?", like, like, like)
 	}
 	countQ = d.applyInactiveListFilter(ctx, countQ, "u", dormantOnly, inactiveDays)
@@ -1224,8 +1222,7 @@ func (d *ProfileDal) GetListByOrg(ctx context.Context, orgID uint, pageSize, pag
 			u.spider_interval_min_override, u.ai_summary_interval_min_override, u.created_at,
 			u.sync_exempt, u.last_login_at, u.admin_force_dormant, u.disabled`).
 		Joins("JOIN org_members AS m ON m.user_id = u.id AND m.org_id = ?", orgID)
-	if kw != "" {
-		like := "%" + kw + "%"
+	if like := sqllike.Pattern(kw); like != "" {
 		listQ = listQ.Where("u.username ILIKE ? OR u.name ILIKE ? OR m.org_display_name ILIKE ?", like, like, like)
 	}
 	listQ = d.applyInactiveListFilter(ctx, listQ, "u", dormantOnly, inactiveDays)

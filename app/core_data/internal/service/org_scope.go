@@ -15,8 +15,9 @@ import (
 	"github.com/go-kratos/kratos/v2/registry"
 )
 
-// orgScopeMembersCacheTTL 组织成员列表进程内短缓存（动态流/比赛列表每请求都要成员列表）
-const orgScopeMembersCacheTTL = 60 * time.Second
+// orgScopeMembersCacheTTL 组织成员列表进程内短缓存（动态流/比赛列表每请求都要成员列表）。
+// 30s：user 改成员后无法直调 core 失效，靠短 TTL 折中；见 InvalidateOrgMemberCache。
+const orgScopeMembersCacheTTL = 30 * time.Second
 
 // orgScopeMembersFailBackoff user 服务抖动时的重试间隔：期间直接用上一次成功值，
 // 避免每个请求都去撞一次超时的 RPC（比赛列表等会因此整页变空 / 变慢）。
@@ -39,7 +40,21 @@ var (
 	orgScopePublicIDAt time.Time
 )
 
-// ResolveOrgMemberIDs 解析组织成员 userId 列表（带 60s 进程内缓存）。
+// InvalidateOrgMemberCache 清进程内组织成员缓存。
+// orgID=0 时清空全部；否则只删对应 key。供成员变更后调用（当前跨服务无 pub/sub，Resolve 靠 30s TTL 折中）。
+func InvalidateOrgMemberCache(orgID uint) {
+	orgScopeMembersMu.Lock()
+	defer orgScopeMembersMu.Unlock()
+	if orgID == 0 {
+		orgScopeMembersCache = map[uint]orgScopeMembersEntry{}
+		orgScopePublicID = 0
+		orgScopePublicIDAt = time.Time{}
+		return
+	}
+	delete(orgScopeMembersCache, orgID)
+}
+
+// ResolveOrgMemberIDs 解析组织成员 userId 列表（带 30s 进程内缓存）。
 // orgID=0 时用 JWT 当前组织；仍为 0 则 user 服务回落公共域。
 // scopeSite=true 且具备全站统计权限：unrestricted=true 表示全站。
 func ResolveOrgMemberIDs(ctx context.Context, reg *registry.Registrar, orgID uint, scopeSite bool) (userIDs []int64, resolvedOrg uint, unrestricted bool, err error) {

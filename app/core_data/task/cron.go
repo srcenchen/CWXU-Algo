@@ -500,6 +500,15 @@ func (t *CronTask) Do() {
 	_, _ = c.AddFunc("*/5 * * * *", func() {
 		t.runSpiderTick()
 	})
+	// 每分钟扫 pending 评测重爬 ZSET（进程重启后仍可恢复）
+	_, _ = c.AddFunc("* * * * *", func() {
+		if !t.tryCronLock("pending_verdict", 50*time.Second) {
+			return
+		}
+		if n := t.spider.DrainPendingVerdictRetries(50); n > 0 {
+			log.Infof("CronTask: drained %d pending-verdict retries", n)
+		}
+	})
 	_, _ = c.AddFunc("30 7 * * *", func() {
 		t.runDailySummaryTick()
 	})

@@ -1,6 +1,7 @@
 package service
 
 import (
+	"cwxu-algo/app/common/utils/sqllike"
 	"strconv"
 	"strings"
 
@@ -39,6 +40,7 @@ func RegisterRbacRoutes(srv *khttp.Server, s *RbacService) {
 	r.GET("/v1/user/rbac/roles/members", s.handleRoleMembers)
 	r.POST("/v1/user/rbac/roles/assign", s.handleRoleAssign)
 	r.POST("/v1/user/rbac/roles/unassign", s.handleRoleUnassign)
+	r.GET("/v1/user/rbac/user-roles", s.handleUserRoles)
 	r.GET("/v1/user/rbac/my-permissions", s.handleMyPermissions)
 }
 
@@ -762,8 +764,9 @@ func (s *RbacService) handleRoleMembers(ctx khttp.Context) error {
 		Joins("JOIN users u ON u.id = ur.user_id").
 		Where("ur.role_id = ? AND ur.org_id = ?", role.ID, orgID)
 	if keyword != "" {
-		like := "%" + keyword + "%"
-		base = base.Where("u.username ILIKE ? OR u.name ILIKE ?", like, like)
+		if like := sqllike.Pattern(keyword); like != "" {
+			base = base.Where("u.username ILIKE ? OR u.name ILIKE ?", like, like)
+		}
 	}
 	var total int64
 	_ = base.Session(&gorm.Session{}).Count(&total).Error
@@ -901,6 +904,38 @@ func (s *RbacService) handleRoleUnassign(ctx khttp.Context) error {
 		return nil
 	}
 	writeJSON(ctx.Response(), 200, map[string]interface{}{"code": 0, "message": "已移出角色；对方刷新登录态后权限失效"})
+	return nil
+}
+
+// handleUserRoles 某用户持有的站点级自定义角色 id 列表（org_id=0），消 N+1。
+// 权限：site.role.manage 或 site.user.list（与站点角色/用户管理一致）。
+func (s *RbacService) handleUserRoles(ctx khttp.Context) error {
+	pd := auth.GetCurrentUser(ctx)
+	if pd == nil {
+		writeJSON(ctx.Response(), 401, map[string]interface{}{"code": 1, "message": "请先登录"})
+		return nil
+	}
+	if !auth.HasPerm(ctx, rbac.PermSiteRoleManage) && !auth.HasPerm(ctx, rbac.PermSiteUserList) {
+		writeJSON(ctx.Response(), 403, map[string]interface{}{"code": 1, "message": "权限不足"})
+		return nil
+	}
+	q := ctx.Request().URL.Query()
+	userID64, _ := strconv.ParseUint(q.Get("userId"), 10, 64)
+	if userID64 == 0 {
+		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "缺少 userId"})
+		return nil
+	}
+	var roleIDs []uint
+	_ = s.db.Model(&model.UserRole{}).
+		Where("user_id = ? AND org_id = 0", uint(userID64)).
+		Order("role_id ASC").
+		Pluck("role_id", &roleIDs).Error
+	if roleIDs == nil {
+		roleIDs = []uint{}
+	}
+	writeJSON(ctx.Response(), 200, map[string]interface{}{
+		"code": 0, "roleIds": roleIDs,
+	})
 	return nil
 }
 
