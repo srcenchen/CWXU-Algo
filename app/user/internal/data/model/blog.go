@@ -204,9 +204,37 @@ type BlogSiteConfig struct {
 
 	// ImageUploadEnabled 站管在 /admin/blog 授权后，该作者可上传又拍云图片（默认关）
 	ImageUploadEnabled bool `gorm:"not null;default:false;comment:是否允许图片上传"`
+
+	// 固定槽位页面（Markdown；空=前端默认）
+	AboutMD     string `gorm:"type:text;comment:关于页Markdown"`
+	HomeIntroMD string `gorm:"type:text;comment:首页介绍Markdown"`
+	FriendsMD   string `gorm:"type:text;comment:友链页Markdown"`
 }
 
 func (BlogSiteConfig) TableName() string { return "blog_site_configs" }
+
+// BlogTag is a per-user free-form tag (same author merges by lower name).
+type BlogTag struct {
+	ID        uint `gorm:"primaryKey"`
+	CreatedAt time.Time
+	UpdatedAt time.Time
+	UserID    uint   `gorm:"not null;uniqueIndex:idx_blog_tag_user_lower,priority:1;comment:作者"`
+	Name      string `gorm:"size:32;not null;comment:标签名"`
+	// NameLower 用于大小写不敏感合并
+	NameLower string `gorm:"size:32;not null;uniqueIndex:idx_blog_tag_user_lower,priority:2;comment:小写名"`
+}
+
+func (BlogTag) TableName() string { return "blog_tags" }
+
+// BlogArticleTag is M2M between articles and tags.
+type BlogArticleTag struct {
+	ID        uint `gorm:"primaryKey"`
+	CreatedAt time.Time
+	ArticleID uint `gorm:"not null;uniqueIndex:idx_blog_art_tag,priority:1;index;comment:文章"`
+	TagID     uint `gorm:"not null;uniqueIndex:idx_blog_art_tag,priority:2;index;comment:标签"`
+}
+
+func (BlogArticleTag) TableName() string { return "blog_article_tags" }
 
 // BlogImageAsset 用户经又拍云上传的图片资产登记，供未引用 GC。
 type BlogImageAsset struct {

@@ -119,6 +119,8 @@ func migrateModels(db *gorm.DB) {
 		&model.BlogArticle{},
 		&model.BlogCategory{},
 		&model.BlogArticleOrg{},
+		&model.BlogTag{},
+		&model.BlogArticleTag{},
 		&model.BlogComment{},
 		&model.BlogCommentLike{},
 		&model.BlogLike{},

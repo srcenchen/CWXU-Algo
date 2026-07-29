@@ -36,9 +36,12 @@ const (
 	maxBlogContent = 512 << 10 // 512KB
 	maxBlogCover   = 1024
 	maxBlogSlug    = 96
-	maxCommentLen   = 4000
+	maxCommentLen  = 4000
 	maxBlogCmtDepth = 3 // 顶层 depth=0，最多再嵌套 2 层回复
-	blogUnlockTTL   = 12 * time.Hour
+	blogUnlockTTL  = 12 * time.Hour
+	maxBlogTags    = 20
+	maxBlogTagLen  = 32
+	maxSlotMD      = 64 << 10 // 64KB per slot page
 )
 
 // BlogService personal blog articles, comments, likes, categories, theme flags.
@@ -62,6 +65,7 @@ func RegisterBlogRoutes(srv *khttp.Server, bs *BlogService) {
 	r.GET("/v1/user/blog/plaza", bs.handlePlaza)
 	r.GET("/v1/user/blog/authors", bs.handleAuthors)
 	r.GET("/v1/user/blog/categories", bs.handleListCategoriesPublic)
+	r.GET("/v1/user/blog/tags", bs.handleListTagsPublic)
 	r.GET("/v1/user/blog/comment/list", bs.handleListComments)
 	r.GET("/v1/user/blog/theme/status", bs.handleThemeStatus)
 
@@ -280,15 +284,16 @@ func (s *BlogService) likedBy(articleID, userID uint) bool {
 	return n > 0
 }
 
-// blogListPrefetch 列表页预取：整页文章的已赞集合与组织 id 分组，消除逐篇 N+1 查询。
+// blogListPrefetch 列表页预取：整页文章的已赞集合、组织 id、tags，消除逐篇 N+1 查询。
 type blogListPrefetch struct {
 	liked  map[uint]bool
 	orgIDs map[uint][]uint
+	tags   map[uint][]string
 }
 
-// prefetchArticleExtras 对整页文章 id 各做一次 IN 批量查询（liked / orgIds）。
+// prefetchArticleExtras 对整页文章 id 各做一次 IN 批量查询（liked / orgIds / tags）。
 func (s *BlogService) prefetchArticleExtras(list []model.BlogArticle, viewerID uint) *blogListPrefetch {
-	pre := &blogListPrefetch{liked: map[uint]bool{}, orgIDs: map[uint][]uint{}}
+	pre := &blogListPrefetch{liked: map[uint]bool{}, orgIDs: map[uint][]uint{}, tags: map[uint][]string{}}
 	if len(list) == 0 {
 		return pre
 	}
@@ -308,23 +313,43 @@ func (s *BlogService) prefetchArticleExtras(list []model.BlogArticle, viewerID u
 	for _, r := range rows {
 		pre.orgIDs[r.ArticleID] = append(pre.orgIDs[r.ArticleID], r.OrgID)
 	}
+	type tagRow struct {
+		ArticleID uint
+		Name      string
+	}
+	var trows []tagRow
+	_ = s.db.Table("blog_article_tags AS bat").
+		Select("bat.article_id, bt.name").
+		Joins("JOIN blog_tags bt ON bt.id = bat.tag_id").
+		Where("bat.article_id IN ?", ids).
+		Order("bt.name ASC").
+		Scan(&trows).Error
+	for _, r := range trows {
+		pre.tags[r.ArticleID] = append(pre.tags[r.ArticleID], r.Name)
+	}
 	return pre
 }
 
-// articleToMap 序列化文章；pre 非空时使用预取好的 liked/orgIds（列表页），
+// articleToMap 序列化文章；pre 非空时使用预取好的 liked/orgIds/tags（列表页），
 // 为 nil 时回落单篇查询（详情等单文章场景）。
 func (s *BlogService) articleToMap(a *model.BlogArticle, author *model.User, d blogaccess.Decision, viewerID uint, includeBody bool, pre *blogListPrefetch) map[string]interface{} {
 	liked := false
 	var orgIDs []uint
+	var tags []string
 	if pre != nil {
 		liked = pre.liked[a.ID]
 		orgIDs = pre.orgIDs[a.ID]
 		if orgIDs == nil {
 			orgIDs = []uint{}
 		}
+		tags = pre.tags[a.ID]
+		if tags == nil {
+			tags = []string{}
+		}
 	} else {
 		liked = s.likedBy(a.ID, viewerID)
 		orgIDs = s.loadOrgIDs(a.ID)
+		tags = s.loadArticleTags(a.ID)
 	}
 	m := map[string]interface{}{
 		"id":                a.ID,
@@ -336,6 +361,7 @@ func (s *BlogService) articleToMap(a *model.BlogArticle, author *model.User, d b
 		"recommend":         a.Recommend,
 		"syncToMainProfile": a.SyncToMainProfile,
 		"categoryId":        a.CategoryID,
+		"tags":              tags,
 		"viewCount":         a.ViewCount,
 		"likeCount":         a.LikeCount,
 		"commentCount":      a.CommentCount,
@@ -418,6 +444,7 @@ func (s *BlogService) handleListByUsername(ctx khttp.Context) error {
 	page, pageSize := parsePage(ctx.Request())
 	categoryID, _ := strconv.ParseUint(ctx.Request().URL.Query().Get("categoryId"), 10, 64)
 	keyword := strings.TrimSpace(ctx.Request().URL.Query().Get("keyword"))
+	tagFilter := strings.TrimSpace(ctx.Request().URL.Query().Get("tag"))
 
 	q := s.db.Model(&model.BlogArticle{}).Where("user_id = ?", u.ID)
 	// non-owner: only public + password (meta); never private；且须审核通过
@@ -431,6 +458,18 @@ func (s *BlogService) handleListByUsername(ctx khttp.Context) error {
 	if keyword != "" {
 		like := sqllike.Pattern(keyword)
 		q = q.Where("title ILIKE ? OR summary ILIKE ?", like, like)
+	}
+	if tagFilter != "" {
+		// 模糊：子串匹配作者 tag 名
+		like := sqllike.Pattern(tagFilter)
+		q = q.Where(
+			`id IN (
+				SELECT bat.article_id FROM blog_article_tags bat
+				JOIN blog_tags bt ON bt.id = bat.tag_id
+				WHERE bt.user_id = ? AND bt.name ILIKE ?
+			)`,
+			u.ID, like,
+		)
 	}
 
 	var total int64
@@ -490,6 +529,9 @@ func (s *BlogService) handleListByUsername(ctx khttp.Context) error {
 			"colorScheme":  siteCfg.ColorScheme,
 			"subtitle":     siteCfg.Subtitle,
 			"socialLinks":  siteCfg.SocialLinks,
+			"aboutMd":      siteCfg.AboutMD,
+			"homeIntroMd":  siteCfg.HomeIntroMD,
+			"friendsMd":    siteCfg.FriendsMD,
 			"isOwner":      isOwner,
 			"activated":    activated,
 		},
@@ -636,11 +678,13 @@ type blogArticleWriteReq struct {
 	Visibility string `json:"visibility"`
 	Password   string `json:"password"`
 	// Recommend 作者端不可写：仅站管/资源审核员经 admin/moderate 设精选。
-	// SyncToMainProfile / OrgIDs 对公开文仍自动同步资料与组织发现。
-	Recommend         bool   `json:"recommend"`
-	SyncToMainProfile bool   `json:"syncToMainProfile"`
-	CategoryID        *uint  `json:"categoryId"`
-	OrgIDs            []uint `json:"orgIds"`
+	Recommend bool `json:"recommend"`
+	// SyncToMainProfile 公开文可写：true=进广场/组织发现；false=仅个人站公开。
+	// 省略时公开默认 true；非公开强制 false。用指针区分「未传」与「显式 false」。
+	SyncToMainProfile *bool    `json:"syncToMainProfile"`
+	CategoryID        *uint    `json:"categoryId"`
+	OrgIDs            []uint   `json:"orgIds"`
+	Tags              []string `json:"tags"`
 	// ClearPassword when true removes password on update (if visibility changes away).
 	ClearPassword bool `json:"clearPassword"`
 }
@@ -675,7 +719,12 @@ func (s *BlogService) handleCreate(ctx khttp.Context) error {
 		writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "保存失败"})
 		return nil
 	}
-	_ = s.applyAutoOrgSurface(a.ID, a.UserID, a.Visibility)
+	// create：nil tags = 无标签
+	if msg := s.replaceArticleTags(a.ID, a.UserID, req.Tags); msg != "" {
+		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": msg})
+		return nil
+	}
+	_ = s.applyAutoOrgSurface(a.ID, a.UserID, a.Visibility, a.SyncToMainProfile)
 	go s.gcUserBlogImages(a.UserID)
 	d := blogaccess.Evaluate(blogaccess.ArticleAccess{
 		Visibility:  a.Visibility,
@@ -745,6 +794,10 @@ func (s *BlogService) handleUpdate(ctx khttp.Context) error {
 	} else {
 		a.Recommend = false
 	}
+	// 更新时未传 sync 标志：保留原值（仅公开时）；非公开已在 build 里强制 false
+	if req.SyncToMainProfile == nil && blogaccess.AutoSurface(a.Visibility) {
+		a.SyncToMainProfile = existing.SyncToMainProfile
+	}
 	if err := s.db.Save(a).Error; err != nil {
 		if strings.Contains(err.Error(), "duplicate") || strings.Contains(err.Error(), "unique") {
 			writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "短链已被占用，请换一个"})
@@ -753,7 +806,14 @@ func (s *BlogService) handleUpdate(ctx khttp.Context) error {
 		writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "保存失败"})
 		return nil
 	}
-	_ = s.applyAutoOrgSurface(a.ID, a.UserID, a.Visibility)
+	// update：省略 tags 字段则保留原标签；显式 [] 清空
+	if req.Tags != nil {
+		if msg := s.replaceArticleTags(a.ID, a.UserID, req.Tags); msg != "" {
+			writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": msg})
+			return nil
+		}
+	}
+	_ = s.applyAutoOrgSurface(a.ID, a.UserID, a.Visibility, a.SyncToMainProfile)
 	// 保存后清理未写入正文/头图的又拍云图
 	go s.gcUserBlogImages(a.UserID)
 	d := blogaccess.Evaluate(blogaccess.ArticleAccess{
@@ -886,8 +946,16 @@ func (s *BlogService) buildArticleFromReq(userID, existingID uint, req *blogArti
 		}
 	}
 
-	// 公开文自动同步主站资料/组织发现；精选(recommend) 默认 false，由审核员设
-	auto := blogaccess.AutoSurface(vis)
+	// 公开文默认同步主站；作者可显式 false 仅留个人站。非公开强制不同步。
+	// 精选(recommend) 默认 false，由审核员设。
+	sync := false
+	if blogaccess.AutoSurface(vis) {
+		if req.SyncToMainProfile == nil {
+			sync = true
+		} else {
+			sync = *req.SyncToMainProfile
+		}
+	}
 	return &model.BlogArticle{
 		UserID:            userID,
 		Slug:              slug,
@@ -898,15 +966,15 @@ func (s *BlogService) buildArticleFromReq(userID, existingID uint, req *blogArti
 		Visibility:        vis,
 		PasswordHash:      pwHash,
 		Recommend:         false,
-		SyncToMainProfile: auto,
+		SyncToMainProfile: sync,
 		CategoryID:        req.CategoryID,
 	}, ""
 }
 
-// applyAutoOrgSurface syncs article to all orgs the author belongs to when public.
-// Non-public clears org surfaces.
-func (s *BlogService) applyAutoOrgSurface(articleID, userID uint, visibility string) error {
-	if !blogaccess.AutoSurface(visibility) {
+// applyAutoOrgSurface syncs article to all orgs the author belongs to when public AND sync.
+// Non-public or unsynced clears org surfaces.
+func (s *BlogService) applyAutoOrgSurface(articleID, userID uint, visibility string, syncToMain bool) error {
+	if !blogaccess.AutoSurface(visibility) || !syncToMain {
 		return s.db.Where("article_id = ?", articleID).Delete(&model.BlogArticleOrg{}).Error
 	}
 	var orgIDs []uint
@@ -1032,6 +1100,7 @@ func (s *BlogService) handleDelete(ctx khttp.Context) error {
 	ownerID := a.UserID
 	_ = s.db.Transaction(func(tx *gorm.DB) error {
 		_ = tx.Where("article_id = ?", a.ID).Delete(&model.BlogArticleOrg{}).Error
+		_ = tx.Where("article_id = ?", a.ID).Delete(&model.BlogArticleTag{}).Error
 		// 先清评论点赞再删评论
 		var cmtIDs []uint
 		_ = tx.Model(&model.BlogComment{}).Where("article_id = ?", a.ID).Pluck("id", &cmtIDs).Error
@@ -1099,9 +1168,10 @@ func (s *BlogService) handleMine(ctx khttp.Context) error {
 func (s *BlogService) handleRecommend(ctx khttp.Context) error {
 	page, pageSize := parsePage(ctx.Request())
 	viewer := blogViewerID(ctx)
-	// 仅站管/审核员标记精选(recommend=true) 的公开已审文章
+	// 仅站管/审核员标记精选(recommend=true) 的公开已审且同步主站文章
 	q := s.db.Model(&model.BlogArticle{}).
 		Where("visibility = ?", blogaccess.VisibilityPublic).
+		Where("sync_to_main_profile = ?", true).
 		Where("recommend = ?", true).
 		Where("(moderation_status = ? OR moderation_status = '' OR moderation_status IS NULL)", model.BlogModerationApproved)
 
@@ -1160,9 +1230,10 @@ func (s *BlogService) handlePlaza(ctx khttp.Context) error {
 		sort = "latest"
 	}
 
-	// 最新/热门：全部公开已审；精选：仅 recommend=true（站管/审核员标记）
+	// 最新/热门：公开已审且同步主站；精选：仅 recommend=true（站管/审核员标记）
 	q := s.db.Model(&model.BlogArticle{}).
 		Where("visibility = ?", blogaccess.VisibilityPublic).
+		Where("sync_to_main_profile = ?", true).
 		Where("(moderation_status = ? OR moderation_status = '' OR moderation_status IS NULL)", model.BlogModerationApproved)
 	if keyword != "" {
 		like := sqllike.Pattern(keyword)
@@ -1247,6 +1318,7 @@ func (s *BlogService) handleAuthors(ctx khttp.Context) error {
 	base := s.db.Model(&model.BlogArticle{}).
 		Select("user_id, COUNT(*) as article_count, MAX(COALESCE(published_at, created_at)) as last_published_at").
 		Where("visibility = ?", blogaccess.VisibilityPublic).
+		Where("sync_to_main_profile = ?", true).
 		Group("user_id")
 
 	// Optional name/username filter via join
@@ -2407,6 +2479,9 @@ type blogSiteConfigView struct {
 	ColorScheme string           `json:"colorScheme"`
 	Subtitle    string           `json:"subtitle"`
 	SocialLinks []blogSocialLink `json:"socialLinks"`
+	AboutMD     string           `json:"aboutMd"`
+	HomeIntroMD string           `json:"homeIntroMd"`
+	FriendsMD   string           `json:"friendsMd"`
 }
 
 func normalizeThemeID(raw string) string {
@@ -2473,6 +2548,9 @@ func (s *BlogService) loadSiteConfig(userID uint) blogSiteConfigView {
 		ColorScheme: blogColorSystem,
 		Subtitle:    "",
 		SocialLinks: []blogSocialLink{},
+		AboutMD:     "",
+		HomeIntroMD: "",
+		FriendsMD:   "",
 	}
 	if userID == 0 {
 		return view
@@ -2485,7 +2563,140 @@ func (s *BlogService) loadSiteConfig(userID uint) blogSiteConfigView {
 	view.ColorScheme = normalizeColorScheme(cfg.ColorScheme)
 	view.Subtitle = strings.TrimSpace(cfg.Subtitle)
 	view.SocialLinks = parseSocialLinksJSON(cfg.SocialLinks)
+	view.AboutMD = strings.ReplaceAll(cfg.AboutMD, "\r\n", "\n")
+	view.HomeIntroMD = strings.ReplaceAll(cfg.HomeIntroMD, "\r\n", "\n")
+	view.FriendsMD = strings.ReplaceAll(cfg.FriendsMD, "\r\n", "\n")
 	return view
+}
+
+func normalizeSlotMD(raw string) (string, string) {
+	s := strings.ReplaceAll(raw, "\r\n", "\n")
+	if len(s) > maxSlotMD {
+		return "", "页面内容过大"
+	}
+	return s, ""
+}
+
+func (s *BlogService) loadArticleTags(articleID uint) []string {
+	if articleID == 0 {
+		return []string{}
+	}
+	var names []string
+	_ = s.db.Table("blog_article_tags AS bat").
+		Select("bt.name").
+		Joins("JOIN blog_tags bt ON bt.id = bat.tag_id").
+		Where("bat.article_id = ?", articleID).
+		Order("bt.name ASC").
+		Pluck("bt.name", &names).Error
+	if names == nil {
+		return []string{}
+	}
+	return names
+}
+
+// normalizeBlogTags 去重、截断；返回展示名列表。
+func normalizeBlogTags(raw []string) ([]string, string) {
+	if len(raw) == 0 {
+		return []string{}, ""
+	}
+	seen := map[string]struct{}{}
+	out := make([]string, 0, len(raw))
+	for _, t := range raw {
+		name := strings.TrimSpace(t)
+		if name == "" {
+			continue
+		}
+		if utf8.RuneCountInString(name) > maxBlogTagLen {
+			return nil, "标签过长（最多 32 字）"
+		}
+		// 禁止控制字符
+		if strings.ContainsAny(name, "\n\r\t") {
+			return nil, "标签含非法字符"
+		}
+		key := strings.ToLower(name)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, name)
+		if len(out) > maxBlogTags {
+			return nil, "标签最多 20 个"
+		}
+	}
+	return out, ""
+}
+
+// replaceArticleTags 全量替换文章标签；raw 为 nil 时也清空（前端应始终传数组）。
+func (s *BlogService) replaceArticleTags(articleID, userID uint, raw []string) string {
+	names, msg := normalizeBlogTags(raw)
+	if msg != "" {
+		return msg
+	}
+	_ = s.db.Where("article_id = ?", articleID).Delete(&model.BlogArticleTag{}).Error
+	if len(names) == 0 {
+		return ""
+	}
+	for _, name := range names {
+		lower := strings.ToLower(name)
+		var tag model.BlogTag
+		err := s.db.Where("user_id = ? AND name_lower = ?", userID, lower).First(&tag).Error
+		if err != nil {
+			tag = model.BlogTag{UserID: userID, Name: name, NameLower: lower}
+			if err := s.db.Create(&tag).Error; err != nil {
+				// 并发下可能已存在
+				_ = s.db.Where("user_id = ? AND name_lower = ?", userID, lower).First(&tag).Error
+			}
+		} else if tag.Name != name {
+			// 保留首次写法；不强制改大小写
+		}
+		if tag.ID == 0 {
+			continue
+		}
+		_ = s.db.Create(&model.BlogArticleTag{ArticleID: articleID, TagID: tag.ID}).Error
+	}
+	return ""
+}
+
+func (s *BlogService) handleListTagsPublic(ctx khttp.Context) error {
+	username := strings.TrimSpace(ctx.Request().URL.Query().Get("username"))
+	if username == "" {
+		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "缺少用户名"})
+		return nil
+	}
+	u, err := s.findUserByUsername(username)
+	if err != nil {
+		writeJSON(ctx.Response(), 404, map[string]interface{}{"code": 1, "message": "用户不存在"})
+		return nil
+	}
+	viewer := blogViewerID(ctx)
+	// 仅统计对访客可见的文章上的 tag
+	type tagCount struct {
+		Name  string
+		Count int64
+	}
+	var rows []tagCount
+	q := s.db.Table("blog_tags AS bt").
+		Select("bt.name, COUNT(DISTINCT bat.article_id) AS count").
+		Joins("JOIN blog_article_tags bat ON bat.tag_id = bt.id").
+		Joins("JOIN blog_articles a ON a.id = bat.article_id").
+		Where("bt.user_id = ?", u.ID)
+	if viewer != u.ID {
+		q = q.Where("a.visibility IN ?", []string{blogaccess.VisibilityPublic, blogaccess.VisibilityPassword}).
+			Where("(a.moderation_status = ? OR a.moderation_status = '' OR a.moderation_status IS NULL)", model.BlogModerationApproved)
+	}
+	_ = q.Group("bt.id, bt.name").Having("COUNT(DISTINCT bat.article_id) > 0").
+		Order("count DESC, bt.name ASC").
+		Limit(100).
+		Scan(&rows).Error
+	list := make([]map[string]interface{}, 0, len(rows))
+	for _, r := range rows {
+		list = append(list, map[string]interface{}{"name": r.Name, "count": r.Count})
+	}
+	writeJSON(ctx.Response(), 200, map[string]interface{}{
+		"code": 0, "message": "success",
+		"data": list,
+	})
+	return nil
 }
 
 func (s *BlogService) themeEnabledFor(userID uint) bool {
@@ -2528,13 +2739,16 @@ func (s *BlogService) handleThemeStatus(ctx khttp.Context) error {
 			"colorScheme": siteCfg.ColorScheme,
 			"subtitle":    siteCfg.Subtitle,
 			"socialLinks": siteCfg.SocialLinks,
+			"aboutMd":     siteCfg.AboutMD,
+			"homeIntroMd": siteCfg.HomeIntroMD,
+			"friendsMd":   siteCfg.FriendsMD,
 			"customTheme": nil, // reserved extension point
 		},
 	})
 	return nil
 }
 
-// handleThemeConfigSave owner saves theme id + color scheme + subtitle + social links.
+// handleThemeConfigSave owner saves theme + slots + social links.
 func (s *BlogService) handleThemeConfigSave(ctx khttp.Context) error {
 	pd := auth.GetCurrentUser(ctx)
 	if pd == nil || pd.UserID == 0 {
@@ -2549,6 +2763,9 @@ func (s *BlogService) handleThemeConfigSave(ctx khttp.Context) error {
 		ColorScheme string           `json:"colorScheme"`
 		Subtitle    string           `json:"subtitle"`
 		SocialLinks []blogSocialLink `json:"socialLinks"`
+		AboutMD     *string          `json:"aboutMd"`
+		HomeIntroMD *string          `json:"homeIntroMd"`
+		FriendsMD   *string          `json:"friendsMd"`
 	}
 	if err := json.NewDecoder(ctx.Request().Body).Decode(&body); err != nil {
 		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "参数错误"})
@@ -2586,6 +2803,36 @@ func (s *BlogService) handleThemeConfigSave(ctx khttp.Context) error {
 	}
 	linksJSON, _ := json.Marshal(clean)
 
+	var aboutMD, homeIntroMD, friendsMD string
+	var haveAbout, haveHome, haveFriends bool
+	if body.AboutMD != nil {
+		haveAbout = true
+		var msg string
+		aboutMD, msg = normalizeSlotMD(*body.AboutMD)
+		if msg != "" {
+			writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": msg})
+			return nil
+		}
+	}
+	if body.HomeIntroMD != nil {
+		haveHome = true
+		var msg string
+		homeIntroMD, msg = normalizeSlotMD(*body.HomeIntroMD)
+		if msg != "" {
+			writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": msg})
+			return nil
+		}
+	}
+	if body.FriendsMD != nil {
+		haveFriends = true
+		var msg string
+		friendsMD, msg = normalizeSlotMD(*body.FriendsMD)
+		if msg != "" {
+			writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": msg})
+			return nil
+		}
+	}
+
 	var cfg model.BlogSiteConfig
 	err := s.db.Where("user_id = ?", pd.UserID).First(&cfg).Error
 	if err != nil {
@@ -2596,6 +2843,15 @@ func (s *BlogService) handleThemeConfigSave(ctx khttp.Context) error {
 			Subtitle:    subtitle,
 			SocialLinks: string(linksJSON),
 		}
+		if haveAbout {
+			cfg.AboutMD = aboutMD
+		}
+		if haveHome {
+			cfg.HomeIntroMD = homeIntroMD
+		}
+		if haveFriends {
+			cfg.FriendsMD = friendsMD
+		}
 		if err := s.db.Create(&cfg).Error; err != nil {
 			writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "保存失败"})
 			return nil
@@ -2605,6 +2861,15 @@ func (s *BlogService) handleThemeConfigSave(ctx khttp.Context) error {
 		cfg.ColorScheme = colorScheme
 		cfg.Subtitle = subtitle
 		cfg.SocialLinks = string(linksJSON)
+		if haveAbout {
+			cfg.AboutMD = aboutMD
+		}
+		if haveHome {
+			cfg.HomeIntroMD = homeIntroMD
+		}
+		if haveFriends {
+			cfg.FriendsMD = friendsMD
+		}
 		if err := s.db.Save(&cfg).Error; err != nil {
 			writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "保存失败"})
 			return nil
@@ -2618,6 +2883,9 @@ func (s *BlogService) handleThemeConfigSave(ctx khttp.Context) error {
 			"colorScheme": view.ColorScheme,
 			"subtitle":    view.Subtitle,
 			"socialLinks": view.SocialLinks,
+			"aboutMd":     view.AboutMD,
+			"homeIntroMd": view.HomeIntroMD,
+			"friendsMd":   view.FriendsMD,
 		},
 	})
 	return nil
