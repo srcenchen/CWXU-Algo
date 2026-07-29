@@ -17,6 +17,7 @@ import (
 	"github.com/redis/go-redis/v9"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 	"gorm.io/gorm/logger"
 )
 
@@ -107,9 +108,9 @@ func migrateModels(db *gorm.DB) {
 		&model.Org{},
 		&model.OrgMember{},
 		&model.OrgJoinRequest{},
-			&model.Squad{},
-			&model.SquadMember{},
-			&model.OrgScopeGrant{},
+		&model.Squad{},
+		&model.SquadMember{},
+		&model.OrgScopeGrant{},
 		&model.PlanQuota{},
 		&model.Paste{},
 		&model.SiteVisitDaily{},
@@ -117,6 +118,7 @@ func migrateModels(db *gorm.DB) {
 		&model.UserFollow{},
 		&model.Notification{},
 		&model.BlogArticle{},
+		&model.BlogPage{},
 		&model.BlogCategory{},
 		&model.BlogArticleOrg{},
 		&model.BlogTag{},
@@ -146,6 +148,9 @@ func migrateModels(db *gorm.DB) {
 	ensureBackupActiveJobIndex(db)
 	backfillBlogModerationApproved(db)
 	backfillBlogActivationForExistingAuthors(db)
+	if err := backfillBlogFixedPages(db); err != nil {
+		log.Warnf("backfill blog fixed pages: %v", err)
+	}
 	backfillBlogAutoSurfaceAndZeroViews(db)
 }
 
@@ -217,6 +222,45 @@ func backfillBlogActivationForExistingAuthors(db *gorm.DB) {
 		GROUP BY a.user_id
 		ON CONFLICT (user_id) DO NOTHING
 	`).Error
+}
+
+// backfillBlogFixedPages migrates the legacy about/friends Markdown slots into
+// first-class standalone pages. ON CONFLICT makes it safe across restarts and
+// concurrent instances, while preserving an author's existing page content.
+func backfillBlogFixedPages(db *gorm.DB) error {
+	if db == nil || !db.Migrator().HasTable(&model.BlogSiteConfig{}) || !db.Migrator().HasTable(&model.BlogPage{}) {
+		return nil
+	}
+	var configs []model.BlogSiteConfig
+	if err := db.Select("user_id", "about_md", "friends_md").
+		Where("(about_md IS NOT NULL AND about_md <> '') OR (friends_md IS NOT NULL AND friends_md <> '')").
+		Find(&configs).Error; err != nil {
+		return err
+	}
+	return db.Transaction(func(tx *gorm.DB) error {
+		for _, cfg := range configs {
+			pages := make([]model.BlogPage, 0, 2)
+			if strings.TrimSpace(cfg.AboutMD) != "" {
+				pages = append(pages, model.BlogPage{
+					UserID: cfg.UserID, Title: "关于", Slug: "about", ContentMD: cfg.AboutMD,
+					Status: model.BlogPagePublished, ShowInNav: true, NavLabel: "关于", NavOrder: 100,
+				})
+			}
+			if strings.TrimSpace(cfg.FriendsMD) != "" {
+				pages = append(pages, model.BlogPage{
+					UserID: cfg.UserID, Title: "友链", Slug: "friends", ContentMD: cfg.FriendsMD,
+					Status: model.BlogPagePublished, ShowInNav: true, NavLabel: "友链", NavOrder: 110,
+				})
+			}
+			if len(pages) == 0 {
+				continue
+			}
+			if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&pages).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 const (

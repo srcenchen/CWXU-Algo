@@ -4,9 +4,11 @@ import "time"
 
 // Blog visibility constants (mirror blogaccess).
 const (
-	BlogVisPublic   = "public"
-	BlogVisPrivate  = "private"
-	BlogVisPassword = "password"
+	BlogVisPublic     = "public"
+	BlogVisPrivate    = "private"
+	BlogVisPassword   = "password"
+	BlogPageDraft     = "draft"
+	BlogPagePublished = "published"
 )
 
 // BlogArticle is the single shared article entity (blog shell + main-site surfaces).
@@ -56,6 +58,25 @@ type BlogArticle struct {
 }
 
 func (BlogArticle) TableName() string { return "blog_articles" }
+
+// BlogPage is an author-owned standalone Markdown page rendered by every blog theme.
+// Article slugs and page slugs live under different public route namespaces.
+type BlogPage struct {
+	ID        uint `gorm:"primaryKey"`
+	CreatedAt time.Time
+	UpdatedAt time.Time
+
+	UserID    uint   `gorm:"not null;uniqueIndex:idx_blog_page_user_slug,priority:1;index:idx_blog_page_user_nav,priority:1;comment:作者"`
+	Title     string `gorm:"size:200;not null;comment:页面标题"`
+	Slug      string `gorm:"size:96;not null;uniqueIndex:idx_blog_page_user_slug,priority:2;comment:作者内页面短链"`
+	ContentMD string `gorm:"type:text;not null;comment:Markdown 正文"`
+	Status    string `gorm:"size:16;not null;default:draft;index;comment:draft|published"`
+	ShowInNav bool   `gorm:"not null;default:false;index:idx_blog_page_user_nav,priority:2;comment:是否加入博客导航"`
+	NavLabel  string `gorm:"size:64;comment:导航名称，空则使用标题"`
+	NavOrder  int    `gorm:"not null;default:0;index:idx_blog_page_user_nav,priority:3;comment:导航排序"`
+}
+
+func (BlogPage) TableName() string { return "blog_pages" }
 
 // BlogCategory is a per-user article category.
 type BlogCategory struct {
@@ -241,7 +262,7 @@ type BlogImageAsset struct {
 	ID        uint `gorm:"primaryKey"`
 	CreatedAt time.Time
 	UpdatedAt time.Time
-	UserID    uint   `gorm:"not null;index:idx_blog_img_user,priority:1;comment:上传者"`
+	UserID    uint `gorm:"not null;index:idx_blog_img_user,priority:1;comment:上传者"`
 	// ObjectKey 又拍云对象路径，如 /blog/12/20260728_xxx.webp
 	ObjectKey string `gorm:"size:512;not null;uniqueIndex;comment:对象key"`
 	// URL 对外访问完整 URL

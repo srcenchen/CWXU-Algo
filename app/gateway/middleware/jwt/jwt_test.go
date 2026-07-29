@@ -31,3 +31,16 @@ func TestMiddlewareRejectsShortConfigSecret(t *testing.T) {
 		t.Fatal("expected short config secret to be rejected")
 	}
 }
+
+func TestBlogPagePublicReadsAreWhitelisted(t *testing.T) {
+	for _, path := range []string{
+		"/v1/user/blog/page/list",
+		"/api/user/blog/page/list",
+		"/v1/user/blog/page/get",
+		"/api/user/blog/page/get",
+	} {
+		if _, ok := publicExact[path]; !ok {
+			t.Errorf("public blog page path missing from JWT whitelist: %s", path)
+		}
+	}
+}

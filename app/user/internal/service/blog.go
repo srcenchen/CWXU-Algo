@@ -1,10 +1,10 @@
 package service
 
 import (
-	"cwxu-algo/app/common/utils/sqllike"
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
+	"cwxu-algo/app/common/utils/sqllike"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -31,17 +31,17 @@ import (
 )
 
 const (
-	maxBlogTitle   = 200
-	maxBlogSummary = 500
-	maxBlogContent = 512 << 10 // 512KB
-	maxBlogCover   = 1024
-	maxBlogSlug    = 96
-	maxCommentLen  = 4000
+	maxBlogTitle    = 200
+	maxBlogSummary  = 500
+	maxBlogContent  = 512 << 10 // 512KB
+	maxBlogCover    = 1024
+	maxBlogSlug     = 96
+	maxCommentLen   = 4000
 	maxBlogCmtDepth = 3 // 顶层 depth=0，最多再嵌套 2 层回复
-	blogUnlockTTL  = 12 * time.Hour
-	maxBlogTags    = 20
-	maxBlogTagLen  = 32
-	maxSlotMD      = 64 << 10 // 64KB per slot page
+	blogUnlockTTL   = 12 * time.Hour
+	maxBlogTags     = 20
+	maxBlogTagLen   = 32
+	maxSlotMD       = 64 << 10 // 64KB per slot page
 )
 
 // BlogService personal blog articles, comments, likes, categories, theme flags.
@@ -66,6 +66,8 @@ func RegisterBlogRoutes(srv *khttp.Server, bs *BlogService) {
 	r.GET("/v1/user/blog/authors", bs.handleAuthors)
 	r.GET("/v1/user/blog/categories", bs.handleListCategoriesPublic)
 	r.GET("/v1/user/blog/tags", bs.handleListTagsPublic)
+	r.GET("/v1/user/blog/page/list", bs.handlePageListPublic)
+	r.GET("/v1/user/blog/page/get", bs.handlePageGetPublic)
 	r.GET("/v1/user/blog/comment/list", bs.handleListComments)
 	r.GET("/v1/user/blog/theme/status", bs.handleThemeStatus)
 
@@ -75,6 +77,11 @@ func RegisterBlogRoutes(srv *khttp.Server, bs *BlogService) {
 	r.POST("/v1/user/blog/article/delete", bs.handleDelete)
 	r.GET("/v1/user/blog/article/mine", bs.handleMine)
 	r.GET("/v1/user/blog/analytics", bs.handleAnalytics)
+	r.GET("/v1/user/blog/page/mine", bs.handlePageMine)
+	r.POST("/v1/user/blog/page/create", bs.handlePageCreate)
+	r.POST("/v1/user/blog/page/update", bs.handlePageUpdate)
+	r.POST("/v1/user/blog/page/delete", bs.handlePageDelete)
+	r.POST("/v1/user/blog/page/reorder", bs.handlePageReorder)
 
 	r.POST("/v1/user/blog/category/create", bs.handleCategoryCreate)
 	r.POST("/v1/user/blog/category/update", bs.handleCategoryUpdate)
@@ -1387,12 +1394,12 @@ func (s *BlogService) handleAuthors(ctx khttp.Context) error {
 	for _, a := range aggs {
 		u := authors[a.UserID]
 		item := map[string]interface{}{
-			"id":            a.UserID,
-			"username":      u.Username,
-			"name":          u.Name,
-			"avatar":        u.Avatar,
-			"articleCount":  a.ArticleCount,
-			"latestTitle":   latestTitle[a.UserID],
+			"id":           a.UserID,
+			"username":     u.Username,
+			"name":         u.Name,
+			"avatar":       u.Avatar,
+			"articleCount": a.ArticleCount,
+			"latestTitle":  latestTitle[a.UserID],
 		}
 		if a.LastPublishedAt != nil {
 			item["lastPublishedAt"] = a.LastPublishedAt.Unix()
@@ -2657,6 +2664,42 @@ func (s *BlogService) replaceArticleTags(articleID, userID uint, raw []string) s
 	return ""
 }
 
+type blogTagCount struct {
+	Name  string `json:"name"`
+	Count int64  `json:"count"`
+}
+
+func (s *BlogService) listBlogTagCounts(authorID, viewerID uint, keyword string, limit int) ([]blogTagCount, error) {
+	if limit < 1 {
+		limit = 12
+	}
+	if limit > 50 {
+		limit = 50
+	}
+	var rows []blogTagCount
+	q := s.db.Table("blog_tags AS bt").
+		Select("bt.name, COUNT(DISTINCT bat.article_id) AS count").
+		Joins("JOIN blog_article_tags bat ON bat.tag_id = bt.id").
+		Joins("JOIN blog_articles a ON a.id = bat.article_id").
+		Where("bt.user_id = ?", authorID)
+	if viewerID != authorID {
+		q = q.Where("a.visibility IN ?", []string{blogaccess.VisibilityPublic, blogaccess.VisibilityPassword}).
+			Where("(a.moderation_status = ? OR a.moderation_status = '' OR a.moderation_status IS NULL)", model.BlogModerationApproved)
+	}
+	if pattern := sqllike.Pattern(keyword); pattern != "" {
+		if s.db.Dialector.Name() == "postgres" {
+			q = q.Where("bt.name ILIKE ?", pattern)
+		} else {
+			q = q.Where("LOWER(bt.name) LIKE LOWER(?)", pattern)
+		}
+	}
+	err := q.Group("bt.id, bt.name").Having("COUNT(DISTINCT bat.article_id) > 0").
+		Order("count DESC, bt.name ASC").
+		Limit(limit).
+		Scan(&rows).Error
+	return rows, err
+}
+
 func (s *BlogService) handleListTagsPublic(ctx khttp.Context) error {
 	username := strings.TrimSpace(ctx.Request().URL.Query().Get("username"))
 	if username == "" {
@@ -2668,33 +2711,20 @@ func (s *BlogService) handleListTagsPublic(ctx khttp.Context) error {
 		writeJSON(ctx.Response(), 404, map[string]interface{}{"code": 1, "message": "用户不存在"})
 		return nil
 	}
-	viewer := blogViewerID(ctx)
-	// 仅统计对访客可见的文章上的 tag
-	type tagCount struct {
-		Name  string
-		Count int64
-	}
-	var rows []tagCount
-	q := s.db.Table("blog_tags AS bt").
-		Select("bt.name, COUNT(DISTINCT bat.article_id) AS count").
-		Joins("JOIN blog_article_tags bat ON bat.tag_id = bt.id").
-		Joins("JOIN blog_articles a ON a.id = bat.article_id").
-		Where("bt.user_id = ?", u.ID)
-	if viewer != u.ID {
-		q = q.Where("a.visibility IN ?", []string{blogaccess.VisibilityPublic, blogaccess.VisibilityPassword}).
-			Where("(a.moderation_status = ? OR a.moderation_status = '' OR a.moderation_status IS NULL)", model.BlogModerationApproved)
-	}
-	_ = q.Group("bt.id, bt.name").Having("COUNT(DISTINCT bat.article_id) > 0").
-		Order("count DESC, bt.name ASC").
-		Limit(100).
-		Scan(&rows).Error
-	list := make([]map[string]interface{}, 0, len(rows))
-	for _, r := range rows {
-		list = append(list, map[string]interface{}{"name": r.Name, "count": r.Count})
+	limit, _ := strconv.Atoi(ctx.Request().URL.Query().Get("limit"))
+	rows, err := s.listBlogTagCounts(
+		u.ID,
+		blogViewerID(ctx),
+		ctx.Request().URL.Query().Get("keyword"),
+		limit,
+	)
+	if err != nil {
+		writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "加载失败"})
+		return nil
 	}
 	writeJSON(ctx.Response(), 200, map[string]interface{}{
 		"code": 0, "message": "success",
-		"data": list,
+		"data": rows,
 	})
 	return nil
 }
