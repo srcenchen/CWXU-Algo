@@ -64,6 +64,8 @@ var publicExact = map[string]struct{}{
 	"/api/user/blog/authors":       {},
 	"/v1/user/blog/categories":     {},
 	"/api/user/blog/categories":    {},
+	"/v1/user/blog/tags":           {},
+	"/api/user/blog/tags":          {},
 	"/v1/user/blog/comment/list":   {},
 	"/api/user/blog/comment/list":  {},
 	"/v1/user/blog/theme/status":   {},
