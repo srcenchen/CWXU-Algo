@@ -105,6 +105,10 @@ func RegisterBlogRoutes(srv *khttp.Server, bs *BlogService) {
 	r.POST("/v1/user/blog/activate", bs.handleActivate)
 	r.POST("/v1/user/blog/notify-pref", bs.handleNotifyPref)
 
+	// Obsidian 插件：公开读版本；发布脚本/站管登记（下载走云存储具体版本目录）
+	r.GET("/v1/user/blog/obsidian-plugin/latest", bs.handleObsidianPluginLatest)
+	r.POST("/v1/user/blog/obsidian-plugin/publish", bs.handleObsidianPluginPublish)
+
 	// 图片上传能力（又拍云；需站管授权 + 站点配置）
 	r.GET("/v1/user/blog/image-upload/status", bs.handleImageUploadStatus)
 	r.POST("/v1/user/blog/image-upload/apply", bs.handleImageUploadApply)

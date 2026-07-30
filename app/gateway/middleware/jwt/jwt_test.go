@@ -38,6 +38,8 @@ func TestBlogPagePublicReadsAreWhitelisted(t *testing.T) {
 		"/api/user/blog/page/list",
 		"/v1/user/blog/page/get",
 		"/api/user/blog/page/get",
+		"/v1/user/blog/obsidian-plugin/latest",
+		"/api/user/blog/obsidian-plugin/latest",
 	} {
 		if _, ok := publicExact[path]; !ok {
 			t.Errorf("public blog page path missing from JWT whitelist: %s", path)

@@ -62,7 +62,8 @@ func NewWhiteListMatcher() selector.MatchFunc {
 			strings.Contains(operation, "blog/categories") ||
 			strings.Contains(operation, "blog/comment/list") ||
 			strings.Contains(operation, "blog/theme/status") ||
-			strings.Contains(operation, "blog/agreement") {
+			strings.Contains(operation, "blog/agreement") ||
+			strings.Contains(operation, "blog/obsidian-plugin/latest") {
 			return false
 		}
 		// SEO HTML / sitemap 公开
