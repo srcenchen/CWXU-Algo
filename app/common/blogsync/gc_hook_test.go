@@ -90,6 +90,15 @@ func solutionGCDB(t *testing.T) *gorm.DB {
 	if err := db.AutoMigrate(&Category{}, &Article{}, &articleOrg{}, &articleComment{}, &articleLike{}, &assetRow{}, &pageRow{}); err != nil {
 		t.Fatal(err)
 	}
+	if err := db.Exec(`CREATE TABLE IF NOT EXISTS blog_site_configs (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		user_id INTEGER,
+		about_md TEXT,
+		home_intro_md TEXT,
+		friends_md TEXT
+	)`).Error; err != nil {
+		t.Fatal(err)
+	}
 	return db
 }
 
@@ -120,7 +129,7 @@ func TestUpsertFromSolutionManualGCOnDeRef(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// ScheduleGC is async; call shipped GC on real post-upsert state
+	// 自动 GC 已关闭；显式 snapshot 确认后才删
 	n := confirmedGC(t, db, del, userID)
 	if n != 1 {
 		t.Fatalf("after upsert de-ref n=%d del=%v", n, del.snap())
@@ -155,7 +164,7 @@ func TestDeleteBySolutionManualGC(t *testing.T) {
 	}
 
 	del := &recordingDeleter{base: base}
-	// ScheduleGC is fire-and-forget; invoke shipped GC on post-delete state
+	// 自动 GC 已关闭；删文后需显式 snapshot 清理
 	n := confirmedGC(t, db, del, userID)
 	if n != 1 || del.snap()[0] != key {
 		t.Fatalf("n=%d del=%v", n, del.snap())

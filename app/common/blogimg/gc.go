@@ -114,41 +114,8 @@ func LoadUpyunClient(db *gorm.DB) *upyun.Client {
 	})
 }
 
-// gcUserImages deletes registered UpYun objects for user that are no longer
-// referenced by any of their blog_articles / blog_pages.
-//
-// 引用判定（优先 hash，防 URL/域名/path 漂移误删）：
-//  1. 文章/页面 ImageHashes 列（写入时由正文图解析并落库）
-//  2. 正文/头图 object key 扫描（KeysFromContent + bare /blog/…）
-//  3. AssetReferenced 子串兜底
-//  4. 宽限期 GCGracePeriod 内新上传不删
-//  5. 无 ContentHash 的历史资产：仅当 key/正文都无引用才删
-//
-// Returns number of orphan keys processed (delete attempted).
-func gcUserImages(db *gorm.DB, client ObjectDeleter, userID uint) int {
-	return gcUserImagesAt(db, client, userID, time.Now())
-}
-
-func gcUserImagesAt(db *gorm.DB, client ObjectDeleter, userID uint, now time.Time) int {
-	n, _ := gcUserImagesChecked(db, client, userID, now, false)
-	return n
-}
-
-func gcUserImagesChecked(db *gorm.DB, client ObjectDeleter, userID uint, now time.Time, force bool) (int, error) {
-	if db == nil || userID == 0 || client == nil || !client.Configured() {
-		return 0, fmt.Errorf("blog image gc is not configured")
-	}
-	base := client.PublicBaseURL()
-	if strings.TrimSpace(base) == "" {
-		return 0, fmt.Errorf("blog image gc public base is empty")
-	}
-	orphans, err := ListUserImageOrphansCheckedAt(db, userID, base, now)
-	if err != nil {
-		return 0, err
-	}
-	return deleteOrphanAssets(db, client, userID, orphans, force)
-}
-
+// deleteOrphanAssets removes confirmed orphans. force=true also deletes
+// Protected (grace-period) rows — only used after GCUserImagesSnapshot match.
 func deleteOrphanAssets(db *gorm.DB, client ObjectDeleter, userID uint, orphans []OrphanAsset, force bool) (int, error) {
 	processed := 0
 	for _, asset := range orphans {
@@ -278,6 +245,24 @@ func ListUserImageOrphansCheckedAt(db *gorm.DB, userID uint, base string, now ti
 	for _, p := range pages {
 		addHashes(p.ImageHashes)
 		addContent(p.ContentMD, "")
+	}
+
+	// 个人博客固定页（关于 / 首页介绍 / 友链）与站管清理引用对齐
+	var siteSlots []struct {
+		AboutMD     string `gorm:"column:about_md"`
+		HomeIntroMD string `gorm:"column:home_intro_md"`
+		FriendsMD   string `gorm:"column:friends_md"`
+	}
+	if err := db.Table("blog_site_configs").
+		Select("about_md", "home_intro_md", "friends_md").
+		Where("user_id = ?", userID).
+		Find(&siteSlots).Error; err != nil {
+		return nil, fmt.Errorf("query blog site config image references: %w", err)
+	}
+	for _, slot := range siteSlots {
+		addContent(slot.AboutMD, "")
+		addContent(slot.HomeIntroMD, "")
+		addContent(slot.FriendsMD, "")
 	}
 
 	var assets []imageAssetRow

@@ -336,6 +336,14 @@ func deleteAdminImageRow(db *gorm.DB, client ObjectDeleter, id uint) error {
 	return nil
 }
 
+func adminCandidateIDSet(ids []uint) map[uint]struct{} {
+	out := make(map[uint]struct{}, len(ids))
+	for _, id := range ids {
+		out[id] = struct{}{}
+	}
+	return out
+}
+
 func deleteAdminImageAtLocked(db *gorm.DB, client ObjectDeleter, id uint, now time.Time) (bool, error) {
 	preview, err := ListAdminImageAssetsAt(db, client.PublicBaseURL(), AdminImageListOptions{
 		Mode: "cleanup", Page: 1, PageSize: 1,
@@ -388,6 +396,9 @@ func sameAdminImageIDs(left, right []uint) bool {
 	return true
 }
 
+// DeleteAdminImagesSnapshotAt validates the cleanup snapshot and deletes all
+// matching candidates inside one admin reference lock (no unlock between
+// check and delete; no per-id full-table rescan).
 func DeleteAdminImagesSnapshotAt(
 	db *gorm.DB,
 	client ObjectDeleter,
@@ -401,7 +412,8 @@ func DeleteAdminImagesSnapshotAt(
 	if err := validateAdminImageDeleter(client); err != nil {
 		return 0, err
 	}
-	if err := WithAdminImageReferenceTx(db, func(tx *gorm.DB) error {
+	deleted := 0
+	err := WithAdminImageReferenceTx(db, func(tx *gorm.DB) error {
 		preview, err := ListAdminImageAssetsAt(tx, client.PublicBaseURL(), AdminImageListOptions{
 			Mode: "cleanup", Page: 1, PageSize: 1,
 		}, now)
@@ -412,24 +424,23 @@ func DeleteAdminImagesSnapshotAt(
 			subtle.ConstantTimeCompare([]byte(preview.Snapshot), []byte(strings.TrimSpace(snapshot))) != 1 {
 			return ErrAdminImageSnapshotStale
 		}
-		return nil
-	}); err != nil {
-		return 0, err
-	}
-
-	ordered := append([]uint(nil), ids...)
-	sort.Slice(ordered, func(i, j int) bool { return ordered[i] < ordered[j] })
-	deleted := 0
-	for _, id := range ordered {
-		ok, err := DeleteAdminImageAt(db, client, id, now)
-		if err != nil {
-			return deleted, err
-		}
-		if ok {
+		// Snapshot already proved every id is a cleanup candidate; delete
+		// without re-listing the whole site per id.
+		candidates := adminCandidateIDSet(preview.CandidateIDs)
+		ordered := append([]uint(nil), ids...)
+		sort.Slice(ordered, func(i, j int) bool { return ordered[i] < ordered[j] })
+		for _, id := range ordered {
+			if _, ok := candidates[id]; !ok {
+				return ErrAdminImageNotCandidate
+			}
+			if err := deleteAdminImageRow(tx, client, id); err != nil {
+				return err
+			}
 			deleted++
 		}
-	}
-	return deleted, nil
+		return nil
+	})
+	return deleted, err
 }
 
 func DeleteAdminImagesSnapshot(db *gorm.DB, client ObjectDeleter, ids []uint, snapshot string) (int, error) {

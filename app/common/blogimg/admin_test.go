@@ -302,6 +302,39 @@ func TestDeleteAdminImagesSnapshotRejectsChangedCandidates(t *testing.T) {
 	}
 }
 
+func TestDeleteAdminImagesSnapshotDeletesAllInOneLock(t *testing.T) {
+	db := adminImageTestDB(t)
+	now := time.Date(2026, 7, 31, 12, 0, 0, 0, time.UTC)
+	idA := createAdminAsset(t, db, adminTestAsset{
+		CreatedAt: now.Add(-13 * time.Hour), UserID: 1,
+		ObjectKey: "/blog/1/a.webp", URL: "/blog/1/a.webp",
+	})
+	idB := createAdminAsset(t, db, adminTestAsset{
+		CreatedAt: now.Add(-14 * time.Hour), UserID: 2,
+		ObjectKey: "/blog/2/b.webp", URL: "/blog/2/b.webp",
+	})
+	preview, err := ListAdminImageAssetsAt(db, "https://cdn.example.com", AdminImageListOptions{Mode: "cleanup"}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(preview.CandidateIDs) != 2 || preview.Snapshot == "" {
+		t.Fatalf("preview=%+v", preview)
+	}
+	deleter := &fakeDeleter{base: "https://cdn.example.com"}
+	count, err := DeleteAdminImagesSnapshotAt(db, deleter, preview.CandidateIDs, preview.Snapshot, now)
+	if err != nil || count != 2 {
+		t.Fatalf("count=%d err=%v remote=%v", count, err, deleter.Deleted())
+	}
+	if len(deleter.Deleted()) != 2 {
+		t.Fatalf("remote deletions=%v", deleter.Deleted())
+	}
+	var left int64
+	_ = db.Model(&adminTestAsset{}).Where("id IN ?", []uint{idA, idB}).Count(&left).Error
+	if left != 0 {
+		t.Fatalf("rows left=%d", left)
+	}
+}
+
 func TestDeleteAdminImageKeepsRowWhenRemoteDeleteFails(t *testing.T) {
 	db := adminImageTestDB(t)
 	now := time.Date(2026, 7, 31, 12, 0, 0, 0, time.UTC)

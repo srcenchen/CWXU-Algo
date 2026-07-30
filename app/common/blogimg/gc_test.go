@@ -52,10 +52,51 @@ func gcTestDB(t *testing.T) *gorm.DB {
 	if err := db.AutoMigrate(&imageAssetRow{}, &articleRefRow{}, &pageRefRow{}); err != nil {
 		t.Fatal(err)
 	}
+	// blog_site_configs is queried by ListUserImageOrphansCheckedAt (fixed pages).
+	if err := db.Exec(`CREATE TABLE IF NOT EXISTS blog_site_configs (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		user_id INTEGER,
+		about_md TEXT,
+		home_intro_md TEXT,
+		friends_md TEXT
+	)`).Error; err != nil {
+		t.Fatal(err)
+	}
 	return db
 }
 
 func gcOld() time.Time { return time.Now().Add(-25 * time.Hour) }
+
+// runConfirmedUserGC lists orphans and deletes via snapshot confirmation (only safe path).
+func runConfirmedUserGC(t *testing.T, db *gorm.DB, del ObjectDeleter, userID uint) int {
+	t.Helper()
+	orphans, err := ListUserImageOrphansCheckedAt(db, userID, del.PublicBaseURL(), time.Now())
+	if err != nil {
+		t.Fatalf("list orphans: %v", err)
+	}
+	if len(orphans) == 0 {
+		return 0
+	}
+	ids, snapshot := BuildOrphanSnapshot(userID, orphans)
+	n, err := GCUserImagesSnapshot(db, del, userID, ids, snapshot)
+	if err != nil {
+		t.Fatalf("GCUserImagesSnapshot: %v", err)
+	}
+	return n
+}
+
+func runConfirmedUserGCErr(t *testing.T, db *gorm.DB, del ObjectDeleter, userID uint) (int, error) {
+	t.Helper()
+	orphans, err := ListUserImageOrphansCheckedAt(db, userID, del.PublicBaseURL(), time.Now())
+	if err != nil {
+		return 0, err
+	}
+	if len(orphans) == 0 {
+		return 0, nil
+	}
+	ids, snapshot := BuildOrphanSnapshot(userID, orphans)
+	return GCUserImagesSnapshot(db, del, userID, ids, snapshot)
+}
 
 func TestGCUserImagesRemovesOrphansKeepsReferenced(t *testing.T) {
 	db := gcTestDB(t)
@@ -73,7 +114,7 @@ func TestGCUserImagesRemovesOrphansKeepsReferenced(t *testing.T) {
 	_ = db.Create(&imageAssetRow{UserID: userID, ObjectKey: "/blog/9/orphan.webp", URL: base + "/blog/9/orphan.webp", CreatedAt: old}).Error
 
 	del := &fakeDeleter{base: base}
-	n := gcUserImages(db, del, userID)
+	n := runConfirmedUserGC(t, db, del, userID)
 	if n != 1 {
 		t.Fatalf("orphan count=%d want 1, deleted=%v", n, del.Deleted())
 	}
@@ -108,7 +149,7 @@ func TestGCUserImagesKeepsByImageHashesColumn(t *testing.T) {
 		UserID: userID, ObjectKey: "/blog/11/orphan.webp", URL: base + "/blog/11/orphan.webp", CreatedAt: old,
 	}).Error
 	del := &fakeDeleter{base: base}
-	n := gcUserImages(db, del, userID)
+	n := runConfirmedUserGC(t, db, del, userID)
 	if n != 1 || len(del.Deleted()) != 1 || del.Deleted()[0] != "/blog/11/orphan.webp" {
 		t.Fatalf("n=%d del=%v", n, del.Deleted())
 	}
@@ -130,7 +171,7 @@ func TestGCUserImagesKeepsPageReferenced(t *testing.T) {
 		UserID: userID, ObjectKey: "/blog/12/gone.webp", URL: "/blog/12/gone.webp", CreatedAt: old,
 	}).Error
 	del := &fakeDeleter{base: base}
-	n := gcUserImages(db, del, userID)
+	n := runConfirmedUserGC(t, db, del, userID)
 	if n != 1 || del.Deleted()[0] != "/blog/12/gone.webp" {
 		t.Fatalf("n=%d del=%v", n, del.Deleted())
 	}
@@ -152,7 +193,7 @@ func TestGCUserImagesKeepsCrossHostReferenced(t *testing.T) {
 		CreatedAt: old,
 	}).Error
 	del := &fakeDeleter{base: "http://other-cdn.example"}
-	if n := gcUserImages(db, del, userID); n != 0 {
+	if n := runConfirmedUserGC(t, db, del, userID); n != 0 {
 		t.Fatalf("should keep cross-host ref, n=%d del=%v", n, del.Deleted())
 	}
 }
@@ -165,10 +206,13 @@ func TestGCUserImagesGracePeriod(t *testing.T) {
 	_ = db.Create(&imageAssetRow{
 		UserID: userID, ObjectKey: "/blog/3/new.webp", URL: base + "/blog/3/new.webp", CreatedAt: fresh,
 	}).Error
-	del := &fakeDeleter{base: base}
-	if n := gcUserImagesAt(db, del, userID, time.Now()); n != 0 {
-		t.Fatalf("grace should keep, n=%d", n)
+	orphans := ListUserImageOrphansAt(db, userID, base, time.Now())
+	if len(orphans) != 1 || !orphans[0].Protected {
+		t.Fatalf("fresh upload should be listed as protected orphan, got %+v", orphans)
 	}
+	// Snapshot GC force-deletes protected; product path is admin grace exclusion + manual confirm.
+	// User silent GC removed — only assert list marks Protected.
+
 }
 
 func TestListUserImageOrphansIncludesFreshAsProtected(t *testing.T) {
@@ -209,6 +253,27 @@ func TestListUserImageOrphansIncludesFreshAsProtected(t *testing.T) {
 	}
 }
 
+func TestListUserImageOrphansKeepsSiteConfigReferenced(t *testing.T) {
+	db := gcTestDB(t)
+	base := "https://zhiyuansofts.cn"
+	userID := uint(88)
+	old := gcOld()
+	key := "/blog/88/about.webp"
+	if err := db.Exec(`INSERT INTO blog_site_configs(user_id, about_md, home_intro_md, friends_md) VALUES (?, ?, '', '')`,
+		userID, "![a]("+base+key+")\n").Error; err != nil {
+		t.Fatal(err)
+	}
+	_ = db.Create(&imageAssetRow{UserID: userID, ObjectKey: key, URL: base + key, CreatedAt: old}).Error
+	_ = db.Create(&imageAssetRow{UserID: userID, ObjectKey: "/blog/88/orphan.webp", URL: base + "/blog/88/orphan.webp", CreatedAt: old}).Error
+	orphans, err := ListUserImageOrphansCheckedAt(db, userID, base, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(orphans) != 1 || orphans[0].ObjectKey != "/blog/88/orphan.webp" {
+		t.Fatalf("orphans=%+v want only orphan", orphans)
+	}
+}
+
 func TestExistingURLsForUser(t *testing.T) {
 	db := gcTestDB(t)
 	userID := uint(7)
@@ -241,14 +306,14 @@ func TestGCUserImagesAfterContentCleared(t *testing.T) {
 	}).Error
 
 	del := &fakeDeleter{base: base}
-	if n := gcUserImages(db, del, userID); n != 0 {
+	if n := runConfirmedUserGC(t, db, del, userID); n != 0 {
 		t.Fatalf("should keep referenced, got n=%d del=%v", n, del.Deleted())
 	}
 
 	// 清正文同时清 ImageHashes（写入路径会一起更新）
 	_ = db.Model(&articleRefRow{}).Where("user_id = ?", userID).
 		Updates(map[string]interface{}{"content": "no images", "image_hashes": "[]"}).Error
-	n := gcUserImages(db, del, userID)
+	n := runConfirmedUserGC(t, db, del, userID)
 	if n != 1 {
 		t.Fatalf("after clear n=%d del=%v", n, del.Deleted())
 	}
@@ -268,7 +333,7 @@ func TestGCUserImagesAfterAllArticlesDeleted(t *testing.T) {
 
 	_ = db.Where("user_id = ?", userID).Delete(&articleRefRow{}).Error
 	del := &fakeDeleter{base: base}
-	n := gcUserImages(db, del, userID)
+	n := runConfirmedUserGC(t, db, del, userID)
 	if n != 1 {
 		t.Fatalf("after article delete n=%d del=%v", n, del.Deleted())
 	}
@@ -289,8 +354,9 @@ func TestGCUserImagesStopsWhenReferenceQueryFails(t *testing.T) {
 	}
 	del := &fakeDeleter{base: "https://zhiyuansofts.cn"}
 
-	if n := gcUserImages(db, del, userID); n != 0 {
-		t.Fatalf("query failure must delete nothing, n=%d deleted=%v", n, del.Deleted())
+	n, err := runConfirmedUserGCErr(t, db, del, userID)
+	if err == nil || n != 0 {
+		t.Fatalf("query failure must err and delete nothing, n=%d err=%v deleted=%v", n, err, del.Deleted())
 	}
 	if len(del.Deleted()) != 0 {
 		t.Fatalf("remote deletion attempted after query failure: %v", del.Deleted())
@@ -310,8 +376,9 @@ func TestGCUserImagesKeepsDatabaseRowWhenRemoteDeleteFails(t *testing.T) {
 	}
 	del := &fakeDeleter{base: "https://zhiyuansofts.cn", err: errors.New("remote unavailable")}
 
-	if n := gcUserImages(db, del, userID); n != 0 {
-		t.Fatalf("failed remote deletion must not count as success, n=%d", n)
+	n, err := runConfirmedUserGCErr(t, db, del, userID)
+	if err == nil || n != 0 {
+		t.Fatalf("failed remote deletion must not count as success, n=%d err=%v", n, err)
 	}
 	var count int64
 	if err := db.Model(&imageAssetRow{}).Where("user_id = ?", userID).Count(&count).Error; err != nil || count != 1 {
