@@ -273,14 +273,22 @@ func (s *BlogService) handlePageCreate(ctx khttp.Context) error {
 		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "参数错误"})
 		return nil
 	}
-	page, msg := normalizeBlogPageWrite(s.db, pd.UserID, req)
-	if msg != "" {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": msg})
+	var page *model.BlogPage
+	var validationMsg string
+	err := blogimg.WithUserImageReferenceTx(s.db, pd.UserID, func(tx *gorm.DB) error {
+		page, validationMsg = normalizeBlogPageWrite(tx, pd.UserID, req)
+		if validationMsg != "" {
+			return gorm.ErrInvalidData
+		}
+		page.ID = 0
+		page.UserID = pd.UserID
+		return tx.Create(page).Error
+	})
+	if validationMsg != "" {
+		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": validationMsg})
 		return nil
 	}
-	page.ID = 0
-	page.UserID = pd.UserID
-	if err := s.db.Create(page).Error; err != nil {
+	if err != nil {
 		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "页面地址已被使用"})
 		return nil
 	}
@@ -299,30 +307,39 @@ func (s *BlogService) handlePageUpdate(ctx khttp.Context) error {
 		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "参数错误"})
 		return nil
 	}
-	page, msg := normalizeBlogPageWrite(s.db, pd.UserID, req)
-	if msg != "" {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": msg})
+	var page *model.BlogPage
+	var existing model.BlogPage
+	var validationMsg string
+	err := blogimg.WithUserImageReferenceTx(s.db, pd.UserID, func(tx *gorm.DB) error {
+		page, validationMsg = normalizeBlogPageWrite(tx, pd.UserID, req)
+		if validationMsg != "" {
+			return gorm.ErrInvalidData
+		}
+		if err := tx.Where("id = ? AND user_id = ?", req.ID, pd.UserID).First(&existing).Error; err != nil {
+			return err
+		}
+		page.ID = existing.ID
+		page.UserID = existing.UserID
+		res := tx.Model(&existing).
+			Select("title", "slug", "content_md", "image_hashes", "status", "show_in_nav", "nav_label", "nav_order").
+			Updates(page)
+		if res.Error != nil {
+			return res.Error
+		}
+		return tx.First(&existing, existing.ID).Error
+	})
+	if validationMsg != "" {
+		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": validationMsg})
 		return nil
 	}
-	var existing model.BlogPage
-	if err := s.db.Where("id = ? AND user_id = ?", req.ID, pd.UserID).First(&existing).Error; err != nil {
+	if errors.Is(err, gorm.ErrRecordNotFound) {
 		writeJSON(ctx.Response(), 404, map[string]interface{}{"code": 1, "message": "页面不存在"})
 		return nil
 	}
-	page.ID = existing.ID
-	page.UserID = existing.UserID
-	res := s.db.Model(&existing).
-		Select("title", "slug", "content_md", "image_hashes", "status", "show_in_nav", "nav_label", "nav_order").
-		Updates(page)
-	if res.Error != nil {
+	if err != nil {
 		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "页面地址已被使用"})
 		return nil
 	}
-	if err := s.db.First(&existing, existing.ID).Error; err != nil {
-		writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "保存失败"})
-		return nil
-	}
-	go s.gcUserBlogImages(pd.UserID)
 	writeJSON(ctx.Response(), 200, map[string]interface{}{"code": 0, "message": "success", "data": blogPageToMap(&existing, true, s.publicImageBase())})
 	return nil
 }
@@ -340,12 +357,17 @@ func (s *BlogService) handlePageDelete(ctx khttp.Context) error {
 		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "参数错误"})
 		return nil
 	}
-	res := s.db.Where("id = ? AND user_id = ?", body.ID, pd.UserID).Delete(&model.BlogPage{})
-	if res.Error != nil {
+	var deleted int64
+	err := blogimg.WithUserImageReferenceTx(s.db, pd.UserID, func(tx *gorm.DB) error {
+		res := tx.Where("id = ? AND user_id = ?", body.ID, pd.UserID).Delete(&model.BlogPage{})
+		deleted = res.RowsAffected
+		return res.Error
+	})
+	if err != nil {
 		writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "删除失败"})
 		return nil
 	}
-	if res.RowsAffected == 0 {
+	if deleted == 0 {
 		writeJSON(ctx.Response(), 404, map[string]interface{}{"code": 1, "message": "页面不存在"})
 		return nil
 	}

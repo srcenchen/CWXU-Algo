@@ -1,9 +1,12 @@
 package service
 
 import (
+	"crypto/subtle"
 	"encoding/json"
 	"net/http"
+	"net/url"
 	"os"
+	"regexp"
 	"strings"
 	"time"
 
@@ -15,10 +18,12 @@ import (
 const (
 	obsidianPluginMetaID     = 1
 	obsidianPluginDefaultCDN = "https://zhiyuansofts.cn/obsidian/goalgo-blog"
-	// 发布脚本与后端共享；可用环境变量 CWXU_OBSIDIAN_PUBLISH_TOKEN 覆盖
+	// 发布脚本与后端共享；未配置时禁用 token 发布。
 	obsidianPluginPublishTokenEnv = "CWXU_OBSIDIAN_PUBLISH_TOKEN"
-	obsidianPluginPublishTokenDef = "goalgo-obsidian-publish-2026"
+	obsidianPluginCDNBaseEnv      = "CWXU_OBSIDIAN_CDN_BASE"
 )
+
+var obsidianSemverRE = regexp.MustCompile(`^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-(?:0|[1-9][0-9]*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9][0-9]*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*))*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$`)
 
 type obsidianPluginView struct {
 	ID            string `json:"id"`
@@ -42,21 +47,62 @@ type obsidianPluginPublishReq struct {
 func obsidianPublishTokenOK(r *http.Request) bool {
 	want := strings.TrimSpace(os.Getenv(obsidianPluginPublishTokenEnv))
 	if want == "" {
-		want = obsidianPluginPublishTokenDef
+		return false
 	}
 	got := strings.TrimSpace(r.Header.Get("X-Plugin-Publish-Token"))
 	if got == "" {
 		got = strings.TrimSpace(r.Header.Get("X-Goalgo-Publish-Token"))
 	}
-	return got != "" && got == want
+	return constantTimeTokenEqual(got, want)
+}
+
+func constantTimeTokenEqual(got, want string) bool {
+	if got == "" || want == "" || len(got) != len(want) {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(got), []byte(want)) == 1
 }
 
 func defaultObsidianDownloadBase(version string) string {
-	v := strings.Trim(strings.TrimSpace(version), "/")
-	if v == "" {
+	v := strings.TrimSpace(version)
+	if !validObsidianVersion(v) {
 		return ""
 	}
-	return strings.TrimRight(obsidianPluginDefaultCDN, "/") + "/" + v
+	return trustedObsidianCDNBase() + "/" + v
+}
+
+func validObsidianVersion(version string) bool {
+	return obsidianSemverRE.MatchString(strings.TrimSpace(version))
+}
+
+func trustedObsidianCDNBase() string {
+	configured := strings.TrimRight(strings.TrimSpace(os.Getenv(obsidianPluginCDNBaseEnv)), "/")
+	if validObsidianCDNRoot(configured) {
+		return configured
+	}
+	return obsidianPluginDefaultCDN
+}
+
+func validObsidianCDNRoot(raw string) bool {
+	u, err := url.Parse(raw)
+	return err == nil && u.Scheme == "https" && u.Host != "" && u.User == nil &&
+		u.RawQuery == "" && u.Fragment == "" && u.Path == "/obsidian/goalgo-blog"
+}
+
+func validObsidianDownloadBase(version, raw string) bool {
+	if !validObsidianVersion(version) {
+		return false
+	}
+	want, err := url.Parse(defaultObsidianDownloadBase(version))
+	if err != nil {
+		return false
+	}
+	got, err := url.Parse(strings.TrimRight(strings.TrimSpace(raw), "/"))
+	if err != nil {
+		return false
+	}
+	return got.Scheme == "https" && got.User == nil && got.RawQuery == "" && got.Fragment == "" &&
+		got.Host == want.Host && got.Path == want.Path
 }
 
 func (s *BlogService) loadObsidianPluginMeta() (*model.ObsidianPluginMeta, error) {
@@ -70,7 +116,7 @@ func (s *BlogService) loadObsidianPluginMeta() (*model.ObsidianPluginMeta, error
 
 func metaToView(row *model.ObsidianPluginMeta) obsidianPluginView {
 	base := strings.TrimRight(strings.TrimSpace(row.DownloadBase), "/")
-	if base == "" && row.Version != "" {
+	if !validObsidianDownloadBase(row.Version, base) {
 		base = defaultObsidianDownloadBase(row.Version)
 	}
 	return obsidianPluginView{
@@ -123,18 +169,7 @@ func (s *BlogService) handleObsidianPluginPublish(ctx khttp.Context) error {
 		return nil
 	}
 	version := strings.TrimSpace(req.Version)
-	if version == "" ||
-		strings.ContainsAny(version, "/\\") ||
-		strings.Contains(version, "..") ||
-		strings.Contains(version, " ") {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{
-			"code":    1,
-			"message": "version 无效",
-		})
-		return nil
-	}
-	// 简单 semver 形态校验
-	if strings.Count(version, ".") < 1 {
+	if !validObsidianVersion(version) {
 		writeJSON(ctx.Response(), 400, map[string]interface{}{
 			"code":    1,
 			"message": "version 应为 semver",
@@ -149,6 +184,13 @@ func (s *BlogService) handleObsidianPluginPublish(ctx khttp.Context) error {
 	base := strings.TrimRight(strings.TrimSpace(req.DownloadBase), "/")
 	if base == "" {
 		base = defaultObsidianDownloadBase(version)
+	}
+	if !validObsidianDownloadBase(version, base) {
+		writeJSON(ctx.Response(), 400, map[string]interface{}{
+			"code":    1,
+			"message": "downloadBase 无效",
+		})
+		return nil
 	}
 	released := req.ReleasedAt
 	if released <= 0 {

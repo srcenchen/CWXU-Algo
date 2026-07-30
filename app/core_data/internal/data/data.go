@@ -17,11 +17,14 @@ import (
 	"github.com/redis/go-redis/v9"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 	"gorm.io/gorm/logger"
 )
 
 // ProviderSet is data providers.
 var ProviderSet = wire.NewSet(NewData, NewDataDB, NewDataRDB)
+
+const solutionImageMigrationBatchSize = 200
 
 // NewDataDB 从 Data 中提取 DB
 func NewDataDB(data *Data) *gorm.DB {
@@ -199,30 +202,53 @@ func migrateSolutionImageURLsToPathOnly(db *gorm.DB) {
 	if db == nil || !db.Migrator().HasTable(&model.ProblemUserSolution{}) {
 		return
 	}
-	if !claimCoreSchemaPatch(db, "solution_image_url_path_only_v1") {
+	const patchKey = "solution_image_url_path_only_v1"
+	var markerCount int64
+	if err := db.Model(&schemaPatch{}).Where("key = ?", patchKey).Count(&markerCount).Error; err != nil {
+		log.Warnf("solution image path-only query marker: %v", err)
 		return
 	}
-	var rows []model.ProblemUserSolution
-	if err := db.Select("id", "content_md").Find(&rows).Error; err != nil {
-		log.Warnf("solution image path-only migrate list: %v", err)
+	if markerCount > 0 {
 		return
 	}
-	updated := 0
-	for _, r := range rows {
-		newMD := blogimg.NormalizeStoredImageRefs(r.ContentMD)
-		if newMD == r.ContentMD {
-			continue
+	updated, scanned := 0, 0
+	var afterID uint
+	for {
+		var rows []model.ProblemUserSolution
+		if err := db.Select("id", "updated_at", "content_md").Where("id > ?", afterID).
+			Order("id ASC").Limit(solutionImageMigrationBatchSize).Find(&rows).Error; err != nil {
+			log.Warnf("solution image path-only migrate list: %v", err)
+			return
 		}
-		res := db.Model(&model.ProblemUserSolution{}).Where("id = ?", r.ID).Update("content_md", newMD)
-		if res.Error != nil {
-			log.Warnf("solution image path-only migrate id=%d: %v", r.ID, res.Error)
-			continue
+		if len(rows) == 0 {
+			break
 		}
-		if res.RowsAffected > 0 {
-			updated++
+		scanned += len(rows)
+		for _, r := range rows {
+			newMD := blogimg.NormalizeStoredImageRefs(r.ContentMD)
+			if newMD == r.ContentMD {
+				continue
+			}
+			res := db.Model(&model.ProblemUserSolution{}).
+				Where("id = ? AND updated_at = ? AND content_md = ?", r.ID, r.UpdatedAt, r.ContentMD).
+				UpdateColumn("content_md", newMD)
+			if res.Error != nil {
+				log.Warnf("solution image path-only migrate id=%d: %v", r.ID, res.Error)
+				return
+			}
+			if res.RowsAffected > 0 {
+				updated++
+			}
 		}
+		afterID = rows[len(rows)-1].ID
 	}
-	log.Infof("solution image path-only migrate: scanned=%d updated=%d", len(rows), updated)
+	if err := db.Clauses(clause.OnConflict{DoNothing: true}).Create(&schemaPatch{
+		Key: patchKey, AppliedAt: time.Now(),
+	}).Error; err != nil {
+		log.Warnf("solution image path-only complete marker: %v", err)
+		return
+	}
+	log.Infof("solution image path-only migrate: scanned=%d updated=%d", scanned, updated)
 }
 
 // purgeLeetCodeOfficialACFromDailyOnce 一次性清理：

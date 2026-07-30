@@ -2,13 +2,48 @@ package blogsync
 
 import (
 	"testing"
+	"time"
 
+	"cwxu-algo/app/common/blogimg"
 	"cwxu-algo/app/common/blogtext"
 
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 )
+
+func TestUpsertFromSolutionWaitsForUserImageReferenceLock(t *testing.T) {
+	db := testDB(t)
+	locked := make(chan struct{})
+	release := make(chan struct{})
+	lockDone := make(chan error, 1)
+	go func() {
+		lockDone <- blogimg.WithUserImageReferenceTx(db, 71, func(tx *gorm.DB) error {
+			close(locked)
+			<-release
+			return nil
+		})
+	}()
+	<-locked
+
+	upsertDone := make(chan error, 1)
+	go func() {
+		_, _, err := UpsertFromSolution(db, 71, 701, 0, "locked", "![x](/blog/71/x.webp)")
+		upsertDone <- err
+	}()
+	select {
+	case err := <-upsertDone:
+		t.Fatalf("upsert completed before reference lock released: %v", err)
+	case <-time.After(40 * time.Millisecond):
+	}
+	close(release)
+	if err := <-lockDone; err != nil {
+		t.Fatal(err)
+	}
+	if err := <-upsertDone; err != nil {
+		t.Fatal(err)
+	}
+}
 
 func testDB(t *testing.T) *gorm.DB {
 	t.Helper()
@@ -42,7 +77,7 @@ func TestEnsureDefaultCategory(t *testing.T) {
 
 func TestUpsertFromSolutionNormalizesBlogImageURLs(t *testing.T) {
 	db := testDB(t)
-	md := "见 ![x](https://old.cdn/blog/3/pic.webp)"
+	md := "见 ![x](https://old.zhiyuansofts.cn/blog/3/pic.webp)"
 	aid, _, err := UpsertFromSolution(db, 3, 77, 0, "图解", md)
 	if err != nil {
 		t.Fatal(err)

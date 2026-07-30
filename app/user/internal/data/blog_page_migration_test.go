@@ -1,8 +1,11 @@
 package data
 
 import (
+	"fmt"
 	"testing"
+	"time"
 
+	"cwxu-algo/app/common/blogimg"
 	"cwxu-algo/app/user/internal/data/model"
 
 	"gorm.io/driver/sqlite"
@@ -52,5 +55,78 @@ func TestBackfillBlogFixedPagesIsIdempotent(t *testing.T) {
 	}
 	if kept.ContentMD != "keep me" || kept.Title != "自定义关于" {
 		t.Fatalf("migration must not overwrite existing page: %+v", kept)
+	}
+}
+
+func TestBackfillBlogFixedPagesUsesUserLock(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AutoMigrate(&model.BlogSiteConfig{}, &model.BlogPage{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&model.BlogSiteConfig{UserID: 94, ThemeID: "mizuki", AboutMD: "![x](/blog/94/x.webp)"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	lockDone := make(chan error, 1)
+	go func() {
+		lockDone <- blogimg.WithUserImageReferenceTx(db, 94, func(tx *gorm.DB) error {
+			close(entered)
+			<-release
+			return nil
+		})
+	}()
+	<-entered
+	backfillDone := make(chan error, 1)
+	go func() { backfillDone <- backfillBlogFixedPages(db) }()
+	select {
+	case err := <-backfillDone:
+		t.Fatalf("fixed-page backfill bypassed user lock: %v", err)
+	case <-time.After(40 * time.Millisecond):
+	}
+	close(release)
+	if err := <-lockDone; err != nil {
+		t.Fatal(err)
+	}
+	if err := <-backfillDone; err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestBackfillBlogFixedPagesUsesBoundedKeysetQueries(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AutoMigrate(&model.BlogSiteConfig{}, &model.BlogPage{}); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 205; i++ {
+		cfg := model.BlogSiteConfig{UserID: uint(i + 1), ThemeID: "mizuki", AboutMD: fmt.Sprintf("about %d", i)}
+		if err := db.Create(&cfg).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	queries := 0
+	missingLimit := false
+	if err := db.Callback().Query().Before("gorm:query").Register("test:fixed-page-keyset", func(tx *gorm.DB) {
+		if tx.Statement.Table != "blog_site_configs" {
+			return
+		}
+		queries++
+		if _, ok := tx.Statement.Clauses["LIMIT"]; !ok {
+			missingLimit = true
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := backfillBlogFixedPages(db); err != nil {
+		t.Fatal(err)
+	}
+	if missingLimit || queries < 3 {
+		t.Fatalf("queries=%d missingLimit=%v", queries, missingLimit)
 	}
 }

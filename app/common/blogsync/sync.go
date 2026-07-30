@@ -109,6 +109,17 @@ func UpsertFromSolution(db *gorm.DB, userID, solutionID, articleID uint, title, 
 
 // UpsertFromSolutionWithProblem same as UpsertFromSolution but stores source problem id.
 func UpsertFromSolutionWithProblem(db *gorm.DB, userID, solutionID, problemID, articleID uint, title, content string) (uint, string, error) {
+	var resultID uint
+	var resultSlug string
+	err := blogimg.WithUserImageReferenceTx(db, userID, func(tx *gorm.DB) error {
+		var err error
+		resultID, resultSlug, err = upsertFromSolutionWithProblem(tx, userID, solutionID, problemID, articleID, title, content)
+		return err
+	})
+	return resultID, resultSlug, err
+}
+
+func upsertFromSolutionWithProblem(db *gorm.DB, userID, solutionID, problemID, articleID uint, title, content string) (uint, string, error) {
 	if db == nil || userID == 0 || solutionID == 0 {
 		return 0, "", fmt.Errorf("blogsync: missing args")
 	}
@@ -141,11 +152,11 @@ func UpsertFromSolutionWithProblem(db *gorm.DB, userID, solutionID, problemID, a
 	)
 	applyUpdate := func(a *Article) (uint, string, error) {
 		updates := map[string]interface{}{
-			"title":                title,
-			"content":              content,
-			"image_hashes":         imageHashes,
-			"category_id":          catPtr,
-			"visibility":           visPublic,
+			"title":        title,
+			"content":      content,
+			"image_hashes": imageHashes,
+			"category_id":  catPtr,
+			"visibility":   visPublic,
 			// 精选(recommend) 不自动设；仅同步主站资料
 			"sync_to_main_profile": true,
 			"source_solution_id":   &sid,
@@ -155,8 +166,12 @@ func UpsertFromSolutionWithProblem(db *gorm.DB, userID, solutionID, problemID, a
 		}
 		// 摘要一律按正文重算（不允许手写保留）
 		updates["summary"] = defSum
-		_ = db.Model(a).Updates(updates).Error
-		_ = autoSurfaceOrgs(db, a.ID, userID)
+		if err := db.Model(a).Updates(updates).Error; err != nil {
+			return 0, "", err
+		}
+		if err := autoSurfaceOrgs(db, a.ID, userID); err != nil {
+			return 0, "", err
+		}
 		return a.ID, a.Slug, nil
 	}
 
@@ -203,7 +218,9 @@ func UpsertFromSolutionWithProblem(db *gorm.DB, userID, solutionID, problemID, a
 		}
 		return 0, "", err
 	}
-	_ = autoSurfaceOrgs(db, a.ID, userID)
+	if err := autoSurfaceOrgs(db, a.ID, userID); err != nil {
+		return 0, "", err
+	}
 	return a.ID, a.Slug, nil
 }
 
@@ -242,15 +259,19 @@ func autoSurfaceOrgs(db *gorm.DB, articleID, userID uint) error {
 	if len(expanded) == 0 && pubID > 0 {
 		expanded = []uint{pubID}
 	}
-	_ = db.Where("article_id = ?", articleID).Delete(&articleOrg{}).Error
+	if err := db.Where("article_id = ?", articleID).Delete(&articleOrg{}).Error; err != nil {
+		return err
+	}
 	for _, oid := range expanded {
-		_ = db.Exec(
+		if err := db.Exec(
 			`INSERT INTO blog_article_orgs (created_at, article_id, org_id)
 			 SELECT NOW(), ?, ? WHERE NOT EXISTS (
 			   SELECT 1 FROM blog_article_orgs WHERE article_id = ? AND org_id = ?
 			 )`,
 			articleID, oid, articleID, oid,
-		).Error
+		).Error; err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -261,6 +282,16 @@ func DeleteBySolution(db *gorm.DB, userID, solutionID, articleID uint) {
 	if db == nil {
 		return
 	}
+	if userID > 0 {
+		_ = blogimg.WithUserImageReferenceTx(db, userID, func(tx *gorm.DB) error {
+			return deleteBySolution(tx, userID, solutionID, articleID)
+		})
+		return
+	}
+	_ = deleteBySolution(db, userID, solutionID, articleID)
+}
+
+func deleteBySolution(db *gorm.DB, userID, solutionID, articleID uint) error {
 	var ids []uint
 	ownerIDs := map[uint]struct{}{}
 	if userID > 0 {
@@ -302,11 +333,20 @@ func DeleteBySolution(db *gorm.DB, userID, solutionID, articleID uint) {
 			continue
 		}
 		seen[id] = struct{}{}
-		_ = db.Where("article_id = ?", id).Delete(&articleOrg{}).Error
-		_ = db.Where("article_id = ?", id).Delete(&articleComment{}).Error
-		_ = db.Where("article_id = ?", id).Delete(&articleLike{}).Error
-		_ = db.Where("id = ?", id).Delete(&Article{}).Error
+		if err := db.Where("article_id = ?", id).Delete(&articleOrg{}).Error; err != nil {
+			return err
+		}
+		if err := db.Where("article_id = ?", id).Delete(&articleComment{}).Error; err != nil {
+			return err
+		}
+		if err := db.Where("article_id = ?", id).Delete(&articleLike{}).Error; err != nil {
+			return err
+		}
+		if err := db.Where("id = ?", id).Delete(&Article{}).Error; err != nil {
+			return err
+		}
 	}
+	return nil
 }
 
 // LookupBySolution 按题解 id 查博客文章 id + slug。

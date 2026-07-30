@@ -1,6 +1,12 @@
 package blogimg
 
 import (
+	"crypto/sha256"
+	"crypto/subtle"
+	"encoding/hex"
+	"errors"
+	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -15,6 +21,12 @@ import (
 // 拉长到 24h，避免草稿/插件分步推送被误删。
 const GCGracePeriod = 24 * time.Hour
 
+var (
+	ErrGCPreviewRequired = errors.New("blog image gc preview required")
+	ErrGCStaleSnapshot   = errors.New("blog image gc preview is stale")
+	ErrGCReferenceQuery  = errors.New("blog image gc reference query failed")
+)
+
 // ObjectDeleter is the UpYun delete surface used by GC (injectable in tests).
 type ObjectDeleter interface {
 	Delete(objectKey string) error
@@ -24,12 +36,15 @@ type ObjectDeleter interface {
 
 // imageAssetRow mirrors blog_image_assets without importing user models.
 type imageAssetRow struct {
-	ID          uint      `gorm:"primaryKey"`
-	CreatedAt   time.Time `gorm:"column:created_at"`
-	UserID      uint      `gorm:"column:user_id"`
-	ObjectKey   string    `gorm:"column:object_key"`
-	URL         string    `gorm:"column:url"`
-	ContentHash string    `gorm:"column:content_hash"`
+	ID          uint       `gorm:"primaryKey"`
+	CreatedAt   time.Time  `gorm:"column:created_at"`
+	UpdatedAt   time.Time  `gorm:"column:updated_at"`
+	UserID      uint       `gorm:"column:user_id"`
+	ObjectKey   string     `gorm:"column:object_key"`
+	URL         string     `gorm:"column:url"`
+	ContentHash string     `gorm:"column:content_hash"`
+	Status      string     `gorm:"column:status"`
+	ReservedAt  *time.Time `gorm:"column:reserved_at"`
 }
 
 func (imageAssetRow) TableName() string { return "blog_image_assets" }
@@ -37,12 +52,14 @@ func (imageAssetRow) TableName() string { return "blog_image_assets" }
 // OrphanAsset is a registered image no longer referenced by any article/page.
 // Protected marks a newly uploaded asset still inside the editing grace period.
 type OrphanAsset struct {
-	ID          uint      `json:"id"`
-	CreatedAt   time.Time `json:"createdAt"`
-	ObjectKey   string    `json:"objectKey"`
-	URL         string    `json:"url"`
-	ContentHash string    `json:"contentHash,omitempty"`
-	Protected   bool      `json:"protected"`
+	ID          uint       `json:"id"`
+	CreatedAt   time.Time  `json:"createdAt"`
+	ObjectKey   string     `json:"objectKey"`
+	URL         string     `json:"url"`
+	ContentHash string     `json:"contentHash,omitempty"`
+	Status      string     `json:"status,omitempty"`
+	ReservedAt  *time.Time `json:"reservedAt,omitempty"`
+	Protected   bool       `json:"protected"`
 }
 
 // articleRefRow is enough content to compute referenced image keys / hashes.
@@ -100,7 +117,7 @@ func LoadUpyunClient(db *gorm.DB) *upyun.Client {
 	})
 }
 
-// GCUserImages deletes registered UpYun objects for user that are no longer
+// gcUserImages deletes registered UpYun objects for user that are no longer
 // referenced by any of their blog_articles / blog_pages.
 //
 // 引用判定（优先 hash，防 URL/域名/path 漂移误删）：
@@ -111,41 +128,103 @@ func LoadUpyunClient(db *gorm.DB) *upyun.Client {
 //  5. 无 ContentHash 的历史资产：仅当 key/正文都无引用才删
 //
 // Returns number of orphan keys processed (delete attempted).
-func GCUserImages(db *gorm.DB, client ObjectDeleter, userID uint) int {
-	return GCUserImagesAt(db, client, userID, time.Now())
+func gcUserImages(db *gorm.DB, client ObjectDeleter, userID uint) int {
+	return gcUserImagesAt(db, client, userID, time.Now())
 }
 
-// GCUserImagesForce runs GC ignoring the 24h grace period (manual cleanup).
-func GCUserImagesForce(db *gorm.DB, client ObjectDeleter, userID uint) int {
-	return gcUserImagesAt(db, client, userID, time.Now(), true)
+func gcUserImagesAt(db *gorm.DB, client ObjectDeleter, userID uint, now time.Time) int {
+	n, _ := gcUserImagesChecked(db, client, userID, now, false)
+	return n
 }
 
-// GCUserImagesAt is GCUserImages with injectable clock (tests).
-func GCUserImagesAt(db *gorm.DB, client ObjectDeleter, userID uint, now time.Time) int {
-	return gcUserImagesAt(db, client, userID, now, false)
-}
-
-func gcUserImagesAt(db *gorm.DB, client ObjectDeleter, userID uint, now time.Time, force bool) int {
+func gcUserImagesChecked(db *gorm.DB, client ObjectDeleter, userID uint, now time.Time, force bool) (int, error) {
 	if db == nil || userID == 0 || client == nil || !client.Configured() {
-		return 0
+		return 0, fmt.Errorf("blog image gc is not configured")
 	}
 	base := client.PublicBaseURL()
-	canDeleteRemote := base != ""
-	orphans := ListUserImageOrphansAt(db, userID, base, now)
+	if strings.TrimSpace(base) == "" {
+		return 0, fmt.Errorf("blog image gc public base is empty")
+	}
+	orphans, err := ListUserImageOrphansCheckedAt(db, userID, base, now)
+	if err != nil {
+		return 0, err
+	}
+	return deleteOrphanAssets(db, client, userID, orphans, force)
+}
+
+func deleteOrphanAssets(db *gorm.DB, client ObjectDeleter, userID uint, orphans []OrphanAsset, force bool) (int, error) {
 	processed := 0
 	for _, asset := range orphans {
 		if asset.Protected && !force {
 			continue
 		}
-		if canDeleteRemote {
-			if err := client.Delete(asset.ObjectKey); err != nil {
-				log.Warnf("blog image gc delete %s: %v", asset.ObjectKey, err)
-			}
+		if err := client.Delete(asset.ObjectKey); err != nil {
+			log.Warnf("blog image gc delete %s: %v", asset.ObjectKey, err)
+			return processed, fmt.Errorf("delete remote object %s: %w", asset.ObjectKey, err)
 		}
-		_ = db.Delete(&imageAssetRow{}, asset.ID).Error
+		res := db.Where("id = ? AND user_id = ?", asset.ID, userID).Delete(&imageAssetRow{})
+		if res.Error != nil {
+			return processed, fmt.Errorf("delete asset row %d: %w", asset.ID, res.Error)
+		}
+		if res.RowsAffected != 1 {
+			return processed, fmt.Errorf("delete asset row %d: affected %d", asset.ID, res.RowsAffected)
+		}
 		processed++
 	}
-	return processed
+	return processed, nil
+}
+
+// BuildOrphanSnapshot produces a deterministic candidate list and snapshot.
+func BuildOrphanSnapshot(userID uint, orphans []OrphanAsset) ([]uint, string) {
+	ordered := append([]OrphanAsset(nil), orphans...)
+	sort.Slice(ordered, func(i, j int) bool { return ordered[i].ID < ordered[j].ID })
+	h := sha256.New()
+	_, _ = fmt.Fprintf(h, "user:%d\n", userID)
+	ids := make([]uint, 0, len(ordered))
+	for _, asset := range ordered {
+		ids = append(ids, asset.ID)
+		reservedUnix := int64(0)
+		if asset.ReservedAt != nil {
+			reservedUnix = asset.ReservedAt.UTC().UnixNano()
+		}
+		_, _ = fmt.Fprintf(h, "%d\x00%s\x00%s\x00%s\x00%s\x00%d\x00%d\x00%t\n",
+			asset.ID, asset.ObjectKey, asset.URL, asset.ContentHash, asset.Status, asset.CreatedAt.UTC().UnixNano(), reservedUnix, asset.Protected)
+	}
+	return ids, hex.EncodeToString(h.Sum(nil))
+}
+
+// GCUserImagesSnapshot deletes only when confirmation exactly matches a fresh full preview.
+func GCUserImagesSnapshot(db *gorm.DB, client ObjectDeleter, userID uint, candidateIDs []uint, snapshot string) (int, error) {
+	if len(candidateIDs) == 0 || strings.TrimSpace(snapshot) == "" {
+		return 0, ErrGCPreviewRequired
+	}
+	if db == nil || userID == 0 || client == nil || !client.Configured() || strings.TrimSpace(client.PublicBaseURL()) == "" {
+		return 0, fmt.Errorf("blog image gc is not configured")
+	}
+	deleted := 0
+	err := WithUserImageReferenceTx(db, userID, func(tx *gorm.DB) error {
+		orphans, err := ListUserImageOrphansCheckedAt(tx, userID, client.PublicBaseURL(), time.Now())
+		if err != nil {
+			return fmt.Errorf("%w: %v", ErrGCReferenceQuery, err)
+		}
+		currentIDs, currentSnapshot := BuildOrphanSnapshot(userID, orphans)
+		wantIDs := append([]uint(nil), candidateIDs...)
+		sort.Slice(wantIDs, func(i, j int) bool { return wantIDs[i] < wantIDs[j] })
+		if len(currentIDs) != len(wantIDs) {
+			return ErrGCStaleSnapshot
+		}
+		for i := range currentIDs {
+			if currentIDs[i] != wantIDs[i] {
+				return ErrGCStaleSnapshot
+			}
+		}
+		if subtle.ConstantTimeCompare([]byte(currentSnapshot), []byte(strings.TrimSpace(snapshot))) != 1 {
+			return ErrGCStaleSnapshot
+		}
+		deleted, err = deleteOrphanAssets(tx, client, userID, orphans, true)
+		return err
+	})
+	return deleted, err
 }
 
 // ListUserImageOrphans lists all unreferenced assets, including fresh uploads.
@@ -156,8 +235,14 @@ func ListUserImageOrphans(db *gorm.DB, userID uint, base string) []OrphanAsset {
 
 // ListUserImageOrphansAt is ListUserImageOrphans with an injectable clock.
 func ListUserImageOrphansAt(db *gorm.DB, userID uint, base string, now time.Time) []OrphanAsset {
+	orphans, _ := ListUserImageOrphansCheckedAt(db, userID, base, now)
+	return orphans
+}
+
+// ListUserImageOrphansCheckedAt aborts on any reference/asset query failure.
+func ListUserImageOrphansCheckedAt(db *gorm.DB, userID uint, base string, now time.Time) ([]OrphanAsset, error) {
 	if db == nil || userID == 0 {
-		return nil
+		return nil, fmt.Errorf("invalid blog image gc arguments")
 	}
 
 	usedHash := map[string]struct{}{}
@@ -180,7 +265,9 @@ func ListUserImageOrphansAt(db *gorm.DB, userID uint, base string, now time.Time
 	}
 
 	var articles []articleRefRow
-	_ = db.Select("content", "cover_url", "image_hashes").Where("user_id = ?", userID).Find(&articles).Error
+	if err := db.Select("content", "cover_url", "image_hashes").Where("user_id = ?", userID).Find(&articles).Error; err != nil {
+		return nil, fmt.Errorf("query article references: %w", err)
+	}
 	for _, a := range articles {
 		addHashes(a.ImageHashes)
 		addContent(a.Content, a.CoverURL)
@@ -188,14 +275,18 @@ func ListUserImageOrphansAt(db *gorm.DB, userID uint, base string, now time.Time
 
 	// 自定义页面此前未纳入 GC 引用 → 正文有图仍被删
 	var pages []pageRefRow
-	_ = db.Select("content_md", "image_hashes").Where("user_id = ?", userID).Find(&pages).Error
+	if err := db.Select("content_md", "image_hashes").Where("user_id = ?", userID).Find(&pages).Error; err != nil {
+		return nil, fmt.Errorf("query page references: %w", err)
+	}
 	for _, p := range pages {
 		addHashes(p.ImageHashes)
 		addContent(p.ContentMD, "")
 	}
 
 	var assets []imageAssetRow
-	_ = db.Where("user_id = ?", userID).Find(&assets).Error
+	if err := db.Where("user_id = ?", userID).Find(&assets).Error; err != nil {
+		return nil, fmt.Errorf("query image assets: %w", err)
+	}
 	var orphans []OrphanAsset
 	for _, a := range assets {
 		key := NormalizeObjectKey(a.ObjectKey)
@@ -205,6 +296,16 @@ func ListUserImageOrphansAt(db *gorm.DB, userID uint, base string, now time.Time
 		h := NormalizeHash(a.ContentHash)
 		if h == "" {
 			h = HashFromObjectKey(key)
+		}
+		status := strings.ToLower(strings.TrimSpace(a.Status))
+		if status == "" {
+			status = "ready"
+		}
+		if a.ReservedAt != nil && now.Sub(*a.ReservedAt) < GCGracePeriod {
+			continue
+		}
+		if status == "pending" && a.ReservedAt == nil && !a.CreatedAt.IsZero() && now.Sub(a.CreatedAt) < GCGracePeriod {
+			continue
 		}
 		// 主路径：content hash 仍被任一文/页声明或可从正文 key 推出
 		if h != "" {
@@ -224,25 +325,13 @@ func ListUserImageOrphansAt(db *gorm.DB, userID uint, base string, now time.Time
 			ObjectKey:   key,
 			URL:         a.URL,
 			ContentHash: h,
-			Protected:   !a.CreatedAt.IsZero() && now.Sub(a.CreatedAt) < GCGracePeriod,
+			Status:      status,
+			ReservedAt:  a.ReservedAt,
+			Protected:   status == "ready" && !a.CreatedAt.IsZero() && now.Sub(a.CreatedAt) < GCGracePeriod,
 		})
 	}
-	return orphans
-}
-
-// GCUserImagesFromSite loads UpYun from site_configs then runs GCUserImages.
-func GCUserImagesFromSite(db *gorm.DB, userID uint) int {
-	return GCUserImages(db, LoadUpyunClient(db), userID)
-}
-
-// ScheduleGCUserImages runs GC asynchronously (fire-and-forget).
-func ScheduleGCUserImages(db *gorm.DB, userID uint) {
-	if db == nil || userID == 0 {
-		return
-	}
-	go func() {
-		_ = GCUserImagesFromSite(db, userID)
-	}()
+	sort.Slice(orphans, func(i, j int) bool { return orphans[i].ID < orphans[j].ID })
+	return orphans, nil
 }
 
 // ExistingURLsForUser returns which of the given URLs are still registered
@@ -302,7 +391,7 @@ func ExistingURLsAndHashesForUser(
 	if len(keys) > 0 {
 		var rows []imageAssetRow
 		_ = db.Select("object_key", "url", "content_hash").
-			Where("user_id = ? AND object_key IN ?", userID, keys).
+			Where("user_id = ? AND object_key IN ? AND COALESCE(NULLIF(status, ''), 'ready') = 'ready'", userID, keys).
 			Find(&rows).Error
 		for _, r := range rows {
 			if k := NormalizeObjectKey(r.ObjectKey); k != "" {
@@ -325,7 +414,7 @@ func ExistingURLsAndHashesForUser(
 	if len(rawURLs) > 0 {
 		var rows []imageAssetRow
 		_ = db.Select("object_key", "url", "content_hash").
-			Where("user_id = ? AND url IN ?", userID, rawURLs).
+			Where("user_id = ? AND url IN ? AND COALESCE(NULLIF(status, ''), 'ready') = 'ready'", userID, rawURLs).
 			Find(&rows).Error
 		for _, r := range rows {
 			if k := NormalizeObjectKey(r.ObjectKey); k != "" {
@@ -372,7 +461,7 @@ func ExistingURLsAndHashesForUser(
 	if len(wantHashes) > 0 {
 		var rows []imageAssetRow
 		_ = db.Select("content_hash").
-			Where("user_id = ? AND content_hash IN ?", userID, wantHashes).
+			Where("user_id = ? AND content_hash IN ? AND COALESCE(NULLIF(status, ''), 'ready') = 'ready'", userID, wantHashes).
 			Find(&rows).Error
 		for _, r := range rows {
 			if h := NormalizeHash(r.ContentHash); h != "" {

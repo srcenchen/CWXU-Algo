@@ -2,6 +2,7 @@ package service
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -24,6 +25,16 @@ const (
 	maxImageUploadReasonLen = 500
 )
 
+var (
+	ErrImageUploadAlreadyReviewed = errors.New("image upload request already reviewed")
+	ErrImageUploadRequestNotFound = errors.New("image upload request not found")
+	ErrImageUploadAlreadyEnabled  = errors.New("image upload already enabled")
+)
+
+type blogImageObjectWriter interface {
+	Put(objectKey string, data []byte, contentType string) error
+}
+
 // loadUpyunFromDB builds an UpYun client from site_configs id=1.
 func loadUpyunFromDB(db *gorm.DB) *upyun.Client {
 	return blogimg.LoadUpyunClient(db)
@@ -44,29 +55,45 @@ func (s *BlogService) userImageUploadEnabled(userID uint) bool {
 	return cfg.ImageUploadEnabled
 }
 
-// gcUserBlogImages deletes UpYun objects registered for user that are no longer
-// referenced by any of their articles (content + cover). Shared with blogsync.
-func (s *BlogService) gcUserBlogImages(userID uint) {
-	blogimg.GCUserImagesFromSite(s.db, userID)
-}
-
 // registerBlogImageAsset records an uploaded object for later GC (keyed by object path + content hash).
 func registerBlogImageAsset(db *gorm.DB, userID uint, objectKey, publicURL, contentHash, purpose string, articleID *uint) error {
 	if db == nil || userID == 0 || objectKey == "" {
 		return fmt.Errorf("invalid asset")
 	}
+	asset, err := reserveBlogImageAsset(db, userID, objectKey, publicURL, contentHash, purpose, articleID)
+	if err != nil {
+		return err
+	}
+	return blogimg.WithUserImageReferenceTx(db, userID, func(tx *gorm.DB) error {
+		return finalizeBlogImageAssetTx(tx, asset.ID, userID)
+	})
+}
+
+func reserveBlogImageAsset(db *gorm.DB, userID uint, objectKey, publicURL, contentHash, purpose string, articleID *uint) (model.BlogImageAsset, error) {
+	var asset model.BlogImageAsset
+	err := blogimg.WithUserImageReferenceTx(db, userID, func(tx *gorm.DB) error {
+		var err error
+		asset, err = reserveBlogImageAssetTx(tx, userID, objectKey, publicURL, contentHash, purpose, articleID)
+		return err
+	})
+	return asset, err
+}
+
+func reserveBlogImageAssetTx(db *gorm.DB, userID uint, objectKey, publicURL, contentHash, purpose string, articleID *uint) (model.BlogImageAsset, error) {
 	key := blogimg.NormalizeObjectKey(objectKey)
 	if key == "" {
 		key = "/" + strings.TrimPrefix(objectKey, "/")
 	}
 	hash := blogimg.NormalizeHash(contentHash)
+	now := time.Now()
 	var existing model.BlogImageAsset
 	err := db.Where("object_key = ?", key).First(&existing).Error
 	if err == nil {
 		updates := map[string]interface{}{
-			"user_id": userID,
-			"url":     publicURL,
-			"purpose": purpose,
+			"user_id":     userID,
+			"url":         publicURL,
+			"purpose":     purpose,
+			"reserved_at": &now,
 		}
 		if hash != "" {
 			updates["content_hash"] = hash
@@ -74,22 +101,13 @@ func registerBlogImageAsset(db *gorm.DB, userID uint, objectKey, publicURL, cont
 		if articleID != nil {
 			updates["article_id"] = *articleID
 		}
-		return db.Model(&existing).Updates(updates).Error
-	}
-	// 同用户同 hash 已有记录（扩展名不同等）：更新为当前 key
-	if hash != "" {
-		var byHash model.BlogImageAsset
-		if db.Where("user_id = ? AND content_hash = ?", userID, hash).First(&byHash).Error == nil {
-			updates := map[string]interface{}{
-				"object_key": key,
-				"url":        publicURL,
-				"purpose":    purpose,
-			}
-			if articleID != nil {
-				updates["article_id"] = *articleID
-			}
-			return db.Model(&byHash).Updates(updates).Error
+		if err := db.Model(&existing).Updates(updates).Error; err != nil {
+			return model.BlogImageAsset{}, err
 		}
+		return existing, db.First(&existing, existing.ID).Error
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return model.BlogImageAsset{}, err
 	}
 	row := model.BlogImageAsset{
 		UserID:      userID,
@@ -98,8 +116,54 @@ func registerBlogImageAsset(db *gorm.DB, userID uint, objectKey, publicURL, cont
 		ContentHash: hash,
 		Purpose:     purpose,
 		ArticleID:   articleID,
+		Status:      model.BlogImageAssetPending,
+		ReservedAt:  &now,
 	}
-	return db.Create(&row).Error
+	return row, db.Create(&row).Error
+}
+
+func finalizeBlogImageAssetTx(db *gorm.DB, assetID, userID uint) error {
+	var asset model.BlogImageAsset
+	if err := db.Select("id", "status").Where("id = ? AND user_id = ?", assetID, userID).First(&asset).Error; err != nil {
+		return err
+	}
+	if asset.Status == model.BlogImageAssetReady || asset.Status == "" {
+		return db.Model(&model.BlogImageAsset{}).Where("id = ? AND user_id = ?", assetID, userID).
+			Update("reserved_at", nil).Error
+	}
+	res := db.Model(&model.BlogImageAsset{}).
+		Where("id = ? AND user_id = ? AND status = ?", assetID, userID, model.BlogImageAssetPending).
+		Updates(map[string]interface{}{"status": model.BlogImageAssetReady, "reserved_at": nil})
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected != 1 {
+		return fmt.Errorf("finalize blog image asset %d affected %d", assetID, res.RowsAffected)
+	}
+	return nil
+}
+
+func putAndRegisterBlogImage(
+	db *gorm.DB,
+	writer blogImageObjectWriter,
+	userID uint,
+	objectKey string,
+	data []byte,
+	contentType, storedURL, contentHash, purpose string,
+) error {
+	if db == nil || writer == nil || userID == 0 || objectKey == "" {
+		return fmt.Errorf("invalid blog image upload")
+	}
+	asset, err := reserveBlogImageAsset(db, userID, objectKey, storedURL, contentHash, purpose, nil)
+	if err != nil {
+		return err
+	}
+	if err := writer.Put(objectKey, data, contentType); err != nil {
+		return err
+	}
+	return blogimg.WithUserImageReferenceTx(db, userID, func(tx *gorm.DB) error {
+		return finalizeBlogImageAssetTx(tx, asset.ID, userID)
+	})
 }
 
 // handleBlogImagesCheck POST /v1/user/blog/images/check
@@ -160,14 +224,21 @@ func (s *BlogService) listOrphanImages(ctx khttp.Context) error {
 	}
 
 	client := blogimg.LoadUpyunClient(s.db)
-	orphans := blogimg.ListUserImageOrphans(s.db, pd.UserID, client.PublicBaseURL())
+	orphans, err := blogimg.ListUserImageOrphansCheckedAt(s.db, pd.UserID, client.PublicBaseURL(), time.Now())
+	if err != nil {
+		writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "加载清理预览失败"})
+		return nil
+	}
+	candidateIDs, snapshot := blogimg.BuildOrphanSnapshot(pd.UserID, orphans)
 
 	writeJSON(ctx.Response(), 200, map[string]interface{}{
 		"code":    0,
 		"message": "success",
 		"data": map[string]interface{}{
-			"orphans": orphans,
-			"total":   len(orphans),
+			"orphans":      orphans,
+			"total":        len(orphans),
+			"candidateIds": candidateIDs,
+			"snapshot":     snapshot,
 		},
 	})
 	return nil
@@ -181,7 +252,37 @@ func (s *BlogService) gcOrphanImages(ctx khttp.Context) error {
 		return nil
 	}
 
-	count := blogimg.GCUserImagesForce(s.db, blogimg.LoadUpyunClient(s.db), pd.UserID)
+	var body struct {
+		CandidateIDs []uint `json:"candidateIds"`
+		Snapshot     string `json:"snapshot"`
+	}
+	if err := json.NewDecoder(ctx.Request().Body).Decode(&body); err != nil {
+		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "请先获取清理预览"})
+		return nil
+	}
+	count, err := blogimg.GCUserImagesSnapshot(
+		s.db, blogimg.LoadUpyunClient(s.db), pd.UserID, body.CandidateIDs, body.Snapshot,
+	)
+	if errors.Is(err, blogimg.ErrGCPreviewRequired) {
+		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "请先获取清理预览"})
+		return nil
+	}
+	if errors.Is(err, blogimg.ErrGCStaleSnapshot) {
+		writeJSON(ctx.Response(), 409, map[string]interface{}{
+			"code": 1, "message": "清理预览已变化，请重新预览", "data": map[string]interface{}{"stale": true},
+		})
+		return nil
+	}
+	if errors.Is(err, blogimg.ErrGCReferenceQuery) {
+		writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "重校验图片引用失败"})
+		return nil
+	}
+	if err != nil {
+		writeJSON(ctx.Response(), 502, map[string]interface{}{
+			"code": 1, "message": "部分图片清理失败", "data": map[string]interface{}{"deleted": count},
+		})
+		return nil
+	}
 
 	writeJSON(ctx.Response(), 200, map[string]interface{}{
 		"code":    0,
@@ -207,25 +308,137 @@ func (s *BlogService) pendingImageUploadRequest(userID uint) *model.BlogImageUpl
 	return &row
 }
 
-// setUserImageUploadEnabled writes blog_site_configs.image_upload_enabled (create if missing).
-func (s *BlogService) setUserImageUploadEnabled(userID uint, enabled bool) error {
+func setUserImageUploadEnabledDB(db *gorm.DB, userID uint, enabled bool) error {
 	if userID == 0 {
 		return fmt.Errorf("invalid user")
 	}
 	var cfg model.BlogSiteConfig
-	err := s.db.Where("user_id = ?", userID).First(&cfg).Error
+	err := db.Where("user_id = ?", userID).First(&cfg).Error
 	if err == gorm.ErrRecordNotFound {
 		cfg = model.BlogSiteConfig{
 			UserID:             userID,
 			ThemeID:            "mizuki",
 			ImageUploadEnabled: enabled,
 		}
-		return s.db.Create(&cfg).Error
+		return db.Create(&cfg).Error
 	}
 	if err != nil {
 		return err
 	}
-	return s.db.Model(&cfg).Update("image_upload_enabled", enabled).Error
+	return db.Model(&cfg).Update("image_upload_enabled", enabled).Error
+}
+
+func setAdminImageUploadEnabled(db *gorm.DB, userID, reviewerID uint, enabled bool) (int64, error) {
+	if db == nil || userID == 0 || reviewerID == 0 {
+		return 0, fmt.Errorf("invalid image upload permission change")
+	}
+	var reviewed int64
+	err := blogimg.WithUserImageReferenceTx(db, userID, func(tx *gorm.DB) error {
+		if err := setUserImageUploadEnabledDB(tx, userID, enabled); err != nil {
+			return err
+		}
+		if !enabled {
+			return nil
+		}
+		now := time.Now()
+		res := tx.Model(&model.BlogImageUploadRequest{}).
+			Where("user_id = ? AND status = ?", userID, model.BlogImageUploadPending).
+			Updates(map[string]interface{}{
+				"status":      model.BlogImageUploadApproved,
+				"reviewer_id": reviewerID,
+				"reviewed_at": now,
+				"review_note": "站管直接开通",
+			})
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected > 1 {
+			return fmt.Errorf("unexpected pending image upload rows: %d", res.RowsAffected)
+		}
+		reviewed = res.RowsAffected
+		return nil
+	})
+	return reviewed, err
+}
+
+func createPendingImageUploadRequest(db *gorm.DB, userID uint, reason string) (model.BlogImageUploadRequest, bool, error) {
+	var row model.BlogImageUploadRequest
+	created := false
+	err := blogimg.WithUserImageReferenceTx(db, userID, func(tx *gorm.DB) error {
+		var cfg model.BlogSiteConfig
+		if err := tx.Select("image_upload_enabled").Where("user_id = ?", userID).First(&cfg).Error; err == nil {
+			if cfg.ImageUploadEnabled {
+				return ErrImageUploadAlreadyEnabled
+			}
+		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		}
+		if err := tx.Where("user_id = ? AND status = ?", userID, model.BlogImageUploadPending).
+			Order("id DESC").First(&row).Error; err == nil {
+			return nil
+		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		}
+		row = model.BlogImageUploadRequest{UserID: userID, Reason: reason, Status: model.BlogImageUploadPending}
+		if err := tx.Create(&row).Error; err != nil {
+			return err
+		}
+		created = true
+		return nil
+	})
+	if errors.Is(err, ErrImageUploadAlreadyEnabled) {
+		return row, false, err
+	}
+	if err == nil {
+		return row, created, nil
+	}
+	// A concurrent transaction may have won the partial unique index race.
+	if qerr := db.Where("user_id = ? AND status = ?", userID, model.BlogImageUploadPending).
+		Order("id DESC").First(&row).Error; qerr == nil {
+		return row, false, nil
+	}
+	return model.BlogImageUploadRequest{}, false, err
+}
+
+func reviewImageUploadRequest(db *gorm.DB, requestID, reviewerID uint, action, note string) (model.BlogImageUploadRequest, string, error) {
+	var row model.BlogImageUploadRequest
+	newStatus := model.BlogImageUploadApproved
+	if action == "reject" {
+		newStatus = model.BlogImageUploadRejected
+	}
+	if err := db.Select("id", "user_id").First(&row, requestID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return row, newStatus, ErrImageUploadRequestNotFound
+		}
+		return row, newStatus, err
+	}
+	err := blogimg.WithUserImageReferenceTx(db, row.UserID, func(tx *gorm.DB) error {
+		if err := tx.First(&row, requestID).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return ErrImageUploadRequestNotFound
+			}
+			return err
+		}
+		if action == "approve" {
+			if err := setUserImageUploadEnabledDB(tx, row.UserID, true); err != nil {
+				return err
+			}
+		}
+		now := time.Now()
+		res := tx.Model(&model.BlogImageUploadRequest{}).
+			Where("id = ? AND status = ?", requestID, model.BlogImageUploadPending).
+			Updates(map[string]interface{}{
+				"status": newStatus, "review_note": note, "reviewer_id": reviewerID, "reviewed_at": now,
+			})
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected != 1 {
+			return ErrImageUploadAlreadyReviewed
+		}
+		return nil
+	})
+	return row, newStatus, err
 }
 
 // handleImageUploadStatus GET /v1/user/blog/image-upload/status
@@ -305,13 +518,23 @@ func (s *BlogService) handleImageUploadApply(ctx khttp.Context) error {
 		return nil
 	}
 
-	row := model.BlogImageUploadRequest{
-		UserID: pd.UserID,
-		Reason: reason,
-		Status: model.BlogImageUploadPending,
+	row, created, err := createPendingImageUploadRequest(s.db, pd.UserID, reason)
+	if errors.Is(err, ErrImageUploadAlreadyEnabled) {
+		writeJSON(ctx.Response(), 200, map[string]interface{}{
+			"code": 0, "message": "你已开通图片上传",
+			"data": map[string]interface{}{"pendingRequest": false, "authorized": true},
+		})
+		return nil
 	}
-	if err := s.db.Create(&row).Error; err != nil {
+	if err != nil {
 		writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "提交失败，请稍后重试"})
+		return nil
+	}
+	if !created {
+		writeJSON(ctx.Response(), 200, map[string]interface{}{
+			"code": 0, "message": "申请已提交，请等待站点管理员审批",
+			"data": map[string]interface{}{"id": row.ID, "pendingRequest": true, "status": row.Status},
+		})
 		return nil
 	}
 
@@ -375,25 +598,16 @@ func (s *BlogService) handleAdminImageUpload(ctx khttp.Context) error {
 		return nil
 	}
 	var u model.User
-	if err := s.db.Select("id").First(&u, body.UserID).Error; err != nil {
+	if err := s.db.Select("id").First(&u, body.UserID).Error; errors.Is(err, gorm.ErrRecordNotFound) {
 		writeJSON(ctx.Response(), 404, map[string]interface{}{"code": 1, "message": "用户不存在"})
 		return nil
-	}
-	if err := s.setUserImageUploadEnabled(body.UserID, body.Enabled); err != nil {
-		writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "保存失败"})
+	} else if err != nil {
+		writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "加载用户失败"})
 		return nil
 	}
-	// 站管直接开通时，顺带通过待审申请
-	if body.Enabled {
-		now := time.Now()
-		_ = s.db.Model(&model.BlogImageUploadRequest{}).
-			Where("user_id = ? AND status = ?", body.UserID, model.BlogImageUploadPending).
-			Updates(map[string]interface{}{
-				"status":      model.BlogImageUploadApproved,
-				"reviewer_id": pd.UserID,
-				"reviewed_at": now,
-				"review_note": "站管直接开通",
-			}).Error
+	if _, err := setAdminImageUploadEnabled(s.db, body.UserID, pd.UserID, body.Enabled); err != nil {
+		writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "保存失败"})
+		return nil
 	}
 	writeJSON(ctx.Response(), 200, map[string]interface{}{
 		"code": 0, "message": "success",
@@ -530,45 +744,21 @@ func (s *BlogService) handleAdminImageUploadReview(ctx khttp.Context) error {
 		return nil
 	}
 
-	var row model.BlogImageUploadRequest
-	if err := s.db.First(&row, body.ID).Error; err != nil {
+	row, newStatus, err := reviewImageUploadRequest(s.db, body.ID, pd.UserID, action, note)
+	if errors.Is(err, ErrImageUploadRequestNotFound) {
 		writeJSON(ctx.Response(), 404, map[string]interface{}{"code": 1, "message": "申请不存在"})
 		return nil
 	}
-	if row.Status != model.BlogImageUploadPending {
+	if errors.Is(err, ErrImageUploadAlreadyReviewed) {
 		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "该申请已处理"})
 		return nil
 	}
-
-	now := time.Now()
-	newStatus := model.BlogImageUploadApproved
-	if action == "reject" {
-		newStatus = model.BlogImageUploadRejected
-	}
-	if err := s.db.Model(&row).Updates(map[string]interface{}{
-		"status":      newStatus,
-		"review_note": note,
-		"reviewer_id": pd.UserID,
-		"reviewed_at": now,
-	}).Error; err != nil {
+	if err != nil {
 		writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "保存失败"})
 		return nil
 	}
 
 	if action == "approve" {
-		if err := s.setUserImageUploadEnabled(row.UserID, true); err != nil {
-			writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "开通失败"})
-			return nil
-		}
-		// 同用户其它待审一并标为通过，避免重复
-		_ = s.db.Model(&model.BlogImageUploadRequest{}).
-			Where("user_id = ? AND status = ? AND id <> ?", row.UserID, model.BlogImageUploadPending, row.ID).
-			Updates(map[string]interface{}{
-				"status":      model.BlogImageUploadApproved,
-				"reviewer_id": pd.UserID,
-				"reviewed_at": now,
-				"review_note": "一并通过",
-			}).Error
 		_ = CreateNotification(s.db, model.Notification{
 			UserID:  row.UserID,
 			Type:    model.NotifTypeImageUploadApproved,

@@ -8,6 +8,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"cwxu-algo/app/common/blogimg"
 	"cwxu-algo/app/common/rbac"
 	"cwxu-algo/app/common/utils/auth"
 	"cwxu-algo/app/user/internal/data/model"
@@ -15,6 +16,36 @@ import (
 	khttp "github.com/go-kratos/kratos/v2/transport/http"
 	"gorm.io/gorm"
 )
+
+func updateBlogArticleModeration(db *gorm.DB, articleID, moderatorID uint, status, note string) (model.BlogArticle, error) {
+	var article model.BlogArticle
+	if db == nil || articleID == 0 || moderatorID == 0 {
+		return article, gorm.ErrInvalidData
+	}
+	if err := db.Select("id", "user_id").First(&article, articleID).Error; err != nil {
+		return article, err
+	}
+	err := blogimg.WithUserImageReferenceTx(db, article.UserID, func(tx *gorm.DB) error {
+		if err := tx.First(&article, articleID).Error; err != nil {
+			return err
+		}
+		now := time.Now()
+		updates := map[string]interface{}{
+			"moderation_status": status,
+			"moderation_note":   note,
+			"moderated_at":      &now,
+			"moderated_by":      moderatorID,
+		}
+		if status == model.BlogModerationRejected {
+			updates["recommend"] = false
+		}
+		if err := tx.Model(&model.BlogArticle{}).Where("id = ? AND user_id = ?", articleID, article.UserID).Updates(updates).Error; err != nil {
+			return err
+		}
+		return tx.First(&article, articleID).Error
+	})
+	return article, err
+}
 
 // 个人博客开通协议正文（遵循中国法律与平台合规）
 const blogAgreementTextCN = `GoAlgo 个人博客开通协议
@@ -188,9 +219,9 @@ func (s *BlogService) handleActivate(ctx khttp.Context) error {
 		return nil
 	}
 	var body struct {
-		Accept            bool   `json:"accept"`
-		AgreementVersion  string `json:"agreementVersion"`
-		EmailNotifyEnabled *bool `json:"emailNotifyEnabled"`
+		Accept              bool   `json:"accept"`
+		AgreementVersion    string `json:"agreementVersion"`
+		EmailNotifyEnabled  *bool  `json:"emailNotifyEnabled"`
 		EmailNotifyStrategy string `json:"emailNotifyStrategy"`
 	}
 	_ = json.NewDecoder(ctx.Request().Body).Decode(&body)
@@ -487,7 +518,7 @@ func (s *BlogService) handleAdminArticles(ctx khttp.Context) error {
 	var total int64
 	_ = q.Count(&total).Error
 	var list []model.BlogArticle
-	_ = q.Order("id DESC").Offset((page-1)*pageSize).Limit(pageSize).Find(&list).Error
+	_ = q.Order("id DESC").Offset((page - 1) * pageSize).Limit(pageSize).Find(&list).Error
 
 	userIDs := make([]uint, 0, len(list))
 	for _, a := range list {
@@ -616,16 +647,8 @@ func (s *BlogService) handleAdminModerate(ctx khttp.Context) error {
 	if utf8.RuneCountInString(note) > 500 {
 		note = string([]rune(note)[:500])
 	}
-	now := time.Now()
-	a.ModerationStatus = status
-	a.ModerationNote = note
-	a.ModeratedAt = &now
-	a.ModeratedBy = pd.UserID
-	// 驳回时取消精选
-	if status == model.BlogModerationRejected {
-		a.Recommend = false
-	}
-	if err := s.db.Save(&a).Error; err != nil {
+	a, err := updateBlogArticleModeration(s.db, a.ID, pd.UserID, status, note)
+	if err != nil {
 		writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "审核失败"})
 		return nil
 	}

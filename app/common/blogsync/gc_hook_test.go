@@ -12,15 +12,42 @@ import (
 	"gorm.io/gorm/logger"
 )
 
+func confirmedGC(t *testing.T, db *gorm.DB, del blogimg.ObjectDeleter, userID uint) int {
+	t.Helper()
+	orphans, err := blogimg.ListUserImageOrphansCheckedAt(db, userID, del.PublicBaseURL(), time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(orphans) == 0 {
+		return 0
+	}
+	ids, snapshot := blogimg.BuildOrphanSnapshot(userID, orphans)
+	n, err := blogimg.GCUserImagesSnapshot(db, del, userID, ids, snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return n
+}
+
 // assetRow local mirror of blog_image_assets for integration with blogsync GC path.
 type assetRow struct {
 	ID        uint   `gorm:"primaryKey"`
 	UserID    uint   `gorm:"column:user_id"`
 	ObjectKey string `gorm:"column:object_key"`
 	URL       string `gorm:"column:url"`
+	Status    string `gorm:"column:status"`
 }
 
 func (assetRow) TableName() string { return "blog_image_assets" }
+
+type pageRow struct {
+	ID          uint   `gorm:"primaryKey"`
+	UserID      uint   `gorm:"column:user_id"`
+	ContentMD   string `gorm:"column:content_md"`
+	ImageHashes string `gorm:"column:image_hashes"`
+}
+
+func (pageRow) TableName() string { return "blog_pages" }
 
 type recordingDeleter struct {
 	mu      sync.Mutex
@@ -28,7 +55,7 @@ type recordingDeleter struct {
 	deleted []string
 }
 
-func (r *recordingDeleter) Configured() bool     { return true }
+func (r *recordingDeleter) Configured() bool      { return true }
 func (r *recordingDeleter) PublicBaseURL() string { return r.base }
 func (r *recordingDeleter) Delete(key string) error {
 	r.mu.Lock()
@@ -60,15 +87,15 @@ func solutionGCDB(t *testing.T) *gorm.DB {
 	}
 	// single conn avoids any residual isolation
 	sqlDB.SetMaxOpenConns(1)
-	if err := db.AutoMigrate(&Category{}, &Article{}, &articleOrg{}, &articleComment{}, &articleLike{}, &assetRow{}); err != nil {
+	if err := db.AutoMigrate(&Category{}, &Article{}, &articleOrg{}, &articleComment{}, &articleLike{}, &assetRow{}, &pageRow{}); err != nil {
 		t.Fatal(err)
 	}
 	return db
 }
 
-// TestUpsertFromSolutionTriggersGCOnDeRef drives the real Upsert path then the
-// same GC function ScheduleGCUserImages would call (sync for determinism).
-func TestUpsertFromSolutionTriggersGCOnDeRef(t *testing.T) {
+// TestUpsertFromSolutionTriggersGCOnDeRef drives the real Upsert path then
+// explicit GC synchronously for deterministic integration coverage.
+func TestUpsertFromSolutionManualGCOnDeRef(t *testing.T) {
 	db := solutionGCDB(t)
 	base := "http://zhiyuansofts.cn"
 	userID := uint(3)
@@ -84,7 +111,7 @@ func TestUpsertFromSolutionTriggersGCOnDeRef(t *testing.T) {
 	}
 	del := &recordingDeleter{base: base}
 	// still referenced → no delete
-	if n := blogimg.GCUserImages(db, del, userID); n != 0 {
+	if n := confirmedGC(t, db, del, userID); n != 0 {
 		t.Fatalf("still referenced n=%d del=%v", n, del.snap())
 	}
 
@@ -94,7 +121,7 @@ func TestUpsertFromSolutionTriggersGCOnDeRef(t *testing.T) {
 		t.Fatal(err)
 	}
 	// ScheduleGC is async; call shipped GC on real post-upsert state
-	n := blogimg.GCUserImages(db, del, userID)
+	n := confirmedGC(t, db, del, userID)
 	if n != 1 {
 		t.Fatalf("after upsert de-ref n=%d del=%v", n, del.snap())
 	}
@@ -109,7 +136,7 @@ func TestUpsertFromSolutionTriggersGCOnDeRef(t *testing.T) {
 }
 
 // TestDeleteBySolutionTriggersGC drives real DeleteBySolution then GC.
-func TestDeleteBySolutionTriggersGC(t *testing.T) {
+func TestDeleteBySolutionManualGC(t *testing.T) {
 	db := solutionGCDB(t)
 	base := "http://zhiyuansofts.cn"
 	userID := uint(8)
@@ -129,21 +156,18 @@ func TestDeleteBySolutionTriggersGC(t *testing.T) {
 
 	del := &recordingDeleter{base: base}
 	// ScheduleGC is fire-and-forget; invoke shipped GC on post-delete state
-	n := blogimg.GCUserImages(db, del, userID)
+	n := confirmedGC(t, db, del, userID)
 	if n != 1 || del.snap()[0] != key {
 		t.Fatalf("n=%d del=%v", n, del.snap())
 	}
 }
 
-// TestDeleteBySolutionSchedulesGC ensures Schedule hook is invoked (async smoke).
-func TestDeleteBySolutionSchedulesGC(t *testing.T) {
+func TestDeleteBySolutionWithoutAutomaticGC(t *testing.T) {
 	db := solutionGCDB(t)
 	userID := uint(11)
 	aid, _, err := UpsertFromSolution(db, userID, 12, 0, "t", "body")
 	if err != nil {
 		t.Fatal(err)
 	}
-	// no upyun configured → ScheduleGC no-ops safely
 	DeleteBySolution(db, userID, 12, aid)
-	time.Sleep(30 * time.Millisecond)
 }

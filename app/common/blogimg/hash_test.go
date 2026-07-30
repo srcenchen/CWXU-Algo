@@ -1,6 +1,7 @@
 package blogimg
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -21,6 +22,47 @@ func TestContentHashStable(t *testing.T) {
 	}
 	if ContentHash(nil) != "" {
 		t.Fatal("empty should be empty hash")
+	}
+}
+
+func TestResolveContentHashesBatchChunksAssetLookupKeys(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Exec(`CREATE TABLE blog_image_assets (
+		id integer PRIMARY KEY, user_id integer, object_key text, url text, content_hash text, status text
+	)`).Error; err != nil {
+		t.Fatal(err)
+	}
+	var content strings.Builder
+	for i := 0; i < 1201; i++ {
+		fmt.Fprintf(&content, "![%d](/blog/44/%064x.webp)\n", i, i+1)
+	}
+	queries := 0
+	maxVars := 0
+	if err := db.Callback().Query().Before("gorm:query").Register("test:hash-key-chunks", func(tx *gorm.DB) {
+		if tx.Statement.Table == "blog_image_assets" {
+			queries++
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Callback().Query().After("gorm:query").Register("test:hash-key-chunk-vars", func(tx *gorm.DB) {
+		if tx.Statement.Table == "blog_image_assets" && len(tx.Statement.Vars) > maxVars {
+			maxVars = len(tx.Statement.Vars)
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ResolveContentHashesBatchChecked(db, []ContentHashInput{{ID: 1, UserID: 44, Content: content.String()}}); err != nil {
+		t.Fatal(err)
+	}
+	if queries != 4 {
+		t.Fatalf("asset lookup queries=%d, want 4 bounded chunks", queries)
+	}
+	if maxVars == 0 || maxVars > contentHashAssetKeyBatchSize+1 {
+		t.Fatalf("max SQL variables=%d, want at most %d keys plus one user", maxVars, contentHashAssetKeyBatchSize)
 	}
 }
 
@@ -71,6 +113,7 @@ func TestResolveContentHashes(t *testing.T) {
 		ObjectKey   string `gorm:"column:object_key"`
 		URL         string `gorm:"column:url"`
 		ContentHash string `gorm:"column:content_hash"`
+		Status      string `gorm:"column:status"`
 	}
 	if err := db.Table("blog_image_assets").AutoMigrate(&row{}); err != nil {
 		t.Fatal(err)

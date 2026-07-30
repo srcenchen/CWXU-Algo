@@ -93,9 +93,113 @@ func uniqueNormalizedHashes(in []string) []string {
 
 // hashAssetRow is a minimal projection for resolving keys → content hashes.
 type hashAssetRow struct {
+	UserID      uint   `gorm:"column:user_id"`
 	ObjectKey   string `gorm:"column:object_key"`
 	URL         string `gorm:"column:url"`
 	ContentHash string `gorm:"column:content_hash"`
+	Status      string `gorm:"column:status"`
+}
+
+// ContentHashInput is one content record whose referenced image hashes need resolving.
+type ContentHashInput struct {
+	ID      uint
+	UserID  uint
+	Content string
+	Cover   string
+}
+
+const contentHashAssetKeyBatchSize = 400
+
+// ResolveContentHashesBatchChecked resolves a batch with one asset-table query.
+func ResolveContentHashesBatchChecked(db *gorm.DB, inputs []ContentHashInput) (map[uint][]string, error) {
+	result := make(map[uint][]string, len(inputs))
+	if db == nil || len(inputs) == 0 {
+		return result, nil
+	}
+	keysByID := make(map[uint][]string, len(inputs))
+	users := make([]uint, 0, len(inputs))
+	allKeys := make([]string, 0)
+	seenUsers := map[uint]struct{}{}
+	seenKeys := map[string]struct{}{}
+	userByID := make(map[uint]uint, len(inputs))
+	for _, input := range inputs {
+		if input.ID == 0 || input.UserID == 0 {
+			continue
+		}
+		userByID[input.ID] = input.UserID
+		if _, ok := seenUsers[input.UserID]; !ok {
+			seenUsers[input.UserID] = struct{}{}
+			users = append(users, input.UserID)
+		}
+		refs := ExtractImageURLs(input.Content, input.Cover)
+		if len(refs) == 0 {
+			for _, match := range blogObjectPathRe.FindAllStringSubmatch(input.Content+"\n"+input.Cover, -1) {
+				if len(match) > 1 {
+					refs = append(refs, match[1])
+				}
+			}
+		}
+		localSeen := map[string]struct{}{}
+		for _, ref := range refs {
+			key := BlogObjectKeyFromAnyURL(ref)
+			if key == "" {
+				key = NormalizeObjectKey(ref)
+			}
+			if key == "" || !strings.HasPrefix(strings.ToLower(key), "/blog/") {
+				continue
+			}
+			if _, ok := localSeen[key]; ok {
+				continue
+			}
+			localSeen[key] = struct{}{}
+			keysByID[input.ID] = append(keysByID[input.ID], key)
+			if _, ok := seenKeys[key]; !ok {
+				seenKeys[key] = struct{}{}
+				allKeys = append(allKeys, key)
+			}
+		}
+	}
+	if len(users) == 0 || len(allKeys) == 0 {
+		return result, nil
+	}
+	rows := make([]hashAssetRow, 0)
+	for start := 0; start < len(allKeys); start += contentHashAssetKeyBatchSize {
+		end := start + contentHashAssetKeyBatchSize
+		if end > len(allKeys) {
+			end = len(allKeys)
+		}
+		var chunk []hashAssetRow
+		if err := db.Select("user_id", "object_key", "url", "content_hash", "status").
+			Where("user_id IN ? AND object_key IN ? AND COALESCE(NULLIF(status, ''), 'ready') = 'ready'", users, allKeys[start:end]).Find(&chunk).Error; err != nil {
+			return nil, err
+		}
+		rows = append(rows, chunk...)
+	}
+	hashByUserKey := make(map[uint]map[string]string)
+	for _, row := range rows {
+		key := NormalizeObjectKey(row.ObjectKey)
+		hash := NormalizeHash(row.ContentHash)
+		if key == "" || hash == "" {
+			continue
+		}
+		if hashByUserKey[row.UserID] == nil {
+			hashByUserKey[row.UserID] = map[string]string{}
+		}
+		hashByUserKey[row.UserID][key] = hash
+	}
+	for id, keys := range keysByID {
+		for _, key := range keys {
+			hash := hashByUserKey[userByID[id]][key]
+			if hash == "" {
+				hash = HashFromObjectKey(key)
+			}
+			if hash != "" {
+				result[id] = append(result[id], hash)
+			}
+		}
+		result[id] = uniqueNormalizedHashes(result[id])
+	}
+	return result, nil
 }
 
 func (hashAssetRow) TableName() string { return "blog_image_assets" }
@@ -103,8 +207,14 @@ func (hashAssetRow) TableName() string { return "blog_image_assets" }
 // ResolveContentHashes looks up blog_image_assets for image refs in content/cover
 // and returns their ContentHash values (for article/page ImageHashes column).
 func ResolveContentHashes(db *gorm.DB, userID uint, content, cover string) []string {
+	hashes, _ := ResolveContentHashesChecked(db, userID, content, cover)
+	return hashes
+}
+
+// ResolveContentHashesChecked is the migration-safe variant that reports DB failures.
+func ResolveContentHashesChecked(db *gorm.DB, userID uint, content, cover string) ([]string, error) {
 	if db == nil || userID == 0 {
-		return nil
+		return nil, nil
 	}
 	refs := ExtractImageURLs(content, cover)
 	if len(refs) == 0 {
@@ -117,7 +227,7 @@ func ResolveContentHashes(db *gorm.DB, userID uint, content, cover string) []str
 		}
 	}
 	if len(refs) == 0 {
-		return nil
+		return nil, nil
 	}
 
 	keys := make([]string, 0, len(refs))
@@ -137,13 +247,15 @@ func ResolveContentHashes(db *gorm.DB, userID uint, content, cover string) []str
 		keys = append(keys, k)
 	}
 	if len(keys) == 0 {
-		return nil
+		return nil, nil
 	}
 
 	var rows []hashAssetRow
-	_ = db.Select("object_key", "url", "content_hash").
-		Where("user_id = ? AND object_key IN ?", userID, keys).
-		Find(&rows).Error
+	if err := db.Select("object_key", "url", "content_hash", "status").
+		Where("user_id = ? AND object_key IN ? AND COALESCE(NULLIF(status, ''), 'ready') = 'ready'", userID, keys).
+		Find(&rows).Error; err != nil {
+		return nil, err
+	}
 
 	var hashes []string
 	foundKey := map[string]struct{}{}
@@ -164,7 +276,7 @@ func ResolveContentHashes(db *gorm.DB, userID uint, content, cover string) []str
 			hashes = append(hashes, h)
 		}
 	}
-	return uniqueNormalizedHashes(hashes)
+	return uniqueNormalizedHashes(hashes), nil
 }
 
 // HashFromObjectKey extracts a content hash embedded in object key

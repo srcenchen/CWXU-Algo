@@ -485,12 +485,6 @@ func handleBlogUpyunUpload(
 	if objectKey == "" {
 		objectKey = fmt.Sprintf("/blog/%d/%s%s", userID, randomName(), ext)
 	}
-	if err := client.Put(objectKey, compressed.Data, compressed.ContentType); err != nil {
-		log.Errorf("upyun put: %v", err)
-		return ctx.JSON(http.StatusBadGateway, map[string]interface{}{
-			"code": 1, "message": "图床上传失败，请稍后重试",
-		})
-	}
 	publicURL := client.PublicURL(objectKey)
 	// 资产表存 path-only，与正文 canonical 一致；读时/客户端仍用完整 publicURL。
 	storedURL := blogimg.NormalizeObjectKey(objectKey)
@@ -501,8 +495,14 @@ func handleBlogUpyunUpload(
 	if purpose == "blog_cover" {
 		assetPurpose = "cover"
 	}
-	if err := registerBlogImageAsset(d.DB, userID, objectKey, storedURL, contentHash, assetPurpose, nil); err != nil {
-		log.Warnf("register blog image asset: %v", err)
+	if err := putAndRegisterBlogImage(
+		d.DB, client, userID, objectKey, compressed.Data, compressed.ContentType,
+		storedURL, contentHash, assetPurpose,
+	); err != nil {
+		log.Errorf("upload/register blog image: %v", err)
+		return ctx.JSON(http.StatusBadGateway, map[string]interface{}{
+			"code": 1, "message": "图床上传失败，请稍后重试",
+		})
 	}
 	return ctx.JSON(http.StatusOK, map[string]interface{}{
 		"code":    0,

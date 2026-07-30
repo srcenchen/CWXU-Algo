@@ -115,7 +115,7 @@ func RegisterBlogRoutes(srv *khttp.Server, bs *BlogService) {
 	// 批量确认图床 URL/object key 是否仍在资产表（插件缓存复用，避免 N+1）
 	r.POST("/v1/user/blog/images/check", bs.handleBlogImagesCheck)
 	// 图床手动清理（禁用自动 GC 后新增）
-	r.POST("/v1/user/blog/images/orphans", bs.listOrphanImages)
+	r.GET("/v1/user/blog/images/orphans", bs.listOrphanImages)
 	r.POST("/v1/user/blog/images/gc", bs.gcOrphanImages)
 	r.POST("/v1/user/blog/admin/image-upload", bs.handleAdminImageUpload)
 	r.GET("/v1/user/blog/admin/image-upload/requests", bs.handleAdminImageUploadRequests)
@@ -738,15 +738,31 @@ func (s *BlogService) handleCreate(ctx khttp.Context) error {
 		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "参数错误"})
 		return nil
 	}
-	a, msg := s.buildArticleFromReq(pd.UserID, 0, &req, true)
-	if msg != "" {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": msg})
+	var a *model.BlogArticle
+	var validationMsg string
+	err := blogimg.WithUserImageReferenceTx(s.db, pd.UserID, func(tx *gorm.DB) error {
+		txService := *s
+		txService.db = tx
+		a, validationMsg = txService.buildArticleFromReq(pd.UserID, 0, &req, true)
+		if validationMsg != "" {
+			return gorm.ErrInvalidData
+		}
+		now := time.Now()
+		a.PublishedAt = &now
+		a.ModerationStatus = model.BlogModerationApproved
+		if err := tx.Create(a).Error; err != nil {
+			return err
+		}
+		if validationMsg = txService.replaceArticleTags(a.ID, a.UserID, req.Tags); validationMsg != "" {
+			return gorm.ErrInvalidData
+		}
+		return txService.applyAutoOrgSurface(a.ID, a.UserID, a.Visibility, a.SyncToMainProfile)
+	})
+	if validationMsg != "" {
+		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": validationMsg})
 		return nil
 	}
-	now := time.Now()
-	a.PublishedAt = &now
-	a.ModerationStatus = model.BlogModerationApproved
-	if err := s.db.Create(a).Error; err != nil {
+	if err != nil {
 		if strings.Contains(err.Error(), "duplicate") || strings.Contains(err.Error(), "unique") {
 			writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "短链已被占用，请换一个"})
 			return nil
@@ -754,12 +770,6 @@ func (s *BlogService) handleCreate(ctx khttp.Context) error {
 		writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "保存失败"})
 		return nil
 	}
-	// create：nil tags = 无标签
-	if msg := s.replaceArticleTags(a.ID, a.UserID, req.Tags); msg != "" {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": msg})
-		return nil
-	}
-	_ = s.applyAutoOrgSurface(a.ID, a.UserID, a.Visibility, a.SyncToMainProfile)
 	d := blogaccess.Evaluate(blogaccess.ArticleAccess{
 		Visibility:  a.Visibility,
 		OwnerID:     a.UserID,
@@ -798,41 +808,57 @@ func (s *BlogService) handleUpdate(ctx khttp.Context) error {
 	if existing.UserID == pd.UserID && !pd.IsSiteAdmin && !s.requireActivated(ctx, pd.UserID) {
 		return nil
 	}
-	a, msg := s.buildArticleFromReq(existing.UserID, existing.ID, &req, false)
-	if msg != "" {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": msg})
+	var a *model.BlogArticle
+	var validationMsg string
+	err := blogimg.WithUserImageReferenceTx(s.db, existing.UserID, func(tx *gorm.DB) error {
+		if err := tx.First(&existing, req.ID).Error; err != nil {
+			return err
+		}
+		txService := *s
+		txService.db = tx
+		a, validationMsg = txService.buildArticleFromReq(existing.UserID, existing.ID, &req, false)
+		if validationMsg != "" {
+			return gorm.ErrInvalidData
+		}
+		// preserve counters, moderation, password and source link from the locked row.
+		a.ID = existing.ID
+		a.CreatedAt = existing.CreatedAt
+		a.ViewCount = existing.ViewCount
+		a.LikeCount = existing.LikeCount
+		a.CommentCount = existing.CommentCount
+		a.PublishedAt = existing.PublishedAt
+		a.ModerationStatus = existing.ModerationStatus
+		a.ModerationNote = existing.ModerationNote
+		a.ModeratedAt = existing.ModeratedAt
+		a.ModeratedBy = existing.ModeratedBy
+		if a.PasswordHash == "" && !req.ClearPassword && existing.PasswordHash != "" &&
+			blogaccess.NormalizeVisibility(a.Visibility) == blogaccess.VisibilityPassword &&
+			strings.TrimSpace(req.Password) == "" {
+			a.PasswordHash = existing.PasswordHash
+		}
+		a.SourceSolutionID = existing.SourceSolutionID
+		a.SourceProblemID = existing.SourceProblemID
+		if blogaccess.AutoSurface(a.Visibility) {
+			a.Recommend = existing.Recommend
+		}
+		if req.SyncToMainProfile == nil && blogaccess.AutoSurface(a.Visibility) {
+			a.SyncToMainProfile = existing.SyncToMainProfile
+		}
+		if err := tx.Save(a).Error; err != nil {
+			return err
+		}
+		if req.Tags != nil {
+			if validationMsg = txService.replaceArticleTags(a.ID, a.UserID, req.Tags); validationMsg != "" {
+				return gorm.ErrInvalidData
+			}
+		}
+		return txService.applyAutoOrgSurface(a.ID, a.UserID, a.Visibility, a.SyncToMainProfile)
+	})
+	if validationMsg != "" {
+		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": validationMsg})
 		return nil
 	}
-	// preserve counters & created
-	a.ID = existing.ID
-	a.CreatedAt = existing.CreatedAt
-	a.ViewCount = existing.ViewCount
-	a.LikeCount = existing.LikeCount
-	a.CommentCount = existing.CommentCount
-	a.PublishedAt = existing.PublishedAt
-	a.ModerationStatus = existing.ModerationStatus
-	a.ModerationNote = existing.ModerationNote
-	a.ModeratedAt = existing.ModeratedAt
-	a.ModeratedBy = existing.ModeratedBy
-	if a.PasswordHash == "" && !req.ClearPassword && existing.PasswordHash != "" &&
-		blogaccess.NormalizeVisibility(a.Visibility) == blogaccess.VisibilityPassword &&
-		strings.TrimSpace(req.Password) == "" {
-		a.PasswordHash = existing.PasswordHash
-	}
-	// preserve solution link
-	a.SourceSolutionID = existing.SourceSolutionID
-	a.SourceProblemID = existing.SourceProblemID
-	// 精选仅审核员可改：作者更新时保留；非公开则强制取消
-	if blogaccess.AutoSurface(a.Visibility) {
-		a.Recommend = existing.Recommend
-	} else {
-		a.Recommend = false
-	}
-	// 更新时未传 sync 标志：保留原值（仅公开时）；非公开已在 build 里强制 false
-	if req.SyncToMainProfile == nil && blogaccess.AutoSurface(a.Visibility) {
-		a.SyncToMainProfile = existing.SyncToMainProfile
-	}
-	if err := s.db.Save(a).Error; err != nil {
+	if err != nil {
 		if strings.Contains(err.Error(), "duplicate") || strings.Contains(err.Error(), "unique") {
 			writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "短链已被占用，请换一个"})
 			return nil
@@ -840,16 +866,6 @@ func (s *BlogService) handleUpdate(ctx khttp.Context) error {
 		writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "保存失败"})
 		return nil
 	}
-	// update：省略 tags 字段则保留原标签；显式 [] 清空
-	if req.Tags != nil {
-		if msg := s.replaceArticleTags(a.ID, a.UserID, req.Tags); msg != "" {
-			writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": msg})
-			return nil
-		}
-	}
-	_ = s.applyAutoOrgSurface(a.ID, a.UserID, a.Visibility, a.SyncToMainProfile)
-	// 保存后清理未写入正文/头图的又拍云图
-	go s.gcUserBlogImages(a.UserID)
 	d := blogaccess.Evaluate(blogaccess.ArticleAccess{
 		Visibility:  a.Visibility,
 		OwnerID:     a.UserID,
@@ -1147,20 +1163,38 @@ func (s *BlogService) handleDelete(ctx khttp.Context) error {
 		writeJSON(ctx.Response(), 403, map[string]interface{}{"code": 1, "message": "只能删除自己的文章"})
 		return nil
 	}
-	_ = s.db.Transaction(func(tx *gorm.DB) error {
-		_ = tx.Where("article_id = ?", a.ID).Delete(&model.BlogArticleOrg{}).Error
-		_ = tx.Where("article_id = ?", a.ID).Delete(&model.BlogArticleTag{}).Error
+	err := blogimg.WithUserImageReferenceTx(s.db, a.UserID, func(tx *gorm.DB) error {
+		if err := tx.Where("article_id = ?", a.ID).Delete(&model.BlogArticleOrg{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("article_id = ?", a.ID).Delete(&model.BlogArticleTag{}).Error; err != nil {
+			return err
+		}
 		// 先清评论点赞再删评论
 		var cmtIDs []uint
-		_ = tx.Model(&model.BlogComment{}).Where("article_id = ?", a.ID).Pluck("id", &cmtIDs).Error
-		if len(cmtIDs) > 0 {
-			_ = tx.Where("comment_id IN ?", cmtIDs).Delete(&model.BlogCommentLike{}).Error
+		if err := tx.Model(&model.BlogComment{}).Where("article_id = ?", a.ID).Pluck("id", &cmtIDs).Error; err != nil {
+			return err
 		}
-		_ = tx.Where("article_id = ?", a.ID).Delete(&model.BlogComment{}).Error
-		_ = tx.Where("article_id = ?", a.ID).Delete(&model.BlogLike{}).Error
-		_ = tx.Where("article_id = ?", a.ID).Delete(&model.BlogArticleViewUV{}).Error
+		if len(cmtIDs) > 0 {
+			if err := tx.Where("comment_id IN ?", cmtIDs).Delete(&model.BlogCommentLike{}).Error; err != nil {
+				return err
+			}
+		}
+		if err := tx.Where("article_id = ?", a.ID).Delete(&model.BlogComment{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("article_id = ?", a.ID).Delete(&model.BlogLike{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("article_id = ?", a.ID).Delete(&model.BlogArticleViewUV{}).Error; err != nil {
+			return err
+		}
 		return tx.Delete(&a).Error
 	})
+	if err != nil {
+		writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "删除失败"})
+		return nil
+	}
 	writeJSON(ctx.Response(), 200, map[string]interface{}{"code": 0, "message": "已删除"})
 	return nil
 }

@@ -75,9 +75,9 @@ type BlogPage struct {
 	// ImageHashes JSON 数组：页面正文引用图 content hash，供 GC 用。
 	ImageHashes string `gorm:"type:text;comment:正文图片content hash JSON"`
 	Status      string `gorm:"size:16;not null;default:draft;index;comment:draft|published"`
-	ShowInNav bool   `gorm:"not null;default:false;index:idx_blog_page_user_nav,priority:2;comment:是否加入博客导航"`
-	NavLabel  string `gorm:"size:64;comment:导航名称，空则使用标题"`
-	NavOrder  int    `gorm:"not null;default:0;index:idx_blog_page_user_nav,priority:3;comment:导航排序"`
+	ShowInNav   bool   `gorm:"not null;default:false;index:idx_blog_page_user_nav,priority:2;comment:是否加入博客导航"`
+	NavLabel    string `gorm:"size:64;comment:导航名称，空则使用标题"`
+	NavOrder    int    `gorm:"not null;default:0;index:idx_blog_page_user_nav,priority:3;comment:导航排序"`
 }
 
 func (BlogPage) TableName() string { return "blog_pages" }
@@ -266,7 +266,7 @@ type BlogImageAsset struct {
 	ID        uint `gorm:"primaryKey"`
 	CreatedAt time.Time
 	UpdatedAt time.Time
-	UserID uint `gorm:"not null;index:idx_blog_img_user;index:idx_blog_img_user_hash,priority:1;comment:上传者"`
+	UserID    uint `gorm:"not null;index:idx_blog_img_user;index:idx_blog_img_user_hash,priority:1;index:idx_blog_img_user_status,priority:1;comment:上传者"`
 	// ObjectKey 又拍云对象路径：新图为 /blog/{uid}/{sha256}{ext}（内容寻址）
 	ObjectKey string `gorm:"size:512;not null;uniqueIndex;comment:对象key"`
 	// URL 库内多为 path-only（与 object_key 一致）；历史上可能是完整公网 URL
@@ -277,16 +277,25 @@ type BlogImageAsset struct {
 	ArticleID *uint `gorm:"index;comment:关联文章"`
 	// Purpose cover | content | misc
 	Purpose string `gorm:"size:32;not null;default:content;comment:用途"`
+	// Status pending | ready. Legacy rows are migrated to ready.
+	Status string `gorm:"size:16;not null;default:ready;index:idx_blog_img_user_status,priority:2;comment:pending|ready"`
+	// ReservedAt protects an in-flight/retryable content-addressed upload from GC.
+	ReservedAt *time.Time `gorm:"index;comment:上传reservation时间"`
 }
 
 func (BlogImageAsset) TableName() string { return "blog_image_assets" }
+
+const (
+	BlogImageAssetPending = "pending"
+	BlogImageAssetReady   = "ready"
+)
 
 // BlogImageUploadRequest 作者申请又拍云图片上传权限（须填理由，站管审核）。
 type BlogImageUploadRequest struct {
 	ID        uint `gorm:"primaryKey"`
 	CreatedAt time.Time
 	UpdatedAt time.Time
-	UserID    uint   `gorm:"not null;index:idx_blog_img_req_user_status,priority:1;comment:申请人"`
+	UserID    uint `gorm:"not null;index:idx_blog_img_req_user_status,priority:1;comment:申请人"`
 	// Reason 申请理由（必填）
 	Reason string `gorm:"type:text;not null;comment:申请理由"`
 	// Status pending|approved|rejected

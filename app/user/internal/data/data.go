@@ -2,6 +2,8 @@ package data
 
 import (
 	"context"
+	"database/sql"
+	"fmt"
 	"os"
 	"strings"
 	"time"
@@ -25,6 +27,34 @@ import (
 // siteSettingsRefreshInterval 定期把 site_configs 刷进 Redis，供 core_data/agent 读 SMTP。
 // 与 sitesettings.RedisTTL 配合：即使缓存被误清/毒缓存被剔除，也会在数分钟内恢复。
 const siteSettingsRefreshInterval = 3 * time.Minute
+
+const blogImageMigrationBatchSize = 200
+const blogFixedPageMigrationBatchSize = 100
+
+type blogArticleImageMigrationRow struct {
+	ID          uint
+	UpdatedAt   time.Time
+	UserID      uint
+	Content     string
+	CoverURL    sql.NullString
+	ImageHashes sql.NullString
+}
+
+type blogPageImageMigrationRow struct {
+	ID          uint
+	UpdatedAt   time.Time
+	UserID      uint
+	ContentMD   string
+	ImageHashes sql.NullString
+}
+
+type blogAssetImageMigrationRow struct {
+	ID          uint
+	UpdatedAt   time.Time
+	ObjectKey   string
+	URL         string
+	ContentHash sql.NullString
+}
 
 // ProviderSet is data providers.
 var ProviderSet = wire.NewSet(NewData)
@@ -143,6 +173,12 @@ func migrateModels(db *gorm.DB) {
 	if err != nil {
 		panic("数据库：数据库自动合并失败")
 	}
+	if err := ensureBlogImageAssetStatuses(db); err != nil {
+		panic("数据库：图片资产状态迁移失败: " + err.Error())
+	}
+	if err := ensureBlogImagePendingUniqueIndex(db); err != nil {
+		panic("数据库：图片上传待审唯一索引迁移失败: " + err.Error())
+	}
 	seedPlanQuotas(db)
 	seedGoAlgoFramework(db)
 	seedRbac(db)
@@ -162,6 +198,116 @@ func migrateModels(db *gorm.DB) {
 	migrateBlogImageURLsToPathOnly(db)
 	// 文章/页面落 ImageHashes；资产补 content_hash（供 hash-GC）
 	backfillBlogImageContentHashes(db)
+}
+
+func ensureBlogImageAssetStatuses(db *gorm.DB) error {
+	if db == nil || !db.Migrator().HasTable(&model.BlogImageAsset{}) {
+		return nil
+	}
+	return db.Model(&model.BlogImageAsset{}).
+		Where("status IS NULL OR status = ''").Update("status", model.BlogImageAssetReady).Error
+}
+
+// ensureBlogImagePendingUniqueIndex reconciles legacy duplicate pending rows and
+// installs the production partial unique index. PostgreSQL builds concurrently so
+// startup migration does not block writes for the duration of the index scan.
+func ensureBlogImagePendingUniqueIndex(db *gorm.DB) error {
+	if db == nil || !db.Migrator().HasTable(&model.BlogImageUploadRequest{}) {
+		return nil
+	}
+	if db.Dialector.Name() != "postgres" {
+		if err := reconcileBlogImagePendingDuplicates(db); err != nil {
+			return err
+		}
+		return db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS uniq_blog_img_req_pending_user
+			ON blog_image_upload_requests (user_id) WHERE status = 'pending'`).Error
+	}
+	return ensurePostgresBlogImagePendingUniqueIndex(db)
+}
+
+func reconcileBlogImagePendingDuplicates(db *gorm.DB) error {
+	return db.Exec(`UPDATE blog_image_upload_requests SET status = 'rejected'
+		WHERE status = 'pending' AND id NOT IN (
+			SELECT MAX(id) FROM blog_image_upload_requests WHERE status = 'pending' GROUP BY user_id
+		)`).Error
+}
+
+type blogImagePendingIndexState struct {
+	Exists     bool   `gorm:"column:index_exists"`
+	Valid      bool   `gorm:"column:valid"`
+	Unique     bool   `gorm:"column:is_unique"`
+	UserIDOnly bool   `gorm:"column:user_id_only"`
+	Predicate  string `gorm:"column:predicate"`
+}
+
+func (state blogImagePendingIndexState) matchesProductionDefinition() bool {
+	if !state.Exists || !state.Valid || !state.Unique || !state.UserIDOnly {
+		return false
+	}
+	predicate := strings.ToLower(state.Predicate)
+	for _, remove := range []string{"::character varying", "::text", "(", ")", " ", "\t", "\n", `"`} {
+		predicate = strings.ReplaceAll(predicate, remove, "")
+	}
+	return predicate == "status='pending'"
+}
+
+func loadPostgresBlogImagePendingIndexState(db *gorm.DB) (blogImagePendingIndexState, error) {
+	const indexName = "uniq_blog_img_req_pending_user"
+	var state blogImagePendingIndexState
+	err := db.Raw(`SELECT TRUE AS index_exists,
+			i.indisvalid AS valid,
+			i.indisunique AS is_unique,
+			(i.indnkeyatts = 1 AND i.indnatts = 1 AND
+			 (SELECT a.attname
+			  FROM unnest(i.indkey) WITH ORDINALITY AS k(attnum, ord)
+			  JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = k.attnum
+			  ORDER BY k.ord LIMIT 1) = 'user_id') AS user_id_only,
+			COALESCE(pg_get_expr(i.indpred, i.indrelid), '') AS predicate
+		FROM pg_class c
+		JOIN pg_index i ON i.indexrelid = c.oid
+		JOIN pg_namespace n ON n.oid = c.relnamespace
+		WHERE c.relname = ? AND n.nspname = current_schema()
+		LIMIT 1`, indexName).Scan(&state).Error
+	return state, err
+}
+
+func ensurePostgresBlogImagePendingUniqueIndex(db *gorm.DB) error {
+	const maxAttempts = 3
+	var lastErr error
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		if err := reconcileBlogImagePendingDuplicates(db); err != nil {
+			return err
+		}
+		state, err := loadPostgresBlogImagePendingIndexState(db)
+		if err != nil {
+			return err
+		}
+		if state.matchesProductionDefinition() {
+			return nil
+		}
+		if state.Exists {
+			if err := db.Exec(`DROP INDEX CONCURRENTLY IF EXISTS uniq_blog_img_req_pending_user`).Error; err != nil {
+				return err
+			}
+		}
+		if err := db.Exec(`CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS uniq_blog_img_req_pending_user
+			ON blog_image_upload_requests (user_id) WHERE status = 'pending'`).Error; err != nil {
+			lastErr = err
+			continue
+		}
+		state, err = loadPostgresBlogImagePendingIndexState(db)
+		if err != nil {
+			return err
+		}
+		if state.matchesProductionDefinition() {
+			return nil
+		}
+		lastErr = fmt.Errorf("pending image upload index definition mismatch after create")
+	}
+	if lastErr == nil {
+		lastErr = fmt.Errorf("pending image upload index creation exhausted retries")
+	}
+	return lastErr
 }
 
 // backfillBlogCoverFromFirstImage 旧文 cover 为空且正文有图时，写入第一张 http(s) 图。
@@ -218,64 +364,101 @@ func migrateBlogImageURLsToPathOnly(db *gorm.DB) {
 	if db == nil {
 		return
 	}
-	if !claimSchemaPatch(db, "blog_image_url_path_only_v1") {
+	const patchKey = "blog_image_url_path_only_v1"
+	if schemaPatchApplied(db, patchKey) {
 		return
 	}
 	articlesUpdated, pagesUpdated, assetsUpdated := 0, 0, 0
 
 	if db.Migrator().HasTable(&model.BlogArticle{}) {
-		var articles []model.BlogArticle
-		if err := db.Select("id", "content", "cover_url").Find(&articles).Error; err != nil {
-			log.Warnf("blog image path-only migrate list articles: %v", err)
-		} else {
+		var afterID uint
+		for {
+			var articles []blogArticleImageMigrationRow
+			if err := db.Model(&model.BlogArticle{}).Select("id", "updated_at", "content", "cover_url").Where("id > ?", afterID).
+				Order("id ASC").Limit(blogImageMigrationBatchSize).Find(&articles).Error; err != nil {
+				log.Warnf("blog image path-only migrate list articles: %v", err)
+				return
+			}
+			if len(articles) == 0 {
+				break
+			}
 			for _, a := range articles {
+				cover := ""
+				if a.CoverURL.Valid {
+					cover = a.CoverURL.String
+				}
 				newContent := blogimg.NormalizeStoredImageRefs(a.Content)
-				newCover := blogimg.NormalizeCoverURL(a.CoverURL)
-				if newContent == a.Content && newCover == strings.TrimSpace(a.CoverURL) {
+				newCover := blogimg.NormalizeCoverURL(cover)
+				if newContent == a.Content && newCover == strings.TrimSpace(cover) {
 					continue
 				}
-				res := db.Model(&model.BlogArticle{}).Where("id = ?", a.ID).Updates(map[string]interface{}{
+				q := db.Model(&model.BlogArticle{}).
+					Where("id = ? AND updated_at = ? AND content = ?", a.ID, a.UpdatedAt, a.Content)
+				if a.CoverURL.Valid {
+					q = q.Where("cover_url = ?", a.CoverURL.String)
+				} else {
+					q = q.Where("cover_url IS NULL")
+				}
+				res := q.UpdateColumns(map[string]interface{}{
 					"content":   newContent,
 					"cover_url": newCover,
 				})
 				if res.Error != nil {
 					log.Warnf("blog image path-only migrate article id=%d: %v", a.ID, res.Error)
-					continue
+					return
 				}
 				if res.RowsAffected > 0 {
 					articlesUpdated++
 				}
 			}
+			afterID = articles[len(articles)-1].ID
 		}
 	}
 
 	if db.Migrator().HasTable(&model.BlogPage{}) {
-		var pages []model.BlogPage
-		if err := db.Select("id", "content_md").Find(&pages).Error; err != nil {
-			log.Warnf("blog image path-only migrate list pages: %v", err)
-		} else {
+		var afterID uint
+		for {
+			var pages []model.BlogPage
+			if err := db.Select("id", "updated_at", "content_md").Where("id > ?", afterID).
+				Order("id ASC").Limit(blogImageMigrationBatchSize).Find(&pages).Error; err != nil {
+				log.Warnf("blog image path-only migrate list pages: %v", err)
+				return
+			}
+			if len(pages) == 0 {
+				break
+			}
 			for _, p := range pages {
 				newMD := blogimg.NormalizeStoredImageRefs(p.ContentMD)
 				if newMD == p.ContentMD {
 					continue
 				}
-				res := db.Model(&model.BlogPage{}).Where("id = ?", p.ID).Update("content_md", newMD)
+				res := db.Model(&model.BlogPage{}).
+					Where("id = ? AND updated_at = ? AND content_md = ?", p.ID, p.UpdatedAt, p.ContentMD).
+					UpdateColumn("content_md", newMD)
 				if res.Error != nil {
 					log.Warnf("blog image path-only migrate page id=%d: %v", p.ID, res.Error)
-					continue
+					return
 				}
 				if res.RowsAffected > 0 {
 					pagesUpdated++
 				}
 			}
+			afterID = pages[len(pages)-1].ID
 		}
 	}
 
 	if db.Migrator().HasTable(&model.BlogImageAsset{}) {
-		var assets []model.BlogImageAsset
-		if err := db.Select("id", "object_key", "url").Find(&assets).Error; err != nil {
-			log.Warnf("blog image path-only migrate list assets: %v", err)
-		} else {
+		var afterID uint
+		for {
+			var assets []blogAssetImageMigrationRow
+			if err := db.Model(&model.BlogImageAsset{}).Select("id", "updated_at", "object_key", "url").Where("id > ?", afterID).
+				Order("id ASC").Limit(blogImageMigrationBatchSize).Find(&assets).Error; err != nil {
+				log.Warnf("blog image path-only migrate list assets: %v", err)
+				return
+			}
+			if len(assets) == 0 {
+				break
+			}
 			for _, a := range assets {
 				key := blogimg.NormalizeObjectKey(a.ObjectKey)
 				if key == "" {
@@ -287,19 +470,26 @@ func migrateBlogImageURLsToPathOnly(db *gorm.DB) {
 				if strings.TrimSpace(a.URL) == key && blogimg.NormalizeObjectKey(a.ObjectKey) == key {
 					continue
 				}
-				res := db.Model(&model.BlogImageAsset{}).Where("id = ?", a.ID).Updates(map[string]interface{}{
-					"object_key": key,
-					"url":        key,
-				})
+				res := db.Model(&model.BlogImageAsset{}).
+					Where("id = ? AND updated_at = ? AND object_key = ? AND url = ?", a.ID, a.UpdatedAt, a.ObjectKey, a.URL).
+					UpdateColumns(map[string]interface{}{
+						"object_key": key,
+						"url":        key,
+					})
 				if res.Error != nil {
 					log.Warnf("blog image path-only migrate asset id=%d: %v", a.ID, res.Error)
-					continue
+					return
 				}
 				if res.RowsAffected > 0 {
 					assetsUpdated++
 				}
 			}
+			afterID = assets[len(assets)-1].ID
 		}
+	}
+	if err := completeSchemaPatch(db, patchKey); err != nil {
+		log.Warnf("complete schema patch %s: %v", patchKey, err)
+		return
 	}
 
 	log.Infof("blog image path-only migrate: articles=%d pages=%d assets=%d",
@@ -313,93 +503,185 @@ func backfillBlogImageContentHashes(db *gorm.DB) {
 	if db == nil {
 		return
 	}
-	if !claimSchemaPatch(db, "blog_image_content_hash_v1") {
+	const patchKey = "blog_image_content_hash_v1"
+	if schemaPatchApplied(db, patchKey) {
 		return
 	}
 	assetsUpdated, articlesUpdated, pagesUpdated := 0, 0, 0
 
 	if db.Migrator().HasTable(&model.BlogImageAsset{}) {
-		var assets []model.BlogImageAsset
-		if err := db.Select("id", "object_key", "content_hash").Find(&assets).Error; err != nil {
-			log.Warnf("blog image hash backfill list assets: %v", err)
-		} else {
+		var afterID uint
+		for {
+			var assets []blogAssetImageMigrationRow
+			if err := db.Model(&model.BlogImageAsset{}).Select("id", "updated_at", "object_key", "content_hash").Where("id > ?", afterID).
+				Order("id ASC").Limit(blogImageMigrationBatchSize).Find(&assets).Error; err != nil {
+				log.Warnf("blog image hash backfill list assets: %v", err)
+				return
+			}
+			if len(assets) == 0 {
+				break
+			}
 			for _, a := range assets {
-				if blogimg.NormalizeHash(a.ContentHash) != "" {
+				contentHash := ""
+				if a.ContentHash.Valid {
+					contentHash = a.ContentHash.String
+				}
+				if blogimg.NormalizeHash(contentHash) != "" {
 					continue
 				}
 				h := blogimg.HashFromObjectKey(a.ObjectKey)
 				if h == "" {
 					continue
 				}
-				res := db.Model(&model.BlogImageAsset{}).Where("id = ?", a.ID).
-					Update("content_hash", h)
+				q := db.Model(&model.BlogImageAsset{}).
+					Where("id = ? AND updated_at = ? AND object_key = ?", a.ID, a.UpdatedAt, a.ObjectKey)
+				if a.ContentHash.Valid {
+					q = q.Where("content_hash = ?", a.ContentHash.String)
+				} else {
+					q = q.Where("content_hash IS NULL")
+				}
+				res := q.Update("content_hash", h)
 				if res.Error != nil {
 					log.Warnf("blog image hash backfill asset id=%d: %v", a.ID, res.Error)
-					continue
+					return
 				}
 				if res.RowsAffected > 0 {
 					assetsUpdated++
 				}
 			}
+			afterID = assets[len(assets)-1].ID
 		}
 	}
 
 	if db.Migrator().HasTable(&model.BlogArticle{}) {
-		var articles []model.BlogArticle
-		if err := db.Select("id", "user_id", "content", "cover_url", "image_hashes").
-			Find(&articles).Error; err != nil {
-			log.Warnf("blog image hash backfill list articles: %v", err)
-		} else {
+		var afterID uint
+		for {
+			var articles []blogArticleImageMigrationRow
+			if err := db.Model(&model.BlogArticle{}).Select("id", "updated_at", "user_id", "content", "cover_url", "image_hashes").
+				Where("id > ?", afterID).Order("id ASC").Limit(blogImageMigrationBatchSize).Find(&articles).Error; err != nil {
+				log.Warnf("blog image hash backfill list articles: %v", err)
+				return
+			}
+			if len(articles) == 0 {
+				break
+			}
+			inputs := make([]blogimg.ContentHashInput, 0, len(articles))
 			for _, a := range articles {
-				if len(blogimg.DecodeImageHashes(a.ImageHashes)) > 0 {
+				imageHashes := ""
+				if a.ImageHashes.Valid {
+					imageHashes = a.ImageHashes.String
+				}
+				cover := ""
+				if a.CoverURL.Valid {
+					cover = a.CoverURL.String
+				}
+				if len(blogimg.DecodeImageHashes(imageHashes)) == 0 {
+					inputs = append(inputs, blogimg.ContentHashInput{ID: a.ID, UserID: a.UserID, Content: a.Content, Cover: cover})
+				}
+			}
+			resolved, err := blogimg.ResolveContentHashesBatchChecked(db, inputs)
+			if err != nil {
+				log.Warnf("blog image hash backfill resolve article batch: %v", err)
+				return
+			}
+			for _, a := range articles {
+				imageHashes := ""
+				if a.ImageHashes.Valid {
+					imageHashes = a.ImageHashes.String
+				}
+				if len(blogimg.DecodeImageHashes(imageHashes)) > 0 {
 					continue
 				}
-				encoded := blogimg.EncodeImageHashes(
-					blogimg.ResolveContentHashes(db, a.UserID, a.Content, a.CoverURL),
-				)
+				encoded := blogimg.EncodeImageHashes(resolved[a.ID])
 				if encoded == "[]" || encoded == "" {
 					continue
 				}
-				res := db.Model(&model.BlogArticle{}).Where("id = ?", a.ID).
-					Update("image_hashes", encoded)
+				q := db.Model(&model.BlogArticle{}).
+					Where("id = ? AND updated_at = ? AND content = ?", a.ID, a.UpdatedAt, a.Content)
+				if a.CoverURL.Valid {
+					q = q.Where("cover_url = ?", a.CoverURL.String)
+				} else {
+					q = q.Where("cover_url IS NULL")
+				}
+				if a.ImageHashes.Valid {
+					q = q.Where("image_hashes = ?", a.ImageHashes.String)
+				} else {
+					q = q.Where("image_hashes IS NULL")
+				}
+				res := q.Update("image_hashes", encoded)
 				if res.Error != nil {
 					log.Warnf("blog image hash backfill article id=%d: %v", a.ID, res.Error)
-					continue
+					return
 				}
 				if res.RowsAffected > 0 {
 					articlesUpdated++
 				}
 			}
+			afterID = articles[len(articles)-1].ID
 		}
 	}
 
 	if db.Migrator().HasTable(&model.BlogPage{}) {
-		var pages []model.BlogPage
-		if err := db.Select("id", "user_id", "content_md", "image_hashes").
-			Find(&pages).Error; err != nil {
-			log.Warnf("blog image hash backfill list pages: %v", err)
-		} else {
+		var afterID uint
+		for {
+			var pages []blogPageImageMigrationRow
+			if err := db.Model(&model.BlogPage{}).Select("id", "updated_at", "user_id", "content_md", "image_hashes").
+				Where("id > ?", afterID).Order("id ASC").Limit(blogImageMigrationBatchSize).Find(&pages).Error; err != nil {
+				log.Warnf("blog image hash backfill list pages: %v", err)
+				return
+			}
+			if len(pages) == 0 {
+				break
+			}
+			inputs := make([]blogimg.ContentHashInput, 0, len(pages))
 			for _, p := range pages {
-				if len(blogimg.DecodeImageHashes(p.ImageHashes)) > 0 {
+				imageHashes := ""
+				if p.ImageHashes.Valid {
+					imageHashes = p.ImageHashes.String
+				}
+				if len(blogimg.DecodeImageHashes(imageHashes)) == 0 {
+					inputs = append(inputs, blogimg.ContentHashInput{ID: p.ID, UserID: p.UserID, Content: p.ContentMD})
+				}
+			}
+			resolved, err := blogimg.ResolveContentHashesBatchChecked(db, inputs)
+			if err != nil {
+				log.Warnf("blog image hash backfill resolve page batch: %v", err)
+				return
+			}
+			for _, p := range pages {
+				imageHashes := ""
+				if p.ImageHashes.Valid {
+					imageHashes = p.ImageHashes.String
+				}
+				if len(blogimg.DecodeImageHashes(imageHashes)) > 0 {
 					continue
 				}
-				encoded := blogimg.EncodeImageHashes(
-					blogimg.ResolveContentHashes(db, p.UserID, p.ContentMD, ""),
-				)
+				encoded := blogimg.EncodeImageHashes(resolved[p.ID])
 				if encoded == "[]" || encoded == "" {
 					continue
 				}
-				res := db.Model(&model.BlogPage{}).Where("id = ?", p.ID).
-					Update("image_hashes", encoded)
+				q := db.Model(&model.BlogPage{}).
+					Where("id = ? AND updated_at = ? AND content_md = ?", p.ID, p.UpdatedAt, p.ContentMD)
+				if p.ImageHashes.Valid {
+					q = q.Where("image_hashes = ?", p.ImageHashes.String)
+				} else {
+					q = q.Where("image_hashes IS NULL")
+				}
+				res := q.Update("image_hashes", encoded)
 				if res.Error != nil {
 					log.Warnf("blog image hash backfill page id=%d: %v", p.ID, res.Error)
-					continue
+					return
 				}
 				if res.RowsAffected > 0 {
 					pagesUpdated++
 				}
 			}
+			afterID = pages[len(pages)-1].ID
 		}
+	}
+	if err := completeSchemaPatch(db, patchKey); err != nil {
+		log.Warnf("complete schema patch %s: %v", patchKey, err)
+		return
 	}
 
 	log.Infof("blog image content-hash backfill: assets=%d articles=%d pages=%d",
@@ -412,12 +694,30 @@ func claimSchemaPatch(db *gorm.DB, key string) bool {
 	if db == nil || !db.Migrator().HasTable(&model.SchemaPatch{}) {
 		return false
 	}
-	res := db.Exec(`INSERT INTO schema_patches (key, applied_at) VALUES (?, NOW()) ON CONFLICT (key) DO NOTHING`, key)
+	res := db.Clauses(clause.OnConflict{DoNothing: true}).Create(&model.SchemaPatch{Key: key, AppliedAt: time.Now()})
 	if res.Error != nil {
 		log.Warnf("claim schema patch %s: %v", key, res.Error)
 		return false
 	}
 	return res.RowsAffected > 0
+}
+
+func schemaPatchApplied(db *gorm.DB, key string) bool {
+	if db == nil || !db.Migrator().HasTable(&model.SchemaPatch{}) {
+		return true
+	}
+	var count int64
+	if err := db.Model(&model.SchemaPatch{}).Where("key = ?", key).Count(&count).Error; err != nil {
+		log.Warnf("query schema patch %s: %v", key, err)
+		return true
+	}
+	return count > 0
+}
+
+func completeSchemaPatch(db *gorm.DB, key string) error {
+	return db.Clauses(clause.OnConflict{DoNothing: true}).Create(&model.SchemaPatch{
+		Key: key, AppliedAt: time.Now(),
+	}).Error
 }
 
 // ensureBackupActiveJobIndex 并发保护：同 kind 同时只允许一个 pending/running 备份任务。
@@ -483,13 +783,17 @@ func backfillBlogFixedPages(db *gorm.DB) error {
 	if db == nil || !db.Migrator().HasTable(&model.BlogSiteConfig{}) || !db.Migrator().HasTable(&model.BlogPage{}) {
 		return nil
 	}
-	var configs []model.BlogSiteConfig
-	if err := db.Select("user_id", "about_md", "friends_md").
-		Where("(about_md IS NOT NULL AND about_md <> '') OR (friends_md IS NOT NULL AND friends_md <> '')").
-		Find(&configs).Error; err != nil {
-		return err
-	}
-	return db.Transaction(func(tx *gorm.DB) error {
+	var afterUserID uint
+	for {
+		var configs []model.BlogSiteConfig
+		if err := db.Select("user_id", "about_md", "friends_md").
+			Where("user_id > ? AND ((about_md IS NOT NULL AND about_md <> '') OR (friends_md IS NOT NULL AND friends_md <> ''))", afterUserID).
+			Order("user_id ASC").Limit(blogFixedPageMigrationBatchSize).Find(&configs).Error; err != nil {
+			return err
+		}
+		if len(configs) == 0 {
+			return nil
+		}
 		for _, cfg := range configs {
 			pages := make([]model.BlogPage, 0, 2)
 			if strings.TrimSpace(cfg.AboutMD) != "" {
@@ -507,12 +811,15 @@ func backfillBlogFixedPages(db *gorm.DB) error {
 			if len(pages) == 0 {
 				continue
 			}
-			if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&pages).Error; err != nil {
+			err := blogimg.WithUserImageReferenceTx(db, cfg.UserID, func(tx *gorm.DB) error {
+				return tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&pages).Error
+			})
+			if err != nil {
 				return err
 			}
 		}
-		return nil
-	})
+		afterUserID = configs[len(configs)-1].UserID
+	}
 }
 
 const (
