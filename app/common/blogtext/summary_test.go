@@ -66,15 +66,16 @@ func TestIsDefaultSummaryAndResolve(t *testing.T) {
 		t.Fatal("generated must count as default")
 	}
 	if !IsDefaultSummary("", content) {
-		t.Fatal("empty is default (editor empty)")
+		t.Fatal("empty is default")
 	}
-	if IsDefaultSummary("我手写的摘要", content) {
-		t.Fatal("custom must not be default")
+	// 手写摘要已废弃：一律视为系统生成路径
+	if !IsDefaultSummary("我手写的摘要", content) {
+		t.Fatal("hand-written no longer special-cased")
 	}
 	if ResolveSummaryForSave("", content) != def {
 		t.Fatal("empty save regenerates")
 	}
-	if ResolveSummaryForSave("  自定义  ", content) != "自定义" {
-		t.Fatal("custom kept")
+	if ResolveSummaryForSave("  自定义  ", content) != def {
+		t.Fatal("custom input must be ignored; always regenerate from content")
 	}
 }

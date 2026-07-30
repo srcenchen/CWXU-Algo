@@ -140,6 +140,7 @@ func migrateModels(db *gorm.DB) {
 		panic("数据库：数据库自动合并失败")
 	}
 	migrateContestLogUnique(db)
+	migrateContestLogListIndexes(db)
 	// 旧顶层评论 root_id=0 → 回填为自身 id（层级评论依赖）
 	_ = db.Exec(`UPDATE problem_comments SET root_id = id WHERE parent_id = 0 AND (root_id = 0 OR root_id IS NULL)`).Error
 	// 丢弃旧无 platform 日汇总（清洗任务会从 submit_logs 全量重建）
@@ -424,6 +425,23 @@ func migrateContestLogUnique(db *gorm.DB) {
 		ON contest_logs (platform, user_id, contest_id)
 	`).Error; err != nil {
 		log.Warnf("migrate contest_logs unique index: %v", err)
+	}
+}
+
+// migrateContestLogListIndexes /core/contest/list 去重翻页用的覆盖索引。
+// DISTINCT ON (platform, contest_id) ORDER BY time DESC 与按 user_id 过滤都受益。
+func migrateContestLogListIndexes(db *gorm.DB) {
+	if db == nil || !db.Migrator().HasTable(&model.ContestLog{}) {
+		return
+	}
+	for _, ddl := range []string{
+		`CREATE INDEX IF NOT EXISTS idx_contest_logs_time_id ON contest_logs (time DESC, id DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_contest_logs_user_time ON contest_logs (user_id, time DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_contest_logs_plat_cid_time ON contest_logs (platform, contest_id, time DESC, id DESC)`,
+	} {
+		if err := db.Exec(ddl).Error; err != nil {
+			log.Warnf("migrate contest_logs list index: %v", err)
+		}
 	}
 }
 

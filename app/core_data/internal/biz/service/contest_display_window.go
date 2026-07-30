@@ -186,6 +186,11 @@ func scheduleNowCoderCalendarBackfill(db *gorm.DB, logs []model.ContestLog) {
 		name, url, hintStart, hintEnd := cl.ContestName, cl.ContestUrl, cl.Time, cl.EndTime
 		go func(cid, name, url string, hintStart, hintEnd time.Time) {
 			defer ncBackfillRelease(cid)
+			defer func() {
+				if rec := recover(); rec != nil {
+					log.Errorf("nowcoder calendar backfill panic %s: %v", cid, rec)
+				}
+			}()
 			ncBackfillSlots <- struct{}{}
 			defer func() { <-ncBackfillSlots }()
 			// 排队期间可能已被别的路径补上

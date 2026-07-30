@@ -26,12 +26,16 @@ import (
 	"github.com/go-kratos/kratos/v2/registry"
 	khttp "github.com/go-kratos/kratos/v2/transport/http"
 	"github.com/redis/go-redis/v9"
+	"golang.org/x/sync/singleflight"
 	grpc2 "google.golang.org/grpc"
 	"gorm.io/gorm"
 )
 
 // contestListCacheMaxOffset 「全部比赛」列表短缓存覆盖的最大 offset（再深就直接查库）
 const contestListCacheMaxOffset = 500
+
+// contestListSF 合并同一缓存键的回源，避免首页/翻页缓存击穿时把 8 连接池打满 → 500
+var contestListSF singleflight.Group
 
 type ContestLogService struct {
 	contest_log.UnimplementedContestServer
@@ -67,7 +71,6 @@ func (c ContestLogService) GetContestList(ctx context.Context, req *contest_log.
 	}
 	var logs []model.ContestLog
 	var total int64
-	var err error
 
 	listQ := dal.ContestListQuery{
 		UserId:    req.UserId,
@@ -85,7 +88,11 @@ func (c ContestLogService) GetContestList(ctx context.Context, req *contest_log.
 		req.Limit > 0 && req.Limit <= 50 &&
 		strings.TrimSpace(req.Keyword) == "" && req.TimeFrom == 0 && req.TimeTo == 0
 
-	// 组织首页短缓存（90s + global ver）
+	loadDB := func(loadCtx context.Context) ([]model.ContestLog, int64, error) {
+		return c.sbDal.GetContestListScoped(loadCtx, listQ)
+	}
+
+	// 组织首页短缓存（90s + global ver）+ singleflight 防击穿
 	if useCache {
 		ver := "0"
 		if v, e := c.rdb.Get(ctx, "core:contest:list:global:ver").Result(); e == nil && v != "" {
@@ -100,19 +107,50 @@ func (c ContestLogService) GetContestList(ctx context.Context, req *contest_log.
 			}
 		}
 		if logs == nil {
-			logs, total, err = c.sbDal.GetContestListScoped(ctx, listQ)
-			if err != nil {
+			// singleflight：同一 key 并发只回源一次；用 Background 避免领头请求取消拖死跟随者
+			v, sfErr, _ := contestListSF.Do(key, func() (interface{}, error) {
+				// 双重检查：领头执行前可能已被其它 SF 轮次写入
+				if b, e := c.rdb.Get(context.Background(), key).Bytes(); e == nil && len(b) > 0 {
+					var p listPayload
+					if utils.GobDecoder(b, &p) == nil {
+						return p, nil
+					}
+				}
+				ls, tot, e := loadDB(context.Background())
+				if e != nil {
+					return nil, e
+				}
+				p := listPayload{Logs: ls, Total: tot}
+				if b, encErr := utils.GobEncoder(p); encErr == nil {
+					_ = c.rdb.Set(context.Background(), key, b, 90*time.Second).Err()
+				}
+				return p, nil
+			})
+			if sfErr != nil {
+				log.Errorf("GetContestList db: %v", sfErr)
 				return nil, errors.InternalServer("内部服务器错误", "服务暂时不可用")
 			}
-			if b, e := utils.GobEncoder(listPayload{Logs: logs, Total: total}); e == nil {
-				_ = c.rdb.Set(ctx, key, b, 90*time.Second).Err()
-			}
+			p := v.(listPayload)
+			logs, total = p.Logs, p.Total
 		}
 	} else {
-		logs, total, err = c.sbDal.GetContestListScoped(ctx, listQ)
-		if err != nil {
+		// 无短缓存路径（关键字/深翻页）：按查询指纹合并并发，减轻池压力
+		sfKey := fmt.Sprintf("contest:list:q:u%d:org%d:p%s:kw%s:tf%d:tt%d:off%d:lim%d:n%d",
+			req.UserId, resolvedOrg, req.Platform, strings.TrimSpace(req.Keyword),
+			req.TimeFrom, req.TimeTo, req.Offset, req.Limit, len(memberIDs))
+		v, sfErr, _ := contestListSF.Do(sfKey, func() (interface{}, error) {
+			ls, tot, e := loadDB(context.Background())
+			if e != nil {
+				return nil, e
+			}
+			return listPayload{Logs: ls, Total: tot}, nil
+		})
+		if sfErr != nil {
+			log.Errorf("GetContestList db: %v", sfErr)
 			return nil, errors.InternalServer("内部服务器错误", "服务暂时不可用")
 		}
+		p := v.(listPayload)
+		logs, total = p.Logs, p.Total
 	}
 
 	items := c.contestLogsToProto(ctx, logs)

@@ -166,12 +166,12 @@ const DefaultSummaryMaxRunes = blogtext.DefaultSummaryMaxRunes
 // DefaultSummary builds a content-derived brief for list cards.
 func DefaultSummary(content string) string { return blogtext.DefaultSummary(content) }
 
-// IsDefaultSummary reports whether summary matches the system default for content.
+// IsDefaultSummary reports whether summary is system-generated (always true).
 func IsDefaultSummary(summary, content string) bool {
 	return blogtext.IsDefaultSummary(summary, content)
 }
 
-// ResolveSummaryForSave: empty → regenerate default; non-empty custom kept.
+// ResolveSummaryForSave always regenerates from content; userSummary ignored.
 func ResolveSummaryForSave(userSummary, content string) string {
 	return blogtext.ResolveSummaryForSave(userSummary, content)
 }

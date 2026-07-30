@@ -236,52 +236,128 @@ func (s *SpiderDal) GetContestList(ctx context.Context, userId int64, offset int
 	})
 }
 
-// GetContestListScoped userId=-1 时 memberIDs 限制组织成员
+// contestListWhere 共用筛选条件（列表 / 计数）。
+func contestListWhere(db *gorm.DB, q ContestListQuery) *gorm.DB {
+	if q.UserId != -1 {
+		db = db.Where("user_id = ?", q.UserId)
+	} else if q.MemberIDs != nil {
+		db = db.Where("user_id IN ?", q.MemberIDs)
+	}
+	if platform := strings.TrimSpace(q.Platform); platform != "" {
+		db = db.Where("platform = ?", platform)
+	}
+	if kw := strings.TrimSpace(q.Keyword); kw != "" {
+		// 名称或 contest_id 模糊匹配（PG 用 ILIKE；SQLite 单测回落 LIKE）
+		like := sqllike.Pattern(kw)
+		if db.Dialector.Name() == "postgres" {
+			db = db.Where("(contest_name ILIKE ? OR contest_id ILIKE ?)", like, like)
+		} else {
+			db = db.Where("(LOWER(contest_name) LIKE LOWER(?) OR LOWER(contest_id) LIKE LOWER(?))", like, like)
+		}
+	}
+	if q.TimeFrom > 0 {
+		db = db.Where("time >= ?", time.Unix(q.TimeFrom, 0))
+	}
+	if q.TimeTo > 0 {
+		db = db.Where("time <= ?", time.Unix(q.TimeTo, 0))
+	}
+	return db
+}
+
+// GetContestListScoped userId=-1 时 memberIDs 限制组织成员。
+//
+// 旧实现用 ROW_NUMBER() 窗口对全量匹配行编号再滤 row_num=1，在组织成员多 /
+// contest_logs 大时单次查询可吃满连接池数秒；并发翻页/关键字会把 MaxOpen=8
+// 的池打爆，表现为 /core/contest/list 偶发 500（「服务暂时不可用」）。
+//
+// 现改为两段式：
+//  1. GROUP BY (platform, contest_id) 只取代表行 id（MAX 时间 + 同时间 MAX id）
+//  2. 再按 id IN (...) 回表完整行并按时间排序
+// 计数同样走 GROUP BY 子查询，避免 COUNT(DISTINCT (a,b)) 的重计划。
 func (s *SpiderDal) GetContestListScoped(ctx context.Context, q ContestListQuery) ([]model.ContestLog, int64, error) {
 	if q.MemberIDs != nil && len(q.MemberIDs) == 0 && q.UserId == -1 {
 		return []model.ContestLog{}, 0, nil
 	}
-	buildQuery := func() *gorm.DB {
-		db := s.db.WithContext(ctx).Model(&model.ContestLog{})
-		if q.UserId != -1 {
-			db = db.Where("user_id = ?", q.UserId)
-		} else if q.MemberIDs != nil {
-			db = db.Where("user_id IN ?", q.MemberIDs)
-		}
-		if platform := strings.TrimSpace(q.Platform); platform != "" {
-			db = db.Where("platform = ?", platform)
-		}
-		if kw := strings.TrimSpace(q.Keyword); kw != "" {
-			// 名称或 contest_id 模糊匹配
-			like := sqllike.Pattern(kw)
-			db = db.Where("(contest_name ILIKE ? OR contest_id ILIKE ?)", like, like)
-		}
-		if q.TimeFrom > 0 {
-			db = db.Where("time >= ?", time.Unix(q.TimeFrom, 0))
-		}
-		if q.TimeTo > 0 {
-			db = db.Where("time <= ?", time.Unix(q.TimeTo, 0))
-		}
-		return db
+	limit := int(q.Limit)
+	if limit <= 0 {
+		limit = 10
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	offset := int(q.Offset)
+	if offset < 0 {
+		offset = 0
 	}
 
-	// 1. 按 (platform, contest_id) 去重计数（力扣 weekly-contest-N 与其它平台 id 不能并）
+	base := func() *gorm.DB {
+		return contestListWhere(s.db.WithContext(ctx).Model(&model.ContestLog{}), q)
+	}
+
+	// 1) 去重场次总数
 	var total int64
-	countQuery := buildQuery().Select("COUNT(DISTINCT (platform, contest_id))")
-	if err := countQuery.Scan(&total).Error; err != nil {
+	countSQL := base().Select("platform, contest_id").Group("platform, contest_id")
+	if err := s.db.WithContext(ctx).Table("(?) AS contest_dedup", countSQL).Count(&total).Error; err != nil {
 		return nil, 0, err
+	}
+	if total == 0 || offset >= int(total) {
+		return []model.ContestLog{}, total, nil
+	}
+
+	// 2) 本页代表行 id：每个 (platform, contest_id) 取 time 最大、同 time 取 id 最大
+	type pickRow struct {
+		ID uint `gorm:"column:id"`
+	}
+	var picks []pickRow
+	if s.db.Dialector.Name() == "postgres" {
+		// DISTINCT ON 只保留每组一行，避免 ROW_NUMBER 物化全部分区、也避免 ARRAY_AGG 撑爆内存
+		dedup := base().Select("DISTINCT ON (platform, contest_id) id, time").
+			Order("platform, contest_id, time DESC, id DESC")
+		if err := s.db.WithContext(ctx).Table("(?) AS contest_pick", dedup).
+			Select("id").Order("time DESC, id DESC").
+			Offset(offset).Limit(limit).Scan(&picks).Error; err != nil {
+			return nil, 0, err
+		}
+	} else {
+		// SQLite 单测：窗口函数回退（数据量小）
+		ranked := base().Select(
+			"id, time, ROW_NUMBER() OVER (PARTITION BY platform, contest_id ORDER BY time DESC, id DESC) AS row_num",
+		)
+		if err := s.db.WithContext(ctx).Table("(?) AS ranked", ranked).
+			Select("id").Where("row_num = 1").Order("time DESC, id DESC").
+			Offset(offset).Limit(limit).Scan(&picks).Error; err != nil {
+			return nil, 0, err
+		}
+	}
+	if len(picks) == 0 {
+		return []model.ContestLog{}, total, nil
+	}
+	ids := make([]uint, 0, len(picks))
+	for _, p := range picks {
+		if p.ID > 0 {
+			ids = append(ids, p.ID)
+		}
+	}
+	if len(ids) == 0 {
+		return []model.ContestLog{}, total, nil
 	}
 
 	var contestLogs []model.ContestLog
-	ranked := buildQuery().Select(
-		"contest_logs.*, ROW_NUMBER() OVER (PARTITION BY platform, contest_id ORDER BY time DESC, id DESC) AS row_num",
-	)
-	if err := s.db.WithContext(ctx).Table("(?) AS ranked", ranked).
-		Where("row_num = 1").Order("time DESC, id DESC").
-		Offset(int(q.Offset)).Limit(int(q.Limit)).Scan(&contestLogs).Error; err != nil {
+	if err := s.db.WithContext(ctx).Where("id IN ?", ids).Find(&contestLogs).Error; err != nil {
 		return nil, 0, err
 	}
-	return contestLogs, total, nil
+	// Find 不保证 IN 顺序：按 picks（已按 time DESC）重排
+	byID := make(map[uint]model.ContestLog, len(contestLogs))
+	for _, cl := range contestLogs {
+		byID[cl.ID] = cl
+	}
+	ordered := make([]model.ContestLog, 0, len(picks))
+	for _, p := range picks {
+		if cl, ok := byID[p.ID]; ok {
+			ordered = append(ordered, cl)
+		}
+	}
+	return ordered, total, nil
 }
 
 // GetContestRanking 获取比赛排行榜
