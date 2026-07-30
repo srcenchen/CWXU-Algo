@@ -392,9 +392,9 @@ func (s *BlogService) articleToMap(a *model.BlogArticle, author *model.User, d b
 	if a.SourceProblemID != nil && *a.SourceProblemID > 0 {
 		m["sourceProblemId"] = *a.SourceProblemID
 	}
-	// editor helper: whether stored summary is system default (do not backfill)
+	// 摘要一律自动生成；字段保留兼容旧前端
 	if includeBody {
-		m["summaryIsDefault"] = blogaccess.IsDefaultSummary(a.Summary, a.Content)
+		m["summaryIsDefault"] = true
 	}
 	if a.PublishedAt != nil {
 		m["publishedAt"] = a.PublishedAt.Unix()
@@ -853,8 +853,8 @@ func (s *BlogService) buildArticleFromReq(userID, existingID uint, req *blogArti
 	if len(content) > maxBlogContent {
 		return nil, "正文过大，最大 512KB"
 	}
-	// 摘要：空 → 从正文生成默认简述；作者手填则保留
-	summary := blogaccess.ResolveSummaryForSave(req.Summary, content)
+	// 摘要一律按正文自动生成，忽略客户端手写
+	summary := blogaccess.DefaultSummary(content)
 	if utf8.RuneCountInString(summary) > maxBlogSummary {
 		runes := []rune(summary)
 		summary = string(runes[:maxBlogSummary])

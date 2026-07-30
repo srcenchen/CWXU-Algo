@@ -146,10 +146,8 @@ func UpsertFromSolutionWithProblem(db *gorm.DB, userID, solutionID, problemID, a
 		if pid != nil {
 			updates["source_problem_id"] = pid
 		}
-		// regenerate summary only if empty or still system-default for old content
-		if blogtext.IsDefaultSummary(a.Summary, a.Content) || strings.TrimSpace(a.Summary) == "" {
-			updates["summary"] = defSum
-		}
+		// 摘要一律按正文重算（不允许手写保留）
+		updates["summary"] = defSum
 		_ = db.Model(a).Updates(updates).Error
 		_ = autoSurfaceOrgs(db, a.ID, userID)
 		// 题解内容变更后 GC 未再引用的又拍云图（与博客保存路径一致）

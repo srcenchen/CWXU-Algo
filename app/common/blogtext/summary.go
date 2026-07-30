@@ -134,21 +134,19 @@ func PlainText(content string) string {
 	return strings.TrimSpace(s)
 }
 
-// IsDefaultSummary reports whether summary matches the system default for content.
+// IsDefaultSummary reports whether summary is system-generated (always true now:
+// hand-written summaries are no longer accepted on save).
 func IsDefaultSummary(summary, content string) bool {
-	sum := strings.TrimSpace(summary)
-	if sum == "" {
-		return true
-	}
-	return sum == DefaultSummary(content)
+	_ = summary
+	_ = content
+	return true
 }
 
-// ResolveSummaryForSave: empty → regenerate default; non-empty custom kept.
+// ResolveSummaryForSave always regenerates from content; userSummary is ignored.
+// Kept for call-site compatibility (API may still send a summary field).
 func ResolveSummaryForSave(userSummary, content string) string {
-	if strings.TrimSpace(userSummary) == "" {
-		return DefaultSummary(content)
-	}
-	return strings.TrimSpace(userSummary)
+	_ = userSummary
+	return DefaultSummary(content)
 }
 
 func stripFencedCodeBlocks(s string) string {
