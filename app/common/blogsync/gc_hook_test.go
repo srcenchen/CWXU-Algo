@@ -67,7 +67,7 @@ func solutionGCDB(t *testing.T) *gorm.DB {
 }
 
 // TestUpsertFromSolutionTriggersGCOnDeRef drives the real Upsert path then the
-// same GC function ScheduleGCUserImages would call (sync for determinism).
+// low-level reference scanner remains covered independently of request handlers.
 func TestUpsertFromSolutionTriggersGCOnDeRef(t *testing.T) {
 	db := solutionGCDB(t)
 	base := "http://zhiyuansofts.cn"

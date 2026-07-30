@@ -322,7 +322,6 @@ func (s *BlogService) handlePageUpdate(ctx khttp.Context) error {
 		writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "保存失败"})
 		return nil
 	}
-	go s.gcUserBlogImages(pd.UserID)
 	writeJSON(ctx.Response(), 200, map[string]interface{}{"code": 0, "message": "success", "data": blogPageToMap(&existing, true, s.publicImageBase())})
 	return nil
 }

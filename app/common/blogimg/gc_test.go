@@ -287,8 +287,3 @@ func TestGCUserImagesAfterAllArticlesDeleted(t *testing.T) {
 		t.Fatalf("got %v", del.Deleted())
 	}
 }
-
-func TestScheduleGCUserImagesRuns(t *testing.T) {
-	ScheduleGCUserImages(nil, 0)
-	time.Sleep(10 * time.Millisecond)
-}

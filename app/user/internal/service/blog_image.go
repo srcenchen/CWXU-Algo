@@ -44,12 +44,6 @@ func (s *BlogService) userImageUploadEnabled(userID uint) bool {
 	return cfg.ImageUploadEnabled
 }
 
-// gcUserBlogImages deletes UpYun objects registered for user that are no longer
-// referenced by any of their articles (content + cover). Shared with blogsync.
-func (s *BlogService) gcUserBlogImages(userID uint) {
-	blogimg.GCUserImagesFromSite(s.db, userID)
-}
-
 // registerBlogImageAsset records an uploaded object for later GC (keyed by object path + content hash).
 func registerBlogImageAsset(db *gorm.DB, userID uint, objectKey, publicURL, contentHash, purpose string, articleID *uint) error {
 	if db == nil || userID == 0 || objectKey == "" {
@@ -146,48 +140,6 @@ func (s *BlogService) handleBlogImagesCheck(ctx khttp.Context) error {
 			"missing":        missing,
 			"existingHashes": exHash,
 			"missingHashes":  missHash,
-		},
-	})
-	return nil
-}
-
-// listOrphanImages returns unreferenced blog image assets without deleting them.
-func (s *BlogService) listOrphanImages(ctx khttp.Context) error {
-	pd := auth.GetCurrentUser(ctx)
-	if pd == nil || pd.UserID == 0 {
-		writeJSON(ctx.Response(), 401, map[string]interface{}{"code": 1, "message": "请先登录"})
-		return nil
-	}
-
-	client := blogimg.LoadUpyunClient(s.db)
-	orphans := blogimg.ListUserImageOrphans(s.db, pd.UserID, client.PublicBaseURL())
-
-	writeJSON(ctx.Response(), 200, map[string]interface{}{
-		"code":    0,
-		"message": "success",
-		"data": map[string]interface{}{
-			"orphans": orphans,
-			"total":   len(orphans),
-		},
-	})
-	return nil
-}
-
-// gcOrphanImages runs manual GC ignoring grace period (for user-initiated cleanup).
-func (s *BlogService) gcOrphanImages(ctx khttp.Context) error {
-	pd := auth.GetCurrentUser(ctx)
-	if pd == nil || pd.UserID == 0 {
-		writeJSON(ctx.Response(), 401, map[string]interface{}{"code": 1, "message": "请先登录"})
-		return nil
-	}
-
-	count := blogimg.GCUserImagesForce(s.db, blogimg.LoadUpyunClient(s.db), pd.UserID)
-
-	writeJSON(ctx.Response(), 200, map[string]interface{}{
-		"code":    0,
-		"message": "success",
-		"data": map[string]interface{}{
-			"deleted": count,
 		},
 	})
 	return nil

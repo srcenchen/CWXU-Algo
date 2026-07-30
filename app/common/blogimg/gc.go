@@ -11,8 +11,7 @@ import (
 	"gorm.io/gorm"
 )
 
-// GCGracePeriod：刚上传、可能还在编辑中的图暂不 GC。
-// 拉长到 24h，避免草稿/插件分步推送被误删。
+// GCGracePeriod protects images that may still belong to an unfinished edit.
 const GCGracePeriod = 24 * time.Hour
 
 // ObjectDeleter is the UpYun delete surface used by GC (injectable in tests).
@@ -34,8 +33,6 @@ type imageAssetRow struct {
 
 func (imageAssetRow) TableName() string { return "blog_image_assets" }
 
-// OrphanAsset is a registered image no longer referenced by any article/page.
-// Protected marks a newly uploaded asset still inside the editing grace period.
 type OrphanAsset struct {
 	ID          uint      `json:"id"`
 	CreatedAt   time.Time `json:"createdAt"`
@@ -228,21 +225,6 @@ func ListUserImageOrphansAt(db *gorm.DB, userID uint, base string, now time.Time
 		})
 	}
 	return orphans
-}
-
-// GCUserImagesFromSite loads UpYun from site_configs then runs GCUserImages.
-func GCUserImagesFromSite(db *gorm.DB, userID uint) int {
-	return GCUserImages(db, LoadUpyunClient(db), userID)
-}
-
-// ScheduleGCUserImages runs GC asynchronously (fire-and-forget).
-func ScheduleGCUserImages(db *gorm.DB, userID uint) {
-	if db == nil || userID == 0 {
-		return
-	}
-	go func() {
-		_ = GCUserImagesFromSite(db, userID)
-	}()
 }
 
 // ExistingURLsForUser returns which of the given URLs are still registered
