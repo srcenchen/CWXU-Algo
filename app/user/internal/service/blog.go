@@ -114,9 +114,6 @@ func RegisterBlogRoutes(srv *khttp.Server, bs *BlogService) {
 	r.POST("/v1/user/blog/image-upload/apply", bs.handleImageUploadApply)
 	// 批量确认图床 URL/object key 是否仍在资产表（插件缓存复用，避免 N+1）
 	r.POST("/v1/user/blog/images/check", bs.handleBlogImagesCheck)
-	// 图床手动清理（禁用自动 GC 后新增）
-	r.GET("/v1/user/blog/images/orphans", bs.listOrphanImages)
-	r.POST("/v1/user/blog/images/gc", bs.gcOrphanImages)
 	r.POST("/v1/user/blog/admin/image-upload", bs.handleAdminImageUpload)
 	r.GET("/v1/user/blog/admin/image-upload/requests", bs.handleAdminImageUploadRequests)
 	r.POST("/v1/user/blog/admin/image-upload/review", bs.handleAdminImageUploadReview)
@@ -126,6 +123,9 @@ func RegisterBlogRoutes(srv *khttp.Server, bs *BlogService) {
 	r.GET("/v1/user/blog/admin/authors", bs.handleAdminAuthors)
 	r.GET("/v1/user/blog/admin/articles", bs.handleAdminArticles)
 	r.POST("/v1/user/blog/admin/moderate", bs.handleAdminModerate)
+	r.GET("/v1/user/blog/admin/images", bs.handleAdminBlogImages)
+	r.POST("/v1/user/blog/admin/images/delete", bs.handleAdminBlogImageDelete)
+	r.POST("/v1/user/blog/admin/images/delete-batch", bs.handleAdminBlogImagesDeleteBatch)
 
 	// 举报
 	r.POST("/v1/user/blog/report", bs.handleReport)

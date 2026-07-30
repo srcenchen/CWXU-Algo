@@ -17,8 +17,7 @@ import (
 	"gorm.io/gorm"
 )
 
-// GCGracePeriod：刚上传、可能还在编辑中的图暂不 GC。
-// 拉长到 24h，避免草稿/插件分步推送被误删。
+// GCGracePeriod protects images that may still belong to an unfinished edit.
 const GCGracePeriod = 24 * time.Hour
 
 var (
@@ -49,8 +48,6 @@ type imageAssetRow struct {
 
 func (imageAssetRow) TableName() string { return "blog_image_assets" }
 
-// OrphanAsset is a registered image no longer referenced by any article/page.
-// Protected marks a newly uploaded asset still inside the editing grace period.
 type OrphanAsset struct {
 	ID          uint       `json:"id"`
 	CreatedAt   time.Time  `json:"createdAt"`

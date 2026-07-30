@@ -48,6 +48,46 @@ func TestUserImageReferenceLockSerializesSameUser(t *testing.T) {
 	}
 }
 
+func TestAdminImageReferenceLockWaitsForAnyUserWriter(t *testing.T) {
+	db := gcTestDB(t)
+	writerEntered := make(chan struct{})
+	releaseWriter := make(chan struct{})
+	adminEntered := make(chan struct{})
+	done := make(chan error, 2)
+
+	go func() {
+		done <- WithUserImageReferenceTx(db, 71, func(tx *gorm.DB) error {
+			close(writerEntered)
+			<-releaseWriter
+			return nil
+		})
+	}()
+	<-writerEntered
+	go func() {
+		done <- WithAdminImageReferenceTx(db, func(tx *gorm.DB) error {
+			close(adminEntered)
+			return nil
+		})
+	}()
+
+	select {
+	case <-adminEntered:
+		t.Fatal("admin cleanup entered while a user reference write was active")
+	case <-time.After(40 * time.Millisecond):
+	}
+	close(releaseWriter)
+	select {
+	case <-adminEntered:
+	case <-time.After(time.Second):
+		t.Fatal("admin cleanup did not enter after the user writer released")
+	}
+	for i := 0; i < 2; i++ {
+		if err := <-done; err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
 func TestGCSnapshotWaitsForWriterAndSeesCommittedReference(t *testing.T) {
 	db := gcTestDB(t)
 	userID := uint(62)
