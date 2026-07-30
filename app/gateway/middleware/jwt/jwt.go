@@ -76,9 +76,11 @@ var publicExact = map[string]struct{}{
 	"/api/user/blog/theme/status":   {},
 	"/v1/user/blog/agreement":       {},
 	"/api/user/blog/agreement":      {},
-	// Obsidian 插件版本（公开；安装包仍走云存储）
+	// Obsidian 插件版本（公开读；publish 用 Header 令牌鉴权，不经 JWT）
 	"/v1/user/blog/obsidian-plugin/latest":  {},
 	"/api/user/blog/obsidian-plugin/latest": {},
+	"/v1/user/blog/obsidian-plugin/publish":  {},
+	"/api/user/blog/obsidian-plugin/publish": {},
 	"/v1/user/site/config":          {},
 	"/api/user/site/config":         {},
 	"/v1/user/site/visit-ping":      {},

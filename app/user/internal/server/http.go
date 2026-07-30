@@ -63,7 +63,9 @@ func NewWhiteListMatcher() selector.MatchFunc {
 			strings.Contains(operation, "blog/comment/list") ||
 			strings.Contains(operation, "blog/theme/status") ||
 			strings.Contains(operation, "blog/agreement") ||
-			strings.Contains(operation, "blog/obsidian-plugin/latest") {
+			strings.Contains(operation, "blog/obsidian-plugin/latest") ||
+			// publish 用 X-Plugin-Publish-Token，不经 JWT
+			strings.Contains(operation, "blog/obsidian-plugin/publish") {
 			return false
 		}
 		// SEO HTML / sitemap 公开
