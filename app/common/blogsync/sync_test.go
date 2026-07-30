@@ -3,6 +3,8 @@ package blogsync
 import (
 	"testing"
 
+	"cwxu-algo/app/common/blogtext"
+
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
@@ -38,6 +40,20 @@ func TestEnsureDefaultCategory(t *testing.T) {
 	}
 }
 
+func TestUpsertFromSolutionNormalizesBlogImageURLs(t *testing.T) {
+	db := testDB(t)
+	md := "见 ![x](https://old.cdn/blog/3/pic.webp)"
+	aid, _, err := UpsertFromSolution(db, 3, 77, 0, "图解", md)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var a Article
+	_ = db.First(&a, aid).Error
+	if a.Content != "见 ![x](/blog/3/pic.webp)" {
+		t.Fatalf("expected path-only image, got %q", a.Content)
+	}
+}
+
 func TestUpsertFromSolution(t *testing.T) {
 	db := testDB(t)
 	aid, slug, err := UpsertFromSolution(db, 3, 99, 0, "差分题解", "## 思路\nO(n)")
@@ -57,7 +73,7 @@ func TestUpsertFromSolution(t *testing.T) {
 		t.Fatal("solution mirror must not auto recommend")
 	}
 
-	// 作者手填摘要后，题解再更新不应覆盖
+	// 摘要一律按正文重算（与博客写路径一致，不保留手写）
 	_ = db.Model(&created).Update("summary", "我手写的摘要").Error
 
 	// update
@@ -70,8 +86,9 @@ func TestUpsertFromSolution(t *testing.T) {
 	if a.Title != "差分题解 v2" || a.Content != "新内容" {
 		t.Fatalf("article=%+v", a)
 	}
-	if a.Summary != "我手写的摘要" {
-		t.Fatalf("update must keep author summary, got %q", a.Summary)
+	wantSum := blogtext.DefaultSummary("新内容")
+	if a.Summary != wantSum {
+		t.Fatalf("update must regenerate summary from content, got %q want %q", a.Summary, wantSum)
 	}
 	if a.SourceSolutionID == nil || *a.SourceSolutionID != 99 {
 		t.Fatalf("source=%v", a.SourceSolutionID)

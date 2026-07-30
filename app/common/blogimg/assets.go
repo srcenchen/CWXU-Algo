@@ -26,17 +26,38 @@ const JPEGQuality = 88
 // mdImageRe matches markdown images ![alt](url)
 var mdImageRe = regexp.MustCompile(`!\[[^\]]*]\(\s*<?([^)\s>]+)>?\s*(?:["'][^"']*["'])?\s*\)`)
 
-// ExtractImageURLs collects http(s) image URLs from markdown content and cover.
+// isStoredImageRef reports whether u is a usable image ref in content/cover:
+// absolute http(s), or path-only blog object key (/blog/{uid}/…).
+func isStoredImageRef(u string) bool {
+	u = strings.TrimSpace(u)
+	if u == "" {
+		return false
+	}
+	if strings.HasPrefix(u, "http://") || strings.HasPrefix(u, "https://") {
+		return true
+	}
+	if BlogObjectKeyFromAnyURL(u) != "" {
+		return true
+	}
+	k := NormalizeObjectKey(u)
+	return strings.HasPrefix(strings.ToLower(k), "/blog/")
+}
+
+// ExtractImageURLs collects image refs from markdown content and cover.
+// Accepts http(s) URLs and path-only blog object keys (canonical storage form).
 func ExtractImageURLs(content, cover string) []string {
 	seen := map[string]struct{}{}
 	var out []string
 	add := func(u string) {
 		u = strings.TrimSpace(u)
-		if u == "" {
+		if !isStoredImageRef(u) {
 			return
 		}
-		if !strings.HasPrefix(u, "http://") && !strings.HasPrefix(u, "https://") {
-			return
+		// Prefer path-only for blog objects so callers see stable keys.
+		if k := BlogObjectKeyFromAnyURL(u); k != "" {
+			u = k
+		} else if k := NormalizeObjectKey(u); strings.HasPrefix(strings.ToLower(k), "/blog/") {
+			u = k
 		}
 		if _, ok := seen[u]; ok {
 			return
@@ -61,25 +82,23 @@ func ExtractImageURLs(content, cover string) []string {
 }
 
 // ResolveCoverURL picks the article cover for write paths.
-// Non-empty cover wins; otherwise if useFirst, the first http(s) image URL from
-// content that fits maxLen (bytes) is used. Invalid auto candidates are skipped
-// without error; empty result means no cover.
+// Non-empty cover wins; otherwise if useFirst, the first image ref from content
+// that fits maxLen (bytes) is used. Blog object refs are returned path-only.
+// Invalid auto candidates are skipped without error; empty result means no cover.
 func ResolveCoverURL(cover, content string, useFirst bool, maxLen int) string {
 	cover = strings.TrimSpace(cover)
 	if cover != "" {
-		return cover
+		return NormalizeCoverURL(cover)
 	}
 	if !useFirst {
 		return ""
 	}
 	for _, u := range ExtractImageURLs(content, "") {
 		u = strings.TrimSpace(u)
-		if u == "" {
+		if u == "" || !isStoredImageRef(u) {
 			continue
 		}
-		if !strings.HasPrefix(u, "http://") && !strings.HasPrefix(u, "https://") {
-			continue
-		}
+		u = NormalizeCoverURL(u)
 		if maxLen > 0 && len(u) > maxLen {
 			continue
 		}

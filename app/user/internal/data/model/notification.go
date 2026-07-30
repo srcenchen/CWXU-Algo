@@ -20,9 +20,11 @@ const (
 	NotifTypeUserRegistered      = "user_registered"
 	NotifTypeUserFrozen          = "user_frozen"
 	NotifTypeUserUnfrozen        = "user_unfrozen"
-	NotifTypeReviewPending       = "review_pending"
+	NotifTypeReviewPending             = "review_pending"
 	NotifTypeResourceReviewerAppointed = "resource_reviewer_appointed"
 	NotifTypeResourceReviewerRevoked   = "resource_reviewer_revoked"
+	NotifTypeImageUploadApproved       = "image_upload_approved"
+	NotifTypeImageUploadRejected       = "image_upload_rejected"
 )
 
 // Notification 站内信（按接收用户存储）

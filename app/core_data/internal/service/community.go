@@ -14,6 +14,7 @@ import (
 	"unicode/utf8"
 
 	"cwxu-algo/api/user/v1/profile"
+	"cwxu-algo/app/common/blogimg"
 	"cwxu-algo/app/common/blogsync"
 	"cwxu-algo/app/common/blogtext"
 	"cwxu-algo/app/common/discovery"
@@ -51,6 +52,18 @@ func NewCommunityService(d *data.Data, reg *discovery.Register) *CommunityServic
 		r = &reg.Reg
 	}
 	return &CommunityService{db: d.DB, udb: d.UserDB, reg: r}
+}
+
+// publicImageBase 从 algo_user.site_configs 读又拍云访问前缀（无 udb 则空）。
+func (s *CommunityService) publicImageBase() string {
+	if s == nil || s.udb == nil {
+		return ""
+	}
+	return blogimg.LoadUpyunClient(s.udb).PublicBaseURL()
+}
+
+func (s *CommunityService) expandSolutionMD(md string) string {
+	return blogimg.ExpandStoredImageRefs(md, s.publicImageBase())
 }
 
 // RegisterCommunityRoutes 注册社区相关路由
@@ -540,7 +553,7 @@ func (s *CommunityService) handleSolutionGet(ctx khttp.Context) error {
 	data := map[string]interface{}{
 		"id": sol.ID, "problemId": sol.ProblemID, "userId": sol.UserID,
 		"username": u.username, "name": u.name, "avatar": u.avatar,
-		"title": sol.Title, "contentMd": sol.ContentMD,
+		"title": sol.Title, "contentMd": s.expandSolutionMD(sol.ContentMD),
 		"likeCount": sol.LikeCount, "viewCount": sol.ViewCount,
 		"commentCount": sol.CommentCount, "liked": liked,
 		"createdAt": sol.CreatedAt.Unix(), "updatedAt": sol.UpdatedAt.Unix(),
@@ -573,6 +586,7 @@ func (s *CommunityService) handleSolutionCreate(ctx khttp.Context) error {
 	}
 	title := strings.TrimSpace(req.Title)
 	content := strings.TrimSpace(strings.ReplaceAll(req.ContentMD, "\r\n", "\n"))
+	content = blogimg.NormalizeStoredImageRefs(content)
 	if title == "" {
 		writeJSON(ctx.Response(), 400, map[string]interface{}{"success": false, "message": "请填写标题"})
 		return nil
@@ -621,7 +635,7 @@ func (s *CommunityService) handleSolutionCreate(ctx khttp.Context) error {
 	s.emitMentions(ctx, pd.UserID, pd.Username, title+"\n"+content, "solution", row.ID, req.ProblemID)
 	out := map[string]interface{}{
 		"id": row.ID, "problemId": row.ProblemID, "userId": row.UserID,
-		"title": row.Title, "contentMd": row.ContentMD, "createdAt": row.CreatedAt.Unix(),
+		"title": row.Title, "contentMd": s.expandSolutionMD(row.ContentMD), "createdAt": row.CreatedAt.Unix(),
 	}
 	if row.BlogArticleID > 0 {
 		out["blogArticleId"] = row.BlogArticleID
@@ -662,6 +676,7 @@ func (s *CommunityService) handleSolutionUpdate(ctx khttp.Context) error {
 	}
 	title := strings.TrimSpace(req.Title)
 	content := strings.TrimSpace(strings.ReplaceAll(req.ContentMD, "\r\n", "\n"))
+	content = blogimg.NormalizeStoredImageRefs(content)
 	if title == "" || content == "" {
 		writeJSON(ctx.Response(), 400, map[string]interface{}{"success": false, "message": "标题和内容不能为空"})
 		return nil

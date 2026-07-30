@@ -22,7 +22,7 @@ func newBlogPageSQLite(t *testing.T) (*BlogService, *gorm.DB) {
 }
 
 func TestNormalizeBlogPageWrite(t *testing.T) {
-	got, msg := normalizeBlogPageWrite(blogPageWriteReq{
+	got, msg := normalizeBlogPageWrite(nil, 0, blogPageWriteReq{
 		Title:     "  我的手记  ",
 		Slug:      " Notes ",
 		ContentMD: "# hi\r\n",
@@ -40,6 +40,10 @@ func TestNormalizeBlogPageWrite(t *testing.T) {
 	if got.ContentMD != "# hi\n" || got.Status != model.BlogPagePublished {
 		t.Fatalf("content/status not normalized: %+v", got)
 	}
+	if got.ImageHashes != "[]" && got.ImageHashes != "" {
+		// no images → empty JSON array
+		t.Fatalf("image hashes: %q", got.ImageHashes)
+	}
 }
 
 func TestNormalizeBlogPageWriteRejectsInvalidFields(t *testing.T) {
@@ -56,7 +60,7 @@ func TestNormalizeBlogPageWriteRejectsInvalidFields(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if _, msg := normalizeBlogPageWrite(tc.req); msg == "" {
+			if _, msg := normalizeBlogPageWrite(nil, 0, tc.req); msg == "" {
 				t.Fatalf("expected validation error for %+v", tc.req)
 			}
 		})

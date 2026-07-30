@@ -133,6 +133,7 @@ func migrateModels(db *gorm.DB) {
 		&model.BlogThemeFlag{},
 		&model.BlogSiteConfig{},
 		&model.BlogImageAsset{},
+		&model.BlogImageUploadRequest{},
 		&model.Role{},
 		&model.RolePermission{},
 		&model.UserRole{},
@@ -156,6 +157,10 @@ func migrateModels(db *gorm.DB) {
 	backfillBlogCoverFromFirstImage(db)
 	// v2：GC 误删/未识别后再次补空头图；幂等 key 与 v1 分离
 	backfillBlogCoverFromFirstImageV2(db)
+	// 图床 URL 改为 path-only 存储，读时按当前域名展开（换域无需改写正文）
+	migrateBlogImageURLsToPathOnly(db)
+	// 文章/页面落 ImageHashes；资产补 content_hash（供 hash-GC）
+	backfillBlogImageContentHashes(db)
 }
 
 // backfillBlogCoverFromFirstImage 旧文 cover 为空且正文有图时，写入第一张 http(s) 图。
@@ -203,6 +208,201 @@ func runBlogCoverFirstImageBackfill(db *gorm.DB, patchKey string) {
 		}
 	}
 	log.Infof("blog cover first-image backfill (%s): scanned=%d updated=%d", patchKey, len(articles), updated)
+}
+
+// migrateBlogImageURLsToPathOnly 将历史绝对图床 URL 规范为 /blog/{uid}/… 路径：
+// blog_articles.content / cover_url、blog_pages.content_md、blog_image_assets.url。
+// 幂等：已是 path-only 的行不会被破坏；外链图保留。
+func migrateBlogImageURLsToPathOnly(db *gorm.DB) {
+	if db == nil {
+		return
+	}
+	if !claimSchemaPatch(db, "blog_image_url_path_only_v1") {
+		return
+	}
+	articlesUpdated, pagesUpdated, assetsUpdated := 0, 0, 0
+
+	if db.Migrator().HasTable(&model.BlogArticle{}) {
+		var articles []model.BlogArticle
+		if err := db.Select("id", "content", "cover_url").Find(&articles).Error; err != nil {
+			log.Warnf("blog image path-only migrate list articles: %v", err)
+		} else {
+			for _, a := range articles {
+				newContent := blogimg.NormalizeStoredImageRefs(a.Content)
+				newCover := blogimg.NormalizeCoverURL(a.CoverURL)
+				if newContent == a.Content && newCover == strings.TrimSpace(a.CoverURL) {
+					continue
+				}
+				res := db.Model(&model.BlogArticle{}).Where("id = ?", a.ID).Updates(map[string]interface{}{
+					"content":   newContent,
+					"cover_url": newCover,
+				})
+				if res.Error != nil {
+					log.Warnf("blog image path-only migrate article id=%d: %v", a.ID, res.Error)
+					continue
+				}
+				if res.RowsAffected > 0 {
+					articlesUpdated++
+				}
+			}
+		}
+	}
+
+	if db.Migrator().HasTable(&model.BlogPage{}) {
+		var pages []model.BlogPage
+		if err := db.Select("id", "content_md").Find(&pages).Error; err != nil {
+			log.Warnf("blog image path-only migrate list pages: %v", err)
+		} else {
+			for _, p := range pages {
+				newMD := blogimg.NormalizeStoredImageRefs(p.ContentMD)
+				if newMD == p.ContentMD {
+					continue
+				}
+				res := db.Model(&model.BlogPage{}).Where("id = ?", p.ID).Update("content_md", newMD)
+				if res.Error != nil {
+					log.Warnf("blog image path-only migrate page id=%d: %v", p.ID, res.Error)
+					continue
+				}
+				if res.RowsAffected > 0 {
+					pagesUpdated++
+				}
+			}
+		}
+	}
+
+	if db.Migrator().HasTable(&model.BlogImageAsset{}) {
+		var assets []model.BlogImageAsset
+		if err := db.Select("id", "object_key", "url").Find(&assets).Error; err != nil {
+			log.Warnf("blog image path-only migrate list assets: %v", err)
+		} else {
+			for _, a := range assets {
+				key := blogimg.NormalizeObjectKey(a.ObjectKey)
+				if key == "" {
+					key = blogimg.BlogObjectKeyFromAnyURL(a.URL)
+				}
+				if key == "" {
+					continue
+				}
+				if strings.TrimSpace(a.URL) == key && blogimg.NormalizeObjectKey(a.ObjectKey) == key {
+					continue
+				}
+				res := db.Model(&model.BlogImageAsset{}).Where("id = ?", a.ID).Updates(map[string]interface{}{
+					"object_key": key,
+					"url":        key,
+				})
+				if res.Error != nil {
+					log.Warnf("blog image path-only migrate asset id=%d: %v", a.ID, res.Error)
+					continue
+				}
+				if res.RowsAffected > 0 {
+					assetsUpdated++
+				}
+			}
+		}
+	}
+
+	log.Infof("blog image path-only migrate: articles=%d pages=%d assets=%d",
+		articlesUpdated, pagesUpdated, assetsUpdated)
+}
+
+// backfillBlogImageContentHashes：
+// 1) 资产表：从 object_key 可解析的内容 hash 写回 content_hash
+// 2) 文章/页面：按正文引用解析 ImageHashes，供 hash-GC
+func backfillBlogImageContentHashes(db *gorm.DB) {
+	if db == nil {
+		return
+	}
+	if !claimSchemaPatch(db, "blog_image_content_hash_v1") {
+		return
+	}
+	assetsUpdated, articlesUpdated, pagesUpdated := 0, 0, 0
+
+	if db.Migrator().HasTable(&model.BlogImageAsset{}) {
+		var assets []model.BlogImageAsset
+		if err := db.Select("id", "object_key", "content_hash").Find(&assets).Error; err != nil {
+			log.Warnf("blog image hash backfill list assets: %v", err)
+		} else {
+			for _, a := range assets {
+				if blogimg.NormalizeHash(a.ContentHash) != "" {
+					continue
+				}
+				h := blogimg.HashFromObjectKey(a.ObjectKey)
+				if h == "" {
+					continue
+				}
+				res := db.Model(&model.BlogImageAsset{}).Where("id = ?", a.ID).
+					Update("content_hash", h)
+				if res.Error != nil {
+					log.Warnf("blog image hash backfill asset id=%d: %v", a.ID, res.Error)
+					continue
+				}
+				if res.RowsAffected > 0 {
+					assetsUpdated++
+				}
+			}
+		}
+	}
+
+	if db.Migrator().HasTable(&model.BlogArticle{}) {
+		var articles []model.BlogArticle
+		if err := db.Select("id", "user_id", "content", "cover_url", "image_hashes").
+			Find(&articles).Error; err != nil {
+			log.Warnf("blog image hash backfill list articles: %v", err)
+		} else {
+			for _, a := range articles {
+				if len(blogimg.DecodeImageHashes(a.ImageHashes)) > 0 {
+					continue
+				}
+				encoded := blogimg.EncodeImageHashes(
+					blogimg.ResolveContentHashes(db, a.UserID, a.Content, a.CoverURL),
+				)
+				if encoded == "[]" || encoded == "" {
+					continue
+				}
+				res := db.Model(&model.BlogArticle{}).Where("id = ?", a.ID).
+					Update("image_hashes", encoded)
+				if res.Error != nil {
+					log.Warnf("blog image hash backfill article id=%d: %v", a.ID, res.Error)
+					continue
+				}
+				if res.RowsAffected > 0 {
+					articlesUpdated++
+				}
+			}
+		}
+	}
+
+	if db.Migrator().HasTable(&model.BlogPage{}) {
+		var pages []model.BlogPage
+		if err := db.Select("id", "user_id", "content_md", "image_hashes").
+			Find(&pages).Error; err != nil {
+			log.Warnf("blog image hash backfill list pages: %v", err)
+		} else {
+			for _, p := range pages {
+				if len(blogimg.DecodeImageHashes(p.ImageHashes)) > 0 {
+					continue
+				}
+				encoded := blogimg.EncodeImageHashes(
+					blogimg.ResolveContentHashes(db, p.UserID, p.ContentMD, ""),
+				)
+				if encoded == "[]" || encoded == "" {
+					continue
+				}
+				res := db.Model(&model.BlogPage{}).Where("id = ?", p.ID).
+					Update("image_hashes", encoded)
+				if res.Error != nil {
+					log.Warnf("blog image hash backfill page id=%d: %v", p.ID, res.Error)
+					continue
+				}
+				if res.RowsAffected > 0 {
+					pagesUpdated++
+				}
+			}
+		}
+	}
+
+	log.Infof("blog image content-hash backfill: assets=%d articles=%d pages=%d",
+		assetsUpdated, articlesUpdated, pagesUpdated)
 }
 
 // claimSchemaPatch 认领一次性数据修补：以 key 唯一插入，成功者执行、失败者跳过。

@@ -6,6 +6,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"cwxu-algo/app/common/blogimg"
 	"cwxu-algo/app/common/utils/auth"
 	"cwxu-algo/app/user/internal/data/model"
 
@@ -40,7 +41,7 @@ type blogPageOrderItem struct {
 	NavOrder int  `json:"navOrder"`
 }
 
-func normalizeBlogPageWrite(req blogPageWriteReq) (*model.BlogPage, string) {
+func normalizeBlogPageWrite(db *gorm.DB, userID uint, req blogPageWriteReq) (*model.BlogPage, string) {
 	title := strings.TrimSpace(req.Title)
 	if title == "" {
 		return nil, "标题不能为空"
@@ -72,6 +73,7 @@ func normalizeBlogPageWrite(req blogPageWriteReq) (*model.BlogPage, string) {
 	if strings.TrimSpace(content) == "" {
 		return nil, "正文不能为空"
 	}
+	content = blogimg.NormalizeStoredImageRefs(content)
 	if len(content) > maxBlogPageContent {
 		return nil, "正文过大，最大 256KB"
 	}
@@ -89,15 +91,19 @@ func normalizeBlogPageWrite(req blogPageWriteReq) (*model.BlogPage, string) {
 		return nil, "导航名称过长"
 	}
 
+	imageHashes := blogimg.EncodeImageHashes(
+		blogimg.ResolveContentHashes(db, userID, content, ""),
+	)
 	return &model.BlogPage{
-		ID:        req.ID,
-		Title:     title,
-		Slug:      slug,
-		ContentMD: content,
-		Status:    status,
-		ShowInNav: req.ShowInNav,
-		NavLabel:  navLabel,
-		NavOrder:  req.NavOrder,
+		ID:          req.ID,
+		Title:       title,
+		Slug:        slug,
+		ContentMD:   content,
+		ImageHashes: imageHashes,
+		Status:      status,
+		ShowInNav:   req.ShowInNav,
+		NavLabel:    navLabel,
+		NavOrder:    req.NavOrder,
 	}, ""
 }
 
@@ -161,10 +167,10 @@ func (s *BlogService) reorderBlogPages(userID uint, items []blogPageOrderItem) e
 	})
 }
 
-func blogPageToMap(page *model.BlogPage, includeBody bool) map[string]interface{} {
+func blogPageToMap(page *model.BlogPage, includeBody bool, imageBase string) map[string]interface{} {
 	content := ""
 	if includeBody {
-		content = page.ContentMD
+		content = blogimg.ExpandStoredImageRefs(page.ContentMD, imageBase)
 	}
 	label := strings.TrimSpace(page.NavLabel)
 	if label == "" {
@@ -184,10 +190,10 @@ func blogPageToMap(page *model.BlogPage, includeBody bool) map[string]interface{
 	}
 }
 
-func blogPagesToMaps(list []model.BlogPage, includeBody bool) []map[string]interface{} {
+func blogPagesToMaps(list []model.BlogPage, includeBody bool, imageBase string) []map[string]interface{} {
 	out := make([]map[string]interface{}, 0, len(list))
 	for i := range list {
-		out = append(out, blogPageToMap(&list[i], includeBody))
+		out = append(out, blogPageToMap(&list[i], includeBody, imageBase))
 	}
 	return out
 }
@@ -213,7 +219,7 @@ func (s *BlogService) handlePageListPublic(ctx khttp.Context) error {
 		writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "加载失败"})
 		return nil
 	}
-	writeJSON(ctx.Response(), 200, map[string]interface{}{"code": 0, "message": "success", "data": blogPagesToMaps(list, false)})
+	writeJSON(ctx.Response(), 200, map[string]interface{}{"code": 0, "message": "success", "data": blogPagesToMaps(list, false, s.publicImageBase())})
 	return nil
 }
 
@@ -234,7 +240,7 @@ func (s *BlogService) handlePageGetPublic(ctx khttp.Context) error {
 		writeJSON(ctx.Response(), 404, map[string]interface{}{"code": 1, "message": "页面不存在"})
 		return nil
 	}
-	writeJSON(ctx.Response(), 200, map[string]interface{}{"code": 0, "message": "success", "data": blogPageToMap(page, true)})
+	writeJSON(ctx.Response(), 200, map[string]interface{}{"code": 0, "message": "success", "data": blogPageToMap(page, true, s.publicImageBase())})
 	return nil
 }
 
@@ -249,7 +255,7 @@ func (s *BlogService) handlePageMine(ctx khttp.Context) error {
 		writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "加载失败"})
 		return nil
 	}
-	writeJSON(ctx.Response(), 200, map[string]interface{}{"code": 0, "message": "success", "data": blogPagesToMaps(list, true)})
+	writeJSON(ctx.Response(), 200, map[string]interface{}{"code": 0, "message": "success", "data": blogPagesToMaps(list, true, s.publicImageBase())})
 	return nil
 }
 
@@ -267,7 +273,7 @@ func (s *BlogService) handlePageCreate(ctx khttp.Context) error {
 		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "参数错误"})
 		return nil
 	}
-	page, msg := normalizeBlogPageWrite(req)
+	page, msg := normalizeBlogPageWrite(s.db, pd.UserID, req)
 	if msg != "" {
 		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": msg})
 		return nil
@@ -278,7 +284,8 @@ func (s *BlogService) handlePageCreate(ctx khttp.Context) error {
 		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "页面地址已被使用"})
 		return nil
 	}
-	writeJSON(ctx.Response(), 200, map[string]interface{}{"code": 0, "message": "success", "data": blogPageToMap(page, true)})
+	go s.gcUserBlogImages(pd.UserID)
+	writeJSON(ctx.Response(), 200, map[string]interface{}{"code": 0, "message": "success", "data": blogPageToMap(page, true, s.publicImageBase())})
 	return nil
 }
 
@@ -293,7 +300,7 @@ func (s *BlogService) handlePageUpdate(ctx khttp.Context) error {
 		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "参数错误"})
 		return nil
 	}
-	page, msg := normalizeBlogPageWrite(req)
+	page, msg := normalizeBlogPageWrite(s.db, pd.UserID, req)
 	if msg != "" {
 		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": msg})
 		return nil
@@ -306,7 +313,7 @@ func (s *BlogService) handlePageUpdate(ctx khttp.Context) error {
 	page.ID = existing.ID
 	page.UserID = existing.UserID
 	res := s.db.Model(&existing).
-		Select("title", "slug", "content_md", "status", "show_in_nav", "nav_label", "nav_order").
+		Select("title", "slug", "content_md", "image_hashes", "status", "show_in_nav", "nav_label", "nav_order").
 		Updates(page)
 	if res.Error != nil {
 		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "页面地址已被使用"})
@@ -316,7 +323,8 @@ func (s *BlogService) handlePageUpdate(ctx khttp.Context) error {
 		writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "保存失败"})
 		return nil
 	}
-	writeJSON(ctx.Response(), 200, map[string]interface{}{"code": 0, "message": "success", "data": blogPageToMap(&existing, true)})
+	go s.gcUserBlogImages(pd.UserID)
+	writeJSON(ctx.Response(), 200, map[string]interface{}{"code": 0, "message": "success", "data": blogPageToMap(&existing, true, s.publicImageBase())})
 	return nil
 }
 
@@ -342,6 +350,7 @@ func (s *BlogService) handlePageDelete(ctx khttp.Context) error {
 		writeJSON(ctx.Response(), 404, map[string]interface{}{"code": 1, "message": "页面不存在"})
 		return nil
 	}
+	go s.gcUserBlogImages(pd.UserID)
 	writeJSON(ctx.Response(), 200, map[string]interface{}{"code": 0, "message": "已删除"})
 	return nil
 }

@@ -23,6 +23,8 @@ type BlogArticle struct {
 	Summary  string `gorm:"size:500;comment:摘要"`
 	Content  string `gorm:"type:text;not null;comment:Markdown 正文"`
 	CoverURL string `gorm:"size:1024;comment:头图外链"`
+	// ImageHashes JSON 数组：正文/头图引用的又拍云图 content hash（SHA-256 hex），供 GC 用。
+	ImageHashes string `gorm:"type:text;comment:正文图片content hash JSON"`
 
 	// Visibility: public | private | password
 	Visibility   string `gorm:"size:16;not null;default:public;index;comment:可见性"`
@@ -70,7 +72,9 @@ type BlogPage struct {
 	Title     string `gorm:"size:200;not null;comment:页面标题"`
 	Slug      string `gorm:"size:96;not null;uniqueIndex:idx_blog_page_user_slug,priority:2;comment:作者内页面短链"`
 	ContentMD string `gorm:"type:text;not null;comment:Markdown 正文"`
-	Status    string `gorm:"size:16;not null;default:draft;index;comment:draft|published"`
+	// ImageHashes JSON 数组：页面正文引用图 content hash，供 GC 用。
+	ImageHashes string `gorm:"type:text;comment:正文图片content hash JSON"`
+	Status      string `gorm:"size:16;not null;default:draft;index;comment:draft|published"`
 	ShowInNav bool   `gorm:"not null;default:false;index:idx_blog_page_user_nav,priority:2;comment:是否加入博客导航"`
 	NavLabel  string `gorm:"size:64;comment:导航名称，空则使用标题"`
 	NavOrder  int    `gorm:"not null;default:0;index:idx_blog_page_user_nav,priority:3;comment:导航排序"`
@@ -262,15 +266,41 @@ type BlogImageAsset struct {
 	ID        uint `gorm:"primaryKey"`
 	CreatedAt time.Time
 	UpdatedAt time.Time
-	UserID    uint `gorm:"not null;index:idx_blog_img_user,priority:1;comment:上传者"`
-	// ObjectKey 又拍云对象路径，如 /blog/12/20260728_xxx.webp
+	UserID uint `gorm:"not null;index:idx_blog_img_user;index:idx_blog_img_user_hash,priority:1;comment:上传者"`
+	// ObjectKey 又拍云对象路径：新图为 /blog/{uid}/{sha256}{ext}（内容寻址）
 	ObjectKey string `gorm:"size:512;not null;uniqueIndex;comment:对象key"`
-	// URL 对外访问完整 URL
+	// URL 库内多为 path-only（与 object_key 一致）；历史上可能是完整公网 URL
 	URL string `gorm:"size:1024;not null;comment:访问URL"`
-	// ArticleID 最近一次关联文章（可选，GC 以正文引用为准）
+	// ContentHash 上传落库字节的 SHA-256 hex；GC 与插件校验主键
+	ContentHash string `gorm:"size:64;index:idx_blog_img_user_hash,priority:2;comment:内容SHA256"`
+	// ArticleID 最近一次关联文章（可选，GC 以 hash/正文引用为准）
 	ArticleID *uint `gorm:"index;comment:关联文章"`
 	// Purpose cover | content | misc
 	Purpose string `gorm:"size:32;not null;default:content;comment:用途"`
 }
 
 func (BlogImageAsset) TableName() string { return "blog_image_assets" }
+
+// BlogImageUploadRequest 作者申请又拍云图片上传权限（须填理由，站管审核）。
+type BlogImageUploadRequest struct {
+	ID        uint `gorm:"primaryKey"`
+	CreatedAt time.Time
+	UpdatedAt time.Time
+	UserID    uint   `gorm:"not null;index:idx_blog_img_req_user_status,priority:1;comment:申请人"`
+	// Reason 申请理由（必填）
+	Reason string `gorm:"type:text;not null;comment:申请理由"`
+	// Status pending|approved|rejected
+	Status string `gorm:"size:16;not null;default:pending;index:idx_blog_img_req_user_status,priority:2;index;comment:pending|approved|rejected"`
+	// ReviewNote 审核备注（驳回时建议填写）
+	ReviewNote string `gorm:"type:text;comment:审核备注"`
+	ReviewerID uint   `gorm:"default:0;comment:审核人"`
+	ReviewedAt *time.Time
+}
+
+func (BlogImageUploadRequest) TableName() string { return "blog_image_upload_requests" }
+
+const (
+	BlogImageUploadPending  = "pending"
+	BlogImageUploadApproved = "approved"
+	BlogImageUploadRejected = "rejected"
+)

@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"cwxu-algo/app/common/blogimg"
 	"cwxu-algo/app/common/conf"
 	gorm2 "cwxu-algo/app/common/data/gorm"
 	redis2 "cwxu-algo/app/common/data/redis"
@@ -163,6 +164,8 @@ func migrateModels(db *gorm.DB) {
 	zeroSolutionViewsOnce(db)
 	// 力扣官方 ac-* 不再进日表/日 ac_cnt（与 lc-prob 双计修复）
 	purgeLeetCodeOfficialACFromDailyOnce(db)
+	// 题解正文图床 URL → path-only（与博客一致，换域读时展开）
+	migrateSolutionImageURLsToPathOnly(db)
 }
 
 // schemaPatch one-shot migration markers (core DB).
@@ -172,6 +175,55 @@ type schemaPatch struct {
 }
 
 func (schemaPatch) TableName() string { return "schema_patches" }
+
+// claimCoreSchemaPatch inserts key if absent; true when this process should run the patch.
+func claimCoreSchemaPatch(db *gorm.DB, key string) bool {
+	if db == nil || !db.Migrator().HasTable(&schemaPatch{}) {
+		return false
+	}
+	var n int64
+	_ = db.Model(&schemaPatch{}).Where("key = ?", key).Count(&n).Error
+	if n > 0 {
+		return false
+	}
+	if err := db.Create(&schemaPatch{Key: key, AppliedAt: time.Now()}).Error; err != nil {
+		// concurrent claim
+		return false
+	}
+	return true
+}
+
+// migrateSolutionImageURLsToPathOnly normalizes absolute blog-object image URLs
+// in problem_user_solutions.content_md to /blog/{uid}/… path form.
+func migrateSolutionImageURLsToPathOnly(db *gorm.DB) {
+	if db == nil || !db.Migrator().HasTable(&model.ProblemUserSolution{}) {
+		return
+	}
+	if !claimCoreSchemaPatch(db, "solution_image_url_path_only_v1") {
+		return
+	}
+	var rows []model.ProblemUserSolution
+	if err := db.Select("id", "content_md").Find(&rows).Error; err != nil {
+		log.Warnf("solution image path-only migrate list: %v", err)
+		return
+	}
+	updated := 0
+	for _, r := range rows {
+		newMD := blogimg.NormalizeStoredImageRefs(r.ContentMD)
+		if newMD == r.ContentMD {
+			continue
+		}
+		res := db.Model(&model.ProblemUserSolution{}).Where("id = ?", r.ID).Update("content_md", newMD)
+		if res.Error != nil {
+			log.Warnf("solution image path-only migrate id=%d: %v", r.ID, res.Error)
+			continue
+		}
+		if res.RowsAffected > 0 {
+			updated++
+		}
+	}
+	log.Infof("solution image path-only migrate: scanned=%d updated=%d", len(rows), updated)
+}
 
 // purgeLeetCodeOfficialACFromDailyOnce 一次性清理：
 // 1) user_ac_problem_days 中 e:LeetCode:ac-* 行（官方合成不应进「今日 AC」）

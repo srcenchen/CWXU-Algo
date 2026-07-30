@@ -479,7 +479,12 @@ func handleBlogUpyunUpload(
 	if ext == "" {
 		ext = ".jpg"
 	}
-	objectKey := fmt.Sprintf("/blog/%d/%s%s", userID, randomName(), ext)
+	// 内容寻址：同用户相同字节 → 同一 object key，GC 与插件按 hash 对齐。
+	contentHash := blogimg.ContentHash(compressed.Data)
+	objectKey := blogimg.ObjectKeyForHash(userID, contentHash, ext)
+	if objectKey == "" {
+		objectKey = fmt.Sprintf("/blog/%d/%s%s", userID, randomName(), ext)
+	}
 	if err := client.Put(objectKey, compressed.Data, compressed.ContentType); err != nil {
 		log.Errorf("upyun put: %v", err)
 		return ctx.JSON(http.StatusBadGateway, map[string]interface{}{
@@ -487,16 +492,22 @@ func handleBlogUpyunUpload(
 		})
 	}
 	publicURL := client.PublicURL(objectKey)
+	// 资产表存 path-only，与正文 canonical 一致；读时/客户端仍用完整 publicURL。
+	storedURL := blogimg.NormalizeObjectKey(objectKey)
+	if storedURL == "" {
+		storedURL = publicURL
+	}
 	assetPurpose := "content"
 	if purpose == "blog_cover" {
 		assetPurpose = "cover"
 	}
-	if err := registerBlogImageAsset(d.DB, userID, objectKey, publicURL, assetPurpose, nil); err != nil {
+	if err := registerBlogImageAsset(d.DB, userID, objectKey, storedURL, contentHash, assetPurpose, nil); err != nil {
 		log.Warnf("register blog image asset: %v", err)
 	}
 	return ctx.JSON(http.StatusOK, map[string]interface{}{
 		"code":    0,
 		"message": "success",
 		"url":     publicURL,
+		"hash":    contentHash,
 	})
 }

@@ -11,8 +11,9 @@ import (
 	"gorm.io/gorm"
 )
 
-// GCGracePeriod：刚上传、可能还在编辑中的图暂不 GC，避免「另存一篇」误删草稿图。
-const GCGracePeriod = 2 * time.Hour
+// GCGracePeriod：刚上传、可能还在编辑中的图暂不 GC。
+// 拉长到 24h，避免草稿/插件分步推送被误删。
+const GCGracePeriod = 24 * time.Hour
 
 // ObjectDeleter is the UpYun delete surface used by GC (injectable in tests).
 type ObjectDeleter interface {
@@ -23,24 +24,36 @@ type ObjectDeleter interface {
 
 // imageAssetRow mirrors blog_image_assets without importing user models.
 type imageAssetRow struct {
-	ID        uint      `gorm:"primaryKey"`
-	CreatedAt time.Time `gorm:"column:created_at"`
-	UserID    uint      `gorm:"column:user_id"`
-	ObjectKey string    `gorm:"column:object_key"`
-	URL       string    `gorm:"column:url"`
+	ID          uint      `gorm:"primaryKey"`
+	CreatedAt   time.Time `gorm:"column:created_at"`
+	UserID      uint      `gorm:"column:user_id"`
+	ObjectKey   string    `gorm:"column:object_key"`
+	URL         string    `gorm:"column:url"`
+	ContentHash string    `gorm:"column:content_hash"`
 }
 
 func (imageAssetRow) TableName() string { return "blog_image_assets" }
 
-// articleRefRow is enough content to compute referenced image keys.
+// articleRefRow is enough content to compute referenced image keys / hashes.
 type articleRefRow struct {
-	ID       uint   `gorm:"primaryKey"`
-	UserID   uint   `gorm:"column:user_id;index"`
-	Content  string `gorm:"column:content"`
-	CoverURL string `gorm:"column:cover_url"`
+	ID          uint   `gorm:"primaryKey"`
+	UserID      uint   `gorm:"column:user_id;index"`
+	Content     string `gorm:"column:content"`
+	CoverURL    string `gorm:"column:cover_url"`
+	ImageHashes string `gorm:"column:image_hashes"`
 }
 
 func (articleRefRow) TableName() string { return "blog_articles" }
+
+// pageRefRow mirrors blog_pages for GC (pages were previously ignored → 误删).
+type pageRefRow struct {
+	ID          uint   `gorm:"primaryKey"`
+	UserID      uint   `gorm:"column:user_id;index"`
+	ContentMD   string `gorm:"column:content_md"`
+	ImageHashes string `gorm:"column:image_hashes"`
+}
+
+func (pageRefRow) TableName() string { return "blog_pages" }
 
 // siteUpyunRow reads又拍云 fields from site_configs.
 type siteUpyunRow struct {
@@ -77,12 +90,14 @@ func LoadUpyunClient(db *gorm.DB) *upyun.Client {
 }
 
 // GCUserImages deletes registered UpYun objects for user that are no longer
-// referenced by any of their blog_articles (content + cover).
+// referenced by any of their blog_articles / blog_pages.
 //
-// 引用判定（多重，防误删）：
-//  1. KeysFromContent（含 /blog/n/… 路径，与 host 无关）
-//  2. AssetReferenced：object key / 完整 URL 出现在任一文正文或头图
-//  3. 宽限期 GCGracePeriod 内新上传的资产不删
+// 引用判定（优先 hash，防 URL/域名/path 漂移误删）：
+//  1. 文章/页面 ImageHashes 列（写入时由正文图解析并落库）
+//  2. 正文/头图 object key 扫描（KeysFromContent + bare /blog/…）
+//  3. AssetReferenced 子串兜底
+//  4. 宽限期 GCGracePeriod 内新上传不删
+//  5. 无 ContentHash 的历史资产：仅当 key/正文都无引用才删
 //
 // Returns number of orphan keys processed (delete attempted).
 func GCUserImages(db *gorm.DB, client ObjectDeleter, userID uint) int {
@@ -95,18 +110,40 @@ func GCUserImagesAt(db *gorm.DB, client ObjectDeleter, userID uint, now time.Tim
 		return 0
 	}
 	base := client.PublicBaseURL()
-	// base 可空：仍可用路径/子串匹配做引用判定；但无 base 时不调又拍云删除
 	canDeleteRemote := base != ""
 
-	var articles []articleRefRow
-	_ = db.Select("content", "cover_url").Where("user_id = ?", userID).Find(&articles).Error
-	used := map[string]struct{}{}
+	usedHash := map[string]struct{}{}
+	usedKey := map[string]struct{}{}
 	var texts []string
-	for _, a := range articles {
-		texts = append(texts, a.Content, a.CoverURL)
-		for k := range KeysFromContent(a.Content, a.CoverURL, base) {
-			used[k] = struct{}{}
+
+	addHashes := func(raw string) {
+		for _, h := range DecodeImageHashes(raw) {
+			usedHash[h] = struct{}{}
 		}
+	}
+	addContent := func(content, cover string) {
+		texts = append(texts, content, cover)
+		for k := range KeysFromContent(content, cover, base) {
+			usedKey[k] = struct{}{}
+			if h := HashFromObjectKey(k); h != "" {
+				usedHash[h] = struct{}{}
+			}
+		}
+	}
+
+	var articles []articleRefRow
+	_ = db.Select("content", "cover_url", "image_hashes").Where("user_id = ?", userID).Find(&articles).Error
+	for _, a := range articles {
+		addHashes(a.ImageHashes)
+		addContent(a.Content, a.CoverURL)
+	}
+
+	// 自定义页面此前未纳入 GC 引用 → 正文有图仍被删
+	var pages []pageRefRow
+	_ = db.Select("content_md", "image_hashes").Where("user_id = ?", userID).Find(&pages).Error
+	for _, p := range pages {
+		addHashes(p.ImageHashes)
+		addContent(p.ContentMD, "")
 	}
 
 	var assets []imageAssetRow
@@ -121,7 +158,17 @@ func GCUserImagesAt(db *gorm.DB, client ObjectDeleter, userID uint, now time.Tim
 		if !a.CreatedAt.IsZero() && now.Sub(a.CreatedAt) < GCGracePeriod {
 			continue
 		}
-		if _, ok := used[key]; ok {
+		h := NormalizeHash(a.ContentHash)
+		if h == "" {
+			h = HashFromObjectKey(key)
+		}
+		// 主路径：content hash 仍被任一文/页声明或可从正文 key 推出
+		if h != "" {
+			if _, ok := usedHash[h]; ok {
+				continue
+			}
+		}
+		if _, ok := usedKey[key]; ok {
 			continue
 		}
 		if AssetReferenced(key, a.URL, texts...) {
@@ -161,10 +208,22 @@ func ScheduleGCUserImages(db *gorm.DB, userID uint) {
 // as blog_image_assets for this user (batch, no N+1).
 // Also accepts bare object keys.
 func ExistingURLsForUser(db *gorm.DB, userID uint, urls []string) (existing, missing []string) {
-	if db == nil || userID == 0 || len(urls) == 0 {
-		return nil, append([]string{}, urls...)
+	ex, miss, _, _ := ExistingURLsAndHashesForUser(db, userID, urls, nil)
+	return ex, miss
+}
+
+// ExistingURLsAndHashesForUser batch-checks URLs/object keys and content hashes.
+func ExistingURLsAndHashesForUser(
+	db *gorm.DB,
+	userID uint,
+	urls []string,
+	hashes []string,
+) (existingURLs, missingURLs, existingHashes, missingHashes []string) {
+	if db == nil || userID == 0 {
+		return nil, append([]string{}, urls...), nil, append([]string{}, hashes...)
 	}
-	// 规范化输入，去重保序
+
+	// —— URLs / keys ——
 	type item struct {
 		raw string
 		key string
@@ -194,15 +253,14 @@ func ExistingURLsForUser(db *gorm.DB, userID uint, urls []string) (existing, mis
 			}
 		}
 	}
-	if len(items) == 0 {
-		return nil, nil
-	}
 
 	aliveKey := map[string]struct{}{}
 	aliveURL := map[string]struct{}{}
+	aliveHash := map[string]struct{}{}
+
 	if len(keys) > 0 {
 		var rows []imageAssetRow
-		_ = db.Select("object_key", "url").
+		_ = db.Select("object_key", "url", "content_hash").
 			Where("user_id = ? AND object_key IN ?", userID, keys).
 			Find(&rows).Error
 		for _, r := range rows {
@@ -212,9 +270,11 @@ func ExistingURLsForUser(db *gorm.DB, userID uint, urls []string) (existing, mis
 			if u := strings.TrimSpace(r.URL); u != "" {
 				aliveURL[u] = struct{}{}
 			}
+			if h := NormalizeHash(r.ContentHash); h != "" {
+				aliveHash[h] = struct{}{}
+			}
 		}
 	}
-	// 也按完整 URL 查一轮（历史 object_key 与 URL 不一致时）
 	var rawURLs []string
 	for _, it := range items {
 		if strings.HasPrefix(it.raw, "http://") || strings.HasPrefix(it.raw, "https://") {
@@ -223,7 +283,7 @@ func ExistingURLsForUser(db *gorm.DB, userID uint, urls []string) (existing, mis
 	}
 	if len(rawURLs) > 0 {
 		var rows []imageAssetRow
-		_ = db.Select("object_key", "url").
+		_ = db.Select("object_key", "url", "content_hash").
 			Where("user_id = ? AND url IN ?", userID, rawURLs).
 			Find(&rows).Error
 		for _, r := range rows {
@@ -232,6 +292,9 @@ func ExistingURLsForUser(db *gorm.DB, userID uint, urls []string) (existing, mis
 			}
 			if u := strings.TrimSpace(r.URL); u != "" {
 				aliveURL[u] = struct{}{}
+			}
+			if h := NormalizeHash(r.ContentHash); h != "" {
+				aliveHash[h] = struct{}{}
 			}
 		}
 	}
@@ -248,11 +311,40 @@ func ExistingURLsForUser(db *gorm.DB, userID uint, urls []string) (existing, mis
 				ok = true
 			}
 		}
+		// content-addressed key still on CDN path even if URL form differs
+		if !ok && it.key != "" {
+			if h := HashFromObjectKey(it.key); h != "" {
+				if _, hit := aliveHash[h]; hit {
+					ok = true
+				}
+			}
+		}
 		if ok {
-			existing = append(existing, it.raw)
+			existingURLs = append(existingURLs, it.raw)
 		} else {
-			missing = append(missing, it.raw)
+			missingURLs = append(missingURLs, it.raw)
 		}
 	}
-	return existing, missing
+
+	// —— content hashes ——
+	wantHashes := uniqueNormalizedHashes(hashes)
+	if len(wantHashes) > 0 {
+		var rows []imageAssetRow
+		_ = db.Select("content_hash").
+			Where("user_id = ? AND content_hash IN ?", userID, wantHashes).
+			Find(&rows).Error
+		for _, r := range rows {
+			if h := NormalizeHash(r.ContentHash); h != "" {
+				aliveHash[h] = struct{}{}
+			}
+		}
+		for _, h := range wantHashes {
+			if _, ok := aliveHash[h]; ok {
+				existingHashes = append(existingHashes, h)
+			} else {
+				missingHashes = append(missingHashes, h)
+			}
+		}
+	}
+	return existingURLs, missingURLs, existingHashes, missingHashes
 }

@@ -47,17 +47,19 @@ func gcTestDB(t *testing.T) *gorm.DB {
 		t.Fatal(err)
 	}
 	sqlDB.SetMaxOpenConns(1)
-	if err := db.AutoMigrate(&imageAssetRow{}, &articleRefRow{}); err != nil {
+	if err := db.AutoMigrate(&imageAssetRow{}, &articleRefRow{}, &pageRefRow{}); err != nil {
 		t.Fatal(err)
 	}
 	return db
 }
 
+func gcOld() time.Time { return time.Now().Add(-25 * time.Hour) }
+
 func TestGCUserImagesRemovesOrphansKeepsReferenced(t *testing.T) {
 	db := gcTestDB(t)
 	base := "http://zhiyuansofts.cn"
 	userID := uint(9)
-	old := time.Now().Add(-3 * time.Hour)
+	old := gcOld()
 
 	_ = db.Create(&articleRefRow{
 		UserID:   userID,
@@ -84,11 +86,59 @@ func TestGCUserImagesRemovesOrphansKeepsReferenced(t *testing.T) {
 	}
 }
 
+func TestGCUserImagesKeepsByImageHashesColumn(t *testing.T) {
+	// 正文被改写/无 URL，但 ImageHashes 仍声明 hash → 不得删
+	db := gcTestDB(t)
+	base := "http://zhiyuansofts.cn"
+	userID := uint(11)
+	old := gcOld()
+	h := ContentHash([]byte("keep-by-hash"))
+	key := ObjectKeyForHash(userID, h, ".webp")
+	_ = db.Create(&articleRefRow{
+		UserID:      userID,
+		Content:     "no image urls here",
+		ImageHashes: EncodeImageHashes([]string{h}),
+	}).Error
+	_ = db.Create(&imageAssetRow{
+		UserID: userID, ObjectKey: key, URL: key, ContentHash: h, CreatedAt: old,
+	}).Error
+	_ = db.Create(&imageAssetRow{
+		UserID: userID, ObjectKey: "/blog/11/orphan.webp", URL: base + "/blog/11/orphan.webp", CreatedAt: old,
+	}).Error
+	del := &fakeDeleter{base: base}
+	n := GCUserImages(db, del, userID)
+	if n != 1 || len(del.Deleted()) != 1 || del.Deleted()[0] != "/blog/11/orphan.webp" {
+		t.Fatalf("n=%d del=%v", n, del.Deleted())
+	}
+}
+
+func TestGCUserImagesKeepsPageReferenced(t *testing.T) {
+	db := gcTestDB(t)
+	base := "http://zhiyuansofts.cn"
+	userID := uint(12)
+	old := gcOld()
+	_ = db.Create(&pageRefRow{
+		UserID:    userID,
+		ContentMD: "![p](/blog/12/page.webp)\n",
+	}).Error
+	_ = db.Create(&imageAssetRow{
+		UserID: userID, ObjectKey: "/blog/12/page.webp", URL: "/blog/12/page.webp", CreatedAt: old,
+	}).Error
+	_ = db.Create(&imageAssetRow{
+		UserID: userID, ObjectKey: "/blog/12/gone.webp", URL: "/blog/12/gone.webp", CreatedAt: old,
+	}).Error
+	del := &fakeDeleter{base: base}
+	n := GCUserImages(db, del, userID)
+	if n != 1 || del.Deleted()[0] != "/blog/12/gone.webp" {
+		t.Fatalf("n=%d del=%v", n, del.Deleted())
+	}
+}
+
 func TestGCUserImagesKeepsCrossHostReferenced(t *testing.T) {
 	// 正文是 https://zhiyuansofts.cn，PublicBase 是 http://… 或其它域时，旧逻辑会误删。
 	db := gcTestDB(t)
 	userID := uint(27)
-	old := time.Now().Add(-3 * time.Hour)
+	old := gcOld()
 	_ = db.Create(&articleRefRow{
 		UserID:  userID,
 		Content: "![x](https://zhiyuansofts.cn/blog/27/20260730_1cfd654d4a20de794600d47ad991590d.webp)\n",
@@ -143,7 +193,7 @@ func TestGCUserImagesAfterContentCleared(t *testing.T) {
 	db := gcTestDB(t)
 	base := "http://zhiyuansofts.cn"
 	userID := uint(5)
-	old := time.Now().Add(-3 * time.Hour)
+	old := gcOld()
 	_ = db.Create(&imageAssetRow{UserID: userID, ObjectKey: "/blog/5/a.webp", URL: base + "/blog/5/a.webp", CreatedAt: old}).Error
 	_ = db.Create(&articleRefRow{
 		UserID:  userID,
@@ -155,7 +205,9 @@ func TestGCUserImagesAfterContentCleared(t *testing.T) {
 		t.Fatalf("should keep referenced, got n=%d del=%v", n, del.Deleted())
 	}
 
-	_ = db.Model(&articleRefRow{}).Where("user_id = ?", userID).Update("content", "no images").Error
+	// 清正文同时清 ImageHashes（写入路径会一起更新）
+	_ = db.Model(&articleRefRow{}).Where("user_id = ?", userID).
+		Updates(map[string]interface{}{"content": "no images", "image_hashes": "[]"}).Error
 	n := GCUserImages(db, del, userID)
 	if n != 1 {
 		t.Fatalf("after clear n=%d del=%v", n, del.Deleted())
@@ -167,7 +219,7 @@ func TestGCUserImagesAfterAllArticlesDeleted(t *testing.T) {
 	db := gcTestDB(t)
 	base := "http://zhiyuansofts.cn"
 	userID := uint(4)
-	old := time.Now().Add(-3 * time.Hour)
+	old := gcOld()
 	_ = db.Create(&imageAssetRow{UserID: userID, ObjectKey: "/blog/4/x.webp", URL: base + "/blog/4/x.webp", CreatedAt: old}).Error
 	_ = db.Create(&articleRefRow{
 		UserID:  userID,

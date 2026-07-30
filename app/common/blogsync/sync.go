@@ -44,6 +44,7 @@ type Article struct {
 	Summary           string     `gorm:"column:summary"`
 	Content           string     `gorm:"column:content"`
 	CoverURL          string     `gorm:"column:cover_url"`
+	ImageHashes       string     `gorm:"column:image_hashes"`
 	Visibility        string     `gorm:"column:visibility"`
 	PasswordHash      string     `gorm:"column:password_hash"`
 	Recommend         bool       `gorm:"column:recommend"`
@@ -113,6 +114,8 @@ func UpsertFromSolutionWithProblem(db *gorm.DB, userID, solutionID, problemID, a
 	}
 	title = strings.TrimSpace(title)
 	content = strings.TrimSpace(strings.ReplaceAll(content, "\r\n", "\n"))
+	// 本站图床 URL 存 path-only，换域无需改写正文。
+	content = blogimg.NormalizeStoredImageRefs(content)
 	if title == "" || content == "" {
 		return 0, "", fmt.Errorf("blogsync: empty title/content")
 	}
@@ -133,10 +136,14 @@ func UpsertFromSolutionWithProblem(db *gorm.DB, userID, solutionID, problemID, a
 	slug := solutionSlug(solutionID)
 	defSum := blogtext.DefaultSummary(content)
 
+	imageHashes := blogimg.EncodeImageHashes(
+		blogimg.ResolveContentHashes(db, userID, content, ""),
+	)
 	applyUpdate := func(a *Article) (uint, string, error) {
 		updates := map[string]interface{}{
 			"title":                title,
 			"content":              content,
+			"image_hashes":         imageHashes,
 			"category_id":          catPtr,
 			"visibility":           visPublic,
 			// 精选(recommend) 不自动设；仅同步主站资料
@@ -179,6 +186,7 @@ func UpsertFromSolutionWithProblem(db *gorm.DB, userID, solutionID, problemID, a
 		Title:             title,
 		Summary:           defSum,
 		Content:           content,
+		ImageHashes:       imageHashes,
 		Visibility:        visPublic,
 		Recommend:         false,
 		SyncToMainProfile: true,

@@ -32,6 +32,9 @@ const (
 	// 资源审核员任命
 	TypeResourceReviewerAppointed = "resource_reviewer_appointed"
 	TypeResourceReviewerRevoked   = "resource_reviewer_revoked"
+	// 博客/题解图片上传权限申请结果
+	TypeImageUploadApproved = "image_upload_approved"
+	TypeImageUploadRejected = "image_upload_rejected"
 )
 
 // Row 与 user.notifications 表对齐（避免 core 依赖 user 包）

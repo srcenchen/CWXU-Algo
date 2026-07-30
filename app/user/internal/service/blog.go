@@ -107,9 +107,12 @@ func RegisterBlogRoutes(srv *khttp.Server, bs *BlogService) {
 
 	// 图片上传能力（又拍云；需站管授权 + 站点配置）
 	r.GET("/v1/user/blog/image-upload/status", bs.handleImageUploadStatus)
+	r.POST("/v1/user/blog/image-upload/apply", bs.handleImageUploadApply)
 	// 批量确认图床 URL/object key 是否仍在资产表（插件缓存复用，避免 N+1）
 	r.POST("/v1/user/blog/images/check", bs.handleBlogImagesCheck)
 	r.POST("/v1/user/blog/admin/image-upload", bs.handleAdminImageUpload)
+	r.GET("/v1/user/blog/admin/image-upload/requests", bs.handleAdminImageUploadRequests)
+	r.POST("/v1/user/blog/admin/image-upload/review", bs.handleAdminImageUploadReview)
 
 	// 站管：博客管理
 	r.GET("/v1/user/blog/admin/overview", bs.handleAdminOverview)
@@ -361,12 +364,17 @@ func (s *BlogService) articleToMap(a *model.BlogArticle, author *model.User, d b
 		orgIDs = s.loadOrgIDs(a.ID)
 		tags = s.loadArticleTags(a.ID)
 	}
+	imgBase := ""
+	if s != nil {
+		imgBase = s.publicImageBase()
+	}
+	coverOut := blogimg.ExpandCoverURL(a.CoverURL, imgBase)
 	m := map[string]interface{}{
 		"id":                a.ID,
 		"slug":              a.Slug,
 		"title":             a.Title,
 		"summary":           a.Summary,
-		"coverUrl":          a.CoverURL,
+		"coverUrl":          coverOut,
 		"visibility":        a.Visibility,
 		"recommend":         a.Recommend,
 		"syncToMainProfile": a.SyncToMainProfile,
@@ -417,12 +425,20 @@ func (s *BlogService) articleToMap(a *model.BlogArticle, author *model.User, d b
 		m["userId"] = a.UserID
 	}
 	if includeBody && d.CanSeeBody {
-		m["content"] = a.Content
+		m["content"] = blogimg.ExpandStoredImageRefs(a.Content, imgBase)
 	} else {
 		m["content"] = ""
 	}
 	// never leak password hash
 	return m
+}
+
+// publicImageBase returns the current UpYun public base (scheme://domain), or "".
+func (s *BlogService) publicImageBase() string {
+	if s == nil {
+		return ""
+	}
+	return s.loadUpyunClient().PublicBaseURL()
 }
 
 func parsePage(q *http.Request) (page, pageSize int) {
@@ -858,6 +874,8 @@ func (s *BlogService) buildArticleFromReq(userID, existingID uint, req *blogArti
 	if len(content) > maxBlogContent {
 		return nil, "正文过大，最大 512KB"
 	}
+	// 本站又拍云图存 path-only（/blog/{uid}/…）；读时再拼当前访问域名。
+	content = blogimg.NormalizeStoredImageRefs(content)
 	// 摘要一律按正文自动生成，忽略客户端手写
 	summary := blogaccess.DefaultSummary(content)
 	if utf8.RuneCountInString(summary) > maxBlogSummary {
@@ -872,11 +890,12 @@ func (s *BlogService) buildArticleFromReq(userID, existingID uint, req *blogArti
 	} else {
 		cover = strings.TrimSpace(req.CoverURL)
 		if cover != "" {
+			if !blogimg.ValidCoverInput(cover) {
+				return nil, "头图请使用 http(s) 链接或本站图床路径"
+			}
+			cover = blogimg.NormalizeCoverURL(cover)
 			if len(cover) > maxBlogCover {
 				return nil, "头图链接过长"
-			}
-			if !strings.HasPrefix(cover, "http://") && !strings.HasPrefix(cover, "https://") {
-				return nil, "头图请使用 http(s) 链接，暂不支持本地上传"
 			}
 		}
 	}
@@ -976,6 +995,10 @@ func (s *BlogService) buildArticleFromReq(userID, existingID uint, req *blogArti
 			sync = *req.SyncToMainProfile
 		}
 	}
+	// 落库正文图 content hash，GC 按 hash 判定引用（不依赖 URL/域名形态）。
+	imageHashes := blogimg.EncodeImageHashes(
+		blogimg.ResolveContentHashes(s.db, userID, content, cover),
+	)
 	return &model.BlogArticle{
 		UserID:            userID,
 		Slug:              slug,
@@ -983,6 +1006,7 @@ func (s *BlogService) buildArticleFromReq(userID, existingID uint, req *blogArti
 		Summary:           summary,
 		Content:           content,
 		CoverURL:          cover,
+		ImageHashes:       imageHashes,
 		Visibility:        vis,
 		PasswordHash:      pwHash,
 		Recommend:         false,

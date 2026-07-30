@@ -13,6 +13,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"cwxu-algo/app/common/blogimg"
 	"cwxu-algo/app/user/internal/biz/blogaccess"
 	"cwxu-algo/app/user/internal/data"
 	"cwxu-algo/app/user/internal/data/model"
@@ -433,7 +434,9 @@ func (s *SEOService) metaBlogArticle(origin, siteTitle, defaultImg, username, sl
 		desc = authorName + " 的文章 · " + siteTitle
 	}
 	// 博文分享图：优先博主头像（保留 GoAlgo siteName）
-	img := absURL(origin, firstNonEmpty(u.Avatar, a.CoverURL, defaultImg))
+	// cover 可能是 path-only 本站图床键，先按又拍云域名展开再 abs。
+	coverExpanded := blogimg.ExpandCoverURL(a.CoverURL, blogimg.LoadUpyunClient(s.data.DB).PublicBaseURL())
+	img := absURL(origin, firstNonEmpty(u.Avatar, coverExpanded, defaultImg))
 	path := fmt.Sprintf("/blog/%s/%s", u.Username, a.Slug)
 	title := a.Title
 	if authorName != "" {
