@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"cwxu-algo/app/common/blogimg"
 	"cwxu-algo/app/common/conf"
 	gorm2 "cwxu-algo/app/common/data/gorm"
 	redis2 "cwxu-algo/app/common/data/redis"
@@ -152,6 +153,46 @@ func migrateModels(db *gorm.DB) {
 		log.Warnf("backfill blog fixed pages: %v", err)
 	}
 	backfillBlogAutoSurfaceAndZeroViews(db)
+	backfillBlogCoverFromFirstImage(db)
+}
+
+// backfillBlogCoverFromFirstImage 旧文 cover 为空且正文有图时，写入第一张 http(s) 图。
+func backfillBlogCoverFromFirstImage(db *gorm.DB) {
+	if db == nil || !db.Migrator().HasTable(&model.BlogArticle{}) {
+		return
+	}
+	if !claimSchemaPatch(db, "blog_cover_first_image_backfill_v1") {
+		return
+	}
+	const maxCover = 1024
+	var articles []model.BlogArticle
+	if err := db.Select("id", "content", "cover_url").
+		Where("cover_url IS NULL OR cover_url = '' OR cover_url = ' '").
+		Find(&articles).Error; err != nil {
+		log.Warnf("blog cover first-image backfill list: %v", err)
+		return
+	}
+	updated := 0
+	for _, a := range articles {
+		if strings.TrimSpace(a.CoverURL) != "" {
+			continue
+		}
+		cover := blogimg.ResolveCoverURL("", a.Content, true, maxCover)
+		if cover == "" {
+			continue
+		}
+		res := db.Model(&model.BlogArticle{}).
+			Where("id = ? AND (cover_url IS NULL OR cover_url = '')", a.ID).
+			Update("cover_url", cover)
+		if res.Error != nil {
+			log.Warnf("blog cover first-image backfill id=%d: %v", a.ID, res.Error)
+			continue
+		}
+		if res.RowsAffected > 0 {
+			updated++
+		}
+	}
+	log.Infof("blog cover first-image backfill: scanned=%d updated=%d", len(articles), updated)
 }
 
 // claimSchemaPatch 认领一次性数据修补：以 key 唯一插入，成功者执行、失败者跳过。

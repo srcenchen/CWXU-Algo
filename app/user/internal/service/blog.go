@@ -15,6 +15,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"cwxu-algo/app/common/blogimg"
 	"cwxu-algo/app/common/blogsync"
 	_const "cwxu-algo/app/common/const"
 	"cwxu-algo/app/common/mail"
@@ -694,6 +695,8 @@ type blogArticleWriteReq struct {
 	Tags              []string `json:"tags"`
 	// ClearPassword when true removes password on update (if visibility changes away).
 	ClearPassword bool `json:"clearPassword"`
+	// UseFirstImageAsCover：cover 为空时用正文第一张 http(s) 图写入 coverUrl；不入库。
+	UseFirstImageAsCover bool `json:"useFirstImageAsCover"`
 }
 
 func (s *BlogService) handleCreate(ctx khttp.Context) error {
@@ -860,12 +863,17 @@ func (s *BlogService) buildArticleFromReq(userID, existingID uint, req *blogArti
 		summary = string(runes[:maxBlogSummary])
 	}
 	cover := strings.TrimSpace(req.CoverURL)
-	if len(cover) > maxBlogCover {
-		return nil, "头图链接过长"
-	}
-	// no file upload — only http(s) links allowed when set
-	if cover != "" && !strings.HasPrefix(cover, "http://") && !strings.HasPrefix(cover, "https://") {
-		return nil, "头图请使用 http(s) 链接，暂不支持本地上传"
+	// 手填非法：直接拒绝。自动补全在 cover 空时再解析。
+	if cover != "" {
+		if len(cover) > maxBlogCover {
+			return nil, "头图链接过长"
+		}
+		// no file upload — only http(s) links allowed when set
+		if !strings.HasPrefix(cover, "http://") && !strings.HasPrefix(cover, "https://") {
+			return nil, "头图请使用 http(s) 链接，暂不支持本地上传"
+		}
+	} else if req.UseFirstImageAsCover {
+		cover = blogimg.ResolveCoverURL("", content, true, maxBlogCover)
 	}
 	vis := blogaccess.NormalizeVisibility(req.Visibility)
 	if !blogaccess.ValidVisibility(vis) {

@@ -5,6 +5,7 @@ import (
 	"image"
 	"image/color"
 	"image/png"
+	"strings"
 	"testing"
 )
 
@@ -14,6 +15,27 @@ func TestExtractImageURLs(t *testing.T) {
 	urls := ExtractImageURLs(md, "https://cdn.example.com/cover.png")
 	if len(urls) != 4 {
 		t.Fatalf("got %v", urls)
+	}
+}
+
+func TestResolveCoverURL(t *testing.T) {
+	md := `text ![a](https://cdn.example.com/a.webp) ![b](https://cdn.example.com/b.webp)`
+	if got := ResolveCoverURL("https://hand.example/c.png", md, true, 1024); got != "https://hand.example/c.png" {
+		t.Fatalf("explicit cover: got %q", got)
+	}
+	if got := ResolveCoverURL("", md, true, 1024); got != "https://cdn.example.com/a.webp" {
+		t.Fatalf("first image: got %q", got)
+	}
+	if got := ResolveCoverURL("", md, false, 1024); got != "" {
+		t.Fatalf("flag off: got %q", got)
+	}
+	if got := ResolveCoverURL("", "no images", true, 1024); got != "" {
+		t.Fatalf("no image: got %q", got)
+	}
+	long := "https://cdn.example.com/" + strings.Repeat("x", 2000) + ".png"
+	mdLong := "![x](" + long + ")\n![ok](https://cdn.example.com/ok.webp)"
+	if got := ResolveCoverURL("", mdLong, true, 1024); got != "https://cdn.example.com/ok.webp" {
+		t.Fatalf("skip overlong: got %q", got)
 	}
 }
 

@@ -60,6 +60,34 @@ func ExtractImageURLs(content, cover string) []string {
 	return out
 }
 
+// ResolveCoverURL picks the article cover for write paths.
+// Non-empty cover wins; otherwise if useFirst, the first http(s) image URL from
+// content that fits maxLen (bytes) is used. Invalid auto candidates are skipped
+// without error; empty result means no cover.
+func ResolveCoverURL(cover, content string, useFirst bool, maxLen int) string {
+	cover = strings.TrimSpace(cover)
+	if cover != "" {
+		return cover
+	}
+	if !useFirst {
+		return ""
+	}
+	for _, u := range ExtractImageURLs(content, "") {
+		u = strings.TrimSpace(u)
+		if u == "" {
+			continue
+		}
+		if !strings.HasPrefix(u, "http://") && !strings.HasPrefix(u, "https://") {
+			continue
+		}
+		if maxLen > 0 && len(u) > maxLen {
+			continue
+		}
+		return u
+	}
+	return ""
+}
+
 // ObjectKeyFromURL extracts the path key for a URL hosted on our public base.
 // publicBase examples: "http://zhiyuansofts.cn", "https://cdn.example.com"
 // Returns "" if URL is not under that host.
