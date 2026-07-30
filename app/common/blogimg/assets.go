@@ -88,13 +88,58 @@ func ResolveCoverURL(cover, content string, useFirst bool, maxLen int) string {
 	return ""
 }
 
+// blogObjectPathRe 匹配又拍云博客对象路径（与 host 无关），如 /blog/27/xxx.webp
+var blogObjectPathRe = regexp.MustCompile(`(?i)(/blog/\d+/[^/?#\s)>"']+)`)
+
+// NormalizeObjectKey forces leading slash and cleans path.
+func NormalizeObjectKey(key string) string {
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return ""
+	}
+	k := path.Clean("/" + strings.TrimPrefix(key, "/"))
+	if k == "/" || k == "." {
+		return ""
+	}
+	return k
+}
+
+// BlogObjectKeyFromAnyURL extracts /blog/{uid}/… path from a URL even when the
+// public base host differs (http vs https、CDN 换域等历史脏数据）。
+func BlogObjectKeyFromAnyURL(imageURL string) string {
+	imageURL = strings.TrimSpace(imageURL)
+	if imageURL == "" {
+		return ""
+	}
+	if m := blogObjectPathRe.FindStringSubmatch(imageURL); len(m) > 1 {
+		return NormalizeObjectKey(m[1])
+	}
+	u, err := url.Parse(imageURL)
+	if err != nil || u.Path == "" {
+		return ""
+	}
+	p := NormalizeObjectKey(u.EscapedPath())
+	if strings.HasPrefix(strings.ToLower(p), "/blog/") {
+		return p
+	}
+	return ""
+}
+
 // ObjectKeyFromURL extracts the path key for a URL hosted on our public base.
 // publicBase examples: "http://zhiyuansofts.cn", "https://cdn.example.com"
 // Returns "" if URL is not under that host.
+// 若 host 不匹配但仍是 /blog/{id}/… 上传路径，仍返回 key（防止 GC 因换域误删）。
 func ObjectKeyFromURL(imageURL, publicBase string) string {
 	imageURL = strings.TrimSpace(imageURL)
 	publicBase = strings.TrimRight(strings.TrimSpace(publicBase), "/")
-	if imageURL == "" || publicBase == "" {
+	if imageURL == "" {
+		return ""
+	}
+	// 优先：标准博客对象路径（与 host 无关）
+	if k := BlogObjectKeyFromAnyURL(imageURL); k != "" {
+		return k
+	}
+	if publicBase == "" {
 		return ""
 	}
 	u, err := url.Parse(imageURL)
@@ -109,31 +154,70 @@ func ObjectKeyFromURL(imageURL, publicBase string) string {
 		if !strings.EqualFold(u.Host, baseHost) {
 			return ""
 		}
-		p := path.Clean("/" + strings.TrimPrefix(u.EscapedPath(), "/"))
-		if p == "/" {
-			return ""
-		}
-		return p
+		return NormalizeObjectKey(u.EscapedPath())
 	}
 	if !strings.EqualFold(u.Host, b.Host) {
 		return ""
 	}
-	p := path.Clean("/" + strings.TrimPrefix(u.EscapedPath(), "/"))
-	if p == "/" {
-		return ""
-	}
-	return p
+	return NormalizeObjectKey(u.EscapedPath())
 }
 
 // KeysFromContent returns object keys referenced in content+cover for a given public base.
 func KeysFromContent(content, cover, publicBase string) map[string]struct{} {
 	keys := map[string]struct{}{}
+	add := func(k string) {
+		k = NormalizeObjectKey(k)
+		if k == "" {
+			return
+		}
+		keys[k] = struct{}{}
+	}
 	for _, u := range ExtractImageURLs(content, cover) {
 		if k := ObjectKeyFromURL(u, publicBase); k != "" {
-			keys[k] = struct{}{}
+			add(k)
+		}
+	}
+	// 裸路径 / 非标准 markdown 中的 /blog/n/… 也算引用
+	blob := content + "\n" + cover
+	for _, m := range blogObjectPathRe.FindAllStringSubmatch(blob, -1) {
+		if len(m) > 1 {
+			add(m[1])
 		}
 	}
 	return keys
+}
+
+// AssetReferenced reports whether a registered asset is still cited in article text.
+// 用 object key、完整 URL、无 scheme URL 做子串匹配，避免 host/scheme 漂移导致误删。
+func AssetReferenced(objectKey, assetURL string, texts ...string) bool {
+	key := NormalizeObjectKey(objectKey)
+	urlFull := strings.TrimSpace(assetURL)
+	var needles []string
+	if key != "" {
+		needles = append(needles, key, strings.TrimPrefix(key, "/"))
+	}
+	if urlFull != "" {
+		needles = append(needles, urlFull)
+		if u, err := url.Parse(urlFull); err == nil && u.Host != "" {
+			// //host/path 与 host/path
+			needles = append(needles, "//"+u.Host+u.Path)
+			needles = append(needles, u.Host+u.Path)
+		}
+	}
+	if len(needles) == 0 {
+		return false
+	}
+	for _, text := range texts {
+		if text == "" {
+			continue
+		}
+		for _, n := range needles {
+			if n != "" && strings.Contains(text, n) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // OrphanKeys returns registered keys that are not in the used set.

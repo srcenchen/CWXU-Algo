@@ -45,8 +45,27 @@ func TestObjectKeyFromURL(t *testing.T) {
 	if k != "/blog/12/x.webp" {
 		t.Fatalf("got %q", k)
 	}
+	// 换 host / https 仍应识别博客对象路径（防 GC 误删）
+	k2 := ObjectKeyFromURL("https://cdn.other.example/blog/27/20260730_abc.webp", base)
+	if k2 != "/blog/27/20260730_abc.webp" {
+		t.Fatalf("cross-host blog path: got %q", k2)
+	}
 	if ObjectKeyFromURL("https://free.picui.cn/x.webp", base) != "" {
-		t.Fatal("third-party should be empty")
+		t.Fatal("third-party non-blog path should be empty")
+	}
+}
+
+func TestAssetReferenced(t *testing.T) {
+	key := "/blog/27/a.webp"
+	url := "https://zhiyuansofts.cn/blog/27/a.webp"
+	if !AssetReferenced(key, url, "hello ![x]("+url+")") {
+		t.Fatal("full url")
+	}
+	if !AssetReferenced(key, url, "see /blog/27/a.webp in text") {
+		t.Fatal("path")
+	}
+	if AssetReferenced(key, url, "no images here") {
+		t.Fatal("should not match")
 	}
 }
 

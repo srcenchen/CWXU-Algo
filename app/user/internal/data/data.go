@@ -154,22 +154,32 @@ func migrateModels(db *gorm.DB) {
 	}
 	backfillBlogAutoSurfaceAndZeroViews(db)
 	backfillBlogCoverFromFirstImage(db)
+	// v2：GC 误删/未识别后再次补空头图；幂等 key 与 v1 分离
+	backfillBlogCoverFromFirstImageV2(db)
 }
 
 // backfillBlogCoverFromFirstImage 旧文 cover 为空且正文有图时，写入第一张 http(s) 图。
 func backfillBlogCoverFromFirstImage(db *gorm.DB) {
+	runBlogCoverFirstImageBackfill(db, "blog_cover_first_image_backfill_v1")
+}
+
+func backfillBlogCoverFromFirstImageV2(db *gorm.DB) {
+	runBlogCoverFirstImageBackfill(db, "blog_cover_first_image_backfill_v2")
+}
+
+func runBlogCoverFirstImageBackfill(db *gorm.DB, patchKey string) {
 	if db == nil || !db.Migrator().HasTable(&model.BlogArticle{}) {
 		return
 	}
-	if !claimSchemaPatch(db, "blog_cover_first_image_backfill_v1") {
+	if !claimSchemaPatch(db, patchKey) {
 		return
 	}
 	const maxCover = 1024
 	var articles []model.BlogArticle
 	if err := db.Select("id", "content", "cover_url").
-		Where("cover_url IS NULL OR cover_url = '' OR cover_url = ' '").
+		Where("cover_url IS NULL OR cover_url = '' OR BTRIM(cover_url) = ''").
 		Find(&articles).Error; err != nil {
-		log.Warnf("blog cover first-image backfill list: %v", err)
+		log.Warnf("blog cover first-image backfill (%s) list: %v", patchKey, err)
 		return
 	}
 	updated := 0
@@ -182,17 +192,17 @@ func backfillBlogCoverFromFirstImage(db *gorm.DB) {
 			continue
 		}
 		res := db.Model(&model.BlogArticle{}).
-			Where("id = ? AND (cover_url IS NULL OR cover_url = '')", a.ID).
+			Where("id = ? AND (cover_url IS NULL OR cover_url = '' OR BTRIM(cover_url) = '')", a.ID).
 			Update("cover_url", cover)
 		if res.Error != nil {
-			log.Warnf("blog cover first-image backfill id=%d: %v", a.ID, res.Error)
+			log.Warnf("blog cover first-image backfill (%s) id=%d: %v", patchKey, a.ID, res.Error)
 			continue
 		}
 		if res.RowsAffected > 0 {
 			updated++
 		}
 	}
-	log.Infof("blog cover first-image backfill: scanned=%d updated=%d", len(articles), updated)
+	log.Infof("blog cover first-image backfill (%s): scanned=%d updated=%d", patchKey, len(articles), updated)
 }
 
 // claimSchemaPatch 认领一次性数据修补：以 key 唯一插入，成功者执行、失败者跳过。

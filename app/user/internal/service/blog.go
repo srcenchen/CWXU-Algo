@@ -107,6 +107,8 @@ func RegisterBlogRoutes(srv *khttp.Server, bs *BlogService) {
 
 	// 图片上传能力（又拍云；需站管授权 + 站点配置）
 	r.GET("/v1/user/blog/image-upload/status", bs.handleImageUploadStatus)
+	// 批量确认图床 URL/object key 是否仍在资产表（插件缓存复用，避免 N+1）
+	r.POST("/v1/user/blog/images/check", bs.handleBlogImagesCheck)
 	r.POST("/v1/user/blog/admin/image-upload", bs.handleAdminImageUpload)
 
 	// 站管：博客管理
@@ -862,18 +864,21 @@ func (s *BlogService) buildArticleFromReq(userID, existingID uint, req *blogArti
 		runes := []rune(summary)
 		summary = string(runes[:maxBlogSummary])
 	}
-	cover := strings.TrimSpace(req.CoverURL)
-	// 手填非法：直接拒绝。自动补全在 cover 空时再解析。
-	if cover != "" {
-		if len(cover) > maxBlogCover {
-			return nil, "头图链接过长"
-		}
-		// no file upload — only http(s) links allowed when set
-		if !strings.HasPrefix(cover, "http://") && !strings.HasPrefix(cover, "https://") {
-			return nil, "头图请使用 http(s) 链接，暂不支持本地上传"
-		}
-	} else if req.UseFirstImageAsCover {
+	// 头图：勾选「用正文第一张图」时每次保存都重识别（忽略旧 coverUrl）；
+	// 未勾选则用手填/上传的 coverUrl，可为空。
+	var cover string
+	if req.UseFirstImageAsCover {
 		cover = blogimg.ResolveCoverURL("", content, true, maxBlogCover)
+	} else {
+		cover = strings.TrimSpace(req.CoverURL)
+		if cover != "" {
+			if len(cover) > maxBlogCover {
+				return nil, "头图链接过长"
+			}
+			if !strings.HasPrefix(cover, "http://") && !strings.HasPrefix(cover, "https://") {
+				return nil, "头图请使用 http(s) 链接，暂不支持本地上传"
+			}
+		}
 	}
 	vis := blogaccess.NormalizeVisibility(req.Visibility)
 	if !blogaccess.ValidVisibility(vis) {

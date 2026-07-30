@@ -57,15 +57,16 @@ func TestGCUserImagesRemovesOrphansKeepsReferenced(t *testing.T) {
 	db := gcTestDB(t)
 	base := "http://zhiyuansofts.cn"
 	userID := uint(9)
+	old := time.Now().Add(-3 * time.Hour)
 
 	_ = db.Create(&articleRefRow{
 		UserID:   userID,
 		Content:  "![keep](http://zhiyuansofts.cn/blog/9/keep.webp)\n",
 		CoverURL: "http://zhiyuansofts.cn/blog/9/cover.jpg",
 	}).Error
-	_ = db.Create(&imageAssetRow{UserID: userID, ObjectKey: "/blog/9/keep.webp", URL: base + "/blog/9/keep.webp"}).Error
-	_ = db.Create(&imageAssetRow{UserID: userID, ObjectKey: "/blog/9/cover.jpg", URL: base + "/blog/9/cover.jpg"}).Error
-	_ = db.Create(&imageAssetRow{UserID: userID, ObjectKey: "/blog/9/orphan.webp", URL: base + "/blog/9/orphan.webp"}).Error
+	_ = db.Create(&imageAssetRow{UserID: userID, ObjectKey: "/blog/9/keep.webp", URL: base + "/blog/9/keep.webp", CreatedAt: old}).Error
+	_ = db.Create(&imageAssetRow{UserID: userID, ObjectKey: "/blog/9/cover.jpg", URL: base + "/blog/9/cover.jpg", CreatedAt: old}).Error
+	_ = db.Create(&imageAssetRow{UserID: userID, ObjectKey: "/blog/9/orphan.webp", URL: base + "/blog/9/orphan.webp", CreatedAt: old}).Error
 
 	del := &fakeDeleter{base: base}
 	n := GCUserImages(db, del, userID)
@@ -83,12 +84,67 @@ func TestGCUserImagesRemovesOrphansKeepsReferenced(t *testing.T) {
 	}
 }
 
+func TestGCUserImagesKeepsCrossHostReferenced(t *testing.T) {
+	// 正文是 https://zhiyuansofts.cn，PublicBase 是 http://… 或其它域时，旧逻辑会误删。
+	db := gcTestDB(t)
+	userID := uint(27)
+	old := time.Now().Add(-3 * time.Hour)
+	_ = db.Create(&articleRefRow{
+		UserID:  userID,
+		Content: "![x](https://zhiyuansofts.cn/blog/27/20260730_1cfd654d4a20de794600d47ad991590d.webp)\n",
+	}).Error
+	_ = db.Create(&imageAssetRow{
+		UserID:    userID,
+		ObjectKey: "/blog/27/20260730_1cfd654d4a20de794600d47ad991590d.webp",
+		URL:       "https://zhiyuansofts.cn/blog/27/20260730_1cfd654d4a20de794600d47ad991590d.webp",
+		CreatedAt: old,
+	}).Error
+	del := &fakeDeleter{base: "http://other-cdn.example"}
+	if n := GCUserImages(db, del, userID); n != 0 {
+		t.Fatalf("should keep cross-host ref, n=%d del=%v", n, del.Deleted())
+	}
+}
+
+func TestGCUserImagesGracePeriod(t *testing.T) {
+	db := gcTestDB(t)
+	base := "http://zhiyuansofts.cn"
+	userID := uint(3)
+	fresh := time.Now().Add(-10 * time.Minute)
+	_ = db.Create(&imageAssetRow{
+		UserID: userID, ObjectKey: "/blog/3/new.webp", URL: base + "/blog/3/new.webp", CreatedAt: fresh,
+	}).Error
+	del := &fakeDeleter{base: base}
+	if n := GCUserImagesAt(db, del, userID, time.Now()); n != 0 {
+		t.Fatalf("grace should keep, n=%d", n)
+	}
+}
+
+func TestExistingURLsForUser(t *testing.T) {
+	db := gcTestDB(t)
+	userID := uint(7)
+	_ = db.Create(&imageAssetRow{
+		UserID: userID, ObjectKey: "/blog/7/a.webp", URL: "https://zhiyuansofts.cn/blog/7/a.webp",
+	}).Error
+	ex, miss := ExistingURLsForUser(db, userID, []string{
+		"https://zhiyuansofts.cn/blog/7/a.webp",
+		"https://zhiyuansofts.cn/blog/7/gone.webp",
+		"/blog/7/a.webp",
+	})
+	if len(ex) != 2 {
+		t.Fatalf("existing=%v", ex)
+	}
+	if len(miss) != 1 || miss[0] != "https://zhiyuansofts.cn/blog/7/gone.webp" {
+		t.Fatalf("missing=%v", miss)
+	}
+}
+
 func TestGCUserImagesAfterContentCleared(t *testing.T) {
 	// Mirrors 题解 UpsertFromSolution rewriting content without image refs.
 	db := gcTestDB(t)
 	base := "http://zhiyuansofts.cn"
 	userID := uint(5)
-	_ = db.Create(&imageAssetRow{UserID: userID, ObjectKey: "/blog/5/a.webp", URL: base + "/blog/5/a.webp"}).Error
+	old := time.Now().Add(-3 * time.Hour)
+	_ = db.Create(&imageAssetRow{UserID: userID, ObjectKey: "/blog/5/a.webp", URL: base + "/blog/5/a.webp", CreatedAt: old}).Error
 	_ = db.Create(&articleRefRow{
 		UserID:  userID,
 		Content: "![a](http://zhiyuansofts.cn/blog/5/a.webp)",
@@ -111,7 +167,8 @@ func TestGCUserImagesAfterAllArticlesDeleted(t *testing.T) {
 	db := gcTestDB(t)
 	base := "http://zhiyuansofts.cn"
 	userID := uint(4)
-	_ = db.Create(&imageAssetRow{UserID: userID, ObjectKey: "/blog/4/x.webp", URL: base + "/blog/4/x.webp"}).Error
+	old := time.Now().Add(-3 * time.Hour)
+	_ = db.Create(&imageAssetRow{UserID: userID, ObjectKey: "/blog/4/x.webp", URL: base + "/blog/4/x.webp", CreatedAt: old}).Error
 	_ = db.Create(&articleRefRow{
 		UserID:  userID,
 		Content: "![x](http://zhiyuansofts.cn/blog/4/x.webp)",

@@ -70,6 +70,43 @@ func registerBlogImageAsset(db *gorm.DB, userID uint, objectKey, publicURL, purp
 	return db.Create(&row).Error
 }
 
+// handleBlogImagesCheck POST /v1/user/blog/images/check
+// body: { urls: ["https://…/blog/27/x.webp", "/blog/27/x.webp", …] }
+// → { existing: [...], missing: [...] } 一次查询，无 N+1。
+func (s *BlogService) handleBlogImagesCheck(ctx khttp.Context) error {
+	pd := auth.GetCurrentUser(ctx)
+	if pd == nil || pd.UserID == 0 {
+		writeJSON(ctx.Response(), 401, map[string]interface{}{"code": 1, "message": "请先登录"})
+		return nil
+	}
+	var body struct {
+		URLs []string `json:"urls"`
+	}
+	if err := json.NewDecoder(ctx.Request().Body).Decode(&body); err != nil {
+		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "参数错误"})
+		return nil
+	}
+	if len(body.URLs) > 200 {
+		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "一次最多检查 200 个地址"})
+		return nil
+	}
+	existing, missing := blogimg.ExistingURLsForUser(s.db, pd.UserID, body.URLs)
+	if existing == nil {
+		existing = []string{}
+	}
+	if missing == nil {
+		missing = []string{}
+	}
+	writeJSON(ctx.Response(), 200, map[string]interface{}{
+		"code": 0, "message": "success",
+		"data": map[string]interface{}{
+			"existing": existing,
+			"missing":  missing,
+		},
+	})
+	return nil
+}
+
 // handleImageUploadStatus GET /v1/user/blog/image-upload/status
 func (s *BlogService) handleImageUploadStatus(ctx khttp.Context) error {
 	pd := auth.GetCurrentUser(ctx)
