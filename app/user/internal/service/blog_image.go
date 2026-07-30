@@ -142,10 +142,52 @@ func (s *BlogService) handleBlogImagesCheck(ctx khttp.Context) error {
 	writeJSON(ctx.Response(), 200, map[string]interface{}{
 		"code": 0, "message": "success",
 		"data": map[string]interface{}{
-			"existing":        existing,
-			"missing":         missing,
-			"existingHashes":  exHash,
-			"missingHashes":   missHash,
+			"existing":       existing,
+			"missing":        missing,
+			"existingHashes": exHash,
+			"missingHashes":  missHash,
+		},
+	})
+	return nil
+}
+
+// listOrphanImages returns unreferenced blog image assets without deleting them.
+func (s *BlogService) listOrphanImages(ctx khttp.Context) error {
+	pd := auth.GetCurrentUser(ctx)
+	if pd == nil || pd.UserID == 0 {
+		writeJSON(ctx.Response(), 401, map[string]interface{}{"code": 1, "message": "请先登录"})
+		return nil
+	}
+
+	client := blogimg.LoadUpyunClient(s.db)
+	orphans := blogimg.ListUserImageOrphans(s.db, pd.UserID, client.PublicBaseURL())
+
+	writeJSON(ctx.Response(), 200, map[string]interface{}{
+		"code":    0,
+		"message": "success",
+		"data": map[string]interface{}{
+			"orphans": orphans,
+			"total":   len(orphans),
+		},
+	})
+	return nil
+}
+
+// gcOrphanImages runs manual GC ignoring grace period (for user-initiated cleanup).
+func (s *BlogService) gcOrphanImages(ctx khttp.Context) error {
+	pd := auth.GetCurrentUser(ctx)
+	if pd == nil || pd.UserID == 0 {
+		writeJSON(ctx.Response(), 401, map[string]interface{}{"code": 1, "message": "请先登录"})
+		return nil
+	}
+
+	count := blogimg.GCUserImagesForce(s.db, blogimg.LoadUpyunClient(s.db), pd.UserID)
+
+	writeJSON(ctx.Response(), 200, map[string]interface{}{
+		"code":    0,
+		"message": "success",
+		"data": map[string]interface{}{
+			"deleted": count,
 		},
 	})
 	return nil

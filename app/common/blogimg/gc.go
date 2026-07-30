@@ -34,6 +34,17 @@ type imageAssetRow struct {
 
 func (imageAssetRow) TableName() string { return "blog_image_assets" }
 
+// OrphanAsset is a registered image no longer referenced by any article/page.
+// Protected marks a newly uploaded asset still inside the editing grace period.
+type OrphanAsset struct {
+	ID          uint      `json:"id"`
+	CreatedAt   time.Time `json:"createdAt"`
+	ObjectKey   string    `json:"objectKey"`
+	URL         string    `json:"url"`
+	ContentHash string    `json:"contentHash,omitempty"`
+	Protected   bool      `json:"protected"`
+}
+
 // articleRefRow is enough content to compute referenced image keys / hashes.
 type articleRefRow struct {
 	ID          uint   `gorm:"primaryKey"`
@@ -104,13 +115,50 @@ func GCUserImages(db *gorm.DB, client ObjectDeleter, userID uint) int {
 	return GCUserImagesAt(db, client, userID, time.Now())
 }
 
+// GCUserImagesForce runs GC ignoring the 24h grace period (manual cleanup).
+func GCUserImagesForce(db *gorm.DB, client ObjectDeleter, userID uint) int {
+	return gcUserImagesAt(db, client, userID, time.Now(), true)
+}
+
 // GCUserImagesAt is GCUserImages with injectable clock (tests).
 func GCUserImagesAt(db *gorm.DB, client ObjectDeleter, userID uint, now time.Time) int {
+	return gcUserImagesAt(db, client, userID, now, false)
+}
+
+func gcUserImagesAt(db *gorm.DB, client ObjectDeleter, userID uint, now time.Time, force bool) int {
 	if db == nil || userID == 0 || client == nil || !client.Configured() {
 		return 0
 	}
 	base := client.PublicBaseURL()
 	canDeleteRemote := base != ""
+	orphans := ListUserImageOrphansAt(db, userID, base, now)
+	processed := 0
+	for _, asset := range orphans {
+		if asset.Protected && !force {
+			continue
+		}
+		if canDeleteRemote {
+			if err := client.Delete(asset.ObjectKey); err != nil {
+				log.Warnf("blog image gc delete %s: %v", asset.ObjectKey, err)
+			}
+		}
+		_ = db.Delete(&imageAssetRow{}, asset.ID).Error
+		processed++
+	}
+	return processed
+}
+
+// ListUserImageOrphans lists all unreferenced assets, including fresh uploads.
+// Fresh uploads are marked Protected so the UI can warn before force cleanup.
+func ListUserImageOrphans(db *gorm.DB, userID uint, base string) []OrphanAsset {
+	return ListUserImageOrphansAt(db, userID, base, time.Now())
+}
+
+// ListUserImageOrphansAt is ListUserImageOrphans with an injectable clock.
+func ListUserImageOrphansAt(db *gorm.DB, userID uint, base string, now time.Time) []OrphanAsset {
+	if db == nil || userID == 0 {
+		return nil
+	}
 
 	usedHash := map[string]struct{}{}
 	usedKey := map[string]struct{}{}
@@ -148,14 +196,10 @@ func GCUserImagesAt(db *gorm.DB, client ObjectDeleter, userID uint, now time.Tim
 
 	var assets []imageAssetRow
 	_ = db.Where("user_id = ?", userID).Find(&assets).Error
-	var orphans []imageAssetRow
+	var orphans []OrphanAsset
 	for _, a := range assets {
 		key := NormalizeObjectKey(a.ObjectKey)
 		if key == "" {
-			continue
-		}
-		// 宽限期：编辑中未写入正文的新图
-		if !a.CreatedAt.IsZero() && now.Sub(a.CreatedAt) < GCGracePeriod {
 			continue
 		}
 		h := NormalizeHash(a.ContentHash)
@@ -174,19 +218,16 @@ func GCUserImagesAt(db *gorm.DB, client ObjectDeleter, userID uint, now time.Tim
 		if AssetReferenced(key, a.URL, texts...) {
 			continue
 		}
-		orphans = append(orphans, a)
+		orphans = append(orphans, OrphanAsset{
+			ID:          a.ID,
+			CreatedAt:   a.CreatedAt,
+			ObjectKey:   key,
+			URL:         a.URL,
+			ContentHash: h,
+			Protected:   !a.CreatedAt.IsZero() && now.Sub(a.CreatedAt) < GCGracePeriod,
+		})
 	}
-
-	for _, a := range orphans {
-		key := NormalizeObjectKey(a.ObjectKey)
-		if canDeleteRemote {
-			if err := client.Delete(key); err != nil {
-				log.Warnf("blog image gc delete %s: %v", key, err)
-			}
-		}
-		_ = db.Delete(&imageAssetRow{}, a.ID).Error
-	}
-	return len(orphans)
+	return orphans
 }
 
 // GCUserImagesFromSite loads UpYun from site_configs then runs GCUserImages.

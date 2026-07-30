@@ -284,7 +284,6 @@ func (s *BlogService) handlePageCreate(ctx khttp.Context) error {
 		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "页面地址已被使用"})
 		return nil
 	}
-	go s.gcUserBlogImages(pd.UserID)
 	writeJSON(ctx.Response(), 200, map[string]interface{}{"code": 0, "message": "success", "data": blogPageToMap(page, true, s.publicImageBase())})
 	return nil
 }
@@ -350,7 +349,6 @@ func (s *BlogService) handlePageDelete(ctx khttp.Context) error {
 		writeJSON(ctx.Response(), 404, map[string]interface{}{"code": 1, "message": "页面不存在"})
 		return nil
 	}
-	go s.gcUserBlogImages(pd.UserID)
 	writeJSON(ctx.Response(), 200, map[string]interface{}{"code": 0, "message": "已删除"})
 	return nil
 }

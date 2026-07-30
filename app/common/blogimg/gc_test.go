@@ -16,7 +16,7 @@ type fakeDeleter struct {
 	deleted []string
 }
 
-func (f *fakeDeleter) Configured() bool     { return true }
+func (f *fakeDeleter) Configured() bool      { return true }
 func (f *fakeDeleter) PublicBaseURL() string { return f.base }
 func (f *fakeDeleter) Delete(key string) error {
 	f.mu.Lock()
@@ -166,6 +166,57 @@ func TestGCUserImagesGracePeriod(t *testing.T) {
 	del := &fakeDeleter{base: base}
 	if n := GCUserImagesAt(db, del, userID, time.Now()); n != 0 {
 		t.Fatalf("grace should keep, n=%d", n)
+	}
+}
+
+func TestListUserImageOrphansIncludesFreshAsProtected(t *testing.T) {
+	db := gcTestDB(t)
+	base := "https://zhiyuansofts.cn"
+	userID := uint(31)
+	now := time.Now()
+	old := now.Add(-25 * time.Hour)
+	fresh := now.Add(-10 * time.Minute)
+
+	_ = db.Create(&articleRefRow{
+		UserID:  userID,
+		Content: "![keep](/blog/31/keep.webp)",
+	}).Error
+	_ = db.Create(&imageAssetRow{
+		UserID: userID, ObjectKey: "/blog/31/keep.webp", URL: base + "/blog/31/keep.webp", CreatedAt: old,
+	}).Error
+	_ = db.Create(&imageAssetRow{
+		UserID: userID, ObjectKey: "/blog/31/old.webp", URL: base + "/blog/31/old.webp", CreatedAt: old,
+	}).Error
+	_ = db.Create(&imageAssetRow{
+		UserID: userID, ObjectKey: "/blog/31/fresh.webp", URL: base + "/blog/31/fresh.webp", CreatedAt: fresh,
+	}).Error
+
+	orphans := ListUserImageOrphansAt(db, userID, base, now)
+	if len(orphans) != 2 {
+		t.Fatalf("orphans=%v want 2", orphans)
+	}
+	protected := map[string]bool{}
+	for _, asset := range orphans {
+		protected[asset.ObjectKey] = asset.Protected
+	}
+	if protected["/blog/31/old.webp"] {
+		t.Fatal("old orphan must not be protected")
+	}
+	if !protected["/blog/31/fresh.webp"] {
+		t.Fatal("fresh orphan must be marked protected")
+	}
+}
+
+func TestGCUserImagesForceRemovesFreshOrphan(t *testing.T) {
+	db := gcTestDB(t)
+	base := "https://zhiyuansofts.cn"
+	userID := uint(32)
+	_ = db.Create(&imageAssetRow{
+		UserID: userID, ObjectKey: "/blog/32/fresh.webp", URL: base + "/blog/32/fresh.webp", CreatedAt: time.Now(),
+	}).Error
+	del := &fakeDeleter{base: base}
+	if n := GCUserImagesForce(db, del, userID); n != 1 {
+		t.Fatalf("force count=%d deleted=%v", n, del.Deleted())
 	}
 }
 

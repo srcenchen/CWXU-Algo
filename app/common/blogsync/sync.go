@@ -157,8 +157,6 @@ func UpsertFromSolutionWithProblem(db *gorm.DB, userID, solutionID, problemID, a
 		updates["summary"] = defSum
 		_ = db.Model(a).Updates(updates).Error
 		_ = autoSurfaceOrgs(db, a.ID, userID)
-		// 题解内容变更后 GC 未再引用的又拍云图（与博客保存路径一致）
-		blogimg.ScheduleGCUserImages(db, userID)
 		return a.ID, a.Slug, nil
 	}
 
@@ -206,8 +204,6 @@ func UpsertFromSolutionWithProblem(db *gorm.DB, userID, solutionID, problemID, a
 		return 0, "", err
 	}
 	_ = autoSurfaceOrgs(db, a.ID, userID)
-	// 新建镜像也可能引用已上传图；跑一次 GC 清理历史孤儿
-	blogimg.ScheduleGCUserImages(db, userID)
 	return a.ID, a.Slug, nil
 }
 
@@ -310,10 +306,6 @@ func DeleteBySolution(db *gorm.DB, userID, solutionID, articleID uint) {
 		_ = db.Where("article_id = ?", id).Delete(&articleComment{}).Error
 		_ = db.Where("article_id = ?", id).Delete(&articleLike{}).Error
 		_ = db.Where("id = ?", id).Delete(&Article{}).Error
-	}
-	// 题解删文后清理不再被引用的又拍云对象
-	for oid := range ownerIDs {
-		blogimg.ScheduleGCUserImages(db, oid)
 	}
 }
 
