@@ -9,11 +9,13 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 )
 
 type NewCodeforces struct{}
@@ -126,16 +128,17 @@ func fetchCFUserStatusPaged(ctx context.Context, username string, needAll bool) 
 		maxPages = cfStatusMaxPagesAll
 	}
 	all := make([]cfJson, 0, cfStatusPageSize)
+	handleQ := url.QueryEscape(username)
 	for page := 0; page < maxPages; page++ {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
 		from := page*cfStatusPageSize + 1
-		url := fmt.Sprintf(
+		apiURL := fmt.Sprintf(
 			"https://codeforces.com/api/user.status?handle=%s&from=%d&count=%d",
-			username, from, cfStatusPageSize,
+			handleQ, from, cfStatusPageSize,
 		)
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil)
 		if err != nil {
 			return nil, err
 		}
@@ -149,7 +152,7 @@ func fetchCFUserStatusPaged(ctx context.Context, username string, needAll bool) 
 			return nil, fmt.Errorf("解析body错误: %s", err.Error())
 		}
 		if resp.StatusCode != http.StatusOK {
-			return nil, fmt.Errorf("请求响应码错误 %d, %s", resp.StatusCode, string(body))
+			return nil, cfHTTPStatusErr("user.status", resp.StatusCode, body)
 		}
 		var cfResp CFResponse
 		if err := json.Unmarshal(body, &cfResp); err != nil {
@@ -313,8 +316,8 @@ func (p NewCodeforces) FetchContestLog(userId int64, username string, needAll bo
 }
 
 func fetchCFUserRating(username string) ([]cfRatingEntry, error) {
-	url := fmt.Sprintf("https://codeforces.com/api/user.rating?handle=%s", username)
-	resp, err := ojhttp.Get(url)
+	apiURL := fmt.Sprintf("https://codeforces.com/api/user.rating?handle=%s", url.QueryEscape(username))
+	resp, err := ojhttp.Get(apiURL)
 	if err != nil {
 		return nil, fmt.Errorf("codeforces user.rating 请求失败: %w", err)
 	}
@@ -324,7 +327,7 @@ func fetchCFUserRating(username string) ([]cfRatingEntry, error) {
 		return nil, err
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("codeforces user.rating 状态码 %d: %s", resp.StatusCode, string(body))
+		return nil, cfHTTPStatusErr("user.rating", resp.StatusCode, body)
 	}
 	var out struct {
 		Status  string          `json:"status"`
@@ -512,8 +515,8 @@ func (p NewCodeforces) FetchContestDetails(userId int64, username string, needAl
 }
 
 func fetchCFContestListMap() (map[int]cfContestListEntry, error) {
-	url := "https://codeforces.com/api/contest.list?gym=false"
-	resp, err := ojhttp.Get(url)
+	apiURL := "https://codeforces.com/api/contest.list?gym=false"
+	resp, err := ojhttp.Get(apiURL)
 	if err != nil {
 		return nil, err
 	}
@@ -523,7 +526,7 @@ func fetchCFContestListMap() (map[int]cfContestListEntry, error) {
 		return nil, err
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("codeforces contest.list 状态码 %d", resp.StatusCode)
+		return nil, cfHTTPStatusErr("contest.list", resp.StatusCode, body)
 	}
 	var out struct {
 		Status string               `json:"status"`
@@ -552,8 +555,8 @@ func (p NewCodeforces) FetchRating(username string) (int, bool, error) {
 	if username == "" {
 		return 0, false, fmt.Errorf("codeforces handle 为空")
 	}
-	url := fmt.Sprintf("https://codeforces.com/api/user.info?handles=%s", username)
-	resp, err := ojhttp.Get(url)
+	apiURL := fmt.Sprintf("https://codeforces.com/api/user.info?handles=%s", url.QueryEscape(username))
+	resp, err := ojhttp.Get(apiURL)
 	if err != nil {
 		return 0, false, fmt.Errorf("codeforces rating 请求失败: %w", err)
 	}
@@ -563,7 +566,7 @@ func (p NewCodeforces) FetchRating(username string) (int, bool, error) {
 		return 0, false, err
 	}
 	if resp.StatusCode != http.StatusOK {
-		return 0, false, fmt.Errorf("codeforces rating 状态码 %d: %s", resp.StatusCode, string(body))
+		return 0, false, cfHTTPStatusErr("user.info", resp.StatusCode, body)
 	}
 	var out struct {
 		Status string `json:"status"`
@@ -583,6 +586,29 @@ func (p NewCodeforces) FetchRating(username string) (int, bool, error) {
 		return 0, false, nil // 未参赛
 	}
 	return *out.Result[0].Rating, true, nil
+}
+
+// cfHTTPStatusErr 不把 HTML 墙/整页 body 塞进 error（会污染 lastError 与日志）。
+func cfHTTPStatusErr(api string, status int, body []byte) error {
+	snippet := strings.TrimSpace(string(body))
+	low := strings.ToLower(snippet)
+	if strings.Contains(low, "<html") || strings.Contains(low, "<!doctype") || strings.Contains(low, "nginx") {
+		switch status {
+		case http.StatusForbidden:
+			return fmt.Errorf("请求响应码错误 %d (codeforces %s 被拒绝/拦截)", status, api)
+		case http.StatusTooManyRequests:
+			return fmt.Errorf("请求响应码错误 %d (codeforces %s 限流)", status, api)
+		default:
+			return fmt.Errorf("请求响应码错误 %d (codeforces %s 返回异常页面)", status, api)
+		}
+	}
+	if utf8.RuneCountInString(snippet) > 120 {
+		snippet = string([]rune(snippet)[:120]) + "…"
+	}
+	if snippet == "" {
+		return fmt.Errorf("请求响应码错误 %d (codeforces %s)", status, api)
+	}
+	return fmt.Errorf("请求响应码错误 %d, %s", status, snippet)
 }
 
 func init() {

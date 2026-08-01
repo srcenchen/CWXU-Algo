@@ -98,7 +98,11 @@ func (uc *SpiderUseCase) LoadData(userId int64, needAll bool, platform string) e
 		}
 	}
 	if failCount == len(platforms) && lastErr != nil {
-		return fmt.Errorf("all platforms failed for user %d: %w", userId, lastErr)
+		// 单平台任务（MQ 按平台拆）不要说 all platforms，便于日志与 lastError 分类
+		if len(platforms) == 1 {
+			return fmt.Errorf("%s sync failed user=%d: %w", platforms[0].Platform, userId, lastErr)
+		}
+		return fmt.Errorf("%d/%d platforms failed user=%d: %w", failCount, len(platforms), userId, lastErr)
 	}
 	return nil
 }

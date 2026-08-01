@@ -63,9 +63,9 @@ func (c *Consumer) Consume() {
 			spidermetrics.RecordEnd(start, err)
 			if err != nil {
 				log.Errorf("RabbitMQ(Spider): %v", err)
-				// 记录平台级失败，供资料页展示（仍 return err 走 MQ 重试）
+				// 记录平台级失败：写入用户可读短文案（仍 return err 走 MQ 重试；完整 err 只进日志）
 				if c.spiderTask != nil {
-					c.spiderTask.MarkLastFail(msg.UserId, msg.Platform, err.Error())
+					c.spiderTask.MarkLastFail(msg.UserId, msg.Platform, task.FormatSpiderLastError(msg.Platform, err))
 				}
 				return err
 			}
