@@ -37,8 +37,8 @@ var (
 	reNowCoderProblemURL  = regexp.MustCompile(`(?i)(?:https?://[^/\s]+)?/acm/problem/(\d+)`)
 	reNowCoderPracticeURL = regexp.MustCompile(`(?i)(?:https?://[^/\s]+)?/practice/([0-9a-fA-F-]{32,36})`)
 	reNowCoderUUID        = regexp.MustCompile(`(?i)^[0-9a-f]{8}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{12}$|^[0-9a-f]{32}$`)
-	// 力扣 titleSlug：小写字母/数字/连字符
-	reLeetCodeSlug = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
+	// 力扣 titleSlug：常规题 two-sum；剑指 Offer II / LCR 为混合大小写短码如 iIQa4I、8Zf90G
+	reLeetCodeSlug = regexp.MustCompile(`^[a-zA-Z0-9]+(?:-[a-zA-Z0-9]+)*$`)
 )
 
 // ParseProblemIdentity 从 SubmitLog 字段解析 (platform, external_id)

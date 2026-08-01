@@ -12,6 +12,15 @@ import (
 	"gorm.io/gorm/clause"
 )
 
+// leetCodeStatsLoc 力扣「同日去重 / 今日 AC」用上海自然日（与产品主用户时区一致）
+var leetCodeStatsLoc = func() *time.Location {
+	loc, err := time.LoadLocation("Asia/Shanghai")
+	if err != nil {
+		return time.FixedZone("CST", 8*3600)
+	}
+	return loc
+}()
+
 // DailyDelta 某用户某平台某日的增量
 type DailyDelta struct {
 	UserID    int64
@@ -91,7 +100,8 @@ func ApplyDailyDeltas(ctx context.Context, db *gorm.DB, deltas []DailyDelta) err
 // FilterNewSubmitLogs 入库前去重（submit_logs (platform, submit_id) 唯一约束为真相）：
 //  1) 本批内按 (platform, submit_id) 去重
 //  2) 去掉 submit_logs 已有（防全量重爬对 daily/user_ac 双计）
-//  3) 力扣 lc-prob：同一用户同一 titleSlug 已有则跳过
+//  3) 力扣 lc-prob：同一用户同一 titleSlug **同一自然日**已有则跳过
+//     （隔日重刷仍入库 → 动态可见 + 今日 AC；同日多次 AC 仍只留一条）
 //
 // 注意：daily_user_stats 是累加语义；必须只对「将新插入」的行 ApplyDaily。
 // OnConflict DoNothing 无法区分新旧行，故在插入前用 submit_logs 过滤。
@@ -196,7 +206,107 @@ func BackfillDailyUserStatsIfEmpty(db *gorm.DB) {
 	log.Infof("daily_user_stats backfill done rows=%d", res.RowsAffected)
 }
 
-// PruneLeetCodeProbDuplicates 清理某用户已入库的重复 lc-prob（同 external_id 只留最新一条）
+// RefreshLeetCodeProbMeta 回写已入库 lc-prob 的 lang / problem 展示字段。
+// 早期实现把 Lang 写死为 "-"、Problem 仅 "{slug} {title}"（LCR 题像 iIQa4I 每日温度）；
+// 重爬时 FilterNew 按 submit_id / titleSlug 去重会跳过，动态永久错乱。
+// 本函数只改展示列，不碰 is_ac / 日统计。
+func RefreshLeetCodeProbMeta(ctx context.Context, db *gorm.DB, fetched []model.SubmitLog) (int64, error) {
+	if db == nil || len(fetched) == 0 {
+		return 0, nil
+	}
+	var updated int64
+	for i := range fetched {
+		l := fetched[i]
+		if l.Platform != "LeetCode" || !strings.HasPrefix(l.SubmitID, "lc-prob-") {
+			continue
+		}
+		lang := strings.TrimSpace(l.Lang)
+		problem := strings.TrimSpace(l.Problem)
+		ext := strings.TrimSpace(l.ExternalID)
+		if lang == "" || lang == "-" {
+			lang = ""
+		}
+		if problem == "" && lang == "" {
+			continue
+		}
+
+		// 1) 同 submit_id：直接补 lang / problem
+		if l.SubmitID != "" {
+			sets := map[string]interface{}{}
+			if lang != "" {
+				sets["lang"] = lang
+			}
+			if problem != "" {
+				sets["problem"] = problem
+			}
+			if len(sets) > 0 {
+				q := db.WithContext(ctx).Model(&model.SubmitLog{}).
+					Where("platform = ? AND user_id = ? AND submit_id = ?", l.Platform, l.UserID, l.SubmitID)
+				// 仅当旧值更差时更新，避免无意义写
+				conds := make([]string, 0, 2)
+				args := make([]interface{}, 0, 2)
+				if lang != "" {
+					conds = append(conds, "(lang IS NULL OR btrim(lang) = '' OR btrim(lang) = '-')")
+				}
+				if problem != "" {
+					conds = append(conds, "(problem IS DISTINCT FROM ?)")
+					args = append(args, problem)
+				}
+				if len(conds) > 0 {
+					res := q.Where(strings.Join(conds, " OR "), args...).Updates(sets)
+					if res.Error != nil {
+						return updated, res.Error
+					}
+					updated += res.RowsAffected
+				}
+			}
+		}
+
+		// 2) 同 titleSlug 已有其它 submit_id（filterLeetCodeProbAlreadyHaveSlug 会拦新行）：
+		//    把保留行的展示字段也修掉
+		if ext == "" || l.UserID == 0 {
+			continue
+		}
+		sets := map[string]interface{}{}
+		if lang != "" {
+			sets["lang"] = lang
+		}
+		if problem != "" {
+			sets["problem"] = problem
+		}
+		if len(sets) == 0 {
+			continue
+		}
+		q := db.WithContext(ctx).Model(&model.SubmitLog{}).
+			Where("platform = ? AND user_id = ? AND submit_id LIKE 'lc-prob-%' AND external_id = ?",
+				l.Platform, l.UserID, ext)
+		if l.SubmitID != "" {
+			q = q.Where("submit_id <> ?", l.SubmitID)
+		}
+		conds := make([]string, 0, 2)
+		args := make([]interface{}, 0, 2)
+		if lang != "" {
+			conds = append(conds, "(lang IS NULL OR btrim(lang) = '' OR btrim(lang) = '-')")
+		}
+		if problem != "" {
+			conds = append(conds, "(problem IS DISTINCT FROM ?)")
+			args = append(args, problem)
+		}
+		if len(conds) == 0 {
+			continue
+		}
+		res := q.Where(strings.Join(conds, " OR "), args...).Updates(sets)
+		if res.Error != nil {
+			return updated, res.Error
+		}
+		updated += res.RowsAffected
+	}
+	return updated, nil
+}
+
+// PruneLeetCodeProbDuplicates 清理某用户「同一自然日」重复的 lc-prob（同 external_id 只留最新）。
+// 隔日重刷保留多条，供动态与今日 AC；同日 recentAC 多 submissionId 仍压成一条。
+// 自然日按 Asia/Shanghai，与站内「今日 AC」口径一致。
 func PruneLeetCodeProbDuplicates(ctx context.Context, db *gorm.DB, userID int64) (int64, error) {
 	if db == nil || userID == 0 {
 		return 0, nil
@@ -212,6 +322,7 @@ func PruneLeetCodeProbDuplicates(ctx context.Context, db *gorm.DB, userID int64)
 		  AND b.submit_id LIKE 'lc-prob-%'
 		  AND a.external_id IS NOT NULL AND a.external_id <> ''
 		  AND a.external_id = b.external_id
+		  AND ((a.time AT TIME ZONE 'Asia/Shanghai')::date = (b.time AT TIME ZONE 'Asia/Shanghai')::date)
 		  AND (a.time < b.time OR (a.time = b.time AND a.id < b.id))
 	`, userID)
 	return res.RowsAffected, res.Error
@@ -239,14 +350,25 @@ func dedupeSubmitLogsBySubmitID(logs []model.SubmitLog) []model.SubmitLog {
 	return out
 }
 
-// filterLeetCodeProbAlreadyHaveSlug 去掉「该用户该 titleSlug 已有 lc-prob-*」的候选
+// filterLeetCodeProbAlreadyHaveSlug 去掉「该用户该 titleSlug 在同一自然日已有 lc-prob」的候选。
+//
+// 历史 bug：按 lifetime slug 去重 → 隔日重刷（如 7/12 过 329、8/1 再过）被整行丢弃，
+// 日历仍计「今日提交」、动态与「今日 AC」却看不到。现改为同日去重；隔日放行。
+// 不再用 user_ac_problems 终身拦截（生涯去重仍由 user_ac_problems 自身 OnConflict 保证）。
 func filterLeetCodeProbAlreadyHaveSlug(ctx context.Context, db *gorm.DB, logs []model.SubmitLog) ([]model.SubmitLog, error) {
-	type ukey struct {
+	type dayKey struct {
 		uid int64
 		ext string
+		day string // YYYY-MM-DD in submit local time
 	}
-	need := make(map[ukey]struct{})
+	type cand struct {
+		idx int
+		ext string
+		day string
+	}
+	var cands []cand
 	userSet := make(map[int64]struct{})
+	extSet := make(map[string]struct{})
 	for i := range logs {
 		l := &logs[i]
 		if l.Platform != "LeetCode" || !strings.HasPrefix(l.SubmitID, "lc-prob-") {
@@ -264,11 +386,15 @@ func filterLeetCodeProbAlreadyHaveSlug(ctx context.Context, db *gorm.DB, logs []
 		if l.ExternalID == "" {
 			l.ExternalID = ext
 		}
-		k := ukey{uid: l.UserID, ext: ext}
-		need[k] = struct{}{}
+		day := ""
+		if !l.Time.IsZero() {
+			day = l.Time.In(leetCodeStatsLoc).Format("2006-01-02")
+		}
+		cands = append(cands, cand{idx: i, ext: ext, day: day})
 		userSet[l.UserID] = struct{}{}
+		extSet[ext] = struct{}{}
 	}
-	if len(need) == 0 {
+	if len(cands) == 0 {
 		return logs, nil
 	}
 
@@ -276,79 +402,62 @@ func filterLeetCodeProbAlreadyHaveSlug(ctx context.Context, db *gorm.DB, logs []
 	for u := range userSet {
 		uids = append(uids, u)
 	}
-	exts := make([]string, 0, len(need))
-	extSeen := make(map[string]struct{}, len(need))
-	for k := range need {
-		if _, ok := extSeen[k.ext]; ok {
-			continue
-		}
-		extSeen[k.ext] = struct{}{}
-		exts = append(exts, k.ext)
+	exts := make([]string, 0, len(extSet))
+	for e := range extSet {
+		exts = append(exts, e)
 	}
 
+	// 已有：user + external_id + 自然日（上海）
+	have := make(map[dayKey]struct{}, len(cands))
 	type row struct {
-		UserID     int64  `gorm:"column:user_id"`
-		ExternalID string `gorm:"column:external_id"`
+		UserID     int64     `gorm:"column:user_id"`
+		ExternalID string    `gorm:"column:external_id"`
+		Time       time.Time `gorm:"column:time"`
 	}
 	var rows []row
 	if err := db.WithContext(ctx).Model(&model.SubmitLog{}).
-		Select("DISTINCT user_id, external_id").
+		Select("user_id, external_id, time").
 		Where("platform = ? AND submit_id LIKE ? AND user_id IN ? AND external_id IN ?",
 			"LeetCode", "lc-prob-%", uids, exts).
 		Find(&rows).Error; err != nil {
 		return nil, err
 	}
-	have := make(map[ukey]struct{}, len(rows))
 	for _, r := range rows {
-		have[ukey{uid: r.UserID, ext: r.ExternalID}] = struct{}{}
-	}
-	// 同题已在 user_ac_problems（e:LeetCode:slug）也视为已有
-	if db.Migrator().HasTable(&model.UserACProblem{}) {
-		keys := make([]string, 0, len(need))
-		for k := range need {
-			keys = append(keys, "e:LeetCode:"+k.ext)
+		if r.Time.IsZero() || r.ExternalID == "" {
+			continue
 		}
-		type acRow struct {
-			UserID     int64  `gorm:"column:user_id"`
-			ProblemKey string `gorm:"column:problem_key"`
-		}
-		var acRows []acRow
-		if err := db.WithContext(ctx).Model(&model.UserACProblem{}).
-			Select("user_id, problem_key").
-			Where("user_id IN ? AND problem_key IN ?", uids, keys).
-			Find(&acRows).Error; err == nil {
-			for _, r := range acRows {
-				ext := strings.TrimPrefix(r.ProblemKey, "e:LeetCode:")
-				if ext != r.ProblemKey {
-					have[ukey{uid: r.UserID, ext: ext}] = struct{}{}
-				}
-			}
-		}
+		day := r.Time.In(leetCodeStatsLoc).Format("2006-01-02")
+		have[dayKey{uid: r.UserID, ext: r.ExternalID, day: day}] = struct{}{}
 	}
 
-	batchSeen := make(map[ukey]struct{}, len(need))
-	out := make([]model.SubmitLog, 0, len(logs))
-	for i := range logs {
-		l := &logs[i]
-		if l.Platform == "LeetCode" && strings.HasPrefix(l.SubmitID, "lc-prob-") {
-			ext := strings.TrimSpace(l.ExternalID)
-			if ext == "" {
-				if f := strings.Fields(l.Problem); len(f) > 0 {
-					ext = f[0]
-				}
-			}
-			if ext != "" {
-				k := ukey{uid: l.UserID, ext: ext}
-				if _, ok := have[k]; ok {
-					continue
-				}
-				if _, ok := batchSeen[k]; ok {
-					continue
-				}
-				batchSeen[k] = struct{}{}
+	batchSeen := make(map[dayKey]struct{}, len(cands))
+	skipIdx := make(map[int]struct{}, len(cands))
+	for _, c := range cands {
+		l := &logs[c.idx]
+		k := dayKey{uid: l.UserID, ext: c.ext, day: c.day}
+		if c.day != "" {
+			if _, ok := have[k]; ok {
+				skipIdx[c.idx] = struct{}{}
+				continue
 			}
 		}
-		out = append(out, *l)
+		// 本批同日同 slug 只留一条（recentAC 常对一题返回多次）
+		if _, ok := batchSeen[k]; ok {
+			skipIdx[c.idx] = struct{}{}
+			continue
+		}
+		batchSeen[k] = struct{}{}
+	}
+
+	if len(skipIdx) == 0 {
+		return logs, nil
+	}
+	out := make([]model.SubmitLog, 0, len(logs)-len(skipIdx))
+	for i := range logs {
+		if _, skip := skipIdx[i]; skip {
+			continue
+		}
+		out = append(out, logs[i])
 	}
 	return out, nil
 }

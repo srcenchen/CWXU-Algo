@@ -53,12 +53,13 @@ type lcProfileResp struct {
 type lcRecentACResp struct {
 	Data struct {
 		RecentACSubmissions []struct {
-			SubmissionID int64 `json:"submissionId"`
-			SubmitTime   int64 `json:"submitTime"`
+			SubmissionID int64  `json:"submissionId"`
+			SubmitTime   int64  `json:"submitTime"`
+			Lang         string `json:"lang"` // 公开 recentAC 有语言（如 C++ / Java / Python3）
 			Question     *struct {
-				TitleSlug         string `json:"titleSlug"`
-				Title             string `json:"title"`
-				TranslatedTitle   string `json:"translatedTitle"`
+				TitleSlug          string `json:"titleSlug"`
+				Title              string `json:"title"`
+				TranslatedTitle    string `json:"translatedTitle"`
 				QuestionFrontendID string `json:"questionFrontendId"`
 			} `json:"question"`
 		} `json:"recentACSubmissions"`
@@ -77,7 +78,9 @@ type lcRecentAC struct {
 	SubmissionID int64
 	SubmitTime   time.Time
 	TitleSlug    string
-	Title        string // 展示用（中文优先）
+	Title        string // 展示用（中文优先；含 frontendId 前缀）
+	Lang         string
+	FrontendID   string
 }
 
 func (p NewLeetCode) Name() string {
@@ -172,20 +175,19 @@ func (p NewLeetCode) FetchSubmitLog(ctx context.Context, userId int64, username 
 
 	// 3) 最近通过 → 真实题级 AC（进题库 / 动态 / 提交历史；不计提交数以免与日历双计）
 	//    公开接口常对同一题返回多次 AC → 先按 submissionId / titleSlug 去重（保留最新）。
-	//    无源码 → 状态固定 AC。
+	//    无源码 → 状态固定 AC；语言取公开字段 lang（旧实现误写死 "-"）。
+	//    Problem 形如 "{titleSlug} {frontendId}. {title}"，首段供 parseLeetCode 取 slug
+	//   （LCR 题 titleSlug 为 iIQa4I 等短码，须保留；展示优先靠 frontendId / 题库回填）。
 	for _, r := range dedupeLeetCodeRecentAC(recent) {
-		title := r.Title
-		if title == "" {
-			title = r.TitleSlug
-		}
+		problem, lang := formatLeetCodeRecentProblem(r)
 		res = append(res, model.SubmitLog{
 			UserID:     userId,
 			Platform:   spider.LeetCode,
 			SubmitID:   fmt.Sprintf("lc-prob-%d", r.SubmissionID),
 			Contest:    "leetcode",
-			Problem:    fmt.Sprintf("%s %s", r.TitleSlug, title),
+			Problem:    problem,
 			ExternalID: r.TitleSlug,
-			Lang:       "-", // 公开最近通过无语言/代码
+			Lang:       lang,
 			Status:     "AC",
 			Time:       r.SubmitTime,
 		})
@@ -320,6 +322,24 @@ func fetchLeetCodeProgress(ctx context.Context, username string) (lcProgress, er
 	}, nil
 }
 
+// formatLeetCodeRecentProblem 组装 lc-prob 的 Problem / Lang。
+// Problem 必须以 titleSlug 开头，供 parseLeetCode 解析 external_id；
+// 有 questionFrontendId 时写入「LCR 038. 每日温度」式可读标题，避免动态里只剩 iIQa4I。
+func formatLeetCodeRecentProblem(r lcRecentAC) (problem, lang string) {
+	title := r.Title
+	if title == "" {
+		title = r.TitleSlug
+	}
+	if r.FrontendID != "" {
+		title = r.FrontendID + ". " + title
+	}
+	lang = strings.TrimSpace(r.Lang)
+	if lang == "" {
+		lang = "-"
+	}
+	return fmt.Sprintf("%s %s", r.TitleSlug, title), lang
+}
+
 // dedupeLeetCodeRecentAC 同一批最近通过：submissionId 去重 + 同一 titleSlug 只留最新一条
 // API 列表通常已按时间倒序；同 slug 保留先出现的（更新）。
 func dedupeLeetCodeRecentAC(in []lcRecentAC) []lcRecentAC {
@@ -355,6 +375,7 @@ func fetchLeetCodeRecentAC(ctx context.Context, username string) ([]lcRecentAC, 
 			recentACSubmissions(userSlug: $userSlug) {
 				submissionId
 				submitTime
+				lang
 				question {
 					titleSlug
 					title
@@ -413,6 +434,8 @@ func fetchLeetCodeRecentAC(ctx context.Context, username string) ([]lcRecentAC, 
 			SubmitTime:   t,
 			TitleSlug:    item.Question.TitleSlug,
 			Title:        title,
+			Lang:         strings.TrimSpace(item.Lang),
+			FrontendID:   strings.TrimSpace(item.Question.QuestionFrontendID),
 		})
 	}
 	return out, nil

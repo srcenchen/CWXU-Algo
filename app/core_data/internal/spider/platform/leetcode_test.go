@@ -163,6 +163,34 @@ func TestDedupeLeetCodeRecentAC(t *testing.T) {
 	}
 }
 
+func TestFormatLeetCodeRecentProblem(t *testing.T) {
+	// 常规题：slug + frontendId + 中文名；带语言
+	p, lang := formatLeetCodeRecentProblem(lcRecentAC{
+		TitleSlug:  "two-sum",
+		Title:      "两数之和",
+		FrontendID: "1",
+		Lang:       "C++",
+	})
+	if p != "two-sum 1. 两数之和" || lang != "C++" {
+		t.Fatalf("regular got problem=%q lang=%q", p, lang)
+	}
+	// LCR：混合大小写 slug + LCR 编号（不再裸露 iIQa4I 当「题号」）
+	p, lang = formatLeetCodeRecentProblem(lcRecentAC{
+		TitleSlug:  "iIQa4I",
+		Title:      "每日温度",
+		FrontendID: "LCR 038",
+		Lang:       "Java",
+	})
+	if p != "iIQa4I LCR 038. 每日温度" || lang != "Java" {
+		t.Fatalf("LCR got problem=%q lang=%q", p, lang)
+	}
+	// 无 frontendId / 无 lang 时兜底
+	p, lang = formatLeetCodeRecentProblem(lcRecentAC{TitleSlug: "8Zf90G", Title: "逆波兰表达式求值"})
+	if p != "8Zf90G 逆波兰表达式求值" || lang != "-" {
+		t.Fatalf("fallback got problem=%q lang=%q", p, lang)
+	}
+}
+
 func TestLeetCodeFetchContestLogLive(t *testing.T) {
 	p := NewLeetCode{}
 	// 已知有参赛记录的 userSlug

@@ -170,6 +170,15 @@ func (uc *SpiderUseCase) fetchAndSave(fetchCtx context.Context, userId int64, pl
 	} else if nRefresh > 0 {
 		log.Infof("Spider: refreshed pending status user=%d platform=%s n=%d", userId, plat.Platform, nRefresh)
 	}
+	// 力扣：已入库 lc-prob 补 lang / 可读标题（早期 Lang="-"、LCR 乱码 slug）
+	if plat.Platform == spider.LeetCode {
+		if nMeta, merr := dal.RefreshLeetCodeProbMeta(ctx, uc.data.DB, tmp); merr != nil {
+			log.Warnf("Spider: refresh leetcode meta user=%d: %v", userId, merr)
+		} else if nMeta > 0 {
+			log.Infof("Spider: refreshed leetcode lc-prob meta user=%d n=%d", userId, nMeta)
+			nRefresh += nMeta
+		}
+	}
 
 	// submit_logs 去重：已有 submit_id 不再累加预聚合（防全量重爬双计）
 	neu, err := dal.FilterNewSubmitLogs(ctx, uc.data.DB, tmp)
