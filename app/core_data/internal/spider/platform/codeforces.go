@@ -2,12 +2,10 @@ package platform
 
 import (
 	"context"
-	"cwxu-algo/app/common/utils/ojhttp"
 	"cwxu-algo/app/core_data/internal/data/model"
 	"cwxu-algo/app/core_data/internal/spider"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"sort"
@@ -134,25 +132,13 @@ func fetchCFUserStatusPaged(ctx context.Context, username string, needAll bool) 
 			return nil, err
 		}
 		from := page*cfStatusPageSize + 1
-		apiURL := fmt.Sprintf(
-			"https://codeforces.com/api/user.status?handle=%s&from=%d&count=%d",
+		path := fmt.Sprintf(
+			"/api/user.status?handle=%s&from=%d&count=%d",
 			handleQ, from, cfStatusPageSize,
 		)
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil)
+		body, _, err := cfGetJSON(ctx, path)
 		if err != nil {
 			return nil, err
-		}
-		resp, err := ojhttp.Do(req)
-		if err != nil {
-			return nil, fmt.Errorf("发起http请求失败: %s", err.Error())
-		}
-		body, err := io.ReadAll(resp.Body)
-		resp.Body.Close()
-		if err != nil {
-			return nil, fmt.Errorf("解析body错误: %s", err.Error())
-		}
-		if resp.StatusCode != http.StatusOK {
-			return nil, cfHTTPStatusErr("user.status", resp.StatusCode, body)
 		}
 		var cfResp CFResponse
 		if err := json.Unmarshal(body, &cfResp); err != nil {
@@ -316,18 +302,10 @@ func (p NewCodeforces) FetchContestLog(userId int64, username string, needAll bo
 }
 
 func fetchCFUserRating(username string) ([]cfRatingEntry, error) {
-	apiURL := fmt.Sprintf("https://codeforces.com/api/user.rating?handle=%s", url.QueryEscape(username))
-	resp, err := ojhttp.Get(apiURL)
+	path := fmt.Sprintf("/api/user.rating?handle=%s", url.QueryEscape(username))
+	body, _, err := cfGetJSON(context.Background(), path)
 	if err != nil {
 		return nil, fmt.Errorf("codeforces user.rating 请求失败: %w", err)
-	}
-	defer resp.Body.Close()
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
-	}
-	if resp.StatusCode != http.StatusOK {
-		return nil, cfHTTPStatusErr("user.rating", resp.StatusCode, body)
 	}
 	var out struct {
 		Status  string          `json:"status"`
@@ -515,18 +493,9 @@ func (p NewCodeforces) FetchContestDetails(userId int64, username string, needAl
 }
 
 func fetchCFContestListMap() (map[int]cfContestListEntry, error) {
-	apiURL := "https://codeforces.com/api/contest.list?gym=false"
-	resp, err := ojhttp.Get(apiURL)
+	body, _, err := cfGetJSON(context.Background(), "/api/contest.list?gym=false")
 	if err != nil {
 		return nil, err
-	}
-	defer resp.Body.Close()
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
-	}
-	if resp.StatusCode != http.StatusOK {
-		return nil, cfHTTPStatusErr("contest.list", resp.StatusCode, body)
 	}
 	var out struct {
 		Status string               `json:"status"`
@@ -555,18 +524,10 @@ func (p NewCodeforces) FetchRating(username string) (int, bool, error) {
 	if username == "" {
 		return 0, false, fmt.Errorf("codeforces handle 为空")
 	}
-	apiURL := fmt.Sprintf("https://codeforces.com/api/user.info?handles=%s", url.QueryEscape(username))
-	resp, err := ojhttp.Get(apiURL)
+	path := fmt.Sprintf("/api/user.info?handles=%s", url.QueryEscape(username))
+	body, _, err := cfGetJSON(context.Background(), path)
 	if err != nil {
 		return 0, false, fmt.Errorf("codeforces rating 请求失败: %w", err)
-	}
-	defer resp.Body.Close()
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return 0, false, err
-	}
-	if resp.StatusCode != http.StatusOK {
-		return 0, false, cfHTTPStatusErr("user.info", resp.StatusCode, body)
 	}
 	var out struct {
 		Status string `json:"status"`
