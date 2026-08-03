@@ -1671,14 +1671,14 @@ func (s *OrgService) handleSetRole(ctx khttp.Context) error {
 		// 卸任某一范围时，用 member 作目标档再验一次（允许卸下级领导职务）
 		if !req.RemoveScope {
 			writeJSON(ctx.Response(), 403, map[string]interface{}{
-				"code": 1, "message": "只能任命低于自己的角色，且不能修改同级或更高身份的成员",
+				"code": 1, "message": "无权任命该角色或修改该成员（组织管理员可任命全部；其余只能任命低于自己的角色）",
 			})
 			return nil
 		}
 		if !model.CanAppointOrgRole(actorRole, targetCurrent, model.OrgRoleCaptain) &&
 			!model.CanAppointOrgRole(actorRole, targetCurrent, model.OrgRoleGroupLeader) {
 			writeJSON(ctx.Response(), 403, map[string]interface{}{
-				"code": 1, "message": "只能任命低于自己的角色，且不能修改同级或更高身份的成员",
+				"code": 1, "message": "无权任命该角色或修改该成员（组织管理员可任命全部；其余只能任命低于自己的角色）",
 			})
 			return nil
 		}

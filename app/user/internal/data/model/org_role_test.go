@@ -18,6 +18,16 @@ func TestOrgRoleRankOrder(t *testing.T) {
 }
 
 func TestCanAppointOrgRole(t *testing.T) {
+	// 组织管理员可任命全部角色（含同级 org_admin）
+	if !CanAppointOrgRole(OrgRoleOrgAdmin, OrgRoleMember, OrgRoleOrgAdmin) {
+		t.Fatal("org_admin should appoint org_admin")
+	}
+	if !CanAppointOrgRole(OrgRoleOrgAdmin, OrgRoleMember, OrgRoleCoach) {
+		t.Fatal("org_admin should appoint coach")
+	}
+	if !CanAppointOrgRole(OrgRoleOrgAdmin, OrgRoleOrgAdmin, OrgRoleMember) {
+		t.Fatal("org_admin should demote peer org_admin")
+	}
 	// 教练可任命组长/队长/成员
 	if !CanAppointOrgRole(OrgRoleCoach, OrgRoleMember, OrgRoleCaptain) {
 		t.Fatal("coach should appoint captain")

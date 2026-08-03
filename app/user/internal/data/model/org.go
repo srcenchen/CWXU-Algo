@@ -131,16 +131,22 @@ func RoleNeedsScope(role string) (scopeType string, ok bool) {
 	}
 }
 
-// CanAppointOrgRole 操作者能否把目标设为 newRole（严格低于自己；站管另议）
+// CanAppointOrgRole 操作者能否把目标设为 newRole。
 // actorRole / targetCurrentRole / newRole 均为 org_members.role。
 // 队长及以下无任命权；组长及以上才可任命。
-// 叠加领导职务：给已是组长的人再加队长、或再加另一组组长时，
-// 只要目标当前等级 < 操作者，且新职务等级 < 操作者即可（不要求降权）。
+// 组织管理员可任命本组织全部角色（含同级 org_admin），并可调整其他组织管理员
+// （最后一位 org_admin 的降权由业务层拦截）。站管在 service 层另开通道。
+// 其余角色：只能任命/改动严格低于自己的职务（教练不可动组织管理员/其他教练）。
+// 叠加领导职务：给已是组长的人再加队长时，目标与新职务等级均须 < 操作者。
 func CanAppointOrgRole(actorRole, targetCurrentRole, newRole string) bool {
 	ar := OrgRoleRank(actorRole)
 	// 仅组长及以上可任命
 	if ar < OrgRoleRankGroupLeader {
 		return false
+	}
+	// 组织管理员：本组织全角色可任命（含同级）
+	if actorRole == OrgRoleOrgAdmin {
+		return true
 	}
 	// 不能任命同级或更高职务
 	if OrgRoleRank(newRole) >= ar {
