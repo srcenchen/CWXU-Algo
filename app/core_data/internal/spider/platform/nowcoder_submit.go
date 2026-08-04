@@ -4,13 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
 
-	"cwxu-algo/app/common/utils/ojhttp"
 	"cwxu-algo/app/core_data/internal/data/model"
 	"cwxu-algo/app/core_data/internal/spider"
 
@@ -84,25 +82,18 @@ func getSubLogResp(url string) (*goquery.Document, error) {
 	return getSubLogRespCtx(context.Background(), url)
 }
 
-// getSubLogRespCtx 同 getSubLogResp，ctx 透传到 HTTP 请求（爬虫超时可中断）
-func getSubLogRespCtx(ctx context.Context, url string) (*goquery.Document, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return nil, err
-	}
-	resp, err := ojhttp.Do(req)
+// getSubLogRespCtx 同 getSubLogResp，ctx 透传到 HTTP 请求（爬虫超时可中断）。
+// 使用浏览器态 Header；WAF 挑战页直接报错，避免空表被当成「无提交」。
+func getSubLogRespCtx(ctx context.Context, rawURL string) (*goquery.Document, error) {
+	resp, err := nowcoderGet(ctx, rawURL, true)
 	if err != nil {
 		return nil, fmt.Errorf("发起http请求失败: %s", err.Error())
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("请求响应码错误 %d, %s", resp.StatusCode, string(body))
+	body, err := nowcoderReadOK(resp, 4<<20)
+	if err != nil {
+		return nil, err
 	}
-	doc, err := goquery.NewDocumentFromReader(resp.Body)
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(string(body)))
 	if err != nil {
 		return nil, fmt.Errorf("解析html失败")
 	}
@@ -230,18 +221,19 @@ func fetchTrainingHistoryPage(ctx context.Context, uid string, page, pageSize in
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	body := fmt.Sprintf(`{"pageNo":%d,"pageSize":%d,"userId":%s}`, page, pageSize, uid)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, nowcoderTrainingHistoryURL, strings.NewReader(body))
+	payload := fmt.Sprintf(`{"pageNo":%d,"pageSize":%d,"userId":%s}`, page, pageSize, uid)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, nowcoderTrainingHistoryURL, strings.NewReader(payload))
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := ojhttp.Do(req)
+	req.Header.Set("Origin", "https://www.nowcoder.com")
+	req.Header.Set("Referer", "https://www.nowcoder.com/")
+	resp, err := nowcoderDo(req, false)
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
-	bs, err := io.ReadAll(resp.Body)
+	bs, err := nowcoderReadOK(resp, 4<<20)
 	if err != nil {
 		return nil, err
 	}

@@ -40,14 +40,14 @@ func TestFetchRating_LeetCode(t *testing.T) {
 }
 
 func TestFetchRating_NowCoder(t *testing.T) {
-	// 示例 UID 来自绑定引导；若账号变更可能无 rating
+	// 978880410 = aoralsfout，公开主页有 Rating；WAF 拦截时应返回 err，不能静默 has=false
 	r, has, err := NewNowCoder{}.FetchRating("978880410")
 	if err != nil {
-		t.Skipf("network/API: %v", err)
+		t.Fatalf("FetchRating NowCoder: %v (若持续 WAF，检查浏览器态 UA)", err)
 	}
 	t.Logf("NowCoder 978880410 has=%v r=%d", has, r)
-	if has && r <= 0 {
-		t.Fatalf("rating should be positive when hasRating: %d", r)
+	if !has || r < 100 {
+		t.Fatalf("expected real rating for 978880410, has=%v r=%d (silent empty = WAF/parse bug)", has, r)
 	}
 }
 

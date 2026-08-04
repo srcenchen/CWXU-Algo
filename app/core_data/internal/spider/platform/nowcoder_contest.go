@@ -1,16 +1,15 @@
 package platform
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
 	"time"
 
-	"cwxu-algo/app/common/utils/ojhttp"
 	"cwxu-algo/app/core_data/internal/data/model"
 	"cwxu-algo/app/core_data/internal/spider"
 )
@@ -191,16 +190,11 @@ func FetchNowCoderContestJoinedHistoryPage(uid string, page int) ([]byte, error)
 	}
 	u := fmt.Sprintf("%s?token=&uid=%s&page=%d&onlyJoinedFilter=true&searchContestName=&onlyRatingFilter=false&contestEndFilter=true",
 		nowcoderContestJoinedHistoryURL, url.QueryEscape(uid), page)
-	resp, err := ojhttp.Get(u)
+	resp, err := nowcoderGet(context.Background(), u, false)
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
-	if err != nil {
-		return nil, err
-	}
-	return body, nil
+	return nowcoderReadOK(resp, 4<<20)
 }
 
 // FetchContestLog 从参赛历史 API 拉取比赛记录；每场带真实 EndTime（非固定 3h）。

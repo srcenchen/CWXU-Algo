@@ -1,15 +1,12 @@
 package platform
 
 import (
+	"context"
 	"fmt"
-	"io"
-	"net/http"
 	"regexp"
 	"strconv"
 	"strings"
 	"time"
-
-	"cwxu-algo/app/common/utils/ojhttp"
 )
 
 // 牛客比赛页内嵌 JSON：startTime/endTime 多为毫秒时间戳
@@ -83,19 +80,14 @@ func FetchNowCoderContestTimes(contestID string) (startSec, endSec int64, name s
 	if contestID == "" {
 		return 0, 0, "", fmt.Errorf("empty contest id")
 	}
-	url := nowcoderContestPageURLFmt + contestID
-	resp, err := ojhttp.Get(url)
+	rawURL := nowcoderContestPageURLFmt + contestID
+	resp, err := nowcoderGet(context.Background(), rawURL, true)
 	if err != nil {
 		return 0, 0, "", err
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-		return 0, 0, "", fmt.Errorf("nowcoder contest %s status %d: %s", contestID, resp.StatusCode, string(body))
-	}
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
+	body, err := nowcoderReadOK(resp, 2<<20)
 	if err != nil {
-		return 0, 0, "", err
+		return 0, 0, "", fmt.Errorf("nowcoder contest %s: %w", contestID, err)
 	}
 	return ParseNowCoderContestTimesHTML(string(body))
 }
