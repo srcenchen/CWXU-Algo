@@ -161,6 +161,7 @@ func TestParseProblemURL_CommonOJs(t *testing.T) {
 		{"https://qoj.ac/problem/100", "QOJ", "100"},
 		{"https://loj.ac/p/6582", "LOJ", "6582"},
 		{"https://uoj.ac/problem/1", "UOJ", "1"},
+		{"http://poj.org/problem?id=1000", "POJ", "1000"},
 	}
 	for _, c := range cases {
 		p, err := biz.ParseProblemURL(c.url)

@@ -66,7 +66,16 @@ func sanitizeProblemURLRaw(raw string) string {
 		return raw
 	}
 	// 丢弃 query / fragment（追踪参数不影响 path 身份，但干扰部分平台）
-	u.RawQuery = ""
+	// POJ 题号在 ?id= 里，必须保留
+	hostLower := strings.ToLower(u.Host)
+	hostLower = strings.TrimPrefix(hostLower, "www.")
+	keepQuery := url.Values{}
+	if strings.Contains(hostLower, "poj.org") {
+		if id := strings.TrimSpace(u.Query().Get("id")); id != "" {
+			keepQuery.Set("id", id)
+		}
+	}
+	u.RawQuery = keepQuery.Encode()
 	u.Fragment = ""
 	// 规范化 path：去多余尾斜杠（根路径除外）
 	if p := u.Path; len(p) > 1 && strings.HasSuffix(p, "/") {
@@ -257,8 +266,39 @@ func ParseProblemURL(raw string) (*ParsedProblem, error) {
 		return nil, fmt.Errorf("unrecognized uoj url")
 	}
 
+	// POJ（北大 OJ）：http://poj.org/problem?id=1000
+	if strings.Contains(host, "poj.org") {
+		id := strings.TrimSpace(u.Query().Get("id"))
+		if id == "" || !isDigitsOnly(id) {
+			if m := reURLUOJ.FindStringSubmatch(path); m != nil {
+				id = m[1]
+			}
+		}
+		if id != "" && isDigitsOnly(id) {
+			return &ParsedProblem{
+				Platform:   spider.POJ,
+				ExternalID: id,
+				Title:      "#" + id, // 占位；题面爬取后回填「#id. 真名」
+				URL:        "http://poj.org/problem?id=" + id,
+			}, nil
+		}
+		return nil, fmt.Errorf("unrecognized poj url")
+	}
+
 	_ = full
 	return nil, fmt.Errorf("unsupported problem url host=%s", host)
+}
+
+func isDigitsOnly(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, c := range s {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // resolveNowCoderContestProblemURL 比赛题页 → 数字 problemId（与 ensure 同源 problem-list）。

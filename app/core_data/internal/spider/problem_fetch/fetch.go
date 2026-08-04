@@ -23,7 +23,7 @@ type FetchedContent struct {
 }
 
 // Fetch 按平台爬取题面 Markdown。
-// 已支持：CodeForces / AtCoder / LuoGu / NowCoder / QOJ / LeetCode / UOJ；
+// 已支持：CodeForces / AtCoder / LuoGu / NowCoder / QOJ / LeetCode / UOJ / POJ；
 // LOJ 为 SPA，走 generic 或占位（提交 identity 已可入库）。
 func Fetch(platform, externalID, problemURL string) (*FetchedContent, error) {
 	return FetchWithFallbacks(platform, externalID, problemURL, nil)
@@ -47,6 +47,8 @@ func FetchWithFallbacks(platform, externalID, problemURL string, fallbackURLs []
 		return fetchNowCoder(externalID, problemURL, fallbackURLs...)
 	case "LeetCode":
 		return fetchLeetCode(externalID, problemURL)
+	case "POJ":
+		return fetchPOJ(externalID, problemURL)
 	case "LOJ":
 		// LibreOJ 前端 SPA；公开页无稳定服务端 HTML 题面，generic 往往只有壳
 		if problemURL == "" && externalID != "" {
@@ -1746,6 +1748,388 @@ func leetcodeHTMLToMD(title, html string) string {
 	b.WriteString("\n\n")
 	b.WriteString(body)
 	return collapseBlankLines(b.String())
+}
+
+// POJ 题面页结构（经典表格式 HTML，无需登录）：
+//
+//	<div class="ptt">A+B Problem</div>
+//	<div class="plm">Time Limit / Memory Limit …</div>
+//	<p class="pst">Description</p><div class="ptx">…</div>
+//	<p class="pst">Sample Input</p><pre class="sio">…</pre>
+//
+// 标题优先 .ptt；<title>「1000 -- A+B Problem」作兜底。
+const pojBaseURL = "http://poj.org"
+
+var (
+	rePOJHTMLTitle = regexp.MustCompile(`(?i)^\s*(\d+)\s*[-–—]+\s*(.+?)\s*$`)
+	rePOJTitleNum  = regexp.MustCompile(`(?i)^#?\s*(\d+)\s*[\.．]?\s*(.*)$`)
+)
+
+// pojSectionHeading 将 POJ 英文小节名映射为中文 Markdown 标题（与 CF 等站内风格一致）。
+func pojSectionHeading(raw string) string {
+	s := normalizeSpace(raw)
+	switch strings.ToLower(s) {
+	case "description":
+		return "题目描述"
+	case "input":
+		return "输入"
+	case "output":
+		return "输出"
+	case "sample input":
+		return "样例输入"
+	case "sample output":
+		return "样例输出"
+	case "hint":
+		return "提示"
+	case "source":
+		return "来源"
+	default:
+		if s == "" {
+			return ""
+		}
+		return s
+	}
+}
+
+// normalizePOJTitle 规范题目标题为「#题号. 题名」。
+func normalizePOJTitle(raw, externalID string) string {
+	t := normalizeSpace(raw)
+	if t == "" || isPOJBadTitle(t) {
+		if externalID != "" {
+			return "#" + externalID
+		}
+		return ""
+	}
+	// 「1000 -- A+B Problem」来自 <title>
+	if m := rePOJHTMLTitle.FindStringSubmatch(t); m != nil {
+		num, name := m[1], strings.TrimSpace(m[2])
+		if name != "" && !isPOJBadTitle(name) {
+			return "#" + num + ". " + name
+		}
+		return "#" + num
+	}
+	// 已是「#1000. Name」或「1000. Name」
+	if m := rePOJTitleNum.FindStringSubmatch(t); m != nil {
+		num, rest := m[1], strings.TrimSpace(m[2])
+		rest = strings.TrimLeft(rest, ".-–—． ")
+		if rest != "" && !isPOJBadTitle(rest) {
+			return "#" + num + ". " + rest
+		}
+		// 纯数字标题：若有更好 externalID 用它；否则只留题号
+		if externalID != "" && externalID != num {
+			return "#" + externalID
+		}
+		return "#" + num
+	}
+	if externalID != "" {
+		return "#" + externalID + ". " + t
+	}
+	return t
+}
+
+func isPOJBadTitle(title string) bool {
+	t := strings.ToLower(normalizeSpace(title))
+	t = strings.Trim(t, ".-–—_|")
+	switch t {
+	case "", "error", "problem", "problem set", "poj", "online judge",
+		"problem status list", "just a moment...":
+		return true
+	default:
+		return false
+	}
+}
+
+// absolutizePOJURL 把相对资源（images/xxx.jpg）补成 http://poj.org/...
+func absolutizePOJURL(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	lower := strings.ToLower(raw)
+	if strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://") || strings.HasPrefix(lower, "data:") {
+		return raw
+	}
+	if strings.HasPrefix(raw, "//") {
+		return "http:" + raw
+	}
+	if strings.HasPrefix(raw, "/") {
+		return pojBaseURL + raw
+	}
+	return pojBaseURL + "/" + raw
+}
+
+// pojInlineToMD 把 .ptx / pre.sio 内 HTML 转成 Markdown（br/pre/img/sup/公式风格标签）。
+func pojInlineToMD(s *goquery.Selection) string {
+	if s == nil || s.Length() == 0 {
+		return ""
+	}
+	var b strings.Builder
+	s.Contents().Each(func(_ int, n *goquery.Selection) {
+		name := goquery.NodeName(n)
+		switch name {
+		case "#text":
+			b.WriteString(n.Text())
+		case "br":
+			b.WriteString("\n")
+		case "pre":
+			code := strings.TrimRight(n.Text(), "\n")
+			b.WriteString("\n```\n")
+			b.WriteString(code)
+			b.WriteString("\n```\n")
+		case "img":
+			src, _ := n.Attr("src")
+			alt, _ := n.Attr("alt")
+			src = absolutizePOJURL(src)
+			alt = normalizeSpace(alt)
+			if src == "" {
+				return
+			}
+			// 导航/页脚图过滤（正常题面区很少出现 logo）
+			low := strings.ToLower(src)
+			if strings.Contains(low, "/logo") || strings.Contains(low, "home.gif") ||
+				strings.Contains(low, "goback") || strings.HasSuffix(low, "/top.gif") {
+				return
+			}
+			if alt == "" {
+				alt = "image"
+			}
+			b.WriteString("\n![")
+			b.WriteString(alt)
+			b.WriteString("](")
+			b.WriteString(src)
+			b.WriteString(")\n")
+		case "a":
+			href, _ := n.Attr("href")
+			text := normalizeSpace(n.Text())
+			href = absolutizePOJURL(href)
+			if text == "" {
+				return
+			}
+			if href != "" && !strings.HasPrefix(strings.ToLower(href), "javascript:") {
+				b.WriteString("[")
+				b.WriteString(text)
+				b.WriteString("](")
+				b.WriteString(href)
+				b.WriteString(")")
+			} else {
+				b.WriteString(text)
+			}
+		case "sup":
+			b.WriteString("^")
+			b.WriteString(strings.TrimSpace(n.Text()))
+		case "sub":
+			b.WriteString("_")
+			b.WriteString(strings.TrimSpace(n.Text()))
+		case "b", "strong":
+			t := strings.TrimSpace(pojInlineToMD(n))
+			if t != "" {
+				b.WriteString("**")
+				b.WriteString(t)
+				b.WriteString("**")
+			}
+		case "i", "em":
+			t := strings.TrimSpace(pojInlineToMD(n))
+			if t != "" {
+				b.WriteString("*")
+				b.WriteString(t)
+				b.WriteString("*")
+			}
+		case "code":
+			b.WriteString("`")
+			b.WriteString(n.Text())
+			b.WriteString("`")
+		case "center", "font", "span", "div", "p", "table", "tbody", "tr", "td", "th":
+			b.WriteString(pojInlineToMD(n))
+		default:
+			b.WriteString(pojInlineToMD(n))
+		}
+	})
+	return b.String()
+}
+
+func pojBlockToMD(s *goquery.Selection) string {
+	raw := pojInlineToMD(s)
+	// 压缩行尾空白，保留有意义换行
+	lines := strings.Split(raw, "\n")
+	var out []string
+	for _, ln := range lines {
+		out = append(out, strings.TrimRight(ln, " \t\r"))
+	}
+	return collapseBlankLines(strings.Join(out, "\n"))
+}
+
+// extractPOJTitle 从 .ptt / <title> 取真实题名。
+func extractPOJTitle(doc *goquery.Document, externalID string) string {
+	if doc == nil {
+		return ""
+	}
+	if t := normalizeSpace(doc.Find("div.ptt").First().Text()); t != "" {
+		return normalizePOJTitle(t, externalID)
+	}
+	// <title>1000 -- A+B Problem</title>
+	if t := normalizeSpace(doc.Find("title").First().Text()); t != "" {
+		return normalizePOJTitle(t, externalID)
+	}
+	if externalID != "" {
+		return "#" + externalID
+	}
+	return ""
+}
+
+// parsePOJProblemHTML 解析 POJ 题面 HTML（可单测）。
+func parsePOJProblemHTML(html, externalID string) (*FetchedContent, error) {
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
+	if err != nil {
+		return nil, err
+	}
+	pageTitle := normalizeSpace(doc.Find("title").First().Text())
+	if strings.EqualFold(pageTitle, "Error") ||
+		strings.Contains(strings.ToLower(html), "can not find problem") ||
+		strings.Contains(html, "Error Occurred") {
+		return nil, fmt.Errorf("POJ 题目不存在")
+	}
+	// 无 .ptt 且无有效 title → 当作解析失败
+	if doc.Find("div.ptt").Length() == 0 && isPOJBadTitle(pageTitle) {
+		return nil, fmt.Errorf("POJ 题面解析失败（无标题块）")
+	}
+
+	title := extractPOJTitle(doc, externalID)
+	var b strings.Builder
+	if title != "" {
+		// title 形如「#1000. A+B Problem」；Markdown H1 只保留一个 #
+		h1 := strings.TrimSpace(strings.TrimPrefix(title, "#"))
+		b.WriteString("# ")
+		b.WriteString(h1)
+		b.WriteString("\n\n")
+	}
+
+	// 时限 / 内存
+	if plm := doc.Find("div.plm").First(); plm.Length() > 0 {
+		// 按表格单元格顺序提取 "Time Limit: 1000MS" 等
+		var limits []string
+		plm.Find("td").Each(func(_ int, td *goquery.Selection) {
+			t := normalizeSpace(td.Text())
+			if t == "" {
+				return
+			}
+			low := strings.ToLower(t)
+			if strings.Contains(low, "time limit") || strings.Contains(low, "memory limit") {
+				limits = append(limits, t)
+			}
+		})
+		if len(limits) == 0 {
+			// 兜底整块文本
+			if t := normalizeSpace(plm.Text()); t != "" {
+				limits = append(limits, t)
+			}
+		}
+		for _, lim := range limits {
+			b.WriteString("- **")
+			// "Time Limit: 1000MS" → **Time Limit:** 1000MS
+			if i := strings.Index(lim, ":"); i > 0 {
+				b.WriteString(strings.TrimSpace(lim[:i]))
+				b.WriteString(":** ")
+				b.WriteString(strings.TrimSpace(lim[i+1:]))
+			} else {
+				b.WriteString(lim)
+				b.WriteString("**")
+			}
+			b.WriteString("\n")
+		}
+		if len(limits) > 0 {
+			b.WriteString("\n")
+		}
+	}
+
+	// 按 .pst 小节顺序输出；正文紧跟 .ptx 或 pre.sio
+	doc.Find("p.pst").Each(func(_ int, pst *goquery.Selection) {
+		secName := normalizeSpace(pst.Text())
+		heading := pojSectionHeading(secName)
+		if heading == "" {
+			return
+		}
+		// 找紧随其后的内容兄弟节点
+		var body *goquery.Selection
+		for sib := pst.Next(); sib.Length() > 0; sib = sib.Next() {
+			// 跳过空白文本节点
+			if goquery.NodeName(sib) == "#text" && strings.TrimSpace(sib.Text()) == "" {
+				continue
+			}
+			if sib.Is("p.pst") {
+				break
+			}
+			if sib.Is("div.ptx") || sib.Is("pre.sio") || sib.Is("pre") {
+				body = sib
+				break
+			}
+			// 偶发包一层
+			if inner := sib.Find("div.ptx, pre.sio").First(); inner.Length() > 0 {
+				body = inner
+				break
+			}
+			break
+		}
+		bodyMD := ""
+		if body != nil && body.Length() > 0 {
+			if body.Is("pre.sio") || body.Is("pre") {
+				code := strings.TrimRight(body.Text(), "\n")
+				bodyMD = "```\n" + code + "\n```"
+			} else {
+				bodyMD = pojBlockToMD(body)
+			}
+		}
+		// Source 空链接常见，跳过空节
+		if strings.TrimSpace(bodyMD) == "" {
+			return
+		}
+		b.WriteString("## ")
+		b.WriteString(heading)
+		b.WriteString("\n\n")
+		b.WriteString(bodyMD)
+		b.WriteString("\n\n")
+	})
+
+	md := collapseBlankLines(b.String())
+	if title == "" && md == "" {
+		return nil, fmt.Errorf("POJ 题面为空")
+	}
+	// 至少要有描述类内容，避免只抓到导航
+	if len(md) < 20 && doc.Find("div.ptx").Length() == 0 {
+		return nil, fmt.Errorf("POJ 题面过短或解析失败")
+	}
+	if title == "" {
+		title = externalID
+	}
+	return &FetchedContent{Title: title, ContentMD: md}, nil
+}
+
+func fetchPOJ(externalID, problemURL string) (*FetchedContent, error) {
+	externalID = strings.TrimSpace(externalID)
+	if problemURL == "" && externalID != "" {
+		problemURL = pojBaseURL + "/problem?id=" + externalID
+	}
+	if problemURL == "" {
+		return nil, fmt.Errorf("poj empty url")
+	}
+	// 从 URL 补 externalID
+	if externalID == "" {
+		if u, err := url.Parse(problemURL); err == nil {
+			externalID = strings.TrimSpace(u.Query().Get("id"))
+		}
+	}
+	resp, err := httpGet(problemURL)
+	if err != nil {
+		return nil, fmt.Errorf("poj fetch: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("poj status %d", resp.StatusCode)
+	}
+	rb, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("poj read: %w", err)
+	}
+	return parsePOJProblemHTML(string(rb), externalID)
 }
 
 func fetchGeneric(problemURL string) (*FetchedContent, error) {

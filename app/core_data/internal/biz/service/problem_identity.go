@@ -31,6 +31,7 @@ var (
 	reQOJNum      = regexp.MustCompile(`#?\s*(\d+)`)
 	reLOJNum      = regexp.MustCompile(`#?\s*(\d+)`)
 	reUOJNum      = regexp.MustCompile(`#?\s*(\d+)`)
+	rePOJNum      = regexp.MustCompile(`#?\s*(\d+)`)
 	reDigits      = regexp.MustCompile(`^\d+$`)
 	// CF API：gym 提交的 contestId 为负数
 	reCFNegativeContest = regexp.MustCompile(`^-\d+$`)
@@ -65,6 +66,8 @@ func ParseProblemIdentity(platform, contest, problem string) (*ParsedProblem, er
 		return parseLOJ(problem)
 	case spider.UOJ:
 		return parseUOJ(problem)
+	case spider.POJ:
+		return parsePOJ(problem)
 	case spider.LeetCode:
 		return parseLeetCode(problem)
 	default:
@@ -412,6 +415,32 @@ func parseUOJ(problem string) (*ParsedProblem, error) {
 		ExternalID: ext,
 		Title:      title,
 		URL:        "https://uoj.ac/problem/" + ext,
+	}, nil
+}
+
+// parsePOJ 提交列表题名多为「#1000」或纯题号；真实题名由 problem_fetch 回填。
+func parsePOJ(problem string) (*ParsedProblem, error) {
+	title := strings.TrimSpace(problem)
+	ext := ""
+	if m := rePOJNum.FindStringSubmatch(problem); m != nil {
+		ext = m[1]
+	} else if reDigits.MatchString(strings.TrimSpace(problem)) {
+		ext = strings.TrimSpace(problem)
+	}
+	if ext == "" {
+		return nil, fmt.Errorf("poj parse fail: %q", problem)
+	}
+	// 提交侧只有题号时标题用 #id 占位，避免空标题；爬题面后会换成「#id. 真名」
+	if title == "" || title == ext {
+		title = "#" + ext
+	} else if !strings.HasPrefix(title, "#") && reDigits.MatchString(title) {
+		title = "#" + title
+	}
+	return &ParsedProblem{
+		Platform:   spider.POJ,
+		ExternalID: ext,
+		Title:      title,
+		URL:        "http://poj.org/problem?id=" + ext,
 	}, nil
 }
 

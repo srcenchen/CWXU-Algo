@@ -447,7 +447,7 @@ func (s SpiderService) purgeTrainingCaches(ctx context.Context, userIds []int64)
 	_ = s.rdb.Incr(ctx, "statistic:heatmap:global:ver").Err()
 	_ = s.rdb.Incr(ctx, "statistic:period:global:ver").Err()
 
-	plats := []string{"AtCoder", "Codeforces", "LuoGu", "NowCoder", "QOJ", "LeetCode", "CodeForces", "LOJ", "UOJ"}
+	plats := []string{"AtCoder", "Codeforces", "LuoGu", "NowCoder", "QOJ", "LeetCode", "CodeForces", "LOJ", "UOJ", "POJ"}
 	const chunk = 200
 	for i := 0; i < len(userIds); i += chunk {
 		j := i + chunk
@@ -577,7 +577,7 @@ func (s SpiderService) PurgeUserData(ctx context.Context, req *spider.PurgeUserD
 		log.Warnf("PurgeUserData: redis del user=%d: %v", uid, err)
 	}
 	// 按平台的 pending/inflight 键（扫描可能较多，仅删常见平台前缀）
-	for _, p := range []string{"AtCoder", "Codeforces", "LuoGu", "NowCoder", "QOJ", "LeetCode", "LOJ", "UOJ"} {
+	for _, p := range []string{"AtCoder", "Codeforces", "LuoGu", "NowCoder", "QOJ", "LeetCode", "LOJ", "UOJ", "POJ"} {
 		_ = s.rdb.Del(ctx,
 			fmt.Sprintf("spider:pending:%d:%s", uid, p),
 			fmt.Sprintf("spider:inflight:%d:%s", uid, p),

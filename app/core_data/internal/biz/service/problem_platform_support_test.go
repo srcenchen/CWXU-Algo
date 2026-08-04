@@ -33,6 +33,8 @@ func TestParseProblemURL_AllPlatforms(t *testing.T) {
 		{"loj p", "https://loj.ac/p/6582", "LOJ", "6582", "loj.ac/p/6582"},
 		{"loj problem", "https://loj.ac/problem/100", "LOJ", "100", "loj.ac/p/100"},
 		{"uoj", "https://uoj.ac/problem/1", "UOJ", "1", "uoj.ac/problem/1"},
+		{"poj", "http://poj.org/problem?id=1000", "POJ", "1000", "poj.org/problem?id=1000"},
+		{"poj https noise", "https://poj.org/problem?id=1001&from=x", "POJ", "1001", "id=1001"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -82,6 +84,11 @@ func TestSanitizeProblemURLRaw_Noise(t *testing.T) {
 		if strings.Contains(got, "?") || strings.Contains(got, "#") {
 			t.Fatalf("should strip query/fragment: %s", got)
 		}
+	}
+	// POJ 必须保留 ?id=
+	poj := sanitizeProblemURLRaw("看题 http://poj.org/problem?id=1000&utm=1#top")
+	if !strings.Contains(poj, "id=1000") || strings.Contains(poj, "utm=") {
+		t.Fatalf("poj sanitize keep id: %s", poj)
 	}
 }
 
@@ -140,6 +147,8 @@ func TestParseProblemIdentity_AllPlatforms(t *testing.T) {
 		{"qoj", "QOJ", "", "#1234 Some", "1234", "problem/1234"},
 		{"loj", "LOJ", "", "#6582 雨落葡萄园", "6582", "loj.ac/p/6582"},
 		{"uoj", "UOJ", "", "#1. A + B Problem", "1", "uoj.ac/problem/1"},
+		{"poj", "POJ", "", "#1000", "1000", "poj.org/problem?id=1000"},
+		{"poj bare num", "POJ", "", "1000", "1000", "poj.org/problem?id=1000"},
 		{"leetcode", "LeetCode", "leetcode", "two-sum 两数之和", "two-sum", "two-sum"},
 	}
 	for _, tc := range cases {

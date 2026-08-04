@@ -13,6 +13,7 @@ var (
 	LeetCode   = "LeetCode"
 	LOJ        = "LOJ"
 	UOJ        = "UOJ"
+	POJ        = "POJ"
 )
 var registry = map[string]Provider{}
 

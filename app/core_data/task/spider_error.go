@@ -25,6 +25,8 @@ func spiderDisplayName(platform string) string {
 		return "LOJ"
 	case "UOJ", "uoj":
 		return "UOJ"
+	case "POJ", "poj":
+		return "POJ"
 	default:
 		if platform == "" {
 			return "OJ"

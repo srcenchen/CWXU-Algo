@@ -1493,6 +1493,33 @@ func isBadFetchedTitle(platform, title string) bool {
 	return false
 }
 
+// isPlaceholderProblemTitle 仅题号/占位（如 POJ 入库时的 "1000" / "#1000"），可被真实题名替换。
+func isPlaceholderProblemTitle(platform, title, externalID string) bool {
+	t := strings.TrimSpace(title)
+	if t == "" {
+		return true
+	}
+	ext := strings.TrimSpace(externalID)
+	// 纯 external_id 或 #external_id
+	if ext != "" && (t == ext || t == "#"+ext) {
+		return true
+	}
+	if strings.EqualFold(strings.TrimSpace(platform), spider.POJ) {
+		// POJ 早期占位：纯数字题号
+		onlyNum := true
+		for _, r := range strings.TrimPrefix(t, "#") {
+			if r < '0' || r > '9' {
+				onlyNum = false
+				break
+			}
+		}
+		if onlyNum && t != "" {
+			return true
+		}
+	}
+	return false
+}
+
 // shouldReplaceProblemTitle 空标题或品牌垃圾标题可被更好的新标题替换
 func shouldReplaceProblemTitle(platform, oldTitle, newTitle string) bool {
 	newTitle = strings.TrimSpace(newTitle)
@@ -1501,6 +1528,10 @@ func shouldReplaceProblemTitle(platform, oldTitle, newTitle string) bool {
 	}
 	oldTitle = strings.TrimSpace(oldTitle)
 	if oldTitle == "" || isBadFetchedTitle(platform, oldTitle) {
+		return true
+	}
+	// 占位题号 → 真实「#1000. A+B Problem」
+	if isPlaceholderProblemTitle(platform, oldTitle, "") && !isPlaceholderProblemTitle(platform, newTitle, "") {
 		return true
 	}
 	return false
