@@ -297,8 +297,8 @@ func loadgateSkipTick(kind string) bool {
 	if !loadgate.Global().Overloaded() {
 		return false
 	}
-	log.Infof("CronTask: skip tick %s (system overloaded load=%.2f threshold=%.2f)",
-		kind, loadgate.Global().Load(), loadgate.Global().Threshold())
+	log.Infof("CronTask: skip tick %s (system overloaded cpu=%.0f%% threshold=%.0f%% load=%.2f)",
+		kind, loadgate.Global().CPUBusy(), loadgate.Global().Threshold()*100, loadgate.Global().Load())
 	return true
 }
 
