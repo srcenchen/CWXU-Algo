@@ -243,16 +243,16 @@ func (t *SpiderTask) MarkLastOK(userId int64, platform string) {
 	}
 }
 
-// MarkLastFail 记录用户×平台最近一次爬虫失败时间与短错误（供资料页展示）
-func (t *SpiderTask) MarkLastFail(userId int64, platform string, errMsg string) {
+// MarkLastFail 记录用户×平台最近一次爬虫失败时间与短错误（供资料页展示）。
+// userSide 为用户侧失败（绑定用户名错误等）：仍写用户级失败供本人提示，
+// 但不写 OJ 级最近失败，避免站管监控把整 OJ 标成「同步异常」。
+func (t *SpiderTask) MarkLastFail(userId int64, platform string, errMsg string, userSide bool) {
 	if t.rdb == nil || userId <= 0 || platform == "" {
 		return
 	}
 	ctx := context.Background()
 	now := time.Now().Unix()
 	_ = t.rdb.Set(ctx, LastFailPlatformKey(userId, platform), now, 90*24*time.Hour).Err()
-	// OJ 级聚合最近失败时间 + 文案（站管监控）
-	_ = t.rdb.Set(ctx, OjLastFailKey(platform), now, 90*24*time.Hour).Err()
 	msg := strings.TrimSpace(errMsg)
 	if msg == "" {
 		msg = "同步失败"
@@ -263,6 +263,11 @@ func (t *SpiderTask) MarkLastFail(userId int64, platform string, errMsg string) 
 		msg = string(runes[:200])
 	}
 	_ = t.rdb.Set(ctx, LastErrPlatformKey(userId, platform), msg, 7*24*time.Hour).Err()
+	if userSide {
+		return
+	}
+	// OJ 级聚合最近失败时间 + 文案（站管监控）
+	_ = t.rdb.Set(ctx, OjLastFailKey(platform), now, 90*24*time.Hour).Err()
 	_ = t.rdb.Set(ctx, OjLastErrKey(platform), msg, 7*24*time.Hour).Err()
 }
 

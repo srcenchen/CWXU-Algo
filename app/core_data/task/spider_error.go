@@ -57,6 +57,20 @@ func FormatSpiderLastError(platform string, err error) string {
 	}
 }
 
+// IsUserSideSpiderErr 判断爬虫失败是否属于「用户侧」（绑定用户名错误等）。
+// 用户侧失败不算平台/系统异常：不计入今日失败、不写 OJ 级最近失败、MQ 不再重试。
+func IsUserSideSpiderErr(platform string, err error) bool {
+	if err == nil {
+		return false
+	}
+	raw := strings.TrimSpace(err.Error())
+	if raw == "" {
+		return false
+	}
+	fault, _ := classifySpiderErr(raw)
+	return fault == spiderFaultUser
+}
+
 type spiderFaultKind int
 
 const (

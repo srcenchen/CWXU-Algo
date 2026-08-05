@@ -51,3 +51,30 @@ func TestClassifyStripsHTML(t *testing.T) {
 		t.Fatalf("reason still has html: %q", reason)
 	}
 }
+
+func TestIsUserSideSpiderErr(t *testing.T) {
+	cases := []struct {
+		name string
+		raw  string
+		want bool
+	}{
+		{"leetcode user not found", `leetcode 用户不存在或资料不可见: abc`, true},
+		{"leetcode ranking not found", `leetcode ranking: user abc not found in nearby pages for weekly-contest-400`, true},
+		{"codeforces handle not found", `codeforces user.rating: handles: User with handle xxx not found`, true},
+		{"timeout", `发起http请求失败: context deadline exceeded`, false},
+		{"403 html", `请求响应码错误 403, <html>Forbidden</html>`, false},
+		{"rate limited", `429 too many requests`, false},
+		{"empty error", ``, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := IsUserSideSpiderErr("LeetCode", errors.New(c.raw))
+			if got != c.want {
+				t.Fatalf("IsUserSideSpiderErr(%q) = %v, want %v", c.raw, got, c.want)
+			}
+		})
+	}
+	if IsUserSideSpiderErr("LeetCode", nil) {
+		t.Fatal("nil error must not be user-side")
+	}
+}

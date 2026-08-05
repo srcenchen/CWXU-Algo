@@ -64,15 +64,23 @@ func (c *Consumer) Consume() {
 			}
 			start := spidermetrics.RecordStart(msg.Platform, msg.NeedAll)
 			err := c.spider.LoadData(msg.UserId, msg.NeedAll, msg.Platform)
-			spidermetrics.RecordEnd(msg.Platform, start, err)
 			if err != nil {
+				userSide := task.IsUserSideSpiderErr(msg.Platform, err)
+				// 用户侧失败（绑定用户名错误等）不算平台异常：不计入今日失败，直接 Ack 不重试
+				if !userSide {
+					spidermetrics.RecordEnd(msg.Platform, start, err)
+				}
 				log.Errorf("RabbitMQ(Spider): %v", err)
-				// 记录平台级失败：写入用户可读短文案（仍 return err 走 MQ 重试；完整 err 只进日志）
+				// 记录平台级失败：写入用户可读短文案（完整 err 只进日志）
 				if c.spiderTask != nil {
-					c.spiderTask.MarkLastFail(msg.UserId, msg.Platform, task.FormatSpiderLastError(msg.Platform, err))
+					c.spiderTask.MarkLastFail(msg.UserId, msg.Platform, task.FormatSpiderLastError(msg.Platform, err), userSide)
+				}
+				if userSide {
+					return nil
 				}
 				return err
 			}
+			spidermetrics.RecordEnd(msg.Platform, start, nil)
 			// 成功：更新用户级 + 平台级「上次同步」
 			if c.spiderTask != nil {
 				c.spiderTask.MarkLastOK(msg.UserId, msg.Platform)
