@@ -2,6 +2,7 @@ package ojlogin
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
 	"mime/multipart"
@@ -11,53 +12,94 @@ import (
 	"time"
 
 	"cwxu-algo/app/common/utils/ojhttp"
+
+	"github.com/go-kratos/kratos/v2/log"
 )
 
 const (
 	luoguCaptchaURL = "https://www.luogu.com.cn/lg4/captcha"
 	luoguOCRURL     = "https://api.alistgo.com/ocr/file"
 	luoguLoginURL   = "https://www.luogu.com.cn/do-auth/password"
-	luoguMaxRetry   = 5
-	luoguBaseDelay  = 500 * time.Millisecond
+	luoguMaxRetry   = 3
+	luoguBaseDelay  = 800 * time.Millisecond
 )
+
+type luoguLoginResp struct {
+	ErrorCode int    `json:"errorCode"`
+	ErrMsg    string `json:"errorMessage"`
+	Status     int   `json:"status"`
+}
 
 // VerifyLuogu 尝试用账号密码登录洛谷；成功返回 nil。
 func VerifyLuogu(username, password string) error {
 	username = strings.TrimSpace(username)
 	password = strings.TrimSpace(password)
 	if username == "" || password == "" {
-		return fmt.Errorf("洛谷账号或密码为空")
+		return fmt.Errorf("账号或密码为空")
 	}
 	jar, _ := cookiejar.New(nil)
 	client := ojhttp.NewWithJar(jar)
+
+	var lastErr string
 	for attempt := 1; attempt <= luoguMaxRetry; attempt++ {
 		if attempt > 1 {
 			time.Sleep(luoguBaseDelay << (attempt - 2))
 		}
+		// 1. 拉验证码
 		resp, err := client.Get(luoguCaptchaURL)
 		if err != nil {
-			return fmt.Errorf("拉取验证码失败: %w", err)
+			return fmt.Errorf("拉取验证码失败: %v", err)
 		}
 		img, err := io.ReadAll(resp.Body)
 		resp.Body.Close()
 		if err != nil {
-			return fmt.Errorf("读取验证码失败: %w", err)
+			return fmt.Errorf("读取验证码图片失败: %v", err)
 		}
+		if resp.StatusCode != http.StatusOK {
+			return fmt.Errorf("验证码接口返回 %d，可能被限流", resp.StatusCode)
+		}
+
+		// 2. OCR
 		code, err := ocrImage(client, img)
 		if err != nil {
-			return fmt.Errorf("识别验证码失败: %w", err)
+			log.Warnf("ojlogin luogu: OCR 失败 attempt=%d: %v", attempt, err)
+			lastErr = fmt.Sprintf("验证码识别失败: %v", err)
+			continue
 		}
 		code = strings.TrimSpace(code)
-		ok, body, err := doLuoguLogin(client, username, password, code)
-		if err != nil {
-			return err
+		if code == "" {
+			lastErr = "验证码识别结果为空"
+			continue
+		}
+
+		// 3. 登录
+		ok, body, loginErr := doLuoguLogin(client, username, password, code)
+		if loginErr != nil {
+			return fmt.Errorf("登录请求失败: %v", loginErr)
 		}
 		if ok {
 			return nil
 		}
-		_ = body
+		// 解析洛谷返回的具体错误
+		var parsed luoguLoginResp
+		if json.Unmarshal([]byte(body), &parsed) == nil && parsed.ErrMsg != "" {
+			lastErr = parsed.ErrMsg
+		} else if body != "" {
+			// 截取前 100 字符避免太长
+			msg := body
+			if len(msg) > 100 {
+				msg = msg[:100]
+			}
+			lastErr = msg
+		} else {
+			lastErr = fmt.Sprintf("HTTP %d 无响应体", resp.StatusCode)
+		}
+		log.Warnf("ojlogin luogu: attempt=%d captcha=%s err=%s", attempt, code, lastErr)
 	}
-	return fmt.Errorf("洛谷登录失败（验证码或账号密码有误）")
+	if lastErr != "" {
+		return fmt.Errorf("洛谷登录失败（%s）", lastErr)
+	}
+	return fmt.Errorf("洛谷登录失败，已重试 %d 次", luoguMaxRetry)
 }
 
 func ocrImage(client *http.Client, img []byte) (string, error) {
@@ -78,9 +120,13 @@ func ocrImage(client *http.Client, img []byte) (string, error) {
 	req.Header.Set("Content-Type", w.FormDataContentType())
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("OCR 请求失败: %w", err)
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("OCR 返回 %d: %s", resp.StatusCode, string(b))
+	}
 	b, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return "", err
@@ -95,12 +141,12 @@ func doLuoguLogin(client *http.Client, username, password, captcha string) (bool
 	)
 	resp, err := client.Post(luoguLoginURL, "application/json", bytes.NewReader([]byte(payload)))
 	if err != nil {
-		return false, "", err
+		return false, "", fmt.Errorf("POST 登录接口失败: %w", err)
 	}
 	defer resp.Body.Close()
 	b, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return false, "", err
+		return false, "", fmt.Errorf("读取登录响应失败: %w", err)
 	}
 	body := string(b)
 	if strings.Contains(body, "errorCode") {

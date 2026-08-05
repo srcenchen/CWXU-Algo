@@ -17,8 +17,8 @@ import (
 
 const (
 	qojLoginURL  = "https://qoj.ac/login"
-	qojMaxRetry  = 5
-	qojBaseDelay = 500 * time.Millisecond
+	qojMaxRetry  = 3
+	qojBaseDelay = 800 * time.Millisecond
 )
 
 // VerifyQOJ 尝试用账号密码登录 QOJ；成功返回 nil。
@@ -26,22 +26,38 @@ func VerifyQOJ(username, password string) error {
 	username = strings.TrimSpace(username)
 	password = strings.TrimSpace(password)
 	if username == "" || password == "" {
-		return fmt.Errorf("QOJ 账号或密码为空")
+		return fmt.Errorf("账号或密码为空")
 	}
 	jar, _ := cookiejar.New(nil)
 	client := ojhttp.NewWithJar(jar)
+
+	var lastErr string
 	for attempt := 1; attempt <= qojMaxRetry; attempt++ {
+		if attempt > 1 {
+			time.Sleep(qojBaseDelay << (attempt - 2))
+		}
 		ok, body, err := doQOJLogin(client, username, password)
 		if err != nil {
-			return err
+			lastErr = err.Error()
+			continue
 		}
 		if ok {
 			return nil
 		}
-		_ = body
-		time.Sleep(qojBaseDelay << (attempt - 1))
+		if strings.TrimSpace(body) != "" {
+			msg := body
+			if len(msg) > 100 {
+				msg = msg[:100]
+			}
+			lastErr = msg
+		} else {
+			lastErr = "响应为空"
+		}
 	}
-	return fmt.Errorf("QOJ 登录失败（账号密码有误或站点拦截）")
+	if lastErr != "" {
+		return fmt.Errorf("QOJ 登录失败（%s）", lastErr)
+	}
+	return fmt.Errorf("QOJ 登录失败，已重试 %d 次", qojMaxRetry)
 }
 
 func setQOJBrowserHeaders(req *http.Request) {
