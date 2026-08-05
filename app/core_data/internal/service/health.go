@@ -244,9 +244,12 @@ func (s *HealthService) collectCapacity(ctx context.Context, resources []*health
 		}
 	}
 
-	// 资源负载度：取 CPU / 内存 / 磁盘 中最高的使用率
+	// 资源负载度：取 CPU / 内存 / 磁盘 中最高的使用率（load 是相对值，不计入）
 	peakLoad := 0.0
 	for _, r := range resources {
+		if r.Name == "load" {
+			continue
+		}
 		if r.UsedPercent > peakLoad {
 			peakLoad = r.UsedPercent
 		}
