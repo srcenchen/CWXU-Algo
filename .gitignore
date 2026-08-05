@@ -37,3 +37,6 @@ bin/
 .idea/
 *.swp
 dist/
+
+# Claude Code
+.claude/
