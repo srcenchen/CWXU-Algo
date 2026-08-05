@@ -113,6 +113,20 @@ message GetAdminConfigRes {
   string oj_qoj_username = 31;
   string oj_qoj_password_masked = 32;
   bool oj_qoj_password_set = 33;
+  // OJ 登录状态（ok / fail / unchecked）+ 时间戳 + 错误
+  string oj_luogu_status = 34;
+  int64 oj_luogu_status_at = 35;
+  string oj_luogu_err_msg = 36;
+  string oj_qoj_status = 37;
+  int64 oj_qoj_status_at = 38;
+  string oj_qoj_err_msg = 39;
+  // AI 服务状态
+  string agent_status = 40;
+  int64 agent_status_at = 41;
+  string agent_err_msg = 42;
+  string ai_analyze_status = 43;
+  int64 ai_analyze_status_at = 44;
+  string ai_analyze_err_msg = 45;
 }
 
 message UpdateConfigReq {

@@ -4931,6 +4931,32 @@ components:
                     type: string
                 ojQojPasswordSet:
                     type: boolean
+                ojLuoguStatus:
+                    type: string
+                    description: OJ 登录状态（ok / fail / unchecked）+ 时间戳 + 错误
+                ojLuoguStatusAt:
+                    type: string
+                ojLuoguErrMsg:
+                    type: string
+                ojQojStatus:
+                    type: string
+                ojQojStatusAt:
+                    type: string
+                ojQojErrMsg:
+                    type: string
+                agentStatus:
+                    type: string
+                    description: AI 服务状态
+                agentStatusAt:
+                    type: string
+                agentErrMsg:
+                    type: string
+                aiAnalyzeStatus:
+                    type: string
+                aiAnalyzeStatusAt:
+                    type: string
+                aiAnalyzeErrMsg:
+                    type: string
         api.user.v1.site.GetConfigRes:
             type: object
             properties:

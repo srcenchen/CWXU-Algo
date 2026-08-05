@@ -224,8 +224,22 @@ type GetAdminConfigRes struct {
 	OjQojUsername         string `protobuf:"bytes,31,opt,name=oj_qoj_username,json=ojQojUsername,proto3" json:"oj_qoj_username,omitempty"`
 	OjQojPasswordMasked   string `protobuf:"bytes,32,opt,name=oj_qoj_password_masked,json=ojQojPasswordMasked,proto3" json:"oj_qoj_password_masked,omitempty"`
 	OjQojPasswordSet      bool   `protobuf:"varint,33,opt,name=oj_qoj_password_set,json=ojQojPasswordSet,proto3" json:"oj_qoj_password_set,omitempty"`
-	unknownFields         protoimpl.UnknownFields
-	sizeCache             protoimpl.SizeCache
+	// OJ 登录状态（ok / fail / unchecked）+ 时间戳 + 错误
+	OjLuoguStatus   string `protobuf:"bytes,34,opt,name=oj_luogu_status,json=ojLuoguStatus,proto3" json:"oj_luogu_status,omitempty"`
+	OjLuoguStatusAt int64  `protobuf:"varint,35,opt,name=oj_luogu_status_at,json=ojLuoguStatusAt,proto3" json:"oj_luogu_status_at,omitempty"`
+	OjLuoguErrMsg   string `protobuf:"bytes,36,opt,name=oj_luogu_err_msg,json=ojLuoguErrMsg,proto3" json:"oj_luogu_err_msg,omitempty"`
+	OjQojStatus     string `protobuf:"bytes,37,opt,name=oj_qoj_status,json=ojQojStatus,proto3" json:"oj_qoj_status,omitempty"`
+	OjQojStatusAt   int64  `protobuf:"varint,38,opt,name=oj_qoj_status_at,json=ojQojStatusAt,proto3" json:"oj_qoj_status_at,omitempty"`
+	OjQojErrMsg     string `protobuf:"bytes,39,opt,name=oj_qoj_err_msg,json=ojQojErrMsg,proto3" json:"oj_qoj_err_msg,omitempty"`
+	// AI 服务状态
+	AgentStatus       string `protobuf:"bytes,40,opt,name=agent_status,json=agentStatus,proto3" json:"agent_status,omitempty"`
+	AgentStatusAt     int64  `protobuf:"varint,41,opt,name=agent_status_at,json=agentStatusAt,proto3" json:"agent_status_at,omitempty"`
+	AgentErrMsg       string `protobuf:"bytes,42,opt,name=agent_err_msg,json=agentErrMsg,proto3" json:"agent_err_msg,omitempty"`
+	AiAnalyzeStatus   string `protobuf:"bytes,43,opt,name=ai_analyze_status,json=aiAnalyzeStatus,proto3" json:"ai_analyze_status,omitempty"`
+	AiAnalyzeStatusAt int64  `protobuf:"varint,44,opt,name=ai_analyze_status_at,json=aiAnalyzeStatusAt,proto3" json:"ai_analyze_status_at,omitempty"`
+	AiAnalyzeErrMsg   string `protobuf:"bytes,45,opt,name=ai_analyze_err_msg,json=aiAnalyzeErrMsg,proto3" json:"ai_analyze_err_msg,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *GetAdminConfigRes) Reset() {
@@ -487,6 +501,90 @@ func (x *GetAdminConfigRes) GetOjQojPasswordSet() bool {
 		return x.OjQojPasswordSet
 	}
 	return false
+}
+
+func (x *GetAdminConfigRes) GetOjLuoguStatus() string {
+	if x != nil {
+		return x.OjLuoguStatus
+	}
+	return ""
+}
+
+func (x *GetAdminConfigRes) GetOjLuoguStatusAt() int64 {
+	if x != nil {
+		return x.OjLuoguStatusAt
+	}
+	return 0
+}
+
+func (x *GetAdminConfigRes) GetOjLuoguErrMsg() string {
+	if x != nil {
+		return x.OjLuoguErrMsg
+	}
+	return ""
+}
+
+func (x *GetAdminConfigRes) GetOjQojStatus() string {
+	if x != nil {
+		return x.OjQojStatus
+	}
+	return ""
+}
+
+func (x *GetAdminConfigRes) GetOjQojStatusAt() int64 {
+	if x != nil {
+		return x.OjQojStatusAt
+	}
+	return 0
+}
+
+func (x *GetAdminConfigRes) GetOjQojErrMsg() string {
+	if x != nil {
+		return x.OjQojErrMsg
+	}
+	return ""
+}
+
+func (x *GetAdminConfigRes) GetAgentStatus() string {
+	if x != nil {
+		return x.AgentStatus
+	}
+	return ""
+}
+
+func (x *GetAdminConfigRes) GetAgentStatusAt() int64 {
+	if x != nil {
+		return x.AgentStatusAt
+	}
+	return 0
+}
+
+func (x *GetAdminConfigRes) GetAgentErrMsg() string {
+	if x != nil {
+		return x.AgentErrMsg
+	}
+	return ""
+}
+
+func (x *GetAdminConfigRes) GetAiAnalyzeStatus() string {
+	if x != nil {
+		return x.AiAnalyzeStatus
+	}
+	return ""
+}
+
+func (x *GetAdminConfigRes) GetAiAnalyzeStatusAt() int64 {
+	if x != nil {
+		return x.AiAnalyzeStatusAt
+	}
+	return 0
+}
+
+func (x *GetAdminConfigRes) GetAiAnalyzeErrMsg() string {
+	if x != nil {
+		return x.AiAnalyzeErrMsg
+	}
+	return ""
 }
 
 type UpdateConfigReq struct {
@@ -1852,8 +1950,7 @@ const file_user_v1_site_site_proto_rawDesc = "" +
 	"\afavicon\x18\x05 \x01(\tR\afavicon\x12\x1d\n" +
 	"\n" +
 	"footer_icp\x18\x06 \x01(\tR\tfooterIcp\"\x13\n" +
-	"\x11GetAdminConfigReq\"\xbc\n" +
-	"\n" +
+	"\x11GetAdminConfigReq\"\xa5\x0e\n" +
 	"\x11GetAdminConfigRes\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\x03R\x04code\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12\x1d\n" +
@@ -1891,7 +1988,19 @@ const file_user_v1_site_site_proto_rawDesc = "" +
 	"\x15oj_luogu_password_set\x18\x1e \x01(\bR\x12ojLuoguPasswordSet\x12&\n" +
 	"\x0foj_qoj_username\x18\x1f \x01(\tR\rojQojUsername\x123\n" +
 	"\x16oj_qoj_password_masked\x18  \x01(\tR\x13ojQojPasswordMasked\x12-\n" +
-	"\x13oj_qoj_password_set\x18! \x01(\bR\x10ojQojPasswordSet\"\x82\n" +
+	"\x13oj_qoj_password_set\x18! \x01(\bR\x10ojQojPasswordSet\x12&\n" +
+	"\x0foj_luogu_status\x18\" \x01(\tR\rojLuoguStatus\x12+\n" +
+	"\x12oj_luogu_status_at\x18# \x01(\x03R\x0fojLuoguStatusAt\x12'\n" +
+	"\x10oj_luogu_err_msg\x18$ \x01(\tR\rojLuoguErrMsg\x12\"\n" +
+	"\roj_qoj_status\x18% \x01(\tR\vojQojStatus\x12'\n" +
+	"\x10oj_qoj_status_at\x18& \x01(\x03R\rojQojStatusAt\x12#\n" +
+	"\x0eoj_qoj_err_msg\x18' \x01(\tR\vojQojErrMsg\x12!\n" +
+	"\fagent_status\x18( \x01(\tR\vagentStatus\x12&\n" +
+	"\x0fagent_status_at\x18) \x01(\x03R\ragentStatusAt\x12\"\n" +
+	"\ragent_err_msg\x18* \x01(\tR\vagentErrMsg\x12*\n" +
+	"\x11ai_analyze_status\x18+ \x01(\tR\x0faiAnalyzeStatus\x12/\n" +
+	"\x14ai_analyze_status_at\x18, \x01(\x03R\x11aiAnalyzeStatusAt\x12+\n" +
+	"\x12ai_analyze_err_msg\x18- \x01(\tR\x0faiAnalyzeErrMsg\"\x82\n" +
 	"\n" +
 	"\x0fUpdateConfigReq\x12\x1d\n" +
 	"\n" +

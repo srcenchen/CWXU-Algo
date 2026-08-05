@@ -575,6 +575,17 @@ func (uc *SpiderUseCase) fetchAndSaveRating(plat model.Platform) {
 	}
 }
 
+// recordOjStatus 回写 OJ 登录状态到 site_configs（仅 LuoGu/QOJ 需要登录）
+func (uc *SpiderUseCase) recordOjStatus(ctx context.Context, platform, status, errMsg string) {
+	if platform != spider.LuoGu && platform != spider.QOJ {
+		return
+	}
+	if uc.data == nil || uc.data.UserDB == nil {
+		return
+	}
+	sitesettings.UpdateOjStatus(ctx, uc.data.RDB, uc.data.UserDB, platform, status, errMsg)
+}
+
 // injectOjCredentials 从站点设置读取 OJ 凭证并注入到爬虫客户端
 func (uc *SpiderUseCase) injectOjCredentials(ctx context.Context) {
 	if uc.data == nil || uc.data.RDB == nil {
@@ -628,9 +639,11 @@ func (uc *SpiderUseCase) loadOnePlatform(ctx context.Context, userId int64, plat
 				uid := userId
 				go uc.problem.BindSubmitsAfterSpider(uid)
 			}
+			uc.recordOjStatus(ctx, plat.Platform, "ok", "")
 			return anyChange, nil
 		}
 		lastErr = err
+		uc.recordOjStatus(ctx, plat.Platform, "fail", err.Error())
 		if strings.Contains(err.Error(), "平台") {
 			log.Errorf(
 				"Spider: %s %s 失败: %v",

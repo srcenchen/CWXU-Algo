@@ -40,7 +40,21 @@ type SiteConfig struct {
 	OjLuoguPassword string `gorm:"size:512;column:oj_luogu_password;comment:洛谷爬虫密码加密"`
 	OjQojUsername   string `gorm:"size:128;column:oj_qoj_username;comment:QOJ 爬虫账号"`
 	OjQojPassword   string `gorm:"size:512;column:oj_qoj_password;comment:QOJ 爬虫密码加密"`
-	UpdatedAt       time.Time `gorm:"autoUpdateTime"`
+	// OJ 登录状态（由爬虫实际登录后回写：ok / fail / unchecked）
+	OjLuoguStatus    string `gorm:"size:16;column:oj_luogu_status;default:unchecked;comment:洛谷登录状态"`
+	OjLuoguStatusAt  int64  `gorm:"column:oj_luogu_status_at;default:0;comment:洛谷状态更新时间 unix"`
+	OjLuoguErrMsg    string `gorm:"type:text;column:oj_luogu_err_msg;comment:洛谷最近错误"`
+	OjQojStatus      string `gorm:"size:16;column:oj_qoj_status;default:unchecked;comment:QOJ 登录状态"`
+	OjQojStatusAt    int64  `gorm:"column:oj_qoj_status_at;default:0;comment:QOJ 状态更新时间 unix"`
+	OjQojErrMsg      string `gorm:"type:text;column:oj_qoj_err_msg;comment:QOJ 最近错误"`
+	// AI 服务状态（由 agent/core_data 实际调用后回写）
+	AgentStatus       string `gorm:"size:16;column:agent_status;default:unchecked;comment:日报模型状态"`
+	AgentStatusAt     int64  `gorm:"column:agent_status_at;default:0;comment:日报模型状态更新时间 unix"`
+	AgentErrMsg       string `gorm:"type:text;column:agent_err_msg;comment:日报模型最近错误"`
+	AiAnalyzeStatus   string `gorm:"size:16;column:ai_analyze_status;default:unchecked;comment:题库分析状态"`
+	AiAnalyzeStatusAt int64  `gorm:"column:ai_analyze_status_at;default:0;comment:题库分析状态更新时间 unix"`
+	AiAnalyzeErrMsg   string `gorm:"type:text;column:ai_analyze_err_msg;comment:题库分析最近错误"`
+	UpdatedAt         time.Time `gorm:"autoUpdateTime"`
 }
 
 func (SiteConfig) TableName() string { return "site_configs" }

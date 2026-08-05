@@ -39,6 +39,18 @@ type Runtime struct {
 	OjLuoguPassword   string `json:"ojLuoguPassword"`
 	OjQojUsername     string `json:"ojQojUsername"`
 	OjQojPassword     string `json:"ojQojPassword"`
+	OjLuoguStatus     string `json:"ojLuoguStatus"`
+	OjLuoguStatusAt   int64  `json:"ojLuoguStatusAt"`
+	OjLuoguErrMsg     string `json:"ojLuoguErrMsg"`
+	OjQojStatus       string `json:"ojQojStatus"`
+	OjQojStatusAt     int64  `json:"ojQojStatusAt"`
+	OjQojErrMsg       string `json:"ojQojErrMsg"`
+	AgentStatus       string `json:"agentStatus"`
+	AgentStatusAt     int64  `json:"agentStatusAt"`
+	AgentErrMsg       string `json:"agentErrMsg"`
+	AiAnalyzeStatus   string `json:"aiAnalyzeStatus"`
+	AiAnalyzeStatusAt int64  `json:"aiAnalyzeStatusAt"`
+	AiAnalyzeErrMsg   string `json:"aiAnalyzeErrMsg"`
 }
 
 // Row 与 site_configs 表对齐（轻量，避免依赖 user/internal）
@@ -59,6 +71,18 @@ type Row struct {
 	OjLuoguPassword   string `gorm:"column:oj_luogu_password"`
 	OjQojUsername     string `gorm:"column:oj_qoj_username"`
 	OjQojPassword     string `gorm:"column:oj_qoj_password"`
+	OjLuoguStatus     string `gorm:"column:oj_luogu_status"`
+	OjLuoguStatusAt   int64  `gorm:"column:oj_luogu_status_at"`
+	OjLuoguErrMsg     string `gorm:"column:oj_luogu_err_msg"`
+	OjQojStatus       string `gorm:"column:oj_qoj_status"`
+	OjQojStatusAt     int64  `gorm:"column:oj_qoj_status_at"`
+	OjQojErrMsg       string `gorm:"column:oj_qoj_err_msg"`
+	AgentStatus       string `gorm:"column:agent_status"`
+	AgentStatusAt     int64  `gorm:"column:agent_status_at"`
+	AgentErrMsg       string `gorm:"column:agent_err_msg"`
+	AiAnalyzeStatus   string `gorm:"column:ai_analyze_status"`
+	AiAnalyzeStatusAt int64  `gorm:"column:ai_analyze_status_at"`
+	AiAnalyzeErrMsg   string `gorm:"column:ai_analyze_err_msg"`
 }
 
 func (Row) TableName() string { return "site_configs" }
@@ -98,6 +122,18 @@ func (r *Row) ToRuntime() *Runtime {
 		OjLuoguPassword:   decrypt(r.OjLuoguPassword),
 		OjQojUsername:     strings.TrimSpace(r.OjQojUsername),
 		OjQojPassword:     decrypt(r.OjQojPassword),
+		OjLuoguStatus:     r.OjLuoguStatus,
+		OjLuoguStatusAt:   r.OjLuoguStatusAt,
+		OjLuoguErrMsg:     r.OjLuoguErrMsg,
+		OjQojStatus:       r.OjQojStatus,
+		OjQojStatusAt:     r.OjQojStatusAt,
+		OjQojErrMsg:       r.OjQojErrMsg,
+		AgentStatus:       r.AgentStatus,
+		AgentStatusAt:     r.AgentStatusAt,
+		AgentErrMsg:       r.AgentErrMsg,
+		AiAnalyzeStatus:   r.AiAnalyzeStatus,
+		AiAnalyzeStatusAt: r.AiAnalyzeStatusAt,
+		AiAnalyzeErrMsg:   r.AiAnalyzeErrMsg,
 	}
 }
 
@@ -298,4 +334,69 @@ func MaskSecret(s string) string {
 		return ""
 	}
 	return "••••••••"
+}
+
+// UpdateOjStatus 回写 OJ 登录状态到 site_configs（core_data 爬虫调用）。
+func UpdateOjStatus(ctx context.Context, rdb *redis.Client, db *gorm.DB, platform, status, errMsg string) {
+	if db == nil {
+		return
+	}
+	now := time.Now().Unix()
+	updates := map[string]interface{}{}
+	switch platform {
+	case "LuoGu":
+		updates["oj_luogu_status"] = status
+		updates["oj_luogu_status_at"] = now
+		updates["oj_luogu_err_msg"] = errMsg
+	case "QOJ":
+		updates["oj_qoj_status"] = status
+		updates["oj_qoj_status_at"] = now
+		updates["oj_qoj_err_msg"] = errMsg
+	default:
+		return
+	}
+	if err := db.WithContext(ctx).Table("site_configs").Where("id = 1").Updates(updates).Error; err != nil {
+		log.Warnf("sitesettings: UpdateOjStatus %s: %v", platform, err)
+		return
+	}
+	// 刷新 Redis 缓存，让前端立即可见
+	if rdb != nil {
+		if rt, err := LoadFromDB(db); err == nil && rt != nil {
+			if rt.worthCaching() {
+				_ = PublishRedis(ctx, rdb, rt)
+			}
+		}
+	}
+}
+
+// UpdateAiStatus 回写 AI 服务状态到 site_configs（agent/core_data 调用）。
+func UpdateAiStatus(ctx context.Context, rdb *redis.Client, db *gorm.DB, service, status, errMsg string) {
+	if db == nil {
+		return
+	}
+	now := time.Now().Unix()
+	updates := map[string]interface{}{}
+	switch service {
+	case "agent":
+		updates["agent_status"] = status
+		updates["agent_status_at"] = now
+		updates["agent_err_msg"] = errMsg
+	case "ai_analyze":
+		updates["ai_analyze_status"] = status
+		updates["ai_analyze_status_at"] = now
+		updates["ai_analyze_err_msg"] = errMsg
+	default:
+		return
+	}
+	if err := db.WithContext(ctx).Table("site_configs").Where("id = 1").Updates(updates).Error; err != nil {
+		log.Warnf("sitesettings: UpdateAiStatus %s: %v", service, err)
+		return
+	}
+	if rdb != nil {
+		if rt, err := LoadFromDB(db); err == nil && rt != nil {
+			if rt.worthCaching() {
+				_ = PublishRedis(ctx, rdb, rt)
+			}
+		}
+	}
 }

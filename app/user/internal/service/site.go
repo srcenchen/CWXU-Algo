@@ -250,6 +250,18 @@ func (s *SiteService) GetAdminConfig(ctx context.Context, _ *site.GetAdminConfig
 		OjQojUsername:         strings.TrimSpace(row.OjQojUsername),
 		OjQojPasswordMasked:   sitesettings.MaskSecret(decryptSiteSecret(row.OjQojPassword)),
 		OjQojPasswordSet:      strings.TrimSpace(decryptSiteSecret(row.OjQojPassword)) != "",
+		OjLuoguStatus:         row.OjLuoguStatus,
+		OjLuoguStatusAt:       row.OjLuoguStatusAt,
+		OjLuoguErrMsg:         row.OjLuoguErrMsg,
+		OjQojStatus:           row.OjQojStatus,
+		OjQojStatusAt:         row.OjQojStatusAt,
+		OjQojErrMsg:           row.OjQojErrMsg,
+		AgentStatus:           row.AgentStatus,
+		AgentStatusAt:         row.AgentStatusAt,
+		AgentErrMsg:           row.AgentErrMsg,
+		AiAnalyzeStatus:       row.AiAnalyzeStatus,
+		AiAnalyzeStatusAt:     row.AiAnalyzeStatusAt,
+		AiAnalyzeErrMsg:       row.AiAnalyzeErrMsg,
 	}, nil
 }
 
