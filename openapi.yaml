@@ -2238,6 +2238,25 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/api.user.v1.site.TestEmailRes'
+    /v1/user/site/verify-oj:
+        post:
+            tags:
+                - Site
+            description: 管理员：异步校验 OJ 爬虫账号是否可登录
+            operationId: Site_VerifyOjCredential
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/api.user.v1.site.VerifyOjCredentialReq'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.user.v1.site.VerifyOjCredentialRes'
     /v1/user/site/visit-ping:
         post:
             tags:
@@ -5045,6 +5064,29 @@ components:
                 favicon:
                     type: string
                 footerIcp:
+                    type: string
+        api.user.v1.site.VerifyOjCredentialReq:
+            type: object
+            properties:
+                platform:
+                    type: string
+                    description: 'platform: "LuoGu" 或 "QOJ"'
+                username:
+                    type: string
+                    description: 用户名（空则沿用已保存的）
+                password:
+                    type: string
+                    description: 密码（空则沿用已保存的；掩码则跳过）
+        api.user.v1.site.VerifyOjCredentialRes:
+            type: object
+            properties:
+                code:
+                    type: string
+                message:
+                    type: string
+                ok:
+                    type: boolean
+                errorDetail:
                     type: string
         api.user.v1.site.VisitPingReq:
             type: object

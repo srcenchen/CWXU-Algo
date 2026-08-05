@@ -19,12 +19,13 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	Site_GetConfig_FullMethodName      = "/api.user.v1.site.Site/GetConfig"
-	Site_GetAdminConfig_FullMethodName = "/api.user.v1.site.Site/GetAdminConfig"
-	Site_UpdateConfig_FullMethodName   = "/api.user.v1.site.Site/UpdateConfig"
-	Site_TestEmail_FullMethodName      = "/api.user.v1.site.Site/TestEmail"
-	Site_VisitPing_FullMethodName      = "/api.user.v1.site.Site/VisitPing"
-	Site_GetAccessStats_FullMethodName = "/api.user.v1.site.Site/GetAccessStats"
+	Site_GetConfig_FullMethodName          = "/api.user.v1.site.Site/GetConfig"
+	Site_GetAdminConfig_FullMethodName     = "/api.user.v1.site.Site/GetAdminConfig"
+	Site_UpdateConfig_FullMethodName       = "/api.user.v1.site.Site/UpdateConfig"
+	Site_TestEmail_FullMethodName          = "/api.user.v1.site.Site/TestEmail"
+	Site_VisitPing_FullMethodName          = "/api.user.v1.site.Site/VisitPing"
+	Site_GetAccessStats_FullMethodName     = "/api.user.v1.site.Site/GetAccessStats"
+	Site_VerifyOjCredential_FullMethodName = "/api.user.v1.site.Site/VerifyOjCredential"
 )
 
 // SiteClient is the client API for Site service.
@@ -43,6 +44,8 @@ type SiteClient interface {
 	VisitPing(ctx context.Context, in *VisitPingReq, opts ...grpc.CallOption) (*VisitPingRes, error)
 	// 站点访问概览（仅站点管理员）
 	GetAccessStats(ctx context.Context, in *GetAccessStatsReq, opts ...grpc.CallOption) (*GetAccessStatsRes, error)
+	// 管理员：异步校验 OJ 爬虫账号是否可登录
+	VerifyOjCredential(ctx context.Context, in *VerifyOjCredentialReq, opts ...grpc.CallOption) (*VerifyOjCredentialRes, error)
 }
 
 type siteClient struct {
@@ -113,6 +116,16 @@ func (c *siteClient) GetAccessStats(ctx context.Context, in *GetAccessStatsReq, 
 	return out, nil
 }
 
+func (c *siteClient) VerifyOjCredential(ctx context.Context, in *VerifyOjCredentialReq, opts ...grpc.CallOption) (*VerifyOjCredentialRes, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(VerifyOjCredentialRes)
+	err := c.cc.Invoke(ctx, Site_VerifyOjCredential_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // SiteServer is the server API for Site service.
 // All implementations must embed UnimplementedSiteServer
 // for forward compatibility.
@@ -129,6 +142,8 @@ type SiteServer interface {
 	VisitPing(context.Context, *VisitPingReq) (*VisitPingRes, error)
 	// 站点访问概览（仅站点管理员）
 	GetAccessStats(context.Context, *GetAccessStatsReq) (*GetAccessStatsRes, error)
+	// 管理员：异步校验 OJ 爬虫账号是否可登录
+	VerifyOjCredential(context.Context, *VerifyOjCredentialReq) (*VerifyOjCredentialRes, error)
 	mustEmbedUnimplementedSiteServer()
 }
 
@@ -156,6 +171,9 @@ func (UnimplementedSiteServer) VisitPing(context.Context, *VisitPingReq) (*Visit
 }
 func (UnimplementedSiteServer) GetAccessStats(context.Context, *GetAccessStatsReq) (*GetAccessStatsRes, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetAccessStats not implemented")
+}
+func (UnimplementedSiteServer) VerifyOjCredential(context.Context, *VerifyOjCredentialReq) (*VerifyOjCredentialRes, error) {
+	return nil, status.Error(codes.Unimplemented, "method VerifyOjCredential not implemented")
 }
 func (UnimplementedSiteServer) mustEmbedUnimplementedSiteServer() {}
 func (UnimplementedSiteServer) testEmbeddedByValue()              {}
@@ -286,6 +304,24 @@ func _Site_GetAccessStats_Handler(srv interface{}, ctx context.Context, dec func
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Site_VerifyOjCredential_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(VerifyOjCredentialReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SiteServer).VerifyOjCredential(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Site_VerifyOjCredential_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SiteServer).VerifyOjCredential(ctx, req.(*VerifyOjCredentialReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Site_ServiceDesc is the grpc.ServiceDesc for Site service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -316,6 +352,10 @@ var Site_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetAccessStats",
 			Handler:    _Site_GetAccessStats_Handler,
+		},
+		{
+			MethodName: "VerifyOjCredential",
+			Handler:    _Site_VerifyOjCredential_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

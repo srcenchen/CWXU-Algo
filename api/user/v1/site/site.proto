@@ -46,6 +46,13 @@ service Site {
       get: "/v1/user/site/access-stats"
     };
   }
+  // 管理员：异步校验 OJ 爬虫账号是否可登录
+  rpc VerifyOjCredential (VerifyOjCredentialReq) returns (VerifyOjCredentialRes) {
+    option (google.api.http) = {
+      post: "/v1/user/site/verify-oj"
+      body: "*"
+    };
+  }
 }
 
 message GetConfigReq {}
@@ -238,6 +245,22 @@ message AccessIpItem {
   string last_path = 3;
   // unix 秒
   int64 last_seen = 4;
+}
+
+message VerifyOjCredentialReq {
+  // platform: "LuoGu" 或 "QOJ"
+  string platform = 1;
+  // 用户名（空则沿用已保存的）
+  string username = 2;
+  // 密码（空则沿用已保存的；掩码则跳过）
+  string password = 3;
+}
+
+message VerifyOjCredentialRes {
+  int64 code = 1;
+  string message = 2;
+  bool ok = 3;
+  string error_detail = 4;
 }
 
 message GetAccessStatsRes {

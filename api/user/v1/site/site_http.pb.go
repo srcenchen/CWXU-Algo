@@ -24,6 +24,7 @@ const OperationSiteGetAdminConfig = "/api.user.v1.site.Site/GetAdminConfig"
 const OperationSiteGetConfig = "/api.user.v1.site.Site/GetConfig"
 const OperationSiteTestEmail = "/api.user.v1.site.Site/TestEmail"
 const OperationSiteUpdateConfig = "/api.user.v1.site.Site/UpdateConfig"
+const OperationSiteVerifyOjCredential = "/api.user.v1.site.Site/VerifyOjCredential"
 const OperationSiteVisitPing = "/api.user.v1.site.Site/VisitPing"
 
 type SiteHTTPServer interface {
@@ -37,6 +38,8 @@ type SiteHTTPServer interface {
 	TestEmail(context.Context, *TestEmailReq) (*TestEmailRes, error)
 	// UpdateConfig 管理员：更新站点配置（品牌 / SMTP / AI）
 	UpdateConfig(context.Context, *UpdateConfigReq) (*UpdateConfigRes, error)
+	// VerifyOjCredential 管理员：异步校验 OJ 爬虫账号是否可登录
+	VerifyOjCredential(context.Context, *VerifyOjCredentialReq) (*VerifyOjCredentialRes, error)
 	// VisitPing 访问上报（公开；可选 JWT 计入日活）
 	VisitPing(context.Context, *VisitPingReq) (*VisitPingRes, error)
 }
@@ -49,6 +52,7 @@ func RegisterSiteHTTPServer(s *http.Server, srv SiteHTTPServer) {
 	r.POST("/v1/user/site/test-email", _Site_TestEmail0_HTTP_Handler(srv))
 	r.POST("/v1/user/site/visit-ping", _Site_VisitPing0_HTTP_Handler(srv))
 	r.GET("/v1/user/site/access-stats", _Site_GetAccessStats0_HTTP_Handler(srv))
+	r.POST("/v1/user/site/verify-oj", _Site_VerifyOjCredential0_HTTP_Handler(srv))
 }
 
 func _Site_GetConfig0_HTTP_Handler(srv SiteHTTPServer) func(ctx http.Context) error {
@@ -174,6 +178,28 @@ func _Site_GetAccessStats0_HTTP_Handler(srv SiteHTTPServer) func(ctx http.Contex
 	}
 }
 
+func _Site_VerifyOjCredential0_HTTP_Handler(srv SiteHTTPServer) func(ctx http.Context) error {
+	return func(ctx http.Context) error {
+		var in VerifyOjCredentialReq
+		if err := ctx.Bind(&in); err != nil {
+			return err
+		}
+		if err := ctx.BindQuery(&in); err != nil {
+			return err
+		}
+		http.SetOperation(ctx, OperationSiteVerifyOjCredential)
+		h := ctx.Middleware(func(ctx context.Context, req interface{}) (interface{}, error) {
+			return srv.VerifyOjCredential(ctx, req.(*VerifyOjCredentialReq))
+		})
+		out, err := h(ctx, &in)
+		if err != nil {
+			return err
+		}
+		reply := out.(*VerifyOjCredentialRes)
+		return ctx.Result(200, reply)
+	}
+}
+
 type SiteHTTPClient interface {
 	// GetAccessStats 站点访问概览（仅站点管理员）
 	GetAccessStats(ctx context.Context, req *GetAccessStatsReq, opts ...http.CallOption) (rsp *GetAccessStatsRes, err error)
@@ -185,6 +211,8 @@ type SiteHTTPClient interface {
 	TestEmail(ctx context.Context, req *TestEmailReq, opts ...http.CallOption) (rsp *TestEmailRes, err error)
 	// UpdateConfig 管理员：更新站点配置（品牌 / SMTP / AI）
 	UpdateConfig(ctx context.Context, req *UpdateConfigReq, opts ...http.CallOption) (rsp *UpdateConfigRes, err error)
+	// VerifyOjCredential 管理员：异步校验 OJ 爬虫账号是否可登录
+	VerifyOjCredential(ctx context.Context, req *VerifyOjCredentialReq, opts ...http.CallOption) (rsp *VerifyOjCredentialRes, err error)
 	// VisitPing 访问上报（公开；可选 JWT 计入日活）
 	VisitPing(ctx context.Context, req *VisitPingReq, opts ...http.CallOption) (rsp *VisitPingRes, err error)
 }
@@ -259,6 +287,20 @@ func (c *SiteHTTPClientImpl) UpdateConfig(ctx context.Context, in *UpdateConfigR
 	pattern := "/v1/user/site/config"
 	path := binding.EncodeURL(pattern, in, false)
 	opts = append(opts, http.Operation(OperationSiteUpdateConfig))
+	opts = append(opts, http.PathTemplate(pattern))
+	err := c.cc.Invoke(ctx, "POST", path, in, &out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// VerifyOjCredential 管理员：异步校验 OJ 爬虫账号是否可登录
+func (c *SiteHTTPClientImpl) VerifyOjCredential(ctx context.Context, in *VerifyOjCredentialReq, opts ...http.CallOption) (*VerifyOjCredentialRes, error) {
+	var out VerifyOjCredentialRes
+	pattern := "/v1/user/site/verify-oj"
+	path := binding.EncodeURL(pattern, in, false)
+	opts = append(opts, http.Operation(OperationSiteVerifyOjCredential))
 	opts = append(opts, http.PathTemplate(pattern))
 	err := c.cc.Invoke(ctx, "POST", path, in, &out, opts...)
 	if err != nil {

@@ -369,11 +369,6 @@ func (s *SiteService) UpdateConfig(ctx context.Context, req *site.UpdateConfigRe
 		updates["oj_qoj_password"] = encrypted
 	}
 
-	// 保存前校验 OJ 爬虫账号：有用户名则必须能登录（密码可沿用已存）
-	if errMsg := verifyOjCredentialsBeforeSave(row, req); errMsg != "" {
-		return &site.UpdateConfigRes{Code: 1, Message: errMsg}, nil
-	}
-
 	if e := s.data.DB.WithContext(ctx).Model(&model.SiteConfig{}).Where("id = ?", 1).Updates(updates).Error; e != nil {
 		return nil, errors.InternalServer("site config update", e.Error())
 	}
@@ -552,6 +547,53 @@ func (s *SiteService) VisitPing(ctx context.Context, req *site.VisitPingReq) (*s
 		counted = rec.Counted
 	}
 	return &site.VisitPingRes{Code: 0, Message: "ok", Counted: counted}, nil
+}
+
+func (s *SiteService) VerifyOjCredential(ctx context.Context, req *site.VerifyOjCredentialReq) (*site.VerifyOjCredentialRes, error) {
+	if !auth.HasPerm(ctx, rbac.PermSiteConfigWrite) {
+		return &site.VerifyOjCredentialRes{Code: 1, Message: "需要修改站点配置权限"}, nil
+	}
+	row, err := s.ensureRow(ctx)
+	if err != nil {
+		return nil, errors.InternalServer("site config", "服务暂时不可用")
+	}
+
+	plat := strings.TrimSpace(req.GetPlatform())
+	username := strings.TrimSpace(req.GetUsername())
+	password := req.GetPassword()
+
+	switch plat {
+	case "LuoGu":
+		if username == "" {
+			username = strings.TrimSpace(row.OjLuoguUsername)
+		}
+		if !isRealSecret(password) {
+			password = decryptSiteSecret(row.OjLuoguPassword)
+		}
+		if strings.TrimSpace(password) == "" {
+			return &site.VerifyOjCredentialRes{Code: 1, Message: "请先填写洛谷密码", Ok: false}, nil
+		}
+		if err := ojlogin.VerifyLuogu(username, password); err != nil {
+			return &site.VerifyOjCredentialRes{Code: 0, Message: "验证失败", Ok: false, ErrorDetail: err.Error()}, nil
+		}
+		return &site.VerifyOjCredentialRes{Code: 0, Message: "ok", Ok: true}, nil
+	case "QOJ":
+		if username == "" {
+			username = strings.TrimSpace(row.OjQojUsername)
+		}
+		if !isRealSecret(password) {
+			password = decryptSiteSecret(row.OjQojPassword)
+		}
+		if strings.TrimSpace(password) == "" {
+			return &site.VerifyOjCredentialRes{Code: 1, Message: "请先填写 QOJ 密码", Ok: false}, nil
+		}
+		if err := ojlogin.VerifyQOJ(username, password); err != nil {
+			return &site.VerifyOjCredentialRes{Code: 0, Message: "验证失败", Ok: false, ErrorDetail: err.Error()}, nil
+		}
+		return &site.VerifyOjCredentialRes{Code: 0, Message: "ok", Ok: true}, nil
+	default:
+		return &site.VerifyOjCredentialRes{Code: 1, Message: "不支持的平台: " + plat}, nil
+	}
 }
 
 func (s *SiteService) GetAccessStats(ctx context.Context, req *site.GetAccessStatsReq) (*site.GetAccessStatsRes, error) {

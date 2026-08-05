@@ -1488,6 +1488,137 @@ func (x *AccessIpItem) GetLastSeen() int64 {
 	return 0
 }
 
+type VerifyOjCredentialReq struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// platform: "LuoGu" 或 "QOJ"
+	Platform string `protobuf:"bytes,1,opt,name=platform,proto3" json:"platform,omitempty"`
+	// 用户名（空则沿用已保存的）
+	Username string `protobuf:"bytes,2,opt,name=username,proto3" json:"username,omitempty"`
+	// 密码（空则沿用已保存的；掩码则跳过）
+	Password      string `protobuf:"bytes,3,opt,name=password,proto3" json:"password,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *VerifyOjCredentialReq) Reset() {
+	*x = VerifyOjCredentialReq{}
+	mi := &file_user_v1_site_site_proto_msgTypes[15]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *VerifyOjCredentialReq) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*VerifyOjCredentialReq) ProtoMessage() {}
+
+func (x *VerifyOjCredentialReq) ProtoReflect() protoreflect.Message {
+	mi := &file_user_v1_site_site_proto_msgTypes[15]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use VerifyOjCredentialReq.ProtoReflect.Descriptor instead.
+func (*VerifyOjCredentialReq) Descriptor() ([]byte, []int) {
+	return file_user_v1_site_site_proto_rawDescGZIP(), []int{15}
+}
+
+func (x *VerifyOjCredentialReq) GetPlatform() string {
+	if x != nil {
+		return x.Platform
+	}
+	return ""
+}
+
+func (x *VerifyOjCredentialReq) GetUsername() string {
+	if x != nil {
+		return x.Username
+	}
+	return ""
+}
+
+func (x *VerifyOjCredentialReq) GetPassword() string {
+	if x != nil {
+		return x.Password
+	}
+	return ""
+}
+
+type VerifyOjCredentialRes struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Code          int64                  `protobuf:"varint,1,opt,name=code,proto3" json:"code,omitempty"`
+	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	Ok            bool                   `protobuf:"varint,3,opt,name=ok,proto3" json:"ok,omitempty"`
+	ErrorDetail   string                 `protobuf:"bytes,4,opt,name=error_detail,json=errorDetail,proto3" json:"error_detail,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *VerifyOjCredentialRes) Reset() {
+	*x = VerifyOjCredentialRes{}
+	mi := &file_user_v1_site_site_proto_msgTypes[16]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *VerifyOjCredentialRes) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*VerifyOjCredentialRes) ProtoMessage() {}
+
+func (x *VerifyOjCredentialRes) ProtoReflect() protoreflect.Message {
+	mi := &file_user_v1_site_site_proto_msgTypes[16]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use VerifyOjCredentialRes.ProtoReflect.Descriptor instead.
+func (*VerifyOjCredentialRes) Descriptor() ([]byte, []int) {
+	return file_user_v1_site_site_proto_rawDescGZIP(), []int{16}
+}
+
+func (x *VerifyOjCredentialRes) GetCode() int64 {
+	if x != nil {
+		return x.Code
+	}
+	return 0
+}
+
+func (x *VerifyOjCredentialRes) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
+func (x *VerifyOjCredentialRes) GetOk() bool {
+	if x != nil {
+		return x.Ok
+	}
+	return false
+}
+
+func (x *VerifyOjCredentialRes) GetErrorDetail() string {
+	if x != nil {
+		return x.ErrorDetail
+	}
+	return ""
+}
+
 type GetAccessStatsRes struct {
 	state     protoimpl.MessageState `protogen:"open.v1"`
 	Code      int64                  `protobuf:"varint,1,opt,name=code,proto3" json:"code,omitempty"`
@@ -1531,7 +1662,7 @@ type GetAccessStatsRes struct {
 
 func (x *GetAccessStatsRes) Reset() {
 	*x = GetAccessStatsRes{}
-	mi := &file_user_v1_site_site_proto_msgTypes[15]
+	mi := &file_user_v1_site_site_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1543,7 +1674,7 @@ func (x *GetAccessStatsRes) String() string {
 func (*GetAccessStatsRes) ProtoMessage() {}
 
 func (x *GetAccessStatsRes) ProtoReflect() protoreflect.Message {
-	mi := &file_user_v1_site_site_proto_msgTypes[15]
+	mi := &file_user_v1_site_site_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1556,7 +1687,7 @@ func (x *GetAccessStatsRes) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetAccessStatsRes.ProtoReflect.Descriptor instead.
 func (*GetAccessStatsRes) Descriptor() ([]byte, []int) {
-	return file_user_v1_site_site_proto_rawDescGZIP(), []int{15}
+	return file_user_v1_site_site_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *GetAccessStatsRes) GetCode() int64 {
@@ -1852,7 +1983,16 @@ const file_user_v1_site_site_proto_rawDesc = "" +
 	"\x02ip\x18\x01 \x01(\tR\x02ip\x12\x0e\n" +
 	"\x02pv\x18\x02 \x01(\x03R\x02pv\x12\x1b\n" +
 	"\tlast_path\x18\x03 \x01(\tR\blastPath\x12\x1b\n" +
-	"\tlast_seen\x18\x04 \x01(\x03R\blastSeen\"\xa9\a\n" +
+	"\tlast_seen\x18\x04 \x01(\x03R\blastSeen\"k\n" +
+	"\x15VerifyOjCredentialReq\x12\x1a\n" +
+	"\bplatform\x18\x01 \x01(\tR\bplatform\x12\x1a\n" +
+	"\busername\x18\x02 \x01(\tR\busername\x12\x1a\n" +
+	"\bpassword\x18\x03 \x01(\tR\bpassword\"x\n" +
+	"\x15VerifyOjCredentialRes\x12\x12\n" +
+	"\x04code\x18\x01 \x01(\x03R\x04code\x12\x18\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\x12\x0e\n" +
+	"\x02ok\x18\x03 \x01(\bR\x02ok\x12!\n" +
+	"\ferror_detail\x18\x04 \x01(\tR\verrorDetail\"\xa9\a\n" +
 	"\x11GetAccessStatsRes\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\x03R\x04code\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x125\n" +
@@ -1878,14 +2018,15 @@ const file_user_v1_site_site_proto_rawDesc = "" +
 	"\x15spider_enqueued_today\x18\x12 \x01(\x03R\x13spiderEnqueuedToday\x12&\n" +
 	"\x0fspider_ok_today\x18\x13 \x01(\x03R\rspiderOkToday\x12*\n" +
 	"\x11spider_fail_today\x18\x14 \x01(\x03R\x0fspiderFailToday\x12*\n" +
-	"\x11spider_rows_today\x18\x15 \x01(\x03R\x0fspiderRowsToday2\xcc\x05\n" +
+	"\x11spider_rows_today\x18\x15 \x01(\x03R\x0fspiderRowsToday2\xd9\x06\n" +
 	"\x04Site\x12i\n" +
 	"\tGetConfig\x12\x1e.api.user.v1.site.GetConfigReq\x1a\x1e.api.user.v1.site.GetConfigRes\"\x1c\x82\xd3\xe4\x93\x02\x16\x12\x14/v1/user/site/config\x12~\n" +
 	"\x0eGetAdminConfig\x12#.api.user.v1.site.GetAdminConfigReq\x1a#.api.user.v1.site.GetAdminConfigRes\"\"\x82\xd3\xe4\x93\x02\x1c\x12\x1a/v1/user/site/admin-config\x12u\n" +
 	"\fUpdateConfig\x12!.api.user.v1.site.UpdateConfigReq\x1a!.api.user.v1.site.UpdateConfigRes\"\x1f\x82\xd3\xe4\x93\x02\x19:\x01*\"\x14/v1/user/site/config\x12p\n" +
 	"\tTestEmail\x12\x1e.api.user.v1.site.TestEmailReq\x1a\x1e.api.user.v1.site.TestEmailRes\"#\x82\xd3\xe4\x93\x02\x1d:\x01*\"\x18/v1/user/site/test-email\x12p\n" +
 	"\tVisitPing\x12\x1e.api.user.v1.site.VisitPingReq\x1a\x1e.api.user.v1.site.VisitPingRes\"#\x82\xd3\xe4\x93\x02\x1d:\x01*\"\x18/v1/user/site/visit-ping\x12~\n" +
-	"\x0eGetAccessStats\x12#.api.user.v1.site.GetAccessStatsReq\x1a#.api.user.v1.site.GetAccessStatsRes\"\"\x82\xd3\xe4\x93\x02\x1c\x12\x1a/v1/user/site/access-statsB5\n" +
+	"\x0eGetAccessStats\x12#.api.user.v1.site.GetAccessStatsReq\x1a#.api.user.v1.site.GetAccessStatsRes\"\"\x82\xd3\xe4\x93\x02\x1c\x12\x1a/v1/user/site/access-stats\x12\x8a\x01\n" +
+	"\x12VerifyOjCredential\x12'.api.user.v1.site.VerifyOjCredentialReq\x1a'.api.user.v1.site.VerifyOjCredentialRes\"\"\x82\xd3\xe4\x93\x02\x1c:\x01*\"\x17/v1/user/site/verify-ojB5\n" +
 	"\x10api.user.v1.siteP\x01Z\x1fcwxu-algo/api/user/v1/site;siteb\x06proto3"
 
 var (
@@ -1900,24 +2041,26 @@ func file_user_v1_site_site_proto_rawDescGZIP() []byte {
 	return file_user_v1_site_site_proto_rawDescData
 }
 
-var file_user_v1_site_site_proto_msgTypes = make([]protoimpl.MessageInfo, 16)
+var file_user_v1_site_site_proto_msgTypes = make([]protoimpl.MessageInfo, 18)
 var file_user_v1_site_site_proto_goTypes = []any{
-	(*GetConfigReq)(nil),       // 0: api.user.v1.site.GetConfigReq
-	(*GetConfigRes)(nil),       // 1: api.user.v1.site.GetConfigRes
-	(*GetAdminConfigReq)(nil),  // 2: api.user.v1.site.GetAdminConfigReq
-	(*GetAdminConfigRes)(nil),  // 3: api.user.v1.site.GetAdminConfigRes
-	(*UpdateConfigReq)(nil),    // 4: api.user.v1.site.UpdateConfigReq
-	(*UpdateConfigRes)(nil),    // 5: api.user.v1.site.UpdateConfigRes
-	(*TestEmailReq)(nil),       // 6: api.user.v1.site.TestEmailReq
-	(*TestEmailRes)(nil),       // 7: api.user.v1.site.TestEmailRes
-	(*VisitPingReq)(nil),       // 8: api.user.v1.site.VisitPingReq
-	(*VisitPingRes)(nil),       // 9: api.user.v1.site.VisitPingRes
-	(*GetAccessStatsReq)(nil),  // 10: api.user.v1.site.GetAccessStatsReq
-	(*AccessDayStat)(nil),      // 11: api.user.v1.site.AccessDayStat
-	(*AccessPathStat)(nil),     // 12: api.user.v1.site.AccessPathStat
-	(*AccessCategoryStat)(nil), // 13: api.user.v1.site.AccessCategoryStat
-	(*AccessIpItem)(nil),       // 14: api.user.v1.site.AccessIpItem
-	(*GetAccessStatsRes)(nil),  // 15: api.user.v1.site.GetAccessStatsRes
+	(*GetConfigReq)(nil),          // 0: api.user.v1.site.GetConfigReq
+	(*GetConfigRes)(nil),          // 1: api.user.v1.site.GetConfigRes
+	(*GetAdminConfigReq)(nil),     // 2: api.user.v1.site.GetAdminConfigReq
+	(*GetAdminConfigRes)(nil),     // 3: api.user.v1.site.GetAdminConfigRes
+	(*UpdateConfigReq)(nil),       // 4: api.user.v1.site.UpdateConfigReq
+	(*UpdateConfigRes)(nil),       // 5: api.user.v1.site.UpdateConfigRes
+	(*TestEmailReq)(nil),          // 6: api.user.v1.site.TestEmailReq
+	(*TestEmailRes)(nil),          // 7: api.user.v1.site.TestEmailRes
+	(*VisitPingReq)(nil),          // 8: api.user.v1.site.VisitPingReq
+	(*VisitPingRes)(nil),          // 9: api.user.v1.site.VisitPingRes
+	(*GetAccessStatsReq)(nil),     // 10: api.user.v1.site.GetAccessStatsReq
+	(*AccessDayStat)(nil),         // 11: api.user.v1.site.AccessDayStat
+	(*AccessPathStat)(nil),        // 12: api.user.v1.site.AccessPathStat
+	(*AccessCategoryStat)(nil),    // 13: api.user.v1.site.AccessCategoryStat
+	(*AccessIpItem)(nil),          // 14: api.user.v1.site.AccessIpItem
+	(*VerifyOjCredentialReq)(nil), // 15: api.user.v1.site.VerifyOjCredentialReq
+	(*VerifyOjCredentialRes)(nil), // 16: api.user.v1.site.VerifyOjCredentialRes
+	(*GetAccessStatsRes)(nil),     // 17: api.user.v1.site.GetAccessStatsRes
 }
 var file_user_v1_site_site_proto_depIdxs = []int32{
 	11, // 0: api.user.v1.site.GetAccessStatsRes.today:type_name -> api.user.v1.site.AccessDayStat
@@ -1932,14 +2075,16 @@ var file_user_v1_site_site_proto_depIdxs = []int32{
 	6,  // 9: api.user.v1.site.Site.TestEmail:input_type -> api.user.v1.site.TestEmailReq
 	8,  // 10: api.user.v1.site.Site.VisitPing:input_type -> api.user.v1.site.VisitPingReq
 	10, // 11: api.user.v1.site.Site.GetAccessStats:input_type -> api.user.v1.site.GetAccessStatsReq
-	1,  // 12: api.user.v1.site.Site.GetConfig:output_type -> api.user.v1.site.GetConfigRes
-	3,  // 13: api.user.v1.site.Site.GetAdminConfig:output_type -> api.user.v1.site.GetAdminConfigRes
-	5,  // 14: api.user.v1.site.Site.UpdateConfig:output_type -> api.user.v1.site.UpdateConfigRes
-	7,  // 15: api.user.v1.site.Site.TestEmail:output_type -> api.user.v1.site.TestEmailRes
-	9,  // 16: api.user.v1.site.Site.VisitPing:output_type -> api.user.v1.site.VisitPingRes
-	15, // 17: api.user.v1.site.Site.GetAccessStats:output_type -> api.user.v1.site.GetAccessStatsRes
-	12, // [12:18] is the sub-list for method output_type
-	6,  // [6:12] is the sub-list for method input_type
+	15, // 12: api.user.v1.site.Site.VerifyOjCredential:input_type -> api.user.v1.site.VerifyOjCredentialReq
+	1,  // 13: api.user.v1.site.Site.GetConfig:output_type -> api.user.v1.site.GetConfigRes
+	3,  // 14: api.user.v1.site.Site.GetAdminConfig:output_type -> api.user.v1.site.GetAdminConfigRes
+	5,  // 15: api.user.v1.site.Site.UpdateConfig:output_type -> api.user.v1.site.UpdateConfigRes
+	7,  // 16: api.user.v1.site.Site.TestEmail:output_type -> api.user.v1.site.TestEmailRes
+	9,  // 17: api.user.v1.site.Site.VisitPing:output_type -> api.user.v1.site.VisitPingRes
+	17, // 18: api.user.v1.site.Site.GetAccessStats:output_type -> api.user.v1.site.GetAccessStatsRes
+	16, // 19: api.user.v1.site.Site.VerifyOjCredential:output_type -> api.user.v1.site.VerifyOjCredentialRes
+	13, // [13:20] is the sub-list for method output_type
+	6,  // [6:13] is the sub-list for method input_type
 	6,  // [6:6] is the sub-list for extension type_name
 	6,  // [6:6] is the sub-list for extension extendee
 	0,  // [0:6] is the sub-list for field type_name
@@ -1956,7 +2101,7 @@ func file_user_v1_site_site_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_user_v1_site_site_proto_rawDesc), len(file_user_v1_site_site_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   16,
+			NumMessages:   18,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
