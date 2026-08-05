@@ -99,6 +99,13 @@ message GetAdminConfigRes {
   string upyun_domain = 26;
   // 可选协议前缀 http / https；空则按 domain 自带或默认 http
   string upyun_scheme = 27;
+  // OJ 爬虫账号（系统级）
+  string oj_luogu_username = 28;
+  string oj_luogu_password_masked = 29;
+  bool oj_luogu_password_set = 30;
+  string oj_qoj_username = 31;
+  string oj_qoj_password_masked = 32;
+  bool oj_qoj_password_set = 33;
 }
 
 message UpdateConfigReq {
@@ -136,6 +143,13 @@ message UpdateConfigReq {
   bool clear_upyun_password = 24;
   string upyun_domain = 25;
   string upyun_scheme = 26;
+  // OJ 爬虫账号
+  string oj_luogu_username = 27;
+  string oj_luogu_password = 28;
+  bool clear_oj_luogu_password = 29;
+  string oj_qoj_username = 30;
+  string oj_qoj_password = 31;
+  bool clear_oj_qoj_password = 32;
 }
 
 message UpdateConfigRes {

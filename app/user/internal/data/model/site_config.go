@@ -35,7 +35,12 @@ type SiteConfig struct {
 	UpyunDomain string `gorm:"size:256;column:upyun_domain;comment:又拍云加速/访问域名"`
 	// UpyunScheme http | https；空则从 domain 推断，默认 http
 	UpyunScheme string `gorm:"size:16;column:upyun_scheme;comment:访问协议"`
-	UpdatedAt   time.Time `gorm:"autoUpdateTime"`
+	// OJ 爬虫账号（系统级，用于爬取用户提交记录）；密码经 secretutil 加密存储
+	OjLuoguUsername string `gorm:"size:128;column:oj_luogu_username;comment:洛谷爬虫账号"`
+	OjLuoguPassword string `gorm:"size:512;column:oj_luogu_password;comment:洛谷爬虫密码加密"`
+	OjQojUsername   string `gorm:"size:128;column:oj_qoj_username;comment:QOJ 爬虫账号"`
+	OjQojPassword   string `gorm:"size:512;column:oj_qoj_password;comment:QOJ 爬虫密码加密"`
+	UpdatedAt       time.Time `gorm:"autoUpdateTime"`
 }
 
 func (SiteConfig) TableName() string { return "site_configs" }

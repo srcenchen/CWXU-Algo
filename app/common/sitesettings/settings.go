@@ -35,6 +35,10 @@ type Runtime struct {
 	AiAnalyzeEndpoint string `json:"aiAnalyzeEndpoint"`
 	AiAnalyzeModel    string `json:"aiAnalyzeModel"`
 	AiAnalyzeSecret   string `json:"aiAnalyzeSecret"`
+	OjLuoguUsername   string `json:"ojLuoguUsername"`
+	OjLuoguPassword   string `json:"ojLuoguPassword"`
+	OjQojUsername     string `json:"ojQojUsername"`
+	OjQojPassword     string `json:"ojQojPassword"`
 }
 
 // Row 与 site_configs 表对齐（轻量，避免依赖 user/internal）
@@ -51,6 +55,10 @@ type Row struct {
 	AiAnalyzeEndpoint string `gorm:"column:ai_analyze_endpoint"`
 	AiAnalyzeModel    string `gorm:"column:ai_analyze_model"`
 	AiAnalyzeSecret   string `gorm:"column:ai_analyze_secret"`
+	OjLuoguUsername   string `gorm:"column:oj_luogu_username"`
+	OjLuoguPassword   string `gorm:"column:oj_luogu_password"`
+	OjQojUsername     string `gorm:"column:oj_qoj_username"`
+	OjQojPassword     string `gorm:"column:oj_qoj_password"`
 }
 
 func (Row) TableName() string { return "site_configs" }
@@ -86,6 +94,10 @@ func (r *Row) ToRuntime() *Runtime {
 		AiAnalyzeEndpoint: strings.TrimSpace(r.AiAnalyzeEndpoint),
 		AiAnalyzeModel:    strings.TrimSpace(r.AiAnalyzeModel),
 		AiAnalyzeSecret:   decrypt(r.AiAnalyzeSecret),
+		OjLuoguUsername:   strings.TrimSpace(r.OjLuoguUsername),
+		OjLuoguPassword:   decrypt(r.OjLuoguPassword),
+		OjQojUsername:     strings.TrimSpace(r.OjQojUsername),
+		OjQojPassword:     decrypt(r.OjQojPassword),
 	}
 }
 
@@ -135,6 +147,9 @@ func (rt *Runtime) worthCaching() bool {
 		return true
 	}
 	if strings.TrimSpace(rt.AgentModel) != "" || strings.TrimSpace(rt.AgentSecret) != "" {
+		return true
+	}
+	if strings.TrimSpace(rt.OjLuoguUsername) != "" || strings.TrimSpace(rt.OjQojUsername) != "" {
 		return true
 	}
 	return false

@@ -2328,7 +2328,25 @@ type ProgressSnapshot struct {
 	}
 }
 
+const progressSnapshotCacheKey = "problem:progress:snapshot:v1"
+const progressSnapshotCacheTTL = 15 * time.Second
+
 func (uc *ProblemUseCase) Progress() (ProgressSnapshot, error) {
+	// 短缓存：管理端轮询 + 并发打开时避免反复 EXISTS(submit_logs) 扫表
+	if uc.data != nil && uc.data.RDB != nil {
+		if b, err := uc.data.RDB.Get(context.Background(), progressSnapshotCacheKey).Bytes(); err == nil && len(b) > 0 {
+			var cached ProgressSnapshot
+			if json.Unmarshal(b, &cached) == nil {
+				// 暂停态 / 活跃任务以进程内为准（秒级变化，不宜吃 15s 旧缓存）
+				cached.Paused = pipelineControl.IsAnalyzePaused()
+				cached.FetchPaused = pipelineControl.IsFetchPaused()
+				cached.AnalyzePaused = pipelineControl.IsAnalyzePaused()
+				cached.ActiveJobs = pipelineControl.SnapshotActive()
+				return cached, nil
+			}
+		}
+	}
+
 	var snap ProgressSnapshot
 	type sc struct {
 		Status string
@@ -2403,6 +2421,15 @@ func (uc *ProblemUseCase) Progress() (ProgressSnapshot, error) {
 	snap.AnalyzePaused = pipelineControl.IsAnalyzePaused()
 	snap.ActiveJobs = pipelineControl.SnapshotActive()
 	snap.Queues = uc.queueStats()
+
+	if uc.data != nil && uc.data.RDB != nil {
+		// 缓存不含瞬时 ActiveJobs（读侧会覆盖）；计数/失败列表吃 15s 即可
+		toStore := snap
+		toStore.ActiveJobs = nil
+		if b, err := json.Marshal(toStore); err == nil {
+			_ = uc.data.RDB.Set(context.Background(), progressSnapshotCacheKey, b, progressSnapshotCacheTTL).Err()
+		}
+	}
 	return snap, nil
 }
 

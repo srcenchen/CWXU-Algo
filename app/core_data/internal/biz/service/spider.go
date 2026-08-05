@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"cwxu-algo/app/common/sitesettings"
 	"cwxu-algo/app/core_data/internal/data"
 	"cwxu-algo/app/core_data/internal/data/dal"
 	"cwxu-algo/app/core_data/internal/data/model"
@@ -574,8 +575,30 @@ func (uc *SpiderUseCase) fetchAndSaveRating(plat model.Platform) {
 	}
 }
 
+// injectOjCredentials 从站点设置读取 OJ 凭证并注入到爬虫客户端
+func (uc *SpiderUseCase) injectOjCredentials(ctx context.Context) {
+	if uc.data == nil || uc.data.RDB == nil {
+		return
+	}
+	rt := sitesettings.Load(ctx, uc.data.RDB, nil)
+	if rt == nil {
+		return
+	}
+	if p, ok := spider.Get(spider.LuoGu); ok {
+		if setter, ok := p.(interface{ SetCredentials(string, string) }); ok {
+			setter.SetCredentials(rt.OjLuoguUsername, rt.OjLuoguPassword)
+		}
+	}
+	if p, ok := spider.Get(spider.QOJ); ok {
+		if setter, ok := p.(interface{ SetCredentials(string, string) }); ok {
+			setter.SetCredentials(rt.OjQojUsername, rt.OjQojPassword)
+		}
+	}
+}
+
 // loadOnePlatform 返回 (是否有数据变更, error)
 func (uc *SpiderUseCase) loadOnePlatform(ctx context.Context, userId int64, plat model.Platform, needAll bool) (bool, error) {
+	uc.injectOjCredentials(ctx)
 	// needAll 全量：最多 3 次（原先 12 次会把 worker 占死、队列堆积）
 	maxRetries := 1
 	if needAll {

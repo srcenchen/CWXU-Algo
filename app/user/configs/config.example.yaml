@@ -1,10 +1,11 @@
 server:
   http:
     addr: 0.0.0.0:8000
-    timeout: 15s
+    # 站点设置保存会实测洛谷/QOJ 登录（含验证码），过短会超时
+    timeout: 90s
   grpc:
     addr: 0.0.0.0:9000
-    timeout: 15s
+    timeout: 90s
   reg_dsn: 192.168.1.7:8500
   # 三个业务服务与网关必须使用同一个 JWT 密钥（至少 32 字符）
   jwt_secret: ""

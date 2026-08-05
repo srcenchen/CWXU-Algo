@@ -9,6 +9,7 @@ import (
 	"cwxu-algo/api/user/v1/site"
 	"cwxu-algo/app/common/conf"
 	"cwxu-algo/app/common/mail"
+	"cwxu-algo/app/common/ojlogin"
 	"cwxu-algo/app/common/opsmetrics"
 	"cwxu-algo/app/common/rbac"
 	"cwxu-algo/app/common/sitesettings"
@@ -119,6 +120,8 @@ func (s *SiteService) protectStoredSecrets(ctx context.Context, row *model.SiteC
 		"agent_secret":      &row.AgentSecret,
 		"ai_analyze_secret": &row.AiAnalyzeSecret,
 		"upyun_password":    &row.UpyunPassword,
+		"oj_luogu_password": &row.OjLuoguPassword,
+		"oj_qoj_password":   &row.OjQojPassword,
 	}
 	updates := make(map[string]interface{})
 	for column, value := range values {
@@ -178,6 +181,10 @@ func rowToRuntime(row *model.SiteConfig) *sitesettings.Runtime {
 		AiAnalyzeEndpoint: strings.TrimSpace(row.AiAnalyzeEndpoint),
 		AiAnalyzeModel:    strings.TrimSpace(row.AiAnalyzeModel),
 		AiAnalyzeSecret:   decrypt(row.AiAnalyzeSecret),
+		OjLuoguUsername:   strings.TrimSpace(row.OjLuoguUsername),
+		OjLuoguPassword:   decrypt(row.OjLuoguPassword),
+		OjQojUsername:     strings.TrimSpace(row.OjQojUsername),
+		OjQojPassword:     decrypt(row.OjQojPassword),
 	}
 }
 
@@ -237,6 +244,12 @@ func (s *SiteService) GetAdminConfig(ctx context.Context, _ *site.GetAdminConfig
 		UpyunPasswordSet:      strings.TrimSpace(decryptSiteSecret(row.UpyunPassword)) != "",
 		UpyunDomain:           strings.TrimSpace(row.UpyunDomain),
 		UpyunScheme:           strings.TrimSpace(row.UpyunScheme),
+		OjLuoguUsername:       strings.TrimSpace(row.OjLuoguUsername),
+		OjLuoguPasswordMasked: sitesettings.MaskSecret(decryptSiteSecret(row.OjLuoguPassword)),
+		OjLuoguPasswordSet:    strings.TrimSpace(decryptSiteSecret(row.OjLuoguPassword)) != "",
+		OjQojUsername:         strings.TrimSpace(row.OjQojUsername),
+		OjQojPasswordMasked:   sitesettings.MaskSecret(decryptSiteSecret(row.OjQojPassword)),
+		OjQojPasswordSet:      strings.TrimSpace(decryptSiteSecret(row.OjQojPassword)) != "",
 	}, nil
 }
 
@@ -292,6 +305,8 @@ func (s *SiteService) UpdateConfig(ctx context.Context, req *site.UpdateConfigRe
 	updates["upyun_operator"] = strings.TrimSpace(req.UpyunOperator)
 	updates["upyun_domain"] = strings.TrimSpace(req.UpyunDomain)
 	updates["upyun_scheme"] = strings.TrimSpace(req.UpyunScheme)
+	updates["oj_luogu_username"] = strings.TrimSpace(req.OjLuoguUsername)
+	updates["oj_qoj_username"] = strings.TrimSpace(req.OjQojUsername)
 
 	if req.ClearSmtpPassword {
 		updates["smtp_password"] = ""
@@ -333,6 +348,31 @@ func (s *SiteService) UpdateConfig(ctx context.Context, req *site.UpdateConfigRe
 		}
 		updates["upyun_password"] = encrypted
 	}
+	if req.ClearOjLuoguPassword {
+		updates["oj_luogu_password"] = ""
+	} else if isRealSecret(req.OjLuoguPassword) {
+		encrypted, encryptErr := secretutil.Encrypt(req.OjLuoguPassword)
+		if encryptErr != nil {
+			log.Errorf("encrypt oj luogu password: %v", encryptErr)
+			return &site.UpdateConfigRes{Code: 1, Message: "服务器尚未配置配置加密密钥"}, nil
+		}
+		updates["oj_luogu_password"] = encrypted
+	}
+	if req.ClearOjQojPassword {
+		updates["oj_qoj_password"] = ""
+	} else if isRealSecret(req.OjQojPassword) {
+		encrypted, encryptErr := secretutil.Encrypt(req.OjQojPassword)
+		if encryptErr != nil {
+			log.Errorf("encrypt oj qoj password: %v", encryptErr)
+			return &site.UpdateConfigRes{Code: 1, Message: "服务器尚未配置配置加密密钥"}, nil
+		}
+		updates["oj_qoj_password"] = encrypted
+	}
+
+	// 保存前校验 OJ 爬虫账号：有用户名则必须能登录（密码可沿用已存）
+	if errMsg := verifyOjCredentialsBeforeSave(row, req); errMsg != "" {
+		return &site.UpdateConfigRes{Code: 1, Message: errMsg}, nil
+	}
 
 	if e := s.data.DB.WithContext(ctx).Model(&model.SiteConfig{}).Where("id = ?", 1).Updates(updates).Error; e != nil {
 		return nil, errors.InternalServer("site config update", e.Error())
@@ -361,6 +401,54 @@ func isRealSecret(s string) bool {
 		return false
 	}
 	return true
+}
+
+// verifyOjCredentialsBeforeSave 在写库前实测 OJ 登录；失败返回用户可读错误文案。
+func verifyOjCredentialsBeforeSave(row *model.SiteConfig, req *site.UpdateConfigReq) string {
+	if req == nil {
+		return ""
+	}
+	// 洛谷
+	lgUser := strings.TrimSpace(req.OjLuoguUsername)
+	if lgUser != "" {
+		if req.ClearOjLuoguPassword {
+			return "洛谷账号已填写，不能清空密码"
+		}
+		lgPass := ""
+		if isRealSecret(req.OjLuoguPassword) {
+			lgPass = strings.TrimSpace(req.OjLuoguPassword)
+		} else {
+			lgPass = decryptSiteSecret(row.OjLuoguPassword)
+		}
+		if strings.TrimSpace(lgPass) == "" {
+			return "请填写洛谷密码"
+		}
+		if err := ojlogin.VerifyLuogu(lgUser, lgPass); err != nil {
+			log.Warnf("oj login verify luogu: %v", err)
+			return "洛谷账号验证失败：" + err.Error()
+		}
+	}
+	// QOJ
+	qojUser := strings.TrimSpace(req.OjQojUsername)
+	if qojUser != "" {
+		if req.ClearOjQojPassword {
+			return "QOJ 账号已填写，不能清空密码"
+		}
+		qojPass := ""
+		if isRealSecret(req.OjQojPassword) {
+			qojPass = strings.TrimSpace(req.OjQojPassword)
+		} else {
+			qojPass = decryptSiteSecret(row.OjQojPassword)
+		}
+		if strings.TrimSpace(qojPass) == "" {
+			return "请填写 QOJ 密码"
+		}
+		if err := ojlogin.VerifyQOJ(qojUser, qojPass); err != nil {
+			log.Warnf("oj login verify qoj: %v", err)
+			return "QOJ 账号验证失败：" + err.Error()
+		}
+	}
+	return ""
 }
 
 func (s *SiteService) TestEmail(ctx context.Context, req *site.TestEmailReq) (*site.TestEmailRes, error) {

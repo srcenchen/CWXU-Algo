@@ -123,10 +123,10 @@ type ActivityFeed struct {
 	OrgID uint `gorm:"not null;index:idx_af_org_created,priority:1;comment:组织id"`
 	// UserID 作者
 	UserID uint `gorm:"not null;index;comment:作者"`
-	// Type comment|solution
-	Type string `gorm:"size:16;not null;index;comment:动态类型"`
+	// Type comment|solution（与 ref_id 复合索引供公共域 MAX(id) GROUP BY）
+	Type string `gorm:"size:16;not null;index;index:idx_af_type_ref,priority:1;comment:动态类型"`
 	// RefID 评论或题解 id
-	RefID uint `gorm:"not null;comment:源记录id"`
+	RefID uint `gorm:"not null;index:idx_af_type_ref,priority:2;comment:源记录id"`
 	// ProblemID 关联题目
 	ProblemID uint `gorm:"not null;index;comment:题目id"`
 	// Title 展示标题（题解标题 / 评论摘要）

@@ -29,6 +29,7 @@ import (
 	"github.com/go-kratos/kratos/v2/log"
 	"github.com/go-kratos/kratos/v2/registry"
 	khttp "github.com/go-kratos/kratos/v2/transport/http"
+	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 )
 
@@ -37,12 +38,15 @@ const (
 	maxSolutionRunes = 100000
 	maxSolutionTitle = 120
 	maxReportReason  = 500
+	// 公共域动态列表短缓存，削并发下 GROUP BY 重复扫
+	activityFeedCacheTTL = 30 * time.Second
 )
 
 // CommunityService 题目评论 / 用户题解 / 发现动态 / 资料近期
 type CommunityService struct {
 	db  *gorm.DB
 	udb *gorm.DB // optional: algo_user for notifications
+	rdb *redis.Client
 	reg *registry.Registrar
 }
 
@@ -51,7 +55,11 @@ func NewCommunityService(d *data.Data, reg *discovery.Register) *CommunityServic
 	if reg != nil {
 		r = &reg.Reg
 	}
-	return &CommunityService{db: d.DB, udb: d.UserDB, reg: r}
+	var rdb *redis.Client
+	if d != nil {
+		rdb = d.RDB
+	}
+	return &CommunityService{db: d.DB, udb: d.UserDB, rdb: rdb, reg: r}
 }
 
 // publicImageBase 从 algo_user.site_configs 读又拍云访问前缀（无 udb 则空）。
@@ -1055,6 +1063,19 @@ func (s *CommunityService) handleActivityFeed(ctx khttp.Context) error {
 	// 公共域视图：orgId=0（访客）或当前组织即公共域 → 全站聚合
 	publicView := orgID == 0 || s.isPublicOrgID(ctx, orgID)
 
+	// 公共域列表短缓存（与登录态无关的聚合）
+	feedCacheKey := ""
+	if publicView && s.rdb != nil {
+		feedCacheKey = fmt.Sprintf("core:activity:feed:v2:pub:%s:p%d:s%d", typ, page, pageSize)
+		if b, err := s.rdb.Get(context.Background(), feedCacheKey).Bytes(); err == nil && len(b) > 0 {
+			var cached map[string]interface{}
+			if json.Unmarshal(b, &cached) == nil && cached != nil {
+				writeJSON(ctx.Response(), 200, cached)
+				return nil
+			}
+		}
+	}
+
 	var total int64
 	var list []model.ActivityFeed
 	if publicView {
@@ -1155,9 +1176,15 @@ func (s *CommunityService) handleActivityFeed(ctx khttp.Context) error {
 			"createdAt":    a.CreatedAt.Unix(),
 		})
 	}
-	writeJSON(ctx.Response(), 200, map[string]interface{}{
+	payload := map[string]interface{}{
 		"success": true, "message": "ok", "list": items, "total": total, "page": page, "pageSize": pageSize,
-	})
+	}
+	if feedCacheKey != "" && s.rdb != nil {
+		if b, err := json.Marshal(payload); err == nil {
+			_ = s.rdb.Set(context.Background(), feedCacheKey, b, activityFeedCacheTTL).Err()
+		}
+	}
+	writeJSON(ctx.Response(), 200, payload)
 	return nil
 }
 
@@ -1714,7 +1741,8 @@ func (s *CommunityService) batchProblems(ids []uint) map[uint]probBrief {
 	var list []model.Problem
 	_ = s.db.Select("id", "title", "platform").Where("id IN ?", ids).Find(&list).Error
 	for _, p := range list {
-		out[p.ID] = probBrief{title: p.Title, platform: p.Platform}
+		// 与题库详情一致：去掉 AtCoder 页头夹带的 Editorial / 换行
+		out[p.ID] = probBrief{title: cleanDisplayTitle(p.Title), platform: p.Platform}
 	}
 	return out
 }

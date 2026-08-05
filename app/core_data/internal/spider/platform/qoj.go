@@ -34,6 +34,8 @@ type NewQOJ struct {
 	mu       sync.RWMutex
 	client   *http.Client
 	lastUsed time.Time
+	username string
+	password string
 }
 
 // 模拟真实浏览器的请求头
@@ -195,7 +197,11 @@ func (q *NewQOJ) getClient() (*http.Client, error) {
 		return q.client, nil
 	}
 
-	client, err := q.login("sanenchen", "Sanenchen123")
+	u, p := q.username, q.password
+	if u == "" || p == "" {
+		return nil, fmt.Errorf("QOJ 爬虫账号未配置，请在站点设置中填写")
+	}
+	client, err := q.login(u, p)
 	if err != nil {
 		return nil, err
 	}
@@ -332,6 +338,17 @@ func (q *NewQOJ) FetchSubmitLog(ctx context.Context, userId int64, username stri
 	}
 
 	return res, nil
+}
+
+// SetCredentials 注入爬虫登录凭证（从站点设置读取）
+func (q *NewQOJ) SetCredentials(username, password string) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if q.username != username || q.password != password {
+		q.client = nil
+		q.username = username
+		q.password = password
+	}
 }
 
 func (q *NewQOJ) Name() string {

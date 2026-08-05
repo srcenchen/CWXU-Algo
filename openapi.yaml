@@ -4899,6 +4899,19 @@ components:
                 upyunScheme:
                     type: string
                     description: 可选协议前缀 http / https；空则按 domain 自带或默认 http
+                ojLuoguUsername:
+                    type: string
+                    description: OJ 爬虫账号（系统级）
+                ojLuoguPasswordMasked:
+                    type: string
+                ojLuoguPasswordSet:
+                    type: boolean
+                ojQojUsername:
+                    type: string
+                ojQojPasswordMasked:
+                    type: string
+                ojQojPasswordSet:
+                    type: boolean
         api.user.v1.site.GetConfigRes:
             type: object
             properties:
@@ -5005,6 +5018,19 @@ components:
                     type: string
                 upyunScheme:
                     type: string
+                ojLuoguUsername:
+                    type: string
+                    description: OJ 爬虫账号
+                ojLuoguPassword:
+                    type: string
+                clearOjLuoguPassword:
+                    type: boolean
+                ojQojUsername:
+                    type: string
+                ojQojPassword:
+                    type: string
+                clearOjQojPassword:
+                    type: boolean
         api.user.v1.site.UpdateConfigRes:
             type: object
             properties:

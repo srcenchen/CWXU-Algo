@@ -33,6 +33,8 @@ type NewLuoGu struct {
 	mu       sync.RWMutex
 	client   *http.Client
 	lastUsed time.Time
+	username string
+	password string
 }
 
 func (lg *NewLuoGu) ocrImage(client *http.Client, url string, img []byte) (string, error) {
@@ -236,7 +238,11 @@ func (lg *NewLuoGu) getClient() (*http.Client, error) {
 		return lg.client, nil
 	}
 
-	client, err := lg.login("sanenchen", "sanenchen123")
+	u, p := lg.username, lg.password
+	if u == "" || p == "" {
+		return nil, fmt.Errorf("洛谷爬虫账号未配置，请在站点设置中填写")
+	}
+	client, err := lg.login(u, p)
 	if err != nil {
 		return nil, err
 	}
@@ -320,6 +326,17 @@ func (lg *NewLuoGu) FetchSubmitLog(ctx context.Context, userId int64, username s
 		})
 	}
 	return res, nil
+}
+
+// SetCredentials 注入爬虫登录凭证（从站点设置读取）
+func (lg *NewLuoGu) SetCredentials(username, password string) {
+	lg.mu.Lock()
+	defer lg.mu.Unlock()
+	if lg.username != username || lg.password != password {
+		lg.client = nil
+		lg.username = username
+		lg.password = password
+	}
 }
 
 func (lg *NewLuoGu) Name() string {
