@@ -212,7 +212,7 @@ func (uc *SpiderUseCase) fetchAndSave(fetchCtx context.Context, userId int64, pl
 			return 0, err
 		}
 		inserted = int64(len(neu))
-		spidermetrics.IncRows(inserted)
+		spidermetrics.IncRows(plat.Platform, inserted)
 	}
 
 	// 赛后/评测中：本批仍有 Judging 等非终态 → 5 分钟后增量爬，直到没有为止

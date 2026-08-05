@@ -18,6 +18,7 @@ import (
 	"cwxu-algo/app/core_data/internal/data"
 	"cwxu-algo/app/core_data/internal/data/dal"
 	"cwxu-algo/app/core_data/internal/data/model"
+	"cwxu-algo/app/core_data/internal/loadgate"
 	"cwxu-algo/app/core_data/internal/spider"
 	"cwxu-algo/app/core_data/internal/spider/problem_fetch"
 	"cwxu-algo/app/core_data/task"
@@ -80,6 +81,10 @@ func (uc *ProblemUseCase) BindSubmitsAfterSpider(userId int64) {
 	cache := uc.prefetchProblemsForLogs(logs)
 	boundAC := make([]model.SubmitLog, 0, 32)
 	for i := range logs {
+		// 系统过载时放缓逐条绑定，避免整点风暴雪上加霜
+		if i%25 == 0 && loadgate.Global().Overloaded() {
+			time.Sleep(200 * time.Millisecond)
+		}
 		if _, _, err := uc.resolveOneWithCache(&logs[i], true, cache); err != nil {
 			log.Debugf("resolve submit %d: %v", logs[i].ID, err)
 			continue

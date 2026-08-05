@@ -11,6 +11,7 @@ import (
 	"cwxu-algo/app/common/utils"
 	"cwxu-algo/app/core_data/internal/data"
 	"cwxu-algo/app/core_data/internal/data/model"
+	"cwxu-algo/app/core_data/internal/loadgate"
 	"cwxu-algo/app/core_data/internal/userrpc"
 
 	"github.com/go-kratos/kratos/v2/log"
@@ -290,7 +291,21 @@ func (t *CronTask) releaseClaim(kind string, userId int64, intervalMin int) {
 	}
 }
 
+// loadgateSkipTick 系统过载时跳过本轮定时入队（削整点风暴，给日常访问留 CPU）。
+// 跳过不占 claim：下个 5 分钟 tick 负载回落后再补跑。
+func loadgateSkipTick(kind string) bool {
+	if !loadgate.Global().Overloaded() {
+		return false
+	}
+	log.Infof("CronTask: skip tick %s (system overloaded load=%.2f threshold=%.2f)",
+		kind, loadgate.Global().Load(), loadgate.Global().Threshold())
+	return true
+}
+
 func (t *CronTask) runSpiderTick() {
+	if loadgateSkipTick("spider") {
+		return
+	}
 	if !t.tryCronLock("spider", 4*time.Minute) {
 		return
 	}
@@ -333,6 +348,9 @@ func (t *CronTask) runSpiderTick() {
 }
 
 func (t *CronTask) runRecentSummaryTick() {
+	if loadgateSkipTick("summary_recent") {
+		return
+	}
 	if !t.tryCronLock("summary_recent", 4*time.Minute) {
 		return
 	}
@@ -371,6 +389,9 @@ func (t *CronTask) runRecentSummaryTick() {
 }
 
 func (t *CronTask) runDailySummaryTick() {
+	if loadgateSkipTick("summary_mail") {
+		return
+	}
 	if !t.tryCronLock("summary_mail", 30*time.Minute) {
 		return
 	}
@@ -406,6 +427,9 @@ func (t *CronTask) runDailySummaryTick() {
 // runUserProfilePrewarm 将有 AC 的用户入队画像预计算（队列内会 RebuildUserTagAC）。
 // full=true：每日全量；false：仅空雷达补漏（有 AC 但 user_tag_ac 为空）。
 func (t *CronTask) runUserProfilePrewarm(full bool) {
+	if loadgateSkipTick("user_profile_prewarm") {
+		return
+	}
 	if t.profile == nil || t.db == nil {
 		return
 	}
@@ -450,7 +474,7 @@ func (t *CronTask) runUserProfilePrewarm(full bool) {
 			skipped++
 		}
 	}
-	pub, dedup, fail := t.profile.DoBatch(active)
+	pub, dedup, fail := t.profile.DoBatch(active, true)
 	log.Infof("CronTask user_profile prewarm full=%v candidates=%d active=%d dormant_skip=%d published=%d dedup=%d failed=%d",
 		full, len(userIDs), len(active), skipped, pub, dedup, fail)
 }
@@ -502,6 +526,9 @@ func (t *CronTask) Do() {
 	})
 	// 每分钟扫 pending 评测重爬 ZSET（进程重启后仍可恢复）
 	_, _ = c.AddFunc("* * * * *", func() {
+		if loadgateSkipTick("pending_verdict") {
+			return
+		}
 		if !t.tryCronLock("pending_verdict", 50*time.Second) {
 			return
 		}

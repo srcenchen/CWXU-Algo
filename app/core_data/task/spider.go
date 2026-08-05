@@ -82,6 +82,21 @@ func LastErrPlatformKey(userId int64, platform string) string {
 	return fmt.Sprintf("spider:last_err:%d:%s", userId, platform)
 }
 
+// OjLastOKKey 该 OJ 最近一次任意用户爬虫成功时间（站管监控聚合）
+func OjLastOKKey(platform string) string {
+	return fmt.Sprintf("spider:oj_last_ok:%s", platform)
+}
+
+// OjLastFailKey 该 OJ 最近一次任意用户爬虫失败时间
+func OjLastFailKey(platform string) string {
+	return fmt.Sprintf("spider:oj_last_fail:%s", platform)
+}
+
+// OjLastErrKey 该 OJ 最近一次失败短文案
+func OjLastErrKey(platform string) string {
+	return fmt.Sprintf("spider:oj_last_err:%s", platform)
+}
+
 // EnqueueResult 单次入队结果（供 cron claim 是否保留判断）
 type EnqueueResult struct {
 	Published int // MQ 成功条数
@@ -180,7 +195,7 @@ func (t *SpiderTask) DoPlatform(userId int64, platform string, needAll bool) Enq
 		t.clearPending(userId, platform)
 		return EnqueueResult{Platforms: 1, Failed: 1}
 	}
-	spidermetrics.IncEnqueued()
+	spidermetrics.IncEnqueued(platform)
 	return EnqueueResult{Platforms: 1, Published: 1}
 }
 
@@ -221,6 +236,8 @@ func (t *SpiderTask) MarkLastOK(userId int64, platform string) {
 	_ = t.rdb.Set(ctx, LastOKKey(userId), now, ttl).Err()
 	if platform != "" {
 		_ = t.rdb.Set(ctx, LastOKPlatformKey(userId, platform), now, ttl).Err()
+		// OJ 级聚合最近成功时间（站管监控）
+		_ = t.rdb.Set(ctx, OjLastOKKey(platform), now, ttl).Err()
 		// 成功后清掉该平台失败标记，避免 UI 一直显示异常
 		_ = t.rdb.Del(ctx, LastFailPlatformKey(userId, platform), LastErrPlatformKey(userId, platform)).Err()
 	}
@@ -234,6 +251,8 @@ func (t *SpiderTask) MarkLastFail(userId int64, platform string, errMsg string) 
 	ctx := context.Background()
 	now := time.Now().Unix()
 	_ = t.rdb.Set(ctx, LastFailPlatformKey(userId, platform), now, 90*24*time.Hour).Err()
+	// OJ 级聚合最近失败时间 + 文案（站管监控）
+	_ = t.rdb.Set(ctx, OjLastFailKey(platform), now, 90*24*time.Hour).Err()
 	msg := strings.TrimSpace(errMsg)
 	if msg == "" {
 		msg = "同步失败"
@@ -244,6 +263,7 @@ func (t *SpiderTask) MarkLastFail(userId int64, platform string, errMsg string) 
 		msg = string(runes[:200])
 	}
 	_ = t.rdb.Set(ctx, LastErrPlatformKey(userId, platform), msg, 7*24*time.Hour).Err()
+	_ = t.rdb.Set(ctx, OjLastErrKey(platform), msg, 7*24*time.Hour).Err()
 }
 
 // GetLastOK 读取最近成功同步时间（unix 秒；无记录返回 0）

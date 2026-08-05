@@ -43,4 +43,6 @@ type ProblemAnalyzeEvent struct {
 // 重 JOIN 在后台跑，HTTP 只读 Redis，避免高 AC 用户 504
 type UserProfileEvent struct {
 	UserId int64 `json:"user_id"`
+	// Force 强制重建（每日全量 / 空雷达补刷）；false 时按指纹跳过未变化用户
+	Force bool `json:"force,omitempty"`
 }

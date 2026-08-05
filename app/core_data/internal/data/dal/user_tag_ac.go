@@ -211,19 +211,28 @@ func UserHasTaggedAC(ctx context.Context, db *gorm.DB, userID int64) (bool, erro
 	err := db.WithContext(ctx).Raw(`
 		SELECT EXISTS (
 			SELECT 1
-			FROM user_ac_problems u
-			JOIN problems p ON (
-				u.problem_key = 'p:' || p.id::text
-				OR (
-					p.external_id IS NOT NULL AND btrim(p.external_id) <> ''
-					AND u.problem_key = 'e:' || p.platform || ':' || p.external_id
-				)
-			)
-			JOIN problem_tags pt ON pt.problem_id = p.id
-			WHERE u.user_id = ?
+			FROM (
+				SELECT u.problem_key
+				FROM user_ac_problems u
+				JOIN problems p ON p.id = NULLIF(substring(u.problem_key, 3), '')::bigint
+				JOIN problem_tags pt ON pt.problem_id = p.id
+				WHERE u.user_id = ?
+				  AND u.problem_key LIKE 'p:%'
+				  AND u.problem_key ~ '^p:[0-9]+$'
+				UNION ALL
+				SELECT u.problem_key
+				FROM user_ac_problems u
+				JOIN problems p
+				  ON p.platform = split_part(substring(u.problem_key, 3), ':', 1)
+				 AND p.external_id = substring(substring(u.problem_key, 3) FROM position(':' IN substring(u.problem_key, 3)) + 1)
+				 AND p.external_id IS NOT NULL AND btrim(p.external_id) <> ''
+				JOIN problem_tags pt ON pt.problem_id = p.id
+				WHERE u.user_id = ?
+				  AND u.problem_key LIKE 'e:%'
+			) t
 			LIMIT 1
 		)
-	`, userID).Scan(&exists).Error
+	`, userID, userID).Scan(&exists).Error
 	return exists, err
 }
 
@@ -252,6 +261,9 @@ func ListUserIDsWithACButEmptyTagAC(ctx context.Context, db *gorm.DB, limit int)
 // RebuildUserTagACForUser 按 user_ac_problems × problem_tags 全量重建该用户雷达预聚合。
 // 修复：爬虫写 AC 时 problem_id 多为空 → 未走 IncUserTagAC；绑题后也未补写；
 // 题已有标签时不会触发标签差分，导致雷达长期为空。本函数可在 MQ 画像任务中安全调用。
+//
+// 查询从 user_ac_problems（按 user_id 索引）驱动，p:/e: 两个分支分别用
+// problems 主键 / (platform, external_id) 唯一索引探针，避免整表 Seq Scan + OR 重 JOIN。
 func RebuildUserTagACForUser(ctx context.Context, db *gorm.DB, userID int64) error {
 	if db == nil || userID <= 0 {
 		return nil
@@ -266,20 +278,30 @@ func RebuildUserTagACForUser(ctx context.Context, db *gorm.DB, userID int64) err
 		// 不强制 COMPLETED：人工打标/部分完成态只要 problem_tags 有行即计入
 		res := tx.Exec(`
 			INSERT INTO user_tag_ac (user_id, tag, count)
-			SELECT u.user_id, pt.tag, COUNT(DISTINCT p.id)::bigint
-			FROM user_ac_problems u
-			JOIN problems p ON (
-				u.problem_key = 'p:' || p.id::text
-				OR (
-					p.external_id IS NOT NULL AND btrim(p.external_id) <> ''
-					AND u.problem_key = 'e:' || p.platform || ':' || p.external_id
-				)
-			)
-			JOIN problem_tags pt ON pt.problem_id = p.id
-			WHERE u.user_id = ?
-			  AND pt.tag IS NOT NULL AND btrim(pt.tag) <> ''
-			GROUP BY u.user_id, pt.tag
-		`, userID)
+			SELECT user_id, tag, COUNT(DISTINCT pid)::bigint
+			FROM (
+				SELECT u.user_id AS user_id, pt.tag AS tag, p.id AS pid
+				FROM user_ac_problems u
+				JOIN problems p ON p.id = NULLIF(substring(u.problem_key, 3), '')::bigint
+				JOIN problem_tags pt ON pt.problem_id = p.id
+				WHERE u.user_id = ?
+				  AND u.problem_key LIKE 'p:%'
+				  AND u.problem_key ~ '^p:[0-9]+$'
+				  AND pt.tag IS NOT NULL AND btrim(pt.tag) <> ''
+				UNION ALL
+				SELECT u.user_id, pt.tag, p.id
+				FROM user_ac_problems u
+				JOIN problems p
+				  ON p.platform = split_part(substring(u.problem_key, 3), ':', 1)
+				 AND p.external_id = substring(substring(u.problem_key, 3) FROM position(':' IN substring(u.problem_key, 3)) + 1)
+				 AND p.external_id IS NOT NULL AND btrim(p.external_id) <> ''
+				JOIN problem_tags pt ON pt.problem_id = p.id
+				WHERE u.user_id = ?
+				  AND u.problem_key LIKE 'e:%'
+				  AND pt.tag IS NOT NULL AND btrim(pt.tag) <> ''
+			) t
+			GROUP BY user_id, tag
+		`, userID, userID)
 		return res.Error
 	})
 }

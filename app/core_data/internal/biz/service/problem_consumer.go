@@ -4,6 +4,7 @@ import (
 	"context"
 	"cwxu-algo/app/common/event"
 	"cwxu-algo/app/common/utils/mqconsume"
+	"cwxu-algo/app/core_data/internal/loadgate"
 	"encoding/json"
 	"strconv"
 	"strings"
@@ -208,6 +209,8 @@ func (c *ProblemFetchConsumer) consumeOnce() error {
 				_ = d.Nack(false, true)
 				return
 			}
+			// 系统过载时先退避，给在线访问留 CPU
+			loadgate.Global().Wait(nil, 30*time.Second)
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 			defer cancel()
 			if err := c.problem.ProcessFetch(ctx, msg); err != nil {
@@ -326,7 +329,8 @@ func (c *ProblemAnalyzeConsumer) consumeOnce() error {
 				_ = d.Nack(false, true)
 				return
 			}
-			// 流式 AI：整体上限 10 分钟，避免 worker 永久占用
+			// 流式 AI：整体上限 10 分钟，避免 worker 永久占用；过载先退避让 CPU
+			loadgate.Global().Wait(nil, 30*time.Second)
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 			err := c.problem.ProcessAnalyze(ctx, msg)
 			cancel()

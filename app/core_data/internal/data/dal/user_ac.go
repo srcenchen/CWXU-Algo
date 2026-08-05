@@ -433,6 +433,27 @@ func RebuildUserPreaggFromSubmits(ctx context.Context, db *gorm.DB, userId int64
 	return nil
 }
 
+// UserACFingerprint 用户 AC 预聚合指纹（count + 最新 first_ac_at）。
+// 画像重建用它判断「数据是否变化」：未变化则跳过重建，削 3h 整点风暴。
+func UserACFingerprint(ctx context.Context, db *gorm.DB, userID int64) (string, error) {
+	if db == nil || userID <= 0 {
+		return "", nil
+	}
+	var row struct {
+		Count int64
+		Max   *time.Time
+	}
+	if err := db.WithContext(ctx).Model(&model.UserACProblem{}).
+		Select("count(*) AS count, max(first_ac_at) AS max").
+		Where("user_id = ?", userID).Scan(&row).Error; err != nil {
+		return "", err
+	}
+	if row.Max == nil {
+		return fmt.Sprintf("c%d", row.Count), nil
+	}
+	return fmt.Sprintf("c%d_%d", row.Count, row.Max.Unix()), nil
+}
+
 // PromoteUserACFromBoundSubmits 根据已绑定 problem_id 的 AC 明细，把 e:/n: 预聚合键升为 p:{id}。
 func PromoteUserACFromBoundSubmits(ctx context.Context, db *gorm.DB, userID int64) error {
 	if db == nil || userID <= 0 {
@@ -495,94 +516,91 @@ func PromoteUserACKeysToProblemID(ctx context.Context, db *gorm.DB, userID int64
 		return nil
 	}
 
-	if db.Migrator().HasTable(&model.UserACProblem{}) {
-		var rows []model.UserACProblem
+	// 表由 AutoMigrate 保证存在；此处不跑 HasTable（information_schema 全扫，热循环里 200ms+）
+	var rows []model.UserACProblem
+	if err := db.WithContext(ctx).
+		Where("user_id = ? AND problem_key IN ?", userID, keys).
+		Find(&rows).Error; err != nil {
+		return err
+	}
+	if len(rows) > 0 {
+		var existing model.UserACProblem
+		hasNew := db.WithContext(ctx).
+			Where("user_id = ? AND problem_key = ?", userID, newKey).
+			First(&existing).Error == nil
+
+		firstAt := rows[0].FirstACAt
+		platform := rows[0].Platform
+		for _, r := range rows {
+			if r.FirstACAt.Before(firstAt) {
+				firstAt = r.FirstACAt
+			}
+			if platform == "" && r.Platform != "" {
+				platform = r.Platform
+			}
+		}
+		if hasNew && existing.FirstACAt.Before(firstAt) {
+			firstAt = existing.FirstACAt
+		}
+		if hasNew && existing.Platform != "" {
+			platform = existing.Platform
+		}
+
+		row := model.UserACProblem{
+			UserID:     userID,
+			ProblemKey: newKey,
+			Platform:   platform,
+			FirstACAt:  firstAt,
+		}
 		if err := db.WithContext(ctx).
-			Where("user_id = ? AND problem_key IN ?", userID, keys).
-			Find(&rows).Error; err != nil {
+			Clauses(clause.OnConflict{
+				Columns: []clause.Column{{Name: "user_id"}, {Name: "problem_key"}},
+				DoUpdates: clause.Assignments(map[string]interface{}{
+					"first_ac_at": gorm.Expr(
+						"CASE WHEN EXCLUDED.first_ac_at < user_ac_problems.first_ac_at THEN EXCLUDED.first_ac_at ELSE user_ac_problems.first_ac_at END",
+					),
+					"platform": gorm.Expr(
+						"CASE WHEN user_ac_problems.platform = '' OR user_ac_problems.platform IS NULL THEN EXCLUDED.platform ELSE user_ac_problems.platform END",
+					),
+				}),
+			}).
+			Create(&row).Error; err != nil {
 			return err
 		}
-		if len(rows) > 0 {
-			var existing model.UserACProblem
-			hasNew := db.WithContext(ctx).
-				Where("user_id = ? AND problem_key = ?", userID, newKey).
-				First(&existing).Error == nil
-
-			firstAt := rows[0].FirstACAt
-			platform := rows[0].Platform
-			for _, r := range rows {
-				if r.FirstACAt.Before(firstAt) {
-					firstAt = r.FirstACAt
-				}
-				if platform == "" && r.Platform != "" {
-					platform = r.Platform
-				}
-			}
-			if hasNew && existing.FirstACAt.Before(firstAt) {
-				firstAt = existing.FirstACAt
-			}
-			if hasNew && existing.Platform != "" {
-				platform = existing.Platform
-			}
-
-			row := model.UserACProblem{
-				UserID:     userID,
-				ProblemKey: newKey,
-				Platform:   platform,
-				FirstACAt:  firstAt,
-			}
-			if err := db.WithContext(ctx).
-				Clauses(clause.OnConflict{
-					Columns: []clause.Column{{Name: "user_id"}, {Name: "problem_key"}},
-					DoUpdates: clause.Assignments(map[string]interface{}{
-						"first_ac_at": gorm.Expr(
-							"CASE WHEN EXCLUDED.first_ac_at < user_ac_problems.first_ac_at THEN EXCLUDED.first_ac_at ELSE user_ac_problems.first_ac_at END",
-						),
-						"platform": gorm.Expr(
-							"CASE WHEN user_ac_problems.platform = '' OR user_ac_problems.platform IS NULL THEN EXCLUDED.platform ELSE user_ac_problems.platform END",
-						),
-					}),
-				}).
-				Create(&row).Error; err != nil {
-				return err
-			}
-			if err := db.WithContext(ctx).
-				Where("user_id = ? AND problem_key IN ?", userID, keys).
-				Delete(&model.UserACProblem{}).Error; err != nil {
-				return err
-			}
+		if err := db.WithContext(ctx).
+			Where("user_id = ? AND problem_key IN ?", userID, keys).
+			Delete(&model.UserACProblem{}).Error; err != nil {
+			return err
 		}
 	}
 
-	if db.Migrator().HasTable(&model.UserACProblemDay{}) {
-		var dayRows []model.UserACProblemDay
+	var dayRows []model.UserACProblemDay
+	if err := db.WithContext(ctx).
+		Where("user_id = ? AND problem_key IN ?", userID, keys).
+		Find(&dayRows).Error; err != nil {
+		return err
+	}
+	for _, r := range dayRows {
+		promoted := model.UserACProblemDay{
+			UserID:     r.UserID,
+			Day:        r.Day,
+			ProblemKey: newKey,
+			Platform:   r.Platform,
+		}
 		if err := db.WithContext(ctx).
-			Where("user_id = ? AND problem_key IN ?", userID, keys).
-			Find(&dayRows).Error; err != nil {
+			Clauses(clause.OnConflict{
+				Columns:   []clause.Column{{Name: "user_id"}, {Name: "day"}, {Name: "problem_key"}},
+				DoNothing: true,
+			}).
+			Create(&promoted).Error; err != nil {
 			return err
 		}
-		for _, r := range dayRows {
-			promoted := model.UserACProblemDay{
-				UserID:     r.UserID,
-				Day:        r.Day,
-				ProblemKey: newKey,
-				Platform:   r.Platform,
-			}
-			if err := db.WithContext(ctx).
-				Clauses(clause.OnConflict{
-					Columns:   []clause.Column{{Name: "user_id"}, {Name: "day"}, {Name: "problem_key"}},
-					DoNothing: true,
-				}).
-				Create(&promoted).Error; err != nil {
-				return err
-			}
-		}
-		if len(dayRows) > 0 {
-			if err := db.WithContext(ctx).
-				Where("user_id = ? AND problem_key IN ?", userID, keys).
-				Delete(&model.UserACProblemDay{}).Error; err != nil {
-				return err
-			}
+	}
+	if len(dayRows) > 0 {
+		if err := db.WithContext(ctx).
+			Where("user_id = ? AND problem_key IN ?", userID, keys).
+			Delete(&model.UserACProblemDay{}).Error; err != nil {
+			return err
 		}
 	}
 	return nil

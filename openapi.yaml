@@ -1248,6 +1248,19 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/api.core.v1.problemset.UpdateRes'
+    /v1/core/spider/monitor:
+        get:
+            tags:
+                - Spider
+            description: 运维：各 OJ 爬虫模块监控（仅站管）
+            operationId: Spider_GetSpiderMonitor
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.core.v1.spider.SpiderMonitorRes'
     /v1/core/spider/purge-submits-and-recrawl:
         post:
             tags:
@@ -3989,6 +4002,77 @@ components:
                     type: string
                 username:
                     type: string
+        api.core.v1.spider.SpiderMonitorRes:
+            type: object
+            properties:
+                code:
+                    type: string
+                message:
+                    type: string
+                platforms:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/api.core.v1.spider.SpiderPlatformStat'
+                collectedAt:
+                    type: string
+                    description: 采集时间（unix 秒）
+        api.core.v1.spider.SpiderPlatformStat:
+            type: object
+            properties:
+                platform:
+                    type: string
+                boundUsers:
+                    type: string
+                    description: 绑定该 OJ 的用户数
+                submitCount:
+                    type: string
+                    description: 该 OJ 已入库提交记录数
+                todayEnqueued:
+                    type: string
+                    description: 今日入队任务数
+                todayOk:
+                    type: string
+                    description: 今日成功任务数
+                todayFail:
+                    type: string
+                    description: 今日失败任务数
+                lastOkAt:
+                    type: string
+                    description: 最近一次成功同步（unix 秒；0=无）
+                lastFailAt:
+                    type: string
+                    description: 最近一次同步失败（unix 秒；0=无）
+                lastError:
+                    type: string
+                    description: 最近一次失败短文案
+                problemCount:
+                    type: string
+                    description: 题库模块：已入库题目数
+                contestCount:
+                    type: string
+                    description: 比赛模块：日历已入库场次数
+                hasSubmitFetcher:
+                    type: boolean
+                    description: 是否有提交爬虫能力
+                hasProblemFetch:
+                    type: boolean
+                    description: 是否有题库爬虫能力
+                hasContestCalendar:
+                    type: boolean
+                    description: 是否有比赛日历能力
+                hasAccount:
+                    type: boolean
+                    description: 是否有全局账号（洛谷/QOJ）
+                accountStatus:
+                    type: string
+                    description: 账号状态（ok/fail/unchecked；无全局账号时忽略）
+                accountAt:
+                    type: string
+                    description: 账号最近状态时间（unix 秒）
+                accountErr:
+                    type: string
+                    description: 账号失败原因
+            description: 单个 OJ 的爬虫各模块监控
         api.core.v1.spider.SubmitInventoryRes:
             type: object
             properties:

@@ -9,7 +9,9 @@ import (
 	"time"
 
 	"cwxu-algo/api/core/v1/spider"
+	"cwxu-algo/app/common/opsmetrics"
 	"cwxu-algo/app/common/rbac"
+	"cwxu-algo/app/common/sitesettings"
 	"cwxu-algo/app/common/utils/auth"
 	"cwxu-algo/app/common/utils/ratelimit"
 	bizservice "cwxu-algo/app/core_data/internal/biz/service"
@@ -294,10 +296,37 @@ func (s SpiderService) SetSpider(ctx context.Context, req *spider.SetSpiderReq) 
 const purgeSubmitsConfirm = "PURGE_SUBMITS"
 
 // SubmitInventory 运维：真实入库提交库存（仅站点管理员）
+// 结果在 Redis 短缓存（5 分钟），避免每次打开运维页对 67 万行做全表 COUNT。
 func (s SpiderService) SubmitInventory(ctx context.Context, _ *spider.SubmitInventoryReq) (*spider.SubmitInventoryRes, error) {
 	if !auth.HasPerm(ctx, rbac.PermSiteSpiderOps) {
 		return nil, errors.Forbidden("权限不足", "仅站点管理员可查看提交库存")
 	}
+	const cacheKey = "ops:submit_inventory"
+	const cacheTTL = 5 * time.Minute
+	type inventory struct {
+		Total     int64
+		RealTotal int64
+		Oldest    int64
+		Newest    int64
+	}
+	if s.rdb != nil {
+		if b, e := s.rdb.Get(ctx, cacheKey).Bytes(); e == nil && len(b) > 0 {
+			var cached inventory
+			if json.Unmarshal(b, &cached) == nil {
+				return &spider.SubmitInventoryRes{
+					Code:                0,
+					Message:             "ok",
+					SubmitLogsTotal:     cached.Total,
+					SubmitLogsRealTotal: cached.RealTotal,
+					// CountedSubmitIdsTotal 已废弃（账本表已删），固定 0 保持 wire 兼容
+					CountedSubmitIdsTotal: 0,
+					OldestTime:            cached.Oldest,
+					NewestTime:            cached.Newest,
+				}, nil
+			}
+		}
+	}
+
 	var total, realTotal int64
 	if err := s.db.WithContext(ctx).Model(&model.SubmitLog{}).Count(&total).Error; err != nil {
 		return nil, InternalError
@@ -320,6 +349,11 @@ func (s SpiderService) SubmitInventory(ctx context.Context, _ *spider.SubmitInve
 	}
 	if bounds.Newest != nil {
 		newest = bounds.Newest.Unix()
+	}
+	if s.rdb != nil {
+		if b, e := json.Marshal(inventory{Total: total, RealTotal: realTotal, Oldest: oldest, Newest: newest}); e == nil {
+			_ = s.rdb.Set(ctx, cacheKey, b, cacheTTL).Err()
+		}
 	}
 	return &spider.SubmitInventoryRes{
 		Code:                0,
@@ -446,6 +480,8 @@ func (s SpiderService) purgeTrainingCaches(ctx context.Context, userIds []int64)
 	}
 	_ = s.rdb.Incr(ctx, "statistic:heatmap:global:ver").Err()
 	_ = s.rdb.Incr(ctx, "statistic:period:global:ver").Err()
+	// 提交库存缓存失效，避免 purge 后运维页仍显示旧规模
+	_ = s.rdb.Del(ctx, "ops:submit_inventory").Err()
 
 	plats := []string{"AtCoder", "Codeforces", "LuoGu", "NowCoder", "QOJ", "LeetCode", "CodeForces", "LOJ", "UOJ", "POJ"}
 	const chunk = 200
@@ -597,4 +633,113 @@ func NewSpiderService(data *data.Data, spider *task.SpiderTask) *SpiderService {
 		rdb:    data.RDB,
 		spider: spider,
 	}
+}
+
+// ojCap 单个 OJ 的爬虫能力（提交/题库/比赛日历/全局账号）
+type ojCap struct {
+	platform string
+	problem  bool
+	contest  bool
+	// account 关联的全局账号服务（sitesettings；空=无需账号）
+	account string
+}
+
+// ojCaps 站管监控覆盖的全部 OJ 及其模块能力（与注册的爬虫 provider 对齐）
+var ojCaps = []ojCap{
+	{platform: "NowCoder", problem: true, contest: true},
+	{platform: "AtCoder", problem: true, contest: true},
+	{platform: "CodeForces", problem: true, contest: true},
+	{platform: "LuoGu", problem: true, contest: true, account: sitesettings.ServiceLuoGu},
+	{platform: "QOJ", problem: true, contest: true, account: sitesettings.ServiceQOJ},
+	{platform: "LeetCode", problem: true, contest: true},
+	{platform: "LOJ", problem: true},
+	{platform: "UOJ", problem: true},
+	{platform: "POJ", problem: true},
+}
+
+// GetSpiderMonitor 运维：各 OJ 爬虫模块监控（提交/题库/比赛/账号），仅站管
+func (s SpiderService) GetSpiderMonitor(ctx context.Context, _ *spider.SpiderMonitorReq) (*spider.SpiderMonitorRes, error) {
+	if !auth.HasPerm(ctx, rbac.PermSiteConfigRead) {
+		return &spider.SpiderMonitorRes{Code: 1, Message: "需要查看站点配置权限"}, nil
+	}
+
+	// DB 按平台一次 GROUP BY（空库/无该平台行 → 计 0）
+	countBy := func(table string) map[string]int64 {
+		out := make(map[string]int64)
+		if s.db == nil {
+			return out
+		}
+		type row struct {
+			Platform string
+			N        int64
+		}
+		var rows []row
+		if err := s.db.WithContext(ctx).Table(table).
+			Select("platform, COUNT(*) AS n").
+			Group("platform").Scan(&rows).Error; err != nil {
+			log.Warnf("GetSpiderMonitor: count %s: %v", table, err)
+			return out
+		}
+		for _, r := range rows {
+			out[r.Platform] = r.N
+		}
+		return out
+	}
+	boundBy := countBy("platforms")
+	submitBy := countBy("submit_logs")
+	problemBy := countBy("problems")
+	contestBy := countBy("contest_calendars")
+
+	// 账号状态只取一次（洛谷/QOJ）
+	accountStatus := sitesettings.GetAllServiceStatus(ctx, s.rdb)
+
+	now := time.Now()
+	stats := make([]*spider.SpiderPlatformStat, 0, len(ojCaps))
+	for _, cap := range ojCaps {
+		today := opsmetrics.ReadSpiderPlatformToday(ctx, s.rdb, cap.platform)
+		st := &spider.SpiderPlatformStat{
+			Platform:           cap.platform,
+			BoundUsers:         boundBy[cap.platform],
+			SubmitCount:        submitBy[cap.platform],
+			ProblemCount:       problemBy[cap.platform],
+			ContestCount:       contestBy[cap.platform],
+			TodayEnqueued:      today.Enqueued,
+			TodayOk:            today.OK,
+			TodayFail:          today.Fail,
+			HasSubmitFetcher:   true,
+			HasProblemFetch:    cap.problem,
+			HasContestCalendar: cap.contest,
+		}
+		if s.rdb != nil {
+			// 最近同步（按 OJ 聚合）
+			if v, err := s.rdb.Get(ctx, task.OjLastOKKey(cap.platform)).Int64(); err == nil {
+				st.LastOkAt = v
+			}
+			if v, err := s.rdb.Get(ctx, task.OjLastFailKey(cap.platform)).Int64(); err == nil {
+				st.LastFailAt = v
+			}
+			if v, err := s.rdb.Get(ctx, task.OjLastErrKey(cap.platform)).Result(); err == nil {
+				st.LastError = v
+			}
+		}
+		// 全局账号模块
+		if cap.account != "" {
+			acc, ok := accountStatus[cap.account]
+			if !ok {
+				acc = sitesettings.GetServiceStatus(ctx, s.rdb, cap.account)
+			}
+			st.HasAccount = true
+			st.AccountStatus = acc.Status
+			st.AccountAt = acc.At
+			st.AccountErr = acc.ErrMsg
+		}
+		stats = append(stats, st)
+	}
+
+	return &spider.SpiderMonitorRes{
+		Code:        0,
+		Message:     "success",
+		Platforms:   stats,
+		CollectedAt: now.Unix(),
+	}, nil
 }

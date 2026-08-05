@@ -3,9 +3,11 @@ package service
 import (
 	"encoding/json"
 	"sync"
+	"time"
 
 	"cwxu-algo/app/common/event"
 	"cwxu-algo/app/common/utils/mqconsume"
+	"cwxu-algo/app/core_data/internal/loadgate"
 	"cwxu-algo/app/core_data/internal/spidermetrics"
 	"cwxu-algo/app/core_data/task"
 
@@ -54,13 +56,15 @@ func (c *Consumer) Consume() {
 				log.Warnf("RabbitMQ(Spider): 解析json失败，丢弃消息: %v", err)
 				return nil
 			}
+			// 系统过载时先退避，把 CPU 让给在线访问（最多等 30s 再继续）
+			loadgate.Global().Wait(nil, 30*time.Second)
 			if c.spiderTask != nil {
 				c.spiderTask.MarkInflight(msg.UserId, msg.Platform)
 				defer c.spiderTask.ClearInflight(msg.UserId, msg.Platform)
 			}
-			start := spidermetrics.RecordStart(msg.NeedAll)
+			start := spidermetrics.RecordStart(msg.Platform, msg.NeedAll)
 			err := c.spider.LoadData(msg.UserId, msg.NeedAll, msg.Platform)
-			spidermetrics.RecordEnd(start, err)
+			spidermetrics.RecordEnd(msg.Platform, start, err)
 			if err != nil {
 				log.Errorf("RabbitMQ(Spider): %v", err)
 				// 记录平台级失败：写入用户可读短文案（仍 return err 走 MQ 重试；完整 err 只进日志）

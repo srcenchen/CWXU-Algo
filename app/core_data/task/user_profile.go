@@ -62,6 +62,15 @@ func (r UserProfileEnqueueResult) KeepClaim() bool {
 
 // Do 为用户入队画像重建；已在途则 dedup
 func (t *UserProfileTask) Do(userID int64) UserProfileEnqueueResult {
+	return t.do(userID, false)
+}
+
+// DoForce 强制重建（每日全量 / 空雷达补刷），跳过指纹去重
+func (t *UserProfileTask) DoForce(userID int64) UserProfileEnqueueResult {
+	return t.do(userID, true)
+}
+
+func (t *UserProfileTask) do(userID int64, force bool) UserProfileEnqueueResult {
 	if userID <= 0 || t.mq == nil {
 		return UserProfileEnqueueResult{Failed: true}
 	}
@@ -75,7 +84,7 @@ func (t *UserProfileTask) Do(userID int64) UserProfileEnqueueResult {
 		}
 	}
 	t.ensureQueue()
-	body, err := json.Marshal(event.UserProfileEvent{UserId: userID})
+	body, err := json.Marshal(event.UserProfileEvent{UserId: userID, Force: force})
 	if err != nil {
 		t.clearPending(userID)
 		return UserProfileEnqueueResult{Failed: true}
@@ -105,10 +114,10 @@ func (t *UserProfileTask) clearPending(userID int64) {
 	_ = t.rdb.Del(context.Background(), userProfilePendingKey(userID)).Err()
 }
 
-// DoBatch 批量入队（cron 预热）；返回 published 数
-func (t *UserProfileTask) DoBatch(userIDs []int64) (published, deduped, failed int) {
+// DoBatch 批量入队（cron 预热）；force=true 强制重建（跳过指纹）。返回 published 数
+func (t *UserProfileTask) DoBatch(userIDs []int64, force bool) (published, deduped, failed int) {
 	for _, uid := range userIDs {
-		r := t.Do(uid)
+		r := t.do(uid, force)
 		switch {
 		case r.Published:
 			published++

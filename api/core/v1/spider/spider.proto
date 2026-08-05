@@ -45,6 +45,12 @@ service Spider {
   }
   // 内部：休眠唤醒 / 服务间入队爬虫（无 HTTP）
   rpc EnqueueUserSpider (EnqueueUserSpiderReq) returns (EnqueueUserSpiderRes) {}
+  // 运维：各 OJ 爬虫模块监控（仅站管）
+  rpc GetSpiderMonitor (SpiderMonitorReq) returns (SpiderMonitorRes) {
+    option (google.api.http) = {
+      get: "/v1/core/spider/monitor"
+    };
+  }
 }
 
 message SetSpiderReq {
@@ -150,5 +156,54 @@ message EnqueueUserSpiderRes {
   int64 code = 1;
   string message = 2;
   int64 published = 3;
+}
+
+message SpiderMonitorReq {}
+
+message SpiderMonitorRes {
+  int64 code = 1;
+  string message = 2;
+  repeated SpiderPlatformStat platforms = 3;
+  // 采集时间（unix 秒）
+  int64 collectedAt = 4;
+}
+
+// 单个 OJ 的爬虫各模块监控
+message SpiderPlatformStat {
+  string platform = 1;
+  // 绑定该 OJ 的用户数
+  int64 boundUsers = 2;
+  // 该 OJ 已入库提交记录数
+  int64 submitCount = 3;
+  // 今日入队任务数
+  int64 todayEnqueued = 4;
+  // 今日成功任务数
+  int64 todayOk = 5;
+  // 今日失败任务数
+  int64 todayFail = 6;
+  // 最近一次成功同步（unix 秒；0=无）
+  int64 lastOkAt = 7;
+  // 最近一次同步失败（unix 秒；0=无）
+  int64 lastFailAt = 8;
+  // 最近一次失败短文案
+  string lastError = 9;
+  // 题库模块：已入库题目数
+  int64 problemCount = 10;
+  // 比赛模块：日历已入库场次数
+  int64 contestCount = 11;
+  // 是否有提交爬虫能力
+  bool hasSubmitFetcher = 12;
+  // 是否有题库爬虫能力
+  bool hasProblemFetch = 13;
+  // 是否有比赛日历能力
+  bool hasContestCalendar = 14;
+  // 是否有全局账号（洛谷/QOJ）
+  bool hasAccount = 15;
+  // 账号状态（ok/fail/unchecked；无全局账号时忽略）
+  string accountStatus = 16;
+  // 账号最近状态时间（unix 秒）
+  int64 accountAt = 17;
+  // 账号失败原因
+  string accountErr = 18;
 }
 

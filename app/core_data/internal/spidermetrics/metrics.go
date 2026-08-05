@@ -31,16 +31,16 @@ func BindRedis(client *redis.Client) { rdb = client }
 
 func Snapshot() *Metrics { return global }
 
-func IncEnqueued() {
+func IncEnqueued(platform string) {
 	global.Enqueued.Add(1)
-	opsmetrics.IncSpider(context.Background(), rdb, "enqueued", 1)
+	opsmetrics.IncSpider(context.Background(), rdb, platform, "enqueued", 1)
 }
 func IncDedupSkipped() { global.DedupSkipped.Add(1) }
 
 // IncRows 今日新写入提交记录条数
-func IncRows(n int64) {
+func IncRows(platform string, n int64) {
 	if n > 0 {
-		opsmetrics.IncSpider(context.Background(), rdb, "rows", n)
+		opsmetrics.IncSpider(context.Background(), rdb, platform, "rows", n)
 	}
 }
 
@@ -66,7 +66,7 @@ func (m *Metrics) logIfNeeded() {
 	}
 }
 
-func RecordStart(needAll bool) time.Time {
+func RecordStart(platform string, needAll bool) time.Time {
 	global.Started.Add(1)
 	if needAll {
 		global.FullJobs.Add(1)
@@ -77,13 +77,13 @@ func RecordStart(needAll bool) time.Time {
 	return time.Now()
 }
 
-func RecordEnd(start time.Time, err error) {
+func RecordEnd(platform string, start time.Time, err error) {
 	if err != nil {
 		global.Failed.Add(1)
-		opsmetrics.IncSpider(context.Background(), rdb, "fail", 1)
+		opsmetrics.IncSpider(context.Background(), rdb, platform, "fail", 1)
 		return
 	}
 	global.Succeeded.Add(1)
 	global.TotalDuration.Add(time.Since(start).Milliseconds())
-	opsmetrics.IncSpider(context.Background(), rdb, "ok", 1)
+	opsmetrics.IncSpider(context.Background(), rdb, platform, "ok", 1)
 }

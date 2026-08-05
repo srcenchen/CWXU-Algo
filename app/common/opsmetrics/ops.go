@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -100,16 +101,21 @@ func RecordAPIRequest(ctx context.Context, rdb *redis.Client, service string) fu
 	}
 }
 
-// IncSpider 爬虫日计数
-func IncSpider(ctx context.Context, rdb *redis.Client, kind string, n int64) {
+// IncSpider 爬虫日计数（platform 非空时同时写入按 OJ 分桶，兼容全局聚合）
+func IncSpider(ctx context.Context, rdb *redis.Client, platform, kind string, n int64) {
 	if rdb == nil || n == 0 {
 		return
 	}
 	day := dayKey(time.Now())
-	key := fmt.Sprintf("ops:spider:%s:%s", kind, day)
+	keys := []string{fmt.Sprintf("ops:spider:%s:%s", kind, day)}
+	if strings.TrimSpace(platform) != "" {
+		keys = append(keys, fmt.Sprintf("ops:spider:%s:%s:%s", platform, kind, day))
+	}
 	pipe := rdb.Pipeline()
-	pipe.IncrBy(ctx, key, n)
-	pipe.Expire(ctx, key, ttl)
+	for _, key := range keys {
+		pipe.IncrBy(ctx, key, n)
+		pipe.Expire(ctx, key, ttl)
+	}
 	_, _ = pipe.Exec(ctx)
 }
 
@@ -125,7 +131,43 @@ func TouchMAU(ctx context.Context, rdb *redis.Client, userID uint) {
 	_, _ = pipe.Exec(ctx)
 }
 
-// Snapshot 读取运维日指标
+// SpiderPlatformToday 单个 OJ 今日爬虫计数
+type SpiderPlatformToday struct {
+	Enqueued int64
+	OK       int64
+	Fail     int64
+	Rows     int64
+}
+
+// ReadSpiderPlatformToday 读取某 OJ 今日爬虫计数（enqueued/ok/fail/rows）
+func ReadSpiderPlatformToday(ctx context.Context, rdb *redis.Client, platform string) SpiderPlatformToday {
+	var out SpiderPlatformToday
+	if rdb == nil || strings.TrimSpace(platform) == "" {
+		return out
+	}
+	day := dayKey(time.Now())
+	cmds := map[string]*redis.StringCmd{}
+	pipe := rdb.Pipeline()
+	for _, kind := range []string{"enqueued", "ok", "fail", "rows"} {
+		cmds[kind] = pipe.Get(ctx, fmt.Sprintf("ops:spider:%s:%s:%s", platform, kind, day))
+	}
+	_, _ = pipe.Exec(ctx)
+	if v, err := cmds["enqueued"].Int64(); err == nil {
+		out.Enqueued = v
+	}
+	if v, err := cmds["ok"].Int64(); err == nil {
+		out.OK = v
+	}
+	if v, err := cmds["fail"].Int64(); err == nil {
+		out.Fail = v
+	}
+	if v, err := cmds["rows"].Int64(); err == nil {
+		out.Rows = v
+	}
+	return out
+}
+
+// ReadSnapshot 读取运维日指标
 type Snapshot struct {
 	APIRequestsToday int64
 	APIPeakToday     int64

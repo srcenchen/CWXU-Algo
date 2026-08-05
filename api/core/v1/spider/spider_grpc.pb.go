@@ -27,6 +27,7 @@ const (
 	Spider_SubmitInventory_FullMethodName        = "/api.core.v1.spider.Spider/SubmitInventory"
 	Spider_PurgeSubmitsAndRecrawl_FullMethodName = "/api.core.v1.spider.Spider/PurgeSubmitsAndRecrawl"
 	Spider_EnqueueUserSpider_FullMethodName      = "/api.core.v1.spider.Spider/EnqueueUserSpider"
+	Spider_GetSpiderMonitor_FullMethodName       = "/api.core.v1.spider.Spider/GetSpiderMonitor"
 )
 
 // SpiderClient is the client API for Spider service.
@@ -46,6 +47,8 @@ type SpiderClient interface {
 	PurgeSubmitsAndRecrawl(ctx context.Context, in *PurgeSubmitsAndRecrawlReq, opts ...grpc.CallOption) (*PurgeSubmitsAndRecrawlRes, error)
 	// 内部：休眠唤醒 / 服务间入队爬虫（无 HTTP）
 	EnqueueUserSpider(ctx context.Context, in *EnqueueUserSpiderReq, opts ...grpc.CallOption) (*EnqueueUserSpiderRes, error)
+	// 运维：各 OJ 爬虫模块监控（仅站管）
+	GetSpiderMonitor(ctx context.Context, in *SpiderMonitorReq, opts ...grpc.CallOption) (*SpiderMonitorRes, error)
 }
 
 type spiderClient struct {
@@ -136,6 +139,16 @@ func (c *spiderClient) EnqueueUserSpider(ctx context.Context, in *EnqueueUserSpi
 	return out, nil
 }
 
+func (c *spiderClient) GetSpiderMonitor(ctx context.Context, in *SpiderMonitorReq, opts ...grpc.CallOption) (*SpiderMonitorRes, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SpiderMonitorRes)
+	err := c.cc.Invoke(ctx, Spider_GetSpiderMonitor_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // SpiderServer is the server API for Spider service.
 // All implementations must embed UnimplementedSpiderServer
 // for forward compatibility.
@@ -153,6 +166,8 @@ type SpiderServer interface {
 	PurgeSubmitsAndRecrawl(context.Context, *PurgeSubmitsAndRecrawlReq) (*PurgeSubmitsAndRecrawlRes, error)
 	// 内部：休眠唤醒 / 服务间入队爬虫（无 HTTP）
 	EnqueueUserSpider(context.Context, *EnqueueUserSpiderReq) (*EnqueueUserSpiderRes, error)
+	// 运维：各 OJ 爬虫模块监控（仅站管）
+	GetSpiderMonitor(context.Context, *SpiderMonitorReq) (*SpiderMonitorRes, error)
 	mustEmbedUnimplementedSpiderServer()
 }
 
@@ -186,6 +201,9 @@ func (UnimplementedSpiderServer) PurgeSubmitsAndRecrawl(context.Context, *PurgeS
 }
 func (UnimplementedSpiderServer) EnqueueUserSpider(context.Context, *EnqueueUserSpiderReq) (*EnqueueUserSpiderRes, error) {
 	return nil, status.Error(codes.Unimplemented, "method EnqueueUserSpider not implemented")
+}
+func (UnimplementedSpiderServer) GetSpiderMonitor(context.Context, *SpiderMonitorReq) (*SpiderMonitorRes, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetSpiderMonitor not implemented")
 }
 func (UnimplementedSpiderServer) mustEmbedUnimplementedSpiderServer() {}
 func (UnimplementedSpiderServer) testEmbeddedByValue()                {}
@@ -352,6 +370,24 @@ func _Spider_EnqueueUserSpider_Handler(srv interface{}, ctx context.Context, dec
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Spider_GetSpiderMonitor_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SpiderMonitorReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SpiderServer).GetSpiderMonitor(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Spider_GetSpiderMonitor_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SpiderServer).GetSpiderMonitor(ctx, req.(*SpiderMonitorReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Spider_ServiceDesc is the grpc.ServiceDesc for Spider service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -390,6 +426,10 @@ var Spider_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "EnqueueUserSpider",
 			Handler:    _Spider_EnqueueUserSpider_Handler,
+		},
+		{
+			MethodName: "GetSpiderMonitor",
+			Handler:    _Spider_GetSpiderMonitor_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

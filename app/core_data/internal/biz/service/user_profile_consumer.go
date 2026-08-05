@@ -57,11 +57,11 @@ func (c *UserProfileConsumer) Consume() {
 			if err := json.Unmarshal(body, &msg); err != nil {
 				return fmt.Errorf("bad json: %w", err)
 			}
-			if msg.UserId <= 0 {
-				return nil
-			}
-			start := time.Now()
-			err := c.problem.BuildAndCacheUserProfile(msg.UserId)
+		if msg.UserId <= 0 {
+			return nil
+		}
+		start := time.Now()
+		err := c.problem.BuildAndCacheUserProfile(msg.UserId, msg.Force)
 			if err != nil {
 				log.Errorf("user_profile build user=%d: %v", msg.UserId, err)
 				// 失败不释放 pending，避免重试期间重复入队；TTL 到期后可再预热

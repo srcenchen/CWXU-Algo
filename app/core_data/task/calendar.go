@@ -25,6 +25,9 @@ func (t *CronTask) calDal() *dal.ContestCalendarDal {
 }
 
 func (t *CronTask) runCalendarCrawl() {
+	if loadgateSkipTick("calendar_crawl") {
+		return
+	}
 	if !t.tryCronLock("calendar_crawl", 30*time.Minute) {
 		return
 	}
@@ -52,6 +55,9 @@ func (t *CronTask) runCalendarCrawl() {
 }
 
 func (t *CronTask) runCalendarNotify() {
+	if loadgateSkipTick("calendar_notify") {
+		return
+	}
 	if !t.tryCronLock("calendar_notify", 4*time.Minute) {
 		return
 	}
