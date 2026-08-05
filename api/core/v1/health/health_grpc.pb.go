@@ -19,7 +19,8 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	Health_GetHealth_FullMethodName = "/api.core.v1.health.Health/GetHealth"
+	Health_GetHealth_FullMethodName         = "/api.core.v1.health.Health/GetHealth"
+	Health_GetResourceSeries_FullMethodName = "/api.core.v1.health.Health/GetResourceSeries"
 )
 
 // HealthClient is the client API for Health service.
@@ -30,6 +31,8 @@ const (
 type HealthClient interface {
 	// 运维监控总览：服务状态 + 中间件 + 服务器资源 + API 延迟 + 容量估算
 	GetHealth(ctx context.Context, in *GetHealthReq, opts ...grpc.CallOption) (*GetHealthRes, error)
+	// 运维：近 24h CPU / 内存占用时序（后台 25s 采样缓存，服务端降采样）
+	GetResourceSeries(ctx context.Context, in *ResourceSeriesReq, opts ...grpc.CallOption) (*ResourceSeriesRes, error)
 }
 
 type healthClient struct {
@@ -50,6 +53,16 @@ func (c *healthClient) GetHealth(ctx context.Context, in *GetHealthReq, opts ...
 	return out, nil
 }
 
+func (c *healthClient) GetResourceSeries(ctx context.Context, in *ResourceSeriesReq, opts ...grpc.CallOption) (*ResourceSeriesRes, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ResourceSeriesRes)
+	err := c.cc.Invoke(ctx, Health_GetResourceSeries_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // HealthServer is the server API for Health service.
 // All implementations must embed UnimplementedHealthServer
 // for forward compatibility.
@@ -58,6 +71,8 @@ func (c *healthClient) GetHealth(ctx context.Context, in *GetHealthReq, opts ...
 type HealthServer interface {
 	// 运维监控总览：服务状态 + 中间件 + 服务器资源 + API 延迟 + 容量估算
 	GetHealth(context.Context, *GetHealthReq) (*GetHealthRes, error)
+	// 运维：近 24h CPU / 内存占用时序（后台 25s 采样缓存，服务端降采样）
+	GetResourceSeries(context.Context, *ResourceSeriesReq) (*ResourceSeriesRes, error)
 	mustEmbedUnimplementedHealthServer()
 }
 
@@ -70,6 +85,9 @@ type UnimplementedHealthServer struct{}
 
 func (UnimplementedHealthServer) GetHealth(context.Context, *GetHealthReq) (*GetHealthRes, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetHealth not implemented")
+}
+func (UnimplementedHealthServer) GetResourceSeries(context.Context, *ResourceSeriesReq) (*ResourceSeriesRes, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetResourceSeries not implemented")
 }
 func (UnimplementedHealthServer) mustEmbedUnimplementedHealthServer() {}
 func (UnimplementedHealthServer) testEmbeddedByValue()                {}
@@ -110,6 +128,24 @@ func _Health_GetHealth_Handler(srv interface{}, ctx context.Context, dec func(in
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Health_GetResourceSeries_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ResourceSeriesReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HealthServer).GetResourceSeries(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Health_GetResourceSeries_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HealthServer).GetResourceSeries(ctx, req.(*ResourceSeriesReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Health_ServiceDesc is the grpc.ServiceDesc for Health service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -120,6 +156,10 @@ var Health_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetHealth",
 			Handler:    _Health_GetHealth_Handler,
+		},
+		{
+			MethodName: "GetResourceSeries",
+			Handler:    _Health_GetResourceSeries_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

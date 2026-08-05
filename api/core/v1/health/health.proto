@@ -15,6 +15,36 @@ service Health {
       get: "/v1/core/health/overview"
     };
   }
+  // 运维：近 24h CPU / 内存占用时序（后台 25s 采样缓存，服务端降采样）
+  rpc GetResourceSeries (ResourceSeriesReq) returns (ResourceSeriesRes) {
+    option (google.api.http) = {
+      get: "/v1/core/health/resource-series"
+    };
+  }
+}
+
+message ResourceSeriesReq {
+  // 返回点数上限（服务端降采样），默认 288（约 5 分钟粒度覆盖 24h），最大 1440
+  int32 points = 1;
+}
+
+message ResourceSample {
+  // 采样时间 unix 秒
+  int64 t = 1;
+  // CPU 占用 % 0-100
+  double cpu = 2;
+  // 内存占用 % 0-100
+  double mem = 3;
+}
+
+message ResourceSeriesRes {
+  int64 code = 1;
+  string message = 2;
+  repeated ResourceSample samples = 3;
+  // 采样间隔秒
+  int32 interval_sec = 4;
+  // 覆盖时长小时（可能不满 24h，服务刚启动时）
+  double hours = 5;
 }
 
 message GetHealthReq {

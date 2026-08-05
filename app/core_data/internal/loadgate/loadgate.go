@@ -15,7 +15,7 @@ import (
 // 全局 CPU 负载门控：后台批任务（爬虫 / 画像重建 / 定时入队）在系统 CPU 过载时自动放缓，
 // 把 CPU 让给在线访问。
 //
-// 判定信号：后台采样线程每 5s 用 gopsutil 测一次全机 CPU 占用百分比（跨进程，含 postgres
+// 判定信号：后台采样线程每 25s 用 gopsutil 测一次全机 CPU 占用百分比（跨进程，含 postgres
 // 容器与 docker-proxy）。busy% 超过阈值（默认 70）即视为过载。
 // 阈值可用环境变量 CWXU_CPU_GATE_THRESHOLD 覆盖（0 < t < 1，默认 0.7）。
 //
@@ -55,7 +55,7 @@ func New() *Guard {
 func (g *Guard) sampleLoop() {
 	// 首轮丢一次（gopsutil 首次 cpu.Percent(0) 无基线返回 0）
 	_, _ = cpu.Percent(0, false)
-	ticker := time.NewTicker(5 * time.Second)
+	ticker := time.NewTicker(sampleInterval)
 	defer ticker.Stop()
 	for range ticker.C {
 		// interval=0：返回自上次采样以来的总 CPU 占用（跨所有核）
@@ -70,6 +70,9 @@ func (g *Guard) sampleLoop() {
 		}
 	}
 }
+
+// sampleInterval 采样周期：与资源监控一致，25s 一次，避免频繁读 /proc
+const sampleInterval = 25 * time.Second
 
 // CPUBusy 最近一次全机 CPU 占用百分比（0-100；采样未就绪时为 0）。
 func (g *Guard) CPUBusy() float64 {

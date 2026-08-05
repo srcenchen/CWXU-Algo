@@ -20,15 +20,19 @@ var _ = binding.EncodeURL
 const _ = http.SupportPackageIsVersion1
 
 const OperationHealthGetHealth = "/api.core.v1.health.Health/GetHealth"
+const OperationHealthGetResourceSeries = "/api.core.v1.health.Health/GetResourceSeries"
 
 type HealthHTTPServer interface {
 	// GetHealth 运维监控总览：服务状态 + 中间件 + 服务器资源 + API 延迟 + 容量估算
 	GetHealth(context.Context, *GetHealthReq) (*GetHealthRes, error)
+	// GetResourceSeries 运维：近 24h CPU / 内存占用时序（后台 25s 采样缓存，服务端降采样）
+	GetResourceSeries(context.Context, *ResourceSeriesReq) (*ResourceSeriesRes, error)
 }
 
 func RegisterHealthHTTPServer(s *http.Server, srv HealthHTTPServer) {
 	r := s.Route("/")
 	r.GET("/v1/core/health/overview", _Health_GetHealth0_HTTP_Handler(srv))
+	r.GET("/v1/core/health/resource-series", _Health_GetResourceSeries0_HTTP_Handler(srv))
 }
 
 func _Health_GetHealth0_HTTP_Handler(srv HealthHTTPServer) func(ctx http.Context) error {
@@ -50,9 +54,30 @@ func _Health_GetHealth0_HTTP_Handler(srv HealthHTTPServer) func(ctx http.Context
 	}
 }
 
+func _Health_GetResourceSeries0_HTTP_Handler(srv HealthHTTPServer) func(ctx http.Context) error {
+	return func(ctx http.Context) error {
+		var in ResourceSeriesReq
+		if err := ctx.BindQuery(&in); err != nil {
+			return err
+		}
+		http.SetOperation(ctx, OperationHealthGetResourceSeries)
+		h := ctx.Middleware(func(ctx context.Context, req interface{}) (interface{}, error) {
+			return srv.GetResourceSeries(ctx, req.(*ResourceSeriesReq))
+		})
+		out, err := h(ctx, &in)
+		if err != nil {
+			return err
+		}
+		reply := out.(*ResourceSeriesRes)
+		return ctx.Result(200, reply)
+	}
+}
+
 type HealthHTTPClient interface {
 	// GetHealth 运维监控总览：服务状态 + 中间件 + 服务器资源 + API 延迟 + 容量估算
 	GetHealth(ctx context.Context, req *GetHealthReq, opts ...http.CallOption) (rsp *GetHealthRes, err error)
+	// GetResourceSeries 运维：近 24h CPU / 内存占用时序（后台 25s 采样缓存，服务端降采样）
+	GetResourceSeries(ctx context.Context, req *ResourceSeriesReq, opts ...http.CallOption) (rsp *ResourceSeriesRes, err error)
 }
 
 type HealthHTTPClientImpl struct {
@@ -69,6 +94,20 @@ func (c *HealthHTTPClientImpl) GetHealth(ctx context.Context, in *GetHealthReq, 
 	pattern := "/v1/core/health/overview"
 	path := binding.EncodeURL(pattern, in, true)
 	opts = append(opts, http.Operation(OperationHealthGetHealth))
+	opts = append(opts, http.PathTemplate(pattern))
+	err := c.cc.Invoke(ctx, "GET", path, nil, &out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// GetResourceSeries 运维：近 24h CPU / 内存占用时序（后台 25s 采样缓存，服务端降采样）
+func (c *HealthHTTPClientImpl) GetResourceSeries(ctx context.Context, in *ResourceSeriesReq, opts ...http.CallOption) (*ResourceSeriesRes, error) {
+	var out ResourceSeriesRes
+	pattern := "/v1/core/health/resource-series"
+	path := binding.EncodeURL(pattern, in, true)
+	opts = append(opts, http.Operation(OperationHealthGetResourceSeries))
 	opts = append(opts, http.PathTemplate(pattern))
 	err := c.cc.Invoke(ctx, "GET", path, nil, &out, opts...)
 	if err != nil {

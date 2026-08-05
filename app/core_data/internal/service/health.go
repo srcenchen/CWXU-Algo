@@ -14,11 +14,10 @@ import (
 	"cwxu-algo/app/common/sitesettings"
 	"cwxu-algo/app/common/utils/auth"
 	"cwxu-algo/app/core_data/internal/data"
+	"cwxu-algo/app/core_data/internal/resmon"
 
 	"github.com/redis/go-redis/v9"
 	"github.com/shirou/gopsutil/v3/cpu"
-	"github.com/shirou/gopsutil/v3/disk"
-	"github.com/shirou/gopsutil/v3/load"
 	"github.com/shirou/gopsutil/v3/mem"
 	"gorm.io/gorm"
 )
@@ -26,13 +25,15 @@ import (
 // HealthService 运维监控：服务状态 + 中间件 + 服务器资源 + API 延迟 + 容量估算
 type HealthService struct {
 	health.UnimplementedHealthServer
-	db    *gorm.DB
-	udb   *gorm.DB // optional: algo_user
-	rdb   *redis.Client
+	db     *gorm.DB
+	udb    *gorm.DB // optional: algo_user
+	rdb    *redis.Client
 	server *conf.Server
 }
 
 func NewHealthService(d *data.Data, c *conf.Server) *HealthService {
+	// 启动后台资源采样（25s），健康接口改读缓存，避免每次访问实时 gopsutil
+	resmon.Start(d.RDB)
 	return &HealthService{db: d.DB, udb: d.UserDB, rdb: d.RDB, server: c}
 }
 
@@ -156,13 +157,18 @@ func (s *HealthService) collectMiddleware(ctx context.Context) []*health.HealthM
 	return out
 }
 
+// collectResources 读后台 resmon 缓存（25s 采样），不阻塞实时 gopsutil。
+// 采样未就绪（服务刚启动）时兜底实时采集。
 func (s *HealthService) collectResources(ctx context.Context) []*health.HealthResourceItem {
 	out := make([]*health.HealthResourceItem, 0, 4)
+	snap := resmon.SnapshotNow()
 
 	// CPU
-	cpuPct := 0.0
-	if per, err := cpu.PercentWithContext(ctx, 500*time.Millisecond, false); err == nil && len(per) > 0 {
-		cpuPct = per[0]
+	cpuPct := snap.CPUUsedPercent
+	if cpuPct <= 0 && snap.CollectedAt <= 0 {
+		if per, err := cpu.PercentWithContext(ctx, 300*time.Millisecond, false); err == nil && len(per) > 0 {
+			cpuPct = per[0]
+		}
 	}
 	out = append(out, &health.HealthResourceItem{
 		Name: "cpu", Status: levelStatus(cpuPct, 70, 90),
@@ -170,40 +176,89 @@ func (s *HealthService) collectResources(ctx context.Context) []*health.HealthRe
 	})
 
 	// 内存
-	memTotal, memUsed := int64(0), int64(0)
-	if vm, err := mem.VirtualMemoryWithContext(ctx); err == nil {
-		memTotal, memUsed = int64(vm.Total), int64(vm.Used)
-		memPct := vm.UsedPercent
-		out = append(out, &health.HealthResourceItem{
-			Name: "memory", Status: levelStatus(memPct, 75, 92),
-			UsedPercent: memPct, Used: memUsed, Total: memTotal,
-		})
+	memTotal, memUsed := snap.MemTotal, snap.MemUsed
+	memPct := snap.MemUsedPercent
+	if snap.CollectedAt <= 0 || (memPct <= 0 && memTotal <= 0) {
+		if vm, err := mem.VirtualMemoryWithContext(ctx); err == nil {
+			memTotal, memUsed, memPct = int64(vm.Total), int64(vm.Used), vm.UsedPercent
+		}
 	}
+	out = append(out, &health.HealthResourceItem{
+		Name: "memory", Status: levelStatus(memPct, 75, 92),
+		UsedPercent: memPct, Used: memUsed, Total: memTotal,
+	})
 
-	// 磁盘（根分区）
-	if du, err := disk.UsageWithContext(ctx, "/"); err == nil {
-		out = append(out, &health.HealthResourceItem{
-			Name: "disk", Status: levelStatus(du.UsedPercent, 75, 92),
-			UsedPercent: du.UsedPercent, Used: int64(du.Used), Total: int64(du.Total),
-		})
+	// 磁盘（根分区；用 resmon 缓存，未就绪时兜底）
+	diskUsed, diskTotal, diskPct := snap.DiskUsed, snap.DiskTotal, snap.DiskUsedPercent
+	if diskPct <= 0 && snap.CollectedAt <= 0 {
+		diskUsed, diskTotal, diskPct = resmon.DiskRootUsage()
 	}
+	out = append(out, &health.HealthResourceItem{
+		Name: "disk", Status: levelStatus(diskPct, 75, 92),
+		UsedPercent: diskPct, Used: diskUsed, Total: diskTotal,
+	})
 
 	// 负载
-	if la, err := load.AvgWithContext(ctx); err == nil {
+	l1, l5, l15 := snap.Load1, snap.Load5, snap.Load15
+	rel := snap.LoadRelPercent
+	if rel <= 0 && snap.CollectedAt <= 0 {
+		l1, l5, l15 = resmon.LoadAvg()
 		cores, _ := cpu.Counts(true)
 		if cores < 1 {
 			cores = 1
 		}
-		// 相对负载 = load1 / 核数；>1 说明排队
-		rel := la.Load1 / float64(cores) * 100
-		out = append(out, &health.HealthResourceItem{
-			Name: "load", Status: levelStatus(rel, 70, 95),
-			UsedPercent: rel,
-			Detail:      fmt.Sprintf("load1=%.2f load5=%.2f load15=%.2f (核数 %d)", la.Load1, la.Load5, la.Load15, cores),
-		})
+		rel = l1 / float64(cores) * 100
 	}
+	out = append(out, &health.HealthResourceItem{
+		Name: "load", Status: levelStatus(rel, 70, 95),
+		UsedPercent: rel,
+		Detail:      fmt.Sprintf("load1=%.2f load5=%.2f load15=%.2f (核数 %d)", l1, l5, l15, numCores()),
+	})
 
 	return out
+}
+
+// numCores 缓存核数（gopsutil cpu.Counts 每次调用有成本）
+var numCores = func() func() int {
+	n := 0
+	func() {
+		if c, err := cpu.Counts(true); err == nil && c > 0 {
+			n = c
+		}
+	}()
+	return func() int {
+		if n < 1 {
+			return 1
+		}
+		return n
+	}
+}()
+
+// GetResourceSeries 运维：近 24h CPU/内存占用时序（读 Redis 缓存，服务端降采样）
+func (s *HealthService) GetResourceSeries(ctx context.Context, req *health.ResourceSeriesReq) (*health.ResourceSeriesRes, error) {
+	if !auth.HasPerm(ctx, rbac.PermSiteConfigRead) {
+		return &health.ResourceSeriesRes{Code: 1, Message: "需要查看站点配置权限"}, nil
+	}
+	points := 0
+	if req != nil && req.Points > 0 {
+		points = int(req.Points)
+	}
+	samples := resmon.Series(ctx, s.rdb, points)
+	out := make([]*health.ResourceSample, 0, len(samples))
+	for _, s := range samples {
+		out = append(out, &health.ResourceSample{T: s.At, Cpu: s.CPU, Mem: s.Mem})
+	}
+	hours := 0.0
+	if len(samples) > 1 {
+		hours = float64(samples[len(samples)-1].At-samples[0].At) / 3600.0
+	}
+	return &health.ResourceSeriesRes{
+		Code:        0,
+		Message:     "success",
+		Samples:     out,
+		IntervalSec: int32(resmon.SampleInterval.Seconds()),
+		Hours:       hours,
+	}, nil
 }
 
 func (s *HealthService) collectAPI(ctx context.Context) *health.HealthApiItem {
