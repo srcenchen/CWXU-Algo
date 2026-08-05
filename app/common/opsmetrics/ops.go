@@ -3,6 +3,7 @@ package opsmetrics
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strconv"
 	"time"
 
@@ -54,10 +55,11 @@ func monthKey(t time.Time) string {
 	return t.In(loc).Format("200601")
 }
 
-// RecordAPIRequest 记录一次 API 请求，并维护并发峰值
-func RecordAPIRequest(ctx context.Context, rdb *redis.Client, service string) func() {
+// RecordAPIRequest 记录一次 API 请求，并维护并发峰值。
+// 返回的 done 需在请求结束时调用，传入耗时；内部完成延迟样本 + 并发释放。
+func RecordAPIRequest(ctx context.Context, rdb *redis.Client, service string) func(dur time.Duration) {
 	if rdb == nil {
-		return func() {}
+		return func(time.Duration) {}
 	}
 	day := dayKey(time.Now())
 	reqKey := fmt.Sprintf("ops:api:req:%s", day)
@@ -76,10 +78,21 @@ func RecordAPIRequest(ctx context.Context, rdb *redis.Client, service string) fu
 		int(ttl/time.Second), int(inflightTTL/time.Second), hasSvc,
 	).Result()
 
-	return func() {
-		// 客户端取消不应导致计数漂移：用独立短超时 ctx 落 Decr
+	return func(dur time.Duration) {
 		dctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
+		if dur > 0 {
+			ms := int64(dur / time.Millisecond)
+			if ms < 0 {
+				ms = 0
+			}
+			latKey := fmt.Sprintf("ops:api:lat:%s", day)
+			// 延迟样本：保留最近 2000 条（LIST），用 LRANGE 求 p50/p95/p99
+			_ = rdb.RPush(dctx, latKey, ms).Err()
+			_ = rdb.LTrim(dctx, latKey, -2000, -1).Err()
+			_ = rdb.Expire(dctx, latKey, ttl).Err()
+		}
+		// 客户端取消不应导致计数漂移：用独立短超时 ctx 落 Decr
 		n, err := rdb.Decr(dctx, inflightKey).Result()
 		if err == nil && n < 0 {
 			_ = rdb.Set(dctx, inflightKey, 0, inflightTTL).Err()
@@ -122,6 +135,26 @@ type Snapshot struct {
 	SpiderFail       int64
 	SpiderRows       int64
 	MAU              int64
+	// API 延迟（ms）：avg / p50 / p95 / p99，来自当日最近样本
+	APILatencyAvg int64
+	APILatencyP50 int64
+	APILatencyP95 int64
+	APILatencyP99 int64
+}
+
+func percentile(sorted []int64, p float64) int64 {
+	n := len(sorted)
+	if n == 0 {
+		return 0
+	}
+	idx := int(float64(n-1)*p + 0.5)
+	if idx < 0 {
+		idx = 0
+	}
+	if idx >= n {
+		idx = n - 1
+	}
+	return sorted[idx]
 }
 
 func ReadSnapshot(ctx context.Context, rdb *redis.Client) Snapshot {
@@ -154,6 +187,34 @@ func ReadSnapshot(ctx context.Context, rdb *redis.Client) Snapshot {
 	}
 	if v, err := rdb.SCard(ctx, "visit:mau:"+month).Result(); err == nil {
 		s.MAU = v
+	}
+	// 延迟样本
+	if samples, err := rdb.LRange(ctx, "ops:api:lat:"+day, 0, -1).Result(); err == nil && len(samples) > 0 {
+		vals := make([]int64, 0, len(samples))
+		for _, raw := range samples {
+			var v int64
+			for _, c := range raw {
+				if c < '0' || c > '9' {
+					v = 0
+					break
+				}
+				v = v*10 + int64(c-'0')
+			}
+			if v >= 0 {
+				vals = append(vals, v)
+			}
+		}
+		if len(vals) > 0 {
+			var sum int64
+			for _, v := range vals {
+				sum += v
+			}
+			s.APILatencyAvg = sum / int64(len(vals))
+			sort.Slice(vals, func(i, j int) bool { return vals[i] < vals[j] })
+			s.APILatencyP50 = percentile(vals, 0.5)
+			s.APILatencyP95 = percentile(vals, 0.95)
+			s.APILatencyP99 = percentile(vals, 0.99)
+		}
 	}
 	return s
 }

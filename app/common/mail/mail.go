@@ -145,7 +145,25 @@ func (s *Sender) SendWithAttachments(to, subject, body string, attachments []Att
 	}
 
 	if err := dialAndSendTimeout(d, m, sendTimeout); err != nil {
+		reportStatus(false, err.Error())
 		return fmt.Errorf("发送邮件失败: %w", err)
 	}
+	reportStatus(true, "")
 	return nil
+}
+
+// StatusReporter 邮件发送结果回调（由各服务注册，写入站点 SMTP 状态）。
+type StatusReporter func(ok bool, errMsg string)
+
+var statusReporter StatusReporter
+
+// SetStatusReporter 注册 SMTP 状态回调；每个服务启动时调用一次。
+func SetStatusReporter(fn StatusReporter) {
+	statusReporter = fn
+}
+
+func reportStatus(ok bool, errMsg string) {
+	if statusReporter != nil {
+		statusReporter(ok, errMsg)
+	}
 }

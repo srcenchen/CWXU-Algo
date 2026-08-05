@@ -78,10 +78,17 @@ func (c *Chat) Complete(ctx context.Context, messages []*model.ChatCompletionMes
 }
 
 // Chat 支持可选工具调用。maxRounds 防止无限循环；未知工具返回错误文本而非 panic。
-func (c *Chat) Chat(ctx context.Context, messages []*model.ChatCompletionMessage, tools ...tool.AgentToolFactory) (string, error) {
+func (c *Chat) Chat(ctx context.Context, messages []*model.ChatCompletionMessage, tools ...tool.AgentToolFactory) (resp string, err error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	defer func() {
+		if err != nil {
+			sitesettings.SetServiceStatus(ctx, c.rdb, sitesettings.ServiceAgent, sitesettings.StatusFail, err.Error())
+		} else if strings.TrimSpace(resp) != "" {
+			sitesettings.SetServiceStatus(ctx, c.rdb, sitesettings.ServiceAgent, sitesettings.StatusOK, "")
+		}
+	}()
 	client, modelID, err := c.ensureClient(ctx)
 	if err != nil {
 		return "", err

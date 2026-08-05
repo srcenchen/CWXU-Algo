@@ -54,7 +54,11 @@ type SiteConfig struct {
 	AiAnalyzeStatus   string `gorm:"size:16;column:ai_analyze_status;default:unchecked;comment:题库分析状态"`
 	AiAnalyzeStatusAt int64  `gorm:"column:ai_analyze_status_at;default:0;comment:题库分析状态更新时间 unix"`
 	AiAnalyzeErrMsg   string `gorm:"type:text;column:ai_analyze_err_msg;comment:题库分析最近错误"`
-	UpdatedAt         time.Time `gorm:"autoUpdateTime"`
+	// SMTP 邮件服务状态（由发送邮件后回写）
+	SmtpStatus   string `gorm:"size:16;column:smtp_status;default:unchecked;comment:邮件服务状态"`
+	SmtpStatusAt int64  `gorm:"column:smtp_status_at;default:0;comment:邮件状态更新时间 unix"`
+	SmtpErrMsg   string `gorm:"type:text;column:smtp_err_msg;comment:邮件最近错误"`
+	UpdatedAt    time.Time `gorm:"autoUpdateTime"`
 }
 
 func (SiteConfig) TableName() string { return "site_configs" }

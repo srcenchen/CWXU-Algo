@@ -51,6 +51,9 @@ type Runtime struct {
 	AiAnalyzeStatus   string `json:"aiAnalyzeStatus"`
 	AiAnalyzeStatusAt int64  `json:"aiAnalyzeStatusAt"`
 	AiAnalyzeErrMsg   string `json:"aiAnalyzeErrMsg"`
+	SmtpStatus        string `json:"smtpStatus"`
+	SmtpStatusAt      int64  `json:"smtpStatusAt"`
+	SmtpErrMsg        string `json:"smtpErrMsg"`
 }
 
 // Row 与 site_configs 表对齐（轻量，避免依赖 user/internal）
@@ -83,6 +86,9 @@ type Row struct {
 	AiAnalyzeStatus   string `gorm:"column:ai_analyze_status"`
 	AiAnalyzeStatusAt int64  `gorm:"column:ai_analyze_status_at"`
 	AiAnalyzeErrMsg   string `gorm:"column:ai_analyze_err_msg"`
+	SmtpStatus        string `gorm:"column:smtp_status"`
+	SmtpStatusAt      int64  `gorm:"column:smtp_status_at"`
+	SmtpErrMsg        string `gorm:"column:smtp_err_msg"`
 }
 
 func (Row) TableName() string { return "site_configs" }
@@ -134,6 +140,9 @@ func (r *Row) ToRuntime() *Runtime {
 		AiAnalyzeStatus:   r.AiAnalyzeStatus,
 		AiAnalyzeStatusAt: r.AiAnalyzeStatusAt,
 		AiAnalyzeErrMsg:   r.AiAnalyzeErrMsg,
+		SmtpStatus:        r.SmtpStatus,
+		SmtpStatusAt:      r.SmtpStatusAt,
+		SmtpErrMsg:        r.SmtpErrMsg,
 	}
 }
 
@@ -338,6 +347,16 @@ func MaskSecret(s string) string {
 
 // UpdateOjStatus 回写 OJ 登录状态到 site_configs（core_data 爬虫调用）。
 func UpdateOjStatus(ctx context.Context, rdb *redis.Client, db *gorm.DB, platform, status, errMsg string) {
+	service := ""
+	switch platform {
+	case "LuoGu":
+		service = ServiceLuoGu
+	case "QOJ":
+		service = ServiceQOJ
+	}
+	if service != "" {
+		SetServiceStatus(ctx, rdb, service, status, errMsg)
+	}
 	if db == nil {
 		return
 	}

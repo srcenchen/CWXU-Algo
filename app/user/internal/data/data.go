@@ -12,6 +12,7 @@ import (
 	"cwxu-algo/app/common/conf"
 	gorm2 "cwxu-algo/app/common/data/gorm"
 	redis2 "cwxu-algo/app/common/data/redis"
+	"cwxu-algo/app/common/mail"
 	"cwxu-algo/app/common/sitesettings"
 	"cwxu-algo/app/user/internal/data/model"
 
@@ -69,6 +70,14 @@ type Data struct {
 // NewData .
 func NewData(c *conf.Data) (*Data, func(), error) {
 	data := &Data{DB: gorm2.InitGorm(c), RDB: redis2.InitRedis(c)}
+	// 邮件发送结果 → 站点 SMTP 状态（Redis）
+	mail.SetStatusReporter(func(ok bool, errMsg string) {
+		st, msg := sitesettings.StatusFail, errMsg
+		if ok {
+			st, msg = sitesettings.StatusOK, ""
+		}
+		sitesettings.SetServiceStatus(context.Background(), data.RDB, sitesettings.ServiceSmtp, st, msg)
+	})
 	if core := openCoreDB(c); core != nil {
 		data.CoreDB = core
 		log.Info("backup: core database connected")

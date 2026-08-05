@@ -87,7 +87,14 @@ type aiAnalyzeResult struct {
 	ContentMD          string               `json:"content_md"` // 可选：AI 优化排版后的题面
 }
 
-func (t *ProblemTagger) Analyze(ctx context.Context, title, contentMD string) (*aiAnalyzeResult, error) {
+func (t *ProblemTagger) Analyze(ctx context.Context, title, contentMD string) (res *aiAnalyzeResult, err error) {
+	defer func() {
+		if err != nil {
+			sitesettings.SetServiceStatus(ctx, t.rdb, sitesettings.ServiceAiAnaly, sitesettings.StatusFail, err.Error())
+		} else if res != nil {
+			sitesettings.SetServiceStatus(ctx, t.rdb, sitesettings.ServiceAiAnaly, sitesettings.StatusOK, "")
+		}
+	}()
 	t.reload(ctx)
 	t.mu.Lock()
 	client := t.client

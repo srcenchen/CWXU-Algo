@@ -1,0 +1,114 @@
+syntax = "proto3";
+
+package api.core.v1.health;
+
+import "google/api/annotations.proto";
+option go_package = "cwxu-algo/api/core/v1/health;health";
+option java_multiple_files = true;
+option java_package = "api.core.v1.health";
+
+// 站点健康与容量监控（站点管理员）
+service Health {
+  // 运维监控总览：服务状态 + 中间件 + 服务器资源 + API 延迟 + 容量估算
+  rpc GetHealth (GetHealthReq) returns (GetHealthRes) {
+    option (google.api.http) = {
+      get: "/v1/core/health/overview"
+    };
+  }
+}
+
+message GetHealthReq {
+  // 忽略；保留以便扩展
+}
+
+message HealthServiceItem {
+  // service key: oj_luogu / oj_qoj / agent / ai_analyze / smtp
+  string name = 1;
+  // ok | fail | unchecked
+  string status = 2;
+  // 最近调用/验证时间 unix 秒
+  int64 at = 3;
+  string err_msg = 4;
+}
+
+message HealthMiddlewareItem {
+  // database / redis / registry / mq
+  string name = 1;
+  // ok | fail
+  string status = 2;
+  // 探测耗时 ms
+  int64 latency_ms = 3;
+  string err_msg = 4;
+}
+
+message HealthResourceItem {
+  // cpu / memory / disk / load
+  string name = 1;
+  // ok | warn | critical
+  string status = 2;
+  // 使用百分比 0-100（load 用相对负载）
+  double used_percent = 3;
+  // 已用字节
+  int64 used = 4;
+  // 总量字节
+  int64 total = 5;
+  // 附加说明（如 load1/5/15）
+  string detail = 6;
+}
+
+message HealthApiItem {
+  // 今日请求总数
+  int64 requests_today = 1;
+  // 当前并发
+  int64 concurrent_now = 2;
+  // 今日并发峰值
+  int64 peak_concurrent_today = 3;
+  // 平均延迟 ms
+  int64 latency_avg_ms = 4;
+  // p50 ms
+  int64 latency_p50_ms = 5;
+  // p95 ms
+  int64 latency_p95_ms = 6;
+  // p99 ms
+  int64 latency_p99_ms = 7;
+  // 今日爬虫入队/成功/失败
+  int64 spider_enqueued_today = 8;
+  int64 spider_ok_today = 9;
+  int64 spider_fail_today = 10;
+}
+
+message HealthCapacityItem {
+  // 注册用户数
+  int64 registered_users = 1;
+  // 月活跃
+  int64 mau = 2;
+  // 今日访问 UV/PV
+  int64 today_uv = 3;
+  int64 today_pv = 4;
+  // 已用存储字节（含 DB + 文件）
+  int64 storage_used = 5;
+  // 存储总量字节
+  int64 storage_total = 6;
+  // 估算峰值用户数（当前资源配置下的安全上限）
+  int64 peak_users = 7;
+  // 建议健康运行用户数（推荐长期负载）
+  int64 healthy_users = 8;
+  // 当前负载等级: low / normal / high / critical
+  string load_level = 9;
+  string load_note = 10;
+}
+
+message GetHealthRes {
+  int64 code = 1;
+  string message = 2;
+  // 服务状态（AI / 邮件 / OJ）
+  repeated HealthServiceItem services = 3;
+  // 中间件状态
+  repeated HealthMiddlewareItem middleware = 4;
+  // 服务器资源
+  repeated HealthResourceItem resources = 5;
+  HealthApiItem api = 6;
+  HealthCapacityItem capacity = 7;
+  // 采集时间 unix 秒
+  int64 collected_at = 8;
+}

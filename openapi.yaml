@@ -509,6 +509,19 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/api.core.v1.emergency.UpdateEmergencyRes'
+    /v1/core/health/overview:
+        get:
+            tags:
+                - Health
+            description: 运维监控总览：服务状态 + 中间件 + 服务器资源 + API 延迟 + 容量估算
+            operationId: Health_GetHealth
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.core.v1.health.GetHealthRes'
     /v1/core/problem/admin-update:
         post:
             tags:
@@ -2824,6 +2837,147 @@ components:
                     type: string
                 data:
                     $ref: '#/components/schemas/api.core.v1.emergency.EmergencyInfo'
+        api.core.v1.health.GetHealthRes:
+            type: object
+            properties:
+                code:
+                    type: string
+                message:
+                    type: string
+                services:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/api.core.v1.health.HealthServiceItem'
+                    description: 服务状态（AI / 邮件 / OJ）
+                middleware:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/api.core.v1.health.HealthMiddlewareItem'
+                    description: 中间件状态
+                resources:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/api.core.v1.health.HealthResourceItem'
+                    description: 服务器资源
+                api:
+                    $ref: '#/components/schemas/api.core.v1.health.HealthApiItem'
+                capacity:
+                    $ref: '#/components/schemas/api.core.v1.health.HealthCapacityItem'
+                collectedAt:
+                    type: string
+                    description: 采集时间 unix 秒
+        api.core.v1.health.HealthApiItem:
+            type: object
+            properties:
+                requestsToday:
+                    type: string
+                    description: 今日请求总数
+                concurrentNow:
+                    type: string
+                    description: 当前并发
+                peakConcurrentToday:
+                    type: string
+                    description: 今日并发峰值
+                latencyAvgMs:
+                    type: string
+                    description: 平均延迟 ms
+                latencyP50Ms:
+                    type: string
+                    description: p50 ms
+                latencyP95Ms:
+                    type: string
+                    description: p95 ms
+                latencyP99Ms:
+                    type: string
+                    description: p99 ms
+                spiderEnqueuedToday:
+                    type: string
+                    description: 今日爬虫入队/成功/失败
+                spiderOkToday:
+                    type: string
+                spiderFailToday:
+                    type: string
+        api.core.v1.health.HealthCapacityItem:
+            type: object
+            properties:
+                registeredUsers:
+                    type: string
+                    description: 注册用户数
+                mau:
+                    type: string
+                    description: 月活跃
+                todayUv:
+                    type: string
+                    description: 今日访问 UV/PV
+                todayPv:
+                    type: string
+                storageUsed:
+                    type: string
+                    description: 已用存储字节（含 DB + 文件）
+                storageTotal:
+                    type: string
+                    description: 存储总量字节
+                peakUsers:
+                    type: string
+                    description: 估算峰值用户数（当前资源配置下的安全上限）
+                healthyUsers:
+                    type: string
+                    description: 建议健康运行用户数（推荐长期负载）
+                loadLevel:
+                    type: string
+                    description: '当前负载等级: low / normal / high / critical'
+                loadNote:
+                    type: string
+        api.core.v1.health.HealthMiddlewareItem:
+            type: object
+            properties:
+                name:
+                    type: string
+                    description: database / redis / registry / mq
+                status:
+                    type: string
+                    description: ok | fail
+                latencyMs:
+                    type: string
+                    description: 探测耗时 ms
+                errMsg:
+                    type: string
+        api.core.v1.health.HealthResourceItem:
+            type: object
+            properties:
+                name:
+                    type: string
+                    description: cpu / memory / disk / load
+                status:
+                    type: string
+                    description: ok | warn | critical
+                usedPercent:
+                    type: number
+                    description: 使用百分比 0-100（load 用相对负载）
+                    format: double
+                used:
+                    type: string
+                    description: 已用字节
+                total:
+                    type: string
+                    description: 总量字节
+                detail:
+                    type: string
+                    description: 附加说明（如 load1/5/15）
+        api.core.v1.health.HealthServiceItem:
+            type: object
+            properties:
+                name:
+                    type: string
+                    description: 'service key: oj_luogu / oj_qoj / agent / ai_analyze / smtp'
+                status:
+                    type: string
+                    description: ok | fail | unchecked
+                at:
+                    type: string
+                    description: 最近调用/验证时间 unix 秒
+                errMsg:
+                    type: string
         api.core.v1.problem.ActiveJob:
             type: object
             properties:
@@ -4957,6 +5111,13 @@ components:
                     type: string
                 aiAnalyzeErrMsg:
                     type: string
+                smtpStatus:
+                    type: string
+                    description: SMTP 邮件服务状态
+                smtpStatusAt:
+                    type: string
+                smtpErrMsg:
+                    type: string
         api.user.v1.site.GetConfigRes:
             type: object
             properties:
@@ -5145,6 +5306,8 @@ tags:
     - name: Emergency
       description: 紧急通知：全站强制弹窗，仅站点管理员可管理
     - name: Group
+    - name: Health
+      description: 站点健康与容量监控（站点管理员）
     - name: Problem
     - name: Problemset
       description: |-

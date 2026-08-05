@@ -127,6 +127,10 @@ message GetAdminConfigRes {
   string ai_analyze_status = 43;
   int64 ai_analyze_status_at = 44;
   string ai_analyze_err_msg = 45;
+  // SMTP 邮件服务状态
+  string smtp_status = 46;
+  int64 smtp_status_at = 47;
+  string smtp_err_msg = 48;
 }
 
 message UpdateConfigReq {

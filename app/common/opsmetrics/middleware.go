@@ -2,13 +2,14 @@ package opsmetrics
 
 import (
 	"context"
+	"time"
 
 	"github.com/go-kratos/kratos/v2/middleware"
 	"github.com/go-kratos/kratos/v2/transport"
 	"github.com/redis/go-redis/v9"
 )
 
-// Middleware 统计 API 请求量与并发峰值（按服务名）
+// Middleware 统计 API 请求量与并发峰值（按服务名）+ 延迟样本
 func Middleware(rdb *redis.Client, service string) middleware.Middleware {
 	return func(handler middleware.Handler) middleware.Handler {
 		return func(ctx context.Context, req interface{}) (interface{}, error) {
@@ -19,9 +20,11 @@ func Middleware(rdb *redis.Client, service string) middleware.Middleware {
 					return handler(ctx, req)
 				}
 			}
+			start := time.Now()
 			done := RecordAPIRequest(ctx, rdb, service)
-			defer done()
-			return handler(ctx, req)
+			reply, err := handler(ctx, req)
+			done(time.Since(start))
+			return reply, err
 		}
 	}
 }

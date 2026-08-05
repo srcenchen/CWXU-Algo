@@ -8,6 +8,7 @@ import (
 	"cwxu-algo/api/core/v1/contest_calendar"
 	"cwxu-algo/api/core/v1/contest_log"
 	"cwxu-algo/api/core/v1/emergency"
+	healthpb "cwxu-algo/api/core/v1/health"
 	"cwxu-algo/api/core/v1/problem"
 	"cwxu-algo/api/core/v1/spider"
 	statistic2 "cwxu-algo/api/core/v1/statistic"
@@ -80,7 +81,7 @@ func NewWhiteListMatcher() selector.MatchFunc {
 }
 
 // NewHTTPServer new an HTTP server.
-func NewHTTPServer(c *conf.Server, logger log.Logger, d *data.Data, submitService *service.SubmitLogService, spiderService *service.SpiderService, statisticService *service.StatisticService, contestLogService *service.ContestLogService, bulletinService *service.BulletinService, problemService *service.ProblemService, emergencyService *service.EmergencyService, contestCalendarService *service.ContestCalendarService, communityService *service.CommunityService, problemsetService *service.ProblemsetService) *http.Server {
+func NewHTTPServer(c *conf.Server, logger log.Logger, d *data.Data, submitService *service.SubmitLogService, spiderService *service.SpiderService, statisticService *service.StatisticService, contestLogService *service.ContestLogService, bulletinService *service.BulletinService, problemService *service.ProblemService, emergencyService *service.EmergencyService, contestCalendarService *service.ContestCalendarService, communityService *service.CommunityService, problemsetService *service.ProblemsetService, healthService *service.HealthService) *http.Server {
 	var opts = []http.ServerOption{
 		http.Middleware(
 			recovery.Recovery(),
@@ -119,5 +120,6 @@ func NewHTTPServer(c *conf.Server, logger log.Logger, d *data.Data, submitServic
 	service.RegisterContestExtraRoutes(srv, contestLogService)
 	service.RegisterSpiderExtraRoutes(srv, spiderService)
 	service.RegisterProblemExtraRoutes(srv, problemService)
+	healthpb.RegisterHealthHTTPServer(srv, healthService)
 	return srv
 }

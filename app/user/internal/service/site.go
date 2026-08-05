@@ -216,6 +216,12 @@ func (s *SiteService) GetAdminConfig(ctx context.Context, _ *site.GetAdminConfig
 		return nil, errors.InternalServer("site config", "服务暂时不可用")
 	}
 	rt := s.effectiveRuntime(row)
+	// 实时状态：agent / ai / smtp 以 Redis 为准（各服务实际调用后回写），OJ 优先 Redis（手动验证也计入）
+	agentSt := sitesettings.GetServiceStatus(ctx, s.data.RDB, sitesettings.ServiceAgent)
+	aiSt := sitesettings.GetServiceStatus(ctx, s.data.RDB, sitesettings.ServiceAiAnaly)
+	smtpSt := sitesettings.GetServiceStatus(ctx, s.data.RDB, sitesettings.ServiceSmtp)
+	lgSt := sitesettings.GetServiceStatus(ctx, s.data.RDB, sitesettings.ServiceLuoGu)
+	qojSt := sitesettings.GetServiceStatus(ctx, s.data.RDB, sitesettings.ServiceQOJ)
 	return &site.GetAdminConfigRes{
 		Code:                  0,
 		Message:               "success",
@@ -250,18 +256,21 @@ func (s *SiteService) GetAdminConfig(ctx context.Context, _ *site.GetAdminConfig
 		OjQojUsername:         strings.TrimSpace(row.OjQojUsername),
 		OjQojPasswordMasked:   sitesettings.MaskSecret(decryptSiteSecret(row.OjQojPassword)),
 		OjQojPasswordSet:      strings.TrimSpace(decryptSiteSecret(row.OjQojPassword)) != "",
-		OjLuoguStatus:         row.OjLuoguStatus,
-		OjLuoguStatusAt:       row.OjLuoguStatusAt,
-		OjLuoguErrMsg:         row.OjLuoguErrMsg,
-		OjQojStatus:           row.OjQojStatus,
-		OjQojStatusAt:         row.OjQojStatusAt,
-		OjQojErrMsg:           row.OjQojErrMsg,
-		AgentStatus:           row.AgentStatus,
-		AgentStatusAt:         row.AgentStatusAt,
-		AgentErrMsg:           row.AgentErrMsg,
-		AiAnalyzeStatus:       row.AiAnalyzeStatus,
-		AiAnalyzeStatusAt:     row.AiAnalyzeStatusAt,
-		AiAnalyzeErrMsg:       row.AiAnalyzeErrMsg,
+		OjLuoguStatus:         lgSt.Status,
+		OjLuoguStatusAt:       lgSt.At,
+		OjLuoguErrMsg:         lgSt.ErrMsg,
+		OjQojStatus:           qojSt.Status,
+		OjQojStatusAt:         qojSt.At,
+		OjQojErrMsg:           qojSt.ErrMsg,
+		AgentStatus:           agentSt.Status,
+		AgentStatusAt:         agentSt.At,
+		AgentErrMsg:           agentSt.ErrMsg,
+		AiAnalyzeStatus:       aiSt.Status,
+		AiAnalyzeStatusAt:     aiSt.At,
+		AiAnalyzeErrMsg:       aiSt.ErrMsg,
+		SmtpStatus:            smtpSt.Status,
+		SmtpStatusAt:          smtpSt.At,
+		SmtpErrMsg:            smtpSt.ErrMsg,
 	}, nil
 }
 
@@ -574,6 +583,19 @@ func (s *SiteService) VerifyOjCredential(ctx context.Context, req *site.VerifyOj
 	username := strings.TrimSpace(req.GetUsername())
 	password := req.GetPassword()
 
+	report := func(status, errMsg string) {
+		svc := ""
+		switch plat {
+		case "LuoGu":
+			svc = sitesettings.ServiceLuoGu
+		case "QOJ":
+			svc = sitesettings.ServiceQOJ
+		}
+		if svc != "" && s.data != nil && s.data.RDB != nil {
+			sitesettings.SetServiceStatus(ctx, s.data.RDB, svc, status, errMsg)
+		}
+	}
+
 	switch plat {
 	case "LuoGu":
 		if username == "" {
@@ -586,8 +608,10 @@ func (s *SiteService) VerifyOjCredential(ctx context.Context, req *site.VerifyOj
 			return &site.VerifyOjCredentialRes{Code: 1, Message: "请先填写洛谷密码", Ok: false}, nil
 		}
 		if err := ojlogin.VerifyLuogu(username, password); err != nil {
+			report(sitesettings.StatusFail, err.Error())
 			return &site.VerifyOjCredentialRes{Code: 0, Message: "验证失败", Ok: false, ErrorDetail: err.Error()}, nil
 		}
+		report(sitesettings.StatusOK, "")
 		return &site.VerifyOjCredentialRes{Code: 0, Message: "ok", Ok: true}, nil
 	case "QOJ":
 		if username == "" {
@@ -600,8 +624,10 @@ func (s *SiteService) VerifyOjCredential(ctx context.Context, req *site.VerifyOj
 			return &site.VerifyOjCredentialRes{Code: 1, Message: "请先填写 QOJ 密码", Ok: false}, nil
 		}
 		if err := ojlogin.VerifyQOJ(username, password); err != nil {
+			report(sitesettings.StatusFail, err.Error())
 			return &site.VerifyOjCredentialRes{Code: 0, Message: "验证失败", Ok: false, ErrorDetail: err.Error()}, nil
 		}
+		report(sitesettings.StatusOK, "")
 		return &site.VerifyOjCredentialRes{Code: 0, Message: "ok", Ok: true}, nil
 	default:
 		return &site.VerifyOjCredentialRes{Code: 1, Message: "不支持的平台: " + plat}, nil

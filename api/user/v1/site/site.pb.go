@@ -238,8 +238,12 @@ type GetAdminConfigRes struct {
 	AiAnalyzeStatus   string `protobuf:"bytes,43,opt,name=ai_analyze_status,json=aiAnalyzeStatus,proto3" json:"ai_analyze_status,omitempty"`
 	AiAnalyzeStatusAt int64  `protobuf:"varint,44,opt,name=ai_analyze_status_at,json=aiAnalyzeStatusAt,proto3" json:"ai_analyze_status_at,omitempty"`
 	AiAnalyzeErrMsg   string `protobuf:"bytes,45,opt,name=ai_analyze_err_msg,json=aiAnalyzeErrMsg,proto3" json:"ai_analyze_err_msg,omitempty"`
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	// SMTP 邮件服务状态
+	SmtpStatus    string `protobuf:"bytes,46,opt,name=smtp_status,json=smtpStatus,proto3" json:"smtp_status,omitempty"`
+	SmtpStatusAt  int64  `protobuf:"varint,47,opt,name=smtp_status_at,json=smtpStatusAt,proto3" json:"smtp_status_at,omitempty"`
+	SmtpErrMsg    string `protobuf:"bytes,48,opt,name=smtp_err_msg,json=smtpErrMsg,proto3" json:"smtp_err_msg,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *GetAdminConfigRes) Reset() {
@@ -583,6 +587,27 @@ func (x *GetAdminConfigRes) GetAiAnalyzeStatusAt() int64 {
 func (x *GetAdminConfigRes) GetAiAnalyzeErrMsg() string {
 	if x != nil {
 		return x.AiAnalyzeErrMsg
+	}
+	return ""
+}
+
+func (x *GetAdminConfigRes) GetSmtpStatus() string {
+	if x != nil {
+		return x.SmtpStatus
+	}
+	return ""
+}
+
+func (x *GetAdminConfigRes) GetSmtpStatusAt() int64 {
+	if x != nil {
+		return x.SmtpStatusAt
+	}
+	return 0
+}
+
+func (x *GetAdminConfigRes) GetSmtpErrMsg() string {
+	if x != nil {
+		return x.SmtpErrMsg
 	}
 	return ""
 }
@@ -1950,7 +1975,7 @@ const file_user_v1_site_site_proto_rawDesc = "" +
 	"\afavicon\x18\x05 \x01(\tR\afavicon\x12\x1d\n" +
 	"\n" +
 	"footer_icp\x18\x06 \x01(\tR\tfooterIcp\"\x13\n" +
-	"\x11GetAdminConfigReq\"\xa5\x0e\n" +
+	"\x11GetAdminConfigReq\"\x8e\x0f\n" +
 	"\x11GetAdminConfigRes\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\x03R\x04code\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12\x1d\n" +
@@ -2000,7 +2025,12 @@ const file_user_v1_site_site_proto_rawDesc = "" +
 	"\ragent_err_msg\x18* \x01(\tR\vagentErrMsg\x12*\n" +
 	"\x11ai_analyze_status\x18+ \x01(\tR\x0faiAnalyzeStatus\x12/\n" +
 	"\x14ai_analyze_status_at\x18, \x01(\x03R\x11aiAnalyzeStatusAt\x12+\n" +
-	"\x12ai_analyze_err_msg\x18- \x01(\tR\x0faiAnalyzeErrMsg\"\x82\n" +
+	"\x12ai_analyze_err_msg\x18- \x01(\tR\x0faiAnalyzeErrMsg\x12\x1f\n" +
+	"\vsmtp_status\x18. \x01(\tR\n" +
+	"smtpStatus\x12$\n" +
+	"\x0esmtp_status_at\x18/ \x01(\x03R\fsmtpStatusAt\x12 \n" +
+	"\fsmtp_err_msg\x180 \x01(\tR\n" +
+	"smtpErrMsg\"\x82\n" +
 	"\n" +
 	"\x0fUpdateConfigReq\x12\x1d\n" +
 	"\n" +
