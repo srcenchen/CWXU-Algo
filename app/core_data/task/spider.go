@@ -238,8 +238,13 @@ func (t *SpiderTask) MarkLastOK(userId int64, platform string) {
 		_ = t.rdb.Set(ctx, LastOKPlatformKey(userId, platform), now, ttl).Err()
 		// OJ 级聚合最近成功时间（站管监控）
 		_ = t.rdb.Set(ctx, OjLastOKKey(platform), now, ttl).Err()
-		// 成功后清掉该平台失败标记，避免 UI 一直显示异常
-		_ = t.rdb.Del(ctx, LastFailPlatformKey(userId, platform), LastErrPlatformKey(userId, platform)).Err()
+		// 成功后清掉该平台失败标记（用户级 + OJ 级），避免 UI 一直显示异常/残留失败文案
+		_ = t.rdb.Del(ctx,
+			LastFailPlatformKey(userId, platform),
+			LastErrPlatformKey(userId, platform),
+			OjLastFailKey(platform),
+			OjLastErrKey(platform),
+		).Err()
 	}
 }
 
