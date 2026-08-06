@@ -25,6 +25,7 @@ import (
 	"cwxu-algo/app/common/conf"
 	gorminit "cwxu-algo/app/common/data/gorm"
 	redisinit "cwxu-algo/app/common/data/redis"
+	"cwxu-algo/app/common/security"
 	"cwxu-algo/app/common/upyun"
 	"cwxu-algo/app/user/internal/data/model"
 
@@ -115,6 +116,10 @@ func main() {
 	}
 	if bc.Data == nil || bc.Data.Database == nil {
 		log.Fatalf("配置缺少 data.database")
+	}
+	// 加载共享安全密钥（JWT / config_encryption_key），供又拍云密码解密使用
+	if err := security.Configure(bc.Server); err != nil {
+		log.Fatalf("初始化安全配置失败: %v", err)
 	}
 	db := gorminit.InitGorm(bc.Data)
 	// Redis 仅用于失效 profile 缓存；未配置/连不上不阻断迁移（只告警）
@@ -239,12 +244,16 @@ func run(db *gorm.DB, red *redis.Client, client *upyun.Client, dryRun, deleteLoc
 	}
 
 	if deleteLocal {
-		avatarDir := filepath.Join(dir, "avatar")
-		if _, err := os.Stat(avatarDir); err == nil {
-			if err := os.RemoveAll(avatarDir); err != nil {
-				log.Warnf("删除本地 avatar 目录失败: %v", err)
-			} else {
-				log.Infof("已删除本地头像目录: %s", avatarDir)
+		if failed > 0 {
+			log.Warnf("有 %d 个头像迁移失败，跳过删除本地 avatar 目录", failed)
+		} else {
+			avatarDir := filepath.Join(dir, "avatar")
+			if _, err := os.Stat(avatarDir); err == nil {
+				if err := os.RemoveAll(avatarDir); err != nil {
+					log.Warnf("删除本地 avatar 目录失败: %v", err)
+				} else {
+					log.Infof("已删除本地头像目录: %s", avatarDir)
+				}
 			}
 		}
 	}
