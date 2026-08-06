@@ -15,6 +15,8 @@ type GroupDal struct {
 	db *gorm.DB
 }
 
+func (d *GroupDal) DB() *gorm.DB { return d.db }
+
 func NewGroupDal(data *data.Data) *GroupDal {
 	return &GroupDal{db: data.DB}
 }

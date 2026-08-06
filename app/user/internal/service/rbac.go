@@ -708,6 +708,7 @@ func (s *RbacService) handleRoleDelete(ctx khttp.Context) error {
 
 // handleRoleMembers 角色成员（分页 + 模糊搜索）
 func (s *RbacService) handleRoleMembers(ctx khttp.Context) error {
+	avatarBase := avatarPublicBase(s.db)
 	pd := auth.GetCurrentUser(ctx)
 	if pd == nil {
 		writeJSON(ctx.Response(), 401, map[string]interface{}{"code": 1, "message": "请先登录"})
@@ -787,7 +788,7 @@ func (s *RbacService) handleRoleMembers(ctx khttp.Context) error {
 	list := make([]map[string]interface{}, 0, len(rows))
 	for _, r := range rows {
 		list = append(list, map[string]interface{}{
-			"userId": r.UserID, "username": r.Username, "name": r.Name, "avatar": r.Avatar,
+			"userId": r.UserID, "username": r.Username, "name": r.Name, "avatar": expandAvatarBase(avatarBase, r.Avatar),
 		})
 	}
 	writeJSON(ctx.Response(), 200, map[string]interface{}{

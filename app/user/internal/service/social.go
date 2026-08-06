@@ -43,7 +43,7 @@ func RegisterSocialRoutes(srv *khttp.Server, s *SocialService) {
 	r.GET("/v1/user/privacy/status", s.handlePrivacyStatus)
 }
 
-func socialUserJSON(u dal.SocialUser) map[string]interface{} {
+func socialUserJSON(u dal.SocialUser, avatarBase string) map[string]interface{} {
 	siteRoles := u.SiteRoles
 	if siteRoles == nil {
 		siteRoles = []string{}
@@ -60,7 +60,7 @@ func socialUserJSON(u dal.SocialUser) map[string]interface{} {
 		"userId":       u.UserID,
 		"username":     u.Username,
 		"name":         u.Name,
-		"avatar":       u.Avatar,
+		"avatar":       expandAvatarBase(avatarBase, u.Avatar),
 		"inCurrentOrg": u.InCurrentOrg,
 		"sharedOrgs":   shared,
 		"isSiteAdmin":  u.IsSiteAdmin,
@@ -128,6 +128,7 @@ func (s *SocialService) handleUnfollow(ctx khttp.Context) error {
 }
 
 func (s *SocialService) handleFollowing(ctx khttp.Context) error {
+	avatarBase := avatarPublicBase(s.dbData.DB)
 	uid, page, pageSize := socialListParams(ctx)
 	if uid == 0 {
 		writeJSON(ctx.Response(), 400, map[string]interface{}{"success": false, "message": "请指定用户"})
@@ -143,7 +144,7 @@ func (s *SocialService) handleFollowing(ctx khttp.Context) error {
 	list = s.enrichList(ctx, list)
 	items := make([]map[string]interface{}, 0, len(list))
 	for _, u := range list {
-		items = append(items, socialUserJSON(u))
+		items = append(items, socialUserJSON(u, avatarBase))
 	}
 	writeJSON(ctx.Response(), 200, map[string]interface{}{
 		"success": true, "message": "ok", "list": items, "total": total,
@@ -152,6 +153,7 @@ func (s *SocialService) handleFollowing(ctx khttp.Context) error {
 }
 
 func (s *SocialService) handleFollowers(ctx khttp.Context) error {
+	avatarBase := avatarPublicBase(s.dbData.DB)
 	uid, page, pageSize := socialListParams(ctx)
 	if uid == 0 {
 		writeJSON(ctx.Response(), 400, map[string]interface{}{"success": false, "message": "请指定用户"})
@@ -166,7 +168,7 @@ func (s *SocialService) handleFollowers(ctx khttp.Context) error {
 	list = s.enrichList(ctx, list)
 	items := make([]map[string]interface{}, 0, len(list))
 	for _, u := range list {
-		items = append(items, socialUserJSON(u))
+		items = append(items, socialUserJSON(u, avatarBase))
 	}
 	writeJSON(ctx.Response(), 200, map[string]interface{}{
 		"success": true, "message": "ok", "list": items, "total": total,
@@ -212,6 +214,7 @@ func (s *SocialService) handleRelation(ctx khttp.Context) error {
 }
 
 func (s *SocialService) handleSearch(ctx khttp.Context) error {
+	avatarBase := avatarPublicBase(s.dbData.DB)
 	q := strings.TrimSpace(ctx.Query().Get("q"))
 	page, _ := strconv.Atoi(ctx.Query().Get("page"))
 	pageSize, _ := strconv.Atoi(ctx.Query().Get("pageSize"))
@@ -224,7 +227,7 @@ func (s *SocialService) handleSearch(ctx khttp.Context) error {
 	}
 	items := make([]map[string]interface{}, 0, len(list))
 	for _, u := range list {
-		items = append(items, socialUserJSON(u))
+		items = append(items, socialUserJSON(u, avatarBase))
 	}
 	writeJSON(ctx.Response(), 200, map[string]interface{}{
 		"success": true, "message": "ok", "list": items, "total": total,
@@ -234,6 +237,7 @@ func (s *SocialService) handleSearch(ctx khttp.Context) error {
 
 // handleIdentity 单用户域感知展示（资料页等复用）
 func (s *SocialService) handleIdentity(ctx khttp.Context) error {
+	avatarBase := avatarPublicBase(s.dbData.DB)
 	uid, _, _ := socialListParams(ctx)
 	if uid == 0 {
 		writeJSON(ctx.Response(), 400, map[string]interface{}{"success": false, "message": "请指定用户"})
@@ -264,7 +268,7 @@ func (s *SocialService) handleIdentity(ctx khttp.Context) error {
 	}
 	writeJSON(ctx.Response(), 200, map[string]interface{}{
 		"success": true, "message": "ok",
-		"data": socialUserJSON(list[0]),
+		"data": socialUserJSON(list[0], avatarBase),
 	})
 	return nil
 }

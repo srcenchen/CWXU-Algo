@@ -379,6 +379,10 @@ func RegisterUploadRoutes(srv *khttp.Server, d *data.Data) {
 		if purpose == "blog" || purpose == "blog_cover" {
 			return handleBlogUpyunUpload(ctx, d, pd.UserID, raw, ct, purpose, hdr.Filename)
 		}
+		// —— 头像：又拍云（需站点配置，无需博客授权）——
+		if purpose == "avatar" {
+			return handleAvatarUpyunUpload(ctx, d, pd.UserID, raw, ct, hdr.Filename)
+		}
 
 		ext := extFromContentType(ct, hdr.Filename)
 		if ext == "" {
@@ -504,6 +508,69 @@ func handleBlogUpyunUpload(
 			"code": 1, "message": "图床上传失败，请稍后重试",
 		})
 	}
+	return ctx.JSON(http.StatusOK, map[string]interface{}{
+		"code":    0,
+		"message": "success",
+		"url":     publicURL,
+		"hash":    contentHash,
+	})
+}
+
+// handleAvatarUpyunUpload compresses and PUTs a user avatar to UpYun.
+// 与博客图同存储：内容寻址 /avatar/{uid}/{sha256}{ext}，实时读 site_configs 域名。
+func handleAvatarUpyunUpload(
+	ctx khttp.Context,
+	d *data.Data,
+	userID uint,
+	raw []byte,
+	ct string,
+	filename string,
+) error {
+	if d == nil || d.DB == nil {
+		return ctx.JSON(http.StatusServiceUnavailable, map[string]interface{}{
+			"code": 1, "message": "上传服务暂不可用",
+		})
+	}
+	// 与博客一致：svg 不上云（XSS 风险）
+	if strings.Contains(strings.ToLower(ct), "svg") {
+		return ctx.JSON(http.StatusBadRequest, map[string]interface{}{
+			"code": 1, "message": "头像暂不支持 SVG，请使用 jpg/png/gif/webp",
+		})
+	}
+
+	client := loadUpyunFromDB(d.DB)
+	if !client.Configured() || client.PublicBaseURL() == "" {
+		return ctx.JSON(http.StatusForbidden, map[string]interface{}{
+			"code": 1, "message": "站点尚未配置图床，请联系管理员",
+		})
+	}
+
+	compressed, err := blogimg.CompressForUpload(raw, ct)
+	if err != nil {
+		return ctx.JSON(http.StatusBadRequest, map[string]interface{}{
+			"code": 1, "message": err.Error(),
+		})
+	}
+	ext := compressed.Ext
+	if ext == "" || ext == ".bin" {
+		ext = extFromContentType(compressed.ContentType, filename)
+	}
+	if ext == "" {
+		ext = ".jpg"
+	}
+	// 内容寻址：同用户相同字节 → 同一 object key，换头像时旧 key 可精确删除
+	contentHash := blogimg.ContentHash(compressed.Data)
+	objectKey := blogimg.AvatarObjectKeyForHash(userID, contentHash, ext)
+	if objectKey == "" {
+		objectKey = fmt.Sprintf("/avatar/%d/%s%s", userID, randomName(), ext)
+	}
+	if err := client.Put(objectKey, compressed.Data, compressed.ContentType); err != nil {
+		log.Errorf("upload/avatar put: %v", err)
+		return ctx.JSON(http.StatusBadGateway, map[string]interface{}{
+			"code": 1, "message": "图床上传失败，请稍后重试",
+		})
+	}
+	publicURL := client.PublicURL(objectKey)
 	return ctx.JSON(http.StatusOK, map[string]interface{}{
 		"code":    0,
 		"message": "success",

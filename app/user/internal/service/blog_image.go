@@ -542,6 +542,7 @@ func (s *BlogService) handleAdminImageUpload(ctx khttp.Context) error {
 
 // handleAdminImageUploadRequests GET /v1/user/blog/admin/image-upload/requests
 func (s *BlogService) handleAdminImageUploadRequests(ctx khttp.Context) error {
+	imgBase := s.publicImageBase()
 	pd := auth.GetCurrentUser(ctx)
 	if !auth.PayloadHasPerm(pd, rbac.PermSiteBlogBoard) && !auth.PayloadHasPerm(pd, rbac.PermContentBlogModerate) {
 		writeJSON(ctx.Response(), 403, map[string]interface{}{"code": 1, "message": "需要博客管理权限"})
@@ -609,7 +610,7 @@ func (s *BlogService) handleAdminImageUploadRequests(ctx khttp.Context) error {
 			"userId":    r.UserID,
 			"username":  r.Username,
 			"name":      r.Name,
-			"avatar":    r.Avatar,
+			"avatar":    expandAvatarBase(imgBase, r.Avatar),
 			"reason":    r.Reason,
 			"status":    r.Status,
 			"createdAt": r.CreatedAt.Unix(),

@@ -158,6 +158,7 @@ func (p *ProfileService) coreDataRPC() (*grpc2.ClientConn, error) {
 }
 
 func (p *ProfileService) GetList(ctx context.Context, req *profile.GetListReq) (*profile.GetListRes, error) {
+	avatarBase := avatarPublicBase(p.db)
 	pageSize, pageNum := req.PageSize, req.PageNum
 	if pageSize < 1 {
 		pageSize = 20
@@ -324,7 +325,7 @@ func (p *ProfileService) GetList(ctx context.Context, req *profile.GetListReq) (
 			UserId:                      uint64(v.ID),
 			Username:                    v.Username,
 			Name:                        displayName,
-			Avatar:                      v.Avatar,
+			Avatar:                      expandAvatarBase(avatarBase, v.Avatar),
 			GroupId:                     v.GroupId,
 			RoleId:                      int32(v.RoleID),
 			LastSubmit:                  t,
@@ -420,9 +421,12 @@ func (p *ProfileService) Update(ctx context.Context, req *profile.UpdateReq) (*p
 	}
 
 	// 昵称不再由此接口修改（请走组织内称呼）；仅更新头像 / 邮箱
+	// 头像入库规范化：又拍云 URL → path-only key（读时再按当前图床域名扩展）
+	oldAvatar := strings.TrimSpace(cur.Avatar)
+	newAvatar := normalizeAvatarForStore(req.Avatar)
 	pro := model.User{
 		ID:     uint(req.UserId),
-		Avatar: req.Avatar,
+		Avatar: newAvatar,
 		Email:  newEmail,
 	}
 	if !emailChanged {
@@ -431,6 +435,8 @@ func (p *ProfileService) Update(ctx context.Context, req *profile.UpdateReq) (*p
 	if err := p.profileDal.UpdateAvatarEmail(ctx, pro, emailChanged); err != nil {
 		return nil, errors.InternalServer("内部错误", err.Error())
 	}
+	// 换头像后删除旧头像对象（又拍云对象 / 旧本地文件），尽力而为
+	deleteStaleAvatar(p.db, oldAvatar, newAvatar)
 	return &profile.UpdateRes{Code: 0, Message: "更新成功"}, nil
 }
 
@@ -521,6 +527,7 @@ func (p *ProfileService) enforceProfileVisibility(ctx context.Context, targetUID
 }
 
 func (p *ProfileService) buildGetByIdRes(ctx context.Context, pf *model.User) (*profile.GetByIdRes, error) {
+	avatarBase := avatarPublicBase(p.db)
 	// 获取 platform spider 信息（失败不阻断资料：旧用户/core 暂不可用时仍应能看邮箱与昵称）
 	spiders := make([]*profile.GetByIdRes_Spiders, 0)
 	var lastSyncAt int64
@@ -575,7 +582,7 @@ func (p *ProfileService) buildGetByIdRes(ctx context.Context, pf *model.User) (*
 		UserId:                  uint64(pf.ID),
 		Username:                pf.Username,
 		Name:                    displayName,
-		Avatar:                  pf.Avatar,
+		Avatar:                  expandAvatarBase(avatarBase, pf.Avatar),
 		Spiders:                 spiders,
 		EmailEnabled:            emailOn,
 		EmailWeeklyEnabled:      weeklyOn,
@@ -1047,6 +1054,7 @@ func (p *ProfileService) SetSyncIntervals(ctx context.Context, req *profile.SetS
 
 // GetByIds 批量获取用户展示名（当前组织 / 指定 org 的组织内名称）
 func (p *ProfileService) GetByIds(ctx context.Context, req *profile.GetByIdsReq) (*profile.GetByIdsRes, error) {
+	avatarBase := avatarPublicBase(p.db)
 	orgID := uint(req.OrgId)
 	if orgID == 0 {
 		if pd := auth.GetCurrentUser(ctx); pd != nil && pd.OrgID > 0 {
@@ -1065,7 +1073,7 @@ func (p *ProfileService) GetByIds(ctx context.Context, req *profile.GetByIdsReq)
 		list = append(list, &profile.GetByIdsRes_UserProfile{
 			UserId:   int64(v.ID),
 			Name:     v.Name,
-			Avatar:   v.Avatar,
+			Avatar:   expandAvatarBase(avatarBase, v.Avatar),
 			Username: v.Username,
 		})
 	}

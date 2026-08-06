@@ -424,7 +424,7 @@ func (s *BlogService) articleToMap(a *model.BlogArticle, author *model.User, d b
 			"id":       author.ID,
 			"username": author.Username,
 			"name":     author.Name,
-			"avatar":   author.Avatar,
+			"avatar":   expandAvatarBase(imgBase, author.Avatar),
 		}
 		m["userId"] = author.ID
 		m["username"] = author.Username
@@ -463,6 +463,7 @@ func parsePage(q *http.Request) (page, pageSize int) {
 // ---------- list by username ----------
 
 func (s *BlogService) handleListByUsername(ctx khttp.Context) error {
+	imgBase := s.publicImageBase()
 	username := strings.TrimSpace(ctx.Request().URL.Query().Get("username"))
 	if username == "" {
 		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "缺少用户名"})
@@ -551,7 +552,7 @@ func (s *BlogService) handleListByUsername(ctx khttp.Context) error {
 				"id":       u.ID,
 				"username": u.Username,
 				"name":     u.Name,
-				"avatar":   u.Avatar,
+				"avatar":   expandAvatarBase(imgBase, u.Avatar),
 			},
 			"list":         out,
 			"total":        total,
@@ -1381,6 +1382,7 @@ func (s *BlogService) handlePlaza(ctx khttp.Context) error {
 // ---------- active authors (plaza side rail) ----------
 
 func (s *BlogService) handleAuthors(ctx khttp.Context) error {
+	imgBase := s.publicImageBase()
 	page, pageSize := parsePage(ctx.Request())
 	if pageSize > 30 {
 		pageSize = 30
@@ -1471,7 +1473,7 @@ func (s *BlogService) handleAuthors(ctx khttp.Context) error {
 			"id":           a.UserID,
 			"username":     u.Username,
 			"name":         u.Name,
-			"avatar":       u.Avatar,
+			"avatar":       expandAvatarBase(imgBase, u.Avatar),
 			"articleCount": a.ArticleCount,
 			"latestTitle":  latestTitle[a.UserID],
 		}
@@ -1762,6 +1764,7 @@ func (s *BlogService) handleCategoryDelete(ctx khttp.Context) error {
 // ---------- comments ----------
 
 func (s *BlogService) handleListComments(ctx khttp.Context) error {
+	imgBase := s.publicImageBase()
 	articleID, _ := strconv.ParseUint(ctx.Request().URL.Query().Get("articleId"), 10, 64)
 	if articleID == 0 {
 		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "缺少 articleId"})
@@ -1864,7 +1867,7 @@ func (s *BlogService) handleListComments(ctx khttp.Context) error {
 			"content": c.Content, "createdAt": c.CreatedAt.Unix(),
 			"userId": c.UserID, "likeCount": c.LikeCount, "liked": likedSet[c.ID],
 			"author": map[string]interface{}{
-				"id": u.ID, "username": u.Username, "name": u.Name, "avatar": u.Avatar,
+				"id": u.ID, "username": u.Username, "name": u.Name, "avatar": expandAvatarBase(imgBase, u.Avatar),
 			},
 		}
 		if c.ParentID > 0 {

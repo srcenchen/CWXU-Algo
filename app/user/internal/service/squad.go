@@ -289,6 +289,7 @@ func (s *OrgService) handleSquadDelete(ctx khttp.Context) error {
 }
 
 func (s *OrgService) handleSquadMembers(ctx khttp.Context) error {
+	avatarBase := avatarPublicBase(s.db)
 	squadID, _ := strconv.ParseUint(ctx.Request().URL.Query().Get("squadId"), 10, 64)
 	if squadID == 0 {
 		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "缺少分队 id"})
@@ -348,7 +349,7 @@ func (s *OrgService) handleSquadMembers(ctx khttp.Context) error {
 			"userId":   m.UserID,
 			"username": u.Username,
 			"name":     display,
-			"avatar":   u.Avatar,
+			"avatar":   expandAvatarBase(avatarBase, u.Avatar),
 		})
 	}
 	writeJSON(ctx.Response(), 200, map[string]interface{}{"code": 0, "message": "ok", "list": out, "total": len(out)})

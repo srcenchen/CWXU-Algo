@@ -402,6 +402,7 @@ func (s *BlogService) handleAdminOverview(ctx khttp.Context) error {
 }
 
 func (s *BlogService) handleAdminAuthors(ctx khttp.Context) error {
+	imgBase := s.publicImageBase()
 	pd := auth.GetCurrentUser(ctx)
 	if !auth.PayloadHasPerm(pd, rbac.PermSiteBlogBoard) {
 		writeJSON(ctx.Response(), 403, map[string]interface{}{"code": 1, "message": "需要博客数据看板权限"})
@@ -464,7 +465,7 @@ func (s *BlogService) handleAdminAuthors(ctx khttp.Context) error {
 			"userId":              r.UserID,
 			"username":            r.Username,
 			"name":                r.Name,
-			"avatar":              r.Avatar,
+			"avatar":              expandAvatarBase(imgBase, r.Avatar),
 			"agreementVersion":    r.AgreementVersion,
 			"emailNotifyEnabled":  r.EmailNotifyEnabled,
 			"emailNotifyStrategy": normalizeEmailNotifyStrategy(r.EmailNotifyStrategy),

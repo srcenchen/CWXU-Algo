@@ -1,9 +1,9 @@
 package service
 
 import (
-	"cwxu-algo/app/common/utils/sqllike"
 	"context"
 	"crypto/rand"
+	"cwxu-algo/app/common/utils/sqllike"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -1244,6 +1244,7 @@ func (s *OrgService) handleLeave(ctx khttp.Context) error {
 }
 
 func (s *OrgService) handleMembers(ctx khttp.Context) error {
+	avatarBase := avatarPublicBase(s.db)
 	pd := auth.GetCurrentUser(ctx)
 	if pd == nil {
 		writeJSON(ctx.Response(), 401, map[string]interface{}{"code": 1, "message": "请先登录"})
@@ -1435,7 +1436,7 @@ func (s *OrgService) handleMembers(ctx khttp.Context) error {
 			"username":       r.Username,
 			"name":           display,
 			"orgDisplayName": r.OrgDisplayName,
-			"avatar":         r.Avatar,
+			"avatar":         expandAvatarBase(avatarBase, r.Avatar),
 			"role":           r.Role,
 			"groupId":        r.GroupID,
 			"joinedAt":       r.JoinedAt.Unix(),

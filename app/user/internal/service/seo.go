@@ -162,6 +162,14 @@ func absURL(origin, pathOrURL string) string {
 	return strings.TrimRight(origin, "/") + pathOrURL
 }
 
+// avatarBase 当前图床公开访问基址（头像 path-only key 读时扩展用）。
+func (s *SEOService) avatarBase() string {
+	if s == nil || s.data == nil {
+		return ""
+	}
+	return avatarPublicBase(s.data.DB)
+}
+
 func clipDesc(s string, max int) string {
 	s = strings.TrimSpace(s)
 	if s == "" {
@@ -436,7 +444,8 @@ func (s *SEOService) metaBlogArticle(origin, siteTitle, defaultImg, username, sl
 	// 博文分享图：优先博主头像（保留 GoAlgo siteName）
 	// cover 可能是 path-only 本站图床键，先按又拍云域名展开再 abs。
 	coverExpanded := blogimg.ExpandCoverURL(a.CoverURL, blogimg.LoadUpyunClient(s.data.DB).PublicBaseURL())
-	img := absURL(origin, firstNonEmpty(u.Avatar, coverExpanded, defaultImg))
+	avatarExpanded := expandAvatarBase(s.avatarBase(), u.Avatar)
+	img := absURL(origin, firstNonEmpty(avatarExpanded, coverExpanded, defaultImg))
 	path := fmt.Sprintf("/blog/%s/%s", u.Username, a.Slug)
 	title := a.Title
 	if authorName != "" {
@@ -472,7 +481,7 @@ func (s *SEOService) metaBlogHome(origin, siteTitle, defaultImg, username, _ str
 	}
 	// 个人博客分享图：博客身份图（作者头像代表博客）
 	desc := clipDesc(firstNonEmpty(subtitle, authorName+" 的算法博客，分享题解与训练笔记 · "+siteTitle), maxSEODescRunes)
-	img := absURL(origin, firstNonEmpty(u.Avatar, defaultImg))
+	img := absURL(origin, firstNonEmpty(expandAvatarBase(s.avatarBase(), u.Avatar), defaultImg))
 	path := "/blog/" + u.Username
 	return seoPage{
 		Title:       authorName + " 的博客 - " + siteTitle,
@@ -506,7 +515,7 @@ func (s *SEOService) metaProfile(origin, siteTitle, defaultImg string, id uint, 
 	}
 	name := firstNonEmpty(u.Name, u.Username)
 	desc := name + " 的个人资料 · " + siteTitle
-	img := absURL(origin, firstNonEmpty(u.Avatar, defaultImg))
+	img := absURL(origin, firstNonEmpty(expandAvatarBase(s.avatarBase(), u.Avatar), defaultImg))
 	path := fmt.Sprintf("/profile?id=%d", u.ID)
 	return seoPage{
 		Title:       name + " - " + siteTitle,
@@ -700,7 +709,7 @@ func (s *SEOService) metaSolution(origin, siteTitle, defaultImg string, problemI
 	return seoPage{
 		Title:       displayTitle + " - " + siteTitle,
 		Description: desc,
-		Image:       absURL(origin, firstNonEmpty(authorAvatar, defaultImg)),
+		Image:       absURL(origin, firstNonEmpty(expandAvatarBase(s.avatarBase(), authorAvatar), defaultImg)),
 		URL:         absURL(origin, path),
 		Type:        "article",
 		SiteName:    siteTitle,
@@ -764,7 +773,7 @@ func (s *SEOService) metaProblemset(origin, siteTitle, defaultImg string, id uin
 	return seoPage{
 		Title:       title + " - " + siteTitle,
 		Description: desc,
-		Image:       absURL(origin, firstNonEmpty(ownerAvatar, defaultImg)),
+		Image:       absURL(origin, firstNonEmpty(expandAvatarBase(s.avatarBase(), ownerAvatar), defaultImg)),
 		URL:         absURL(origin, path),
 		Type:        "website",
 		SiteName:    siteTitle,
