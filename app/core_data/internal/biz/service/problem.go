@@ -1674,9 +1674,9 @@ func (uc *ProblemUseCase) RetryFailed(limit int, includePermanent bool) (scanned
 			"%需要登录%", "%被拦截%", "%WAF%",
 			"%未找到题面%", "%题面为空%",
 		).
-		// 排除牛客题库无权限（真永久，等 contest 模式再爬）
-		Where("error_msg NOT LIKE ? AND error_msg NOT LIKE ?",
-			"%暂无访问权限%", "%没有查看题目的权限%").
+		// 排除牛客题库无权限 / CF 未找到题面（真永久：等 contest 模式再爬 / 题目不存在需人工处理）
+		Where("error_msg NOT LIKE ? AND error_msg NOT LIKE ? AND error_msg NOT LIKE ?",
+			"%暂无访问权限%", "%没有查看题目的权限%", "%CF 未找到题面%").
 		Updates(map[string]interface{}{
 			"status":           model.ProblemStatusFailed,
 			"error_msg":        "retry: was false permanent (WAF/login/DOM)",
@@ -2783,6 +2783,7 @@ func transientBackoff(attempts int) time.Duration {
 // isTransientFetchError 瞬时/风控类错误：退避重试，满 24h 才升 FAILED_PERM
 // 含：WAF、登录墙、DOM 未找到（常为权限壳/空页误判）等
 // 注意：NowCoder「暂无访问权限」不是瞬时——立刻 FAILED_PERM；有 contest 路径时再爬
+// 注意：CF「未找到题面」不是瞬时——200 且无 Cloudflare 仍缺 .problem-statement 即题目不存在
 func isTransientFetchError(msg string) bool {
 	msg = strings.TrimSpace(msg)
 	if msg == "" {
@@ -2790,6 +2791,10 @@ func isTransientFetchError(msg string) bool {
 	}
 	// 权限类已永久：勿被同句「请稍后重试」误判为瞬时
 	if isNowCoderNoAccessError(msg) {
+		return false
+	}
+	// CF 缺题面：与牛客权限壳不同，CF 无题面即题目不存在，不退避
+	if strings.Contains(msg, "CF 未找到题面") {
 		return false
 	}
 	// 历史误标永久失败的文案也当可退避（管理员重试 / 消费者再爬）
@@ -2825,8 +2830,9 @@ func isNowCoderNoAccessError(msg string) bool {
 
 // isPermanentFetchError 真正不可恢复：立刻 FAILED_PERM，不入退避窗口
 // - NowCoder 题库无权限：立刻永久；有比赛页映射时 Force/hasContestPath 仍可再爬
+// - CF 未找到题面：200 且无 Cloudflare 仍缺 .problem-statement → 题目不存在/不可见，立刻永久
 // - QOJ 403 = 无权限：直接永久
-// - DOM/空题面：走瞬时退避（满 24h 才永久）
+// - 其余 DOM/空题面：走瞬时退避（满 24h 才永久）
 func isPermanentFetchError(msg string) bool {
 	msg = strings.TrimSpace(msg)
 	if msg == "" {
@@ -2838,6 +2844,10 @@ func isPermanentFetchError(msg string) bool {
 	}
 	// 牛客题库无权限：立刻永久（不再 24h 退避）；contest 模式另开路径
 	if isNowCoderNoAccessError(msg) {
+		return true
+	}
+	// CF 缺题面：题目不存在，重试无意义，立刻永久（优先于通用「未找到题面」瞬时规则）
+	if strings.Contains(msg, "CF 未找到题面") {
 		return true
 	}
 	if isTransientFetchError(msg) {
