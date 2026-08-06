@@ -542,6 +542,10 @@ func (t *CronTask) Do() {
 	_, _ = c.AddFunc("*/5 * * * *", func() {
 		t.runRecentSummaryTick()
 	})
+	// 运维告警：OJ 大面积同步出错 / 资源长期占用过高（每 5 分钟检查）
+	_, _ = c.AddFunc("*/5 * * * *", func() {
+		t.runOpsAlertTick()
+	})
 	// 比赛日历：每 12 小时爬取 cpolar + 力扣；每 5 分钟检查邮件提醒
 	_, _ = c.AddFunc("0 */12 * * *", func() {
 		t.runCalendarCrawl()

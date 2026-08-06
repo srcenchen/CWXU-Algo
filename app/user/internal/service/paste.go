@@ -2,11 +2,13 @@ package service
 
 import (
 	"crypto/rand"
+	"cwxu-algo/app/common/rbac"
 	"cwxu-algo/app/common/utils/auth"
 	"cwxu-algo/app/user/internal/data"
 	"cwxu-algo/app/user/internal/data/model"
 	"encoding/json"
 	"math/big"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -38,6 +40,7 @@ func RegisterPasteRoutes(srv *khttp.Server, ps *PasteService) {
 	r.GET("/v1/user/paste/get", ps.handleGet)
 	r.GET("/v1/user/paste/mine", ps.handleMine)
 	r.POST("/v1/user/paste/delete", ps.handleDelete)
+	r.GET("/v1/user/paste/admin-list", ps.handleAdminList)
 }
 
 type pasteCreateReq struct {
@@ -195,6 +198,73 @@ func (s *PasteService) handleDelete(ctx khttp.Context) error {
 		return nil
 	}
 	writeJSON(ctx.Response(), 200, map[string]interface{}{"code": 0, "message": "已删除"})
+	return nil
+}
+
+// pasteAdminRow 粘贴板审查：pastes 关联创建者昵称/用户名
+type pasteAdminRow struct {
+	model.Paste
+	Username string `gorm:"column:username"`
+	Name     string `gorm:"column:name"`
+}
+
+// handleAdminList 站管 / 内容治理：查看当前全部未过期粘贴内容（事后审查）。
+// 过期内容由既有逻辑在读取时删除，这里只看「有效期内」的。
+func (s *PasteService) handleAdminList(ctx khttp.Context) error {
+	pd := auth.GetCurrentUser(ctx)
+	if pd == nil || pd.UserID == 0 {
+		writeJSON(ctx.Response(), 401, map[string]interface{}{"code": 1, "message": "请先登录"})
+		return nil
+	}
+	if !pd.IsSiteAdmin && !auth.HasPerm(ctx, rbac.PermContentCommunityMod) {
+		writeJSON(ctx.Response(), 403, map[string]interface{}{"code": 1, "message": "没有内容治理权限"})
+		return nil
+	}
+	page := 1
+	pageSize := 30
+	if v, err := strconv.Atoi(ctx.Request().URL.Query().Get("page")); err == nil && v >= 1 {
+		page = v
+	}
+	if v, err := strconv.Atoi(ctx.Request().URL.Query().Get("pageSize")); err == nil && v >= 1 && v <= 100 {
+		pageSize = v
+	}
+	now := time.Now()
+
+	var total int64
+	if err := s.db.Model(&model.Paste{}).
+		Where("expire_at IS NULL OR expire_at >= ?", now).
+		Count(&total).Error; err != nil {
+		writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "加载失败"})
+		return nil
+	}
+
+	var rows []pasteAdminRow
+	if err := s.db.Table("pastes AS p").
+		Select("p.*, u.username, u.name").
+		Joins("LEFT JOIN users u ON u.id = p.user_id").
+		Where("p.expire_at IS NULL OR p.expire_at >= ?", now).
+		Order("p.id DESC").
+		Offset((page - 1) * pageSize).
+		Limit(pageSize).
+		Scan(&rows).Error; err != nil {
+		writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "加载失败"})
+		return nil
+	}
+	out := make([]map[string]interface{}, 0, len(rows))
+	for i := range rows {
+		m := pasteToMap(&rows[i].Paste, true)
+		m["username"] = rows[i].Username
+		m["name"] = rows[i].Name
+		out = append(out, m)
+	}
+	writeJSON(ctx.Response(), 200, map[string]interface{}{
+		"code":    0,
+		"message": "success",
+		"list":    out,
+		"total":   total,
+		"page":    page,
+		"pageSize": pageSize,
+	})
 	return nil
 }
 

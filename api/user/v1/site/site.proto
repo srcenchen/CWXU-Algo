@@ -131,6 +131,8 @@ message GetAdminConfigRes {
   string smtp_status = 46;
   int64 smtp_status_at = 47;
   string smtp_err_msg = 48;
+  // 运维告警邮件收件人（逗号或换行分隔）；空则不发（OJ 大面积同步出错 / 资源长期占用过高等）
+  string ops_notify_emails = 49;
 }
 
 message UpdateConfigReq {
@@ -175,6 +177,8 @@ message UpdateConfigReq {
   string oj_qoj_username = 30;
   string oj_qoj_password = 31;
   bool clear_oj_qoj_password = 32;
+  // 运维告警邮件收件人；始终覆盖保存（可清空）
+  string ops_notify_emails = 33;
 }
 
 message UpdateConfigRes {

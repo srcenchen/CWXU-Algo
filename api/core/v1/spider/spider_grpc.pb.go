@@ -28,6 +28,7 @@ const (
 	Spider_PurgeSubmitsAndRecrawl_FullMethodName = "/api.core.v1.spider.Spider/PurgeSubmitsAndRecrawl"
 	Spider_EnqueueUserSpider_FullMethodName      = "/api.core.v1.spider.Spider/EnqueueUserSpider"
 	Spider_GetSpiderMonitor_FullMethodName       = "/api.core.v1.spider.Spider/GetSpiderMonitor"
+	Spider_TogglePlatform_FullMethodName         = "/api.core.v1.spider.Spider/TogglePlatform"
 )
 
 // SpiderClient is the client API for Spider service.
@@ -49,6 +50,8 @@ type SpiderClient interface {
 	EnqueueUserSpider(ctx context.Context, in *EnqueueUserSpiderReq, opts ...grpc.CallOption) (*EnqueueUserSpiderRes, error)
 	// 运维：各 OJ 爬虫模块监控（仅站管）
 	GetSpiderMonitor(ctx context.Context, in *SpiderMonitorReq, opts ...grpc.CallOption) (*SpiderMonitorRes, error)
+	// 站管：暂停 / 恢复某 OJ 的爬虫同步（body: { platform, enabled }）
+	TogglePlatform(ctx context.Context, in *TogglePlatformReq, opts ...grpc.CallOption) (*TogglePlatformRes, error)
 }
 
 type spiderClient struct {
@@ -149,6 +152,16 @@ func (c *spiderClient) GetSpiderMonitor(ctx context.Context, in *SpiderMonitorRe
 	return out, nil
 }
 
+func (c *spiderClient) TogglePlatform(ctx context.Context, in *TogglePlatformReq, opts ...grpc.CallOption) (*TogglePlatformRes, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(TogglePlatformRes)
+	err := c.cc.Invoke(ctx, Spider_TogglePlatform_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // SpiderServer is the server API for Spider service.
 // All implementations must embed UnimplementedSpiderServer
 // for forward compatibility.
@@ -168,6 +181,8 @@ type SpiderServer interface {
 	EnqueueUserSpider(context.Context, *EnqueueUserSpiderReq) (*EnqueueUserSpiderRes, error)
 	// 运维：各 OJ 爬虫模块监控（仅站管）
 	GetSpiderMonitor(context.Context, *SpiderMonitorReq) (*SpiderMonitorRes, error)
+	// 站管：暂停 / 恢复某 OJ 的爬虫同步（body: { platform, enabled }）
+	TogglePlatform(context.Context, *TogglePlatformReq) (*TogglePlatformRes, error)
 	mustEmbedUnimplementedSpiderServer()
 }
 
@@ -204,6 +219,9 @@ func (UnimplementedSpiderServer) EnqueueUserSpider(context.Context, *EnqueueUser
 }
 func (UnimplementedSpiderServer) GetSpiderMonitor(context.Context, *SpiderMonitorReq) (*SpiderMonitorRes, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetSpiderMonitor not implemented")
+}
+func (UnimplementedSpiderServer) TogglePlatform(context.Context, *TogglePlatformReq) (*TogglePlatformRes, error) {
+	return nil, status.Error(codes.Unimplemented, "method TogglePlatform not implemented")
 }
 func (UnimplementedSpiderServer) mustEmbedUnimplementedSpiderServer() {}
 func (UnimplementedSpiderServer) testEmbeddedByValue()                {}
@@ -388,6 +406,24 @@ func _Spider_GetSpiderMonitor_Handler(srv interface{}, ctx context.Context, dec 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Spider_TogglePlatform_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(TogglePlatformReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SpiderServer).TogglePlatform(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Spider_TogglePlatform_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SpiderServer).TogglePlatform(ctx, req.(*TogglePlatformReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Spider_ServiceDesc is the grpc.ServiceDesc for Spider service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -430,6 +466,10 @@ var Spider_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetSpiderMonitor",
 			Handler:    _Spider_GetSpiderMonitor_Handler,
+		},
+		{
+			MethodName: "TogglePlatform",
+			Handler:    _Spider_TogglePlatform_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

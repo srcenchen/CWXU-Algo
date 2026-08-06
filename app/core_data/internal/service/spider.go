@@ -287,6 +287,13 @@ func (s SpiderService) SetSpider(ctx context.Context, req *spider.SetSpiderReq) 
 	// 只全量抓取刚绑定的这一平台，避免重绑 CF 时把其它 OJ 再扫一遍
 	// 后台入队：MQ confirm 可达秒级，绑定 HTTP 路径不阻塞
 	go s.spider.DoPlatform(req.UserId, platformName, true)
+	// 站管已暂停该 OJ：绑定照常保存，但提示用户同步暂时停用（DoPlatform 内部不会入队）
+	if task.IsPlatformPaused(s.rdb, platformName) {
+		return &spider.SetSpiderRep{
+			Code:    0,
+			Message: fmt.Sprintf("绑定成功，但 %s 的同步已临时停用，恢复后会自动同步", platformName),
+		}, nil
+	}
 	return &spider.SetSpiderRep{
 		Code:    0,
 		Message: fmt.Sprintf("绑定成功，正在同步 %s 的全量数据，请稍候", platformName),
@@ -704,11 +711,13 @@ func (s SpiderService) GetSpiderMonitor(ctx context.Context, _ *spider.SpiderMon
 			ProblemCount:       problemBy[cap.platform],
 			ContestCount:       contestBy[cap.platform],
 			TodayEnqueued:      today.Enqueued,
+			TodayRows:          today.Rows,
 			TodayOk:            today.OK,
 			TodayFail:          today.Fail,
 			HasSubmitFetcher:   true,
 			HasProblemFetch:    cap.problem,
 			HasContestCalendar: cap.contest,
+			Paused:             task.IsPlatformPaused(s.rdb, cap.platform),
 		}
 		if s.rdb != nil {
 			// 最近同步（按 OJ 聚合）
@@ -742,4 +751,23 @@ func (s SpiderService) GetSpiderMonitor(ctx context.Context, _ *spider.SpiderMon
 		Platforms:   stats,
 		CollectedAt: now.Unix(),
 	}, nil
+}
+
+// TogglePlatform 站管：暂停 / 恢复某 OJ 的爬虫同步（仅站点管理员）。
+// 暂停不清空任何绑定或历史数据，只是不再入队/消费该平台；绑定用户仍可继续绑定。
+func (s SpiderService) TogglePlatform(ctx context.Context, req *spider.TogglePlatformReq) (*spider.TogglePlatformRes, error) {
+	if !auth.HasPerm(ctx, rbac.PermSiteSpiderOps) {
+		return &spider.TogglePlatformRes{Code: 1, Message: "需要爬虫运维权限"}, nil
+	}
+	plat := strings.TrimSpace(req.GetPlatform())
+	if _, ok := spiderregistry.Get(plat); !ok {
+		return &spider.TogglePlatformRes{Code: 1, Message: "不支持的平台: " + plat}, nil
+	}
+	task.SetPlatformPaused(s.rdb, plat, !req.GetEnabled())
+	if req.GetEnabled() {
+		log.Infof("SpiderService: platform %s 已恢复同步", plat)
+		return &spider.TogglePlatformRes{Code: 0, Message: "已启用同步，该 OJ 将恢复正常抓取"}, nil
+	}
+	log.Infof("SpiderService: platform %s 已暂停同步", plat)
+	return &spider.TogglePlatformRes{Code: 0, Message: "已关闭同步，已绑定用户保留但暂停更新"}, nil
 }

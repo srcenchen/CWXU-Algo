@@ -239,11 +239,13 @@ type GetAdminConfigRes struct {
 	AiAnalyzeStatusAt int64  `protobuf:"varint,44,opt,name=ai_analyze_status_at,json=aiAnalyzeStatusAt,proto3" json:"ai_analyze_status_at,omitempty"`
 	AiAnalyzeErrMsg   string `protobuf:"bytes,45,opt,name=ai_analyze_err_msg,json=aiAnalyzeErrMsg,proto3" json:"ai_analyze_err_msg,omitempty"`
 	// SMTP 邮件服务状态
-	SmtpStatus    string `protobuf:"bytes,46,opt,name=smtp_status,json=smtpStatus,proto3" json:"smtp_status,omitempty"`
-	SmtpStatusAt  int64  `protobuf:"varint,47,opt,name=smtp_status_at,json=smtpStatusAt,proto3" json:"smtp_status_at,omitempty"`
-	SmtpErrMsg    string `protobuf:"bytes,48,opt,name=smtp_err_msg,json=smtpErrMsg,proto3" json:"smtp_err_msg,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	SmtpStatus   string `protobuf:"bytes,46,opt,name=smtp_status,json=smtpStatus,proto3" json:"smtp_status,omitempty"`
+	SmtpStatusAt int64  `protobuf:"varint,47,opt,name=smtp_status_at,json=smtpStatusAt,proto3" json:"smtp_status_at,omitempty"`
+	SmtpErrMsg   string `protobuf:"bytes,48,opt,name=smtp_err_msg,json=smtpErrMsg,proto3" json:"smtp_err_msg,omitempty"`
+	// 运维告警邮件收件人（逗号或换行分隔）；空则不发（OJ 大面积同步出错 / 资源长期占用过高等）
+	OpsNotifyEmails string `protobuf:"bytes,49,opt,name=ops_notify_emails,json=opsNotifyEmails,proto3" json:"ops_notify_emails,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *GetAdminConfigRes) Reset() {
@@ -612,6 +614,13 @@ func (x *GetAdminConfigRes) GetSmtpErrMsg() string {
 	return ""
 }
 
+func (x *GetAdminConfigRes) GetOpsNotifyEmails() string {
+	if x != nil {
+		return x.OpsNotifyEmails
+	}
+	return ""
+}
+
 type UpdateConfigReq struct {
 	state     protoimpl.MessageState `protogen:"open.v1"`
 	SiteTitle string                 `protobuf:"bytes,1,opt,name=site_title,json=siteTitle,proto3" json:"site_title,omitempty"`
@@ -655,8 +664,10 @@ type UpdateConfigReq struct {
 	OjQojUsername        string `protobuf:"bytes,30,opt,name=oj_qoj_username,json=ojQojUsername,proto3" json:"oj_qoj_username,omitempty"`
 	OjQojPassword        string `protobuf:"bytes,31,opt,name=oj_qoj_password,json=ojQojPassword,proto3" json:"oj_qoj_password,omitempty"`
 	ClearOjQojPassword   bool   `protobuf:"varint,32,opt,name=clear_oj_qoj_password,json=clearOjQojPassword,proto3" json:"clear_oj_qoj_password,omitempty"`
-	unknownFields        protoimpl.UnknownFields
-	sizeCache            protoimpl.SizeCache
+	// 运维告警邮件收件人；始终覆盖保存（可清空）
+	OpsNotifyEmails string `protobuf:"bytes,33,opt,name=ops_notify_emails,json=opsNotifyEmails,proto3" json:"ops_notify_emails,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *UpdateConfigReq) Reset() {
@@ -911,6 +922,13 @@ func (x *UpdateConfigReq) GetClearOjQojPassword() bool {
 		return x.ClearOjQojPassword
 	}
 	return false
+}
+
+func (x *UpdateConfigReq) GetOpsNotifyEmails() string {
+	if x != nil {
+		return x.OpsNotifyEmails
+	}
+	return ""
 }
 
 type UpdateConfigRes struct {
@@ -1975,7 +1993,7 @@ const file_user_v1_site_site_proto_rawDesc = "" +
 	"\afavicon\x18\x05 \x01(\tR\afavicon\x12\x1d\n" +
 	"\n" +
 	"footer_icp\x18\x06 \x01(\tR\tfooterIcp\"\x13\n" +
-	"\x11GetAdminConfigReq\"\x8e\x0f\n" +
+	"\x11GetAdminConfigReq\"\xba\x0f\n" +
 	"\x11GetAdminConfigRes\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\x03R\x04code\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12\x1d\n" +
@@ -2030,7 +2048,8 @@ const file_user_v1_site_site_proto_rawDesc = "" +
 	"smtpStatus\x12$\n" +
 	"\x0esmtp_status_at\x18/ \x01(\x03R\fsmtpStatusAt\x12 \n" +
 	"\fsmtp_err_msg\x180 \x01(\tR\n" +
-	"smtpErrMsg\"\x82\n" +
+	"smtpErrMsg\x12*\n" +
+	"\x11ops_notify_emails\x181 \x01(\tR\x0fopsNotifyEmails\"\xae\n" +
 	"\n" +
 	"\x0fUpdateConfigReq\x12\x1d\n" +
 	"\n" +
@@ -2068,7 +2087,8 @@ const file_user_v1_site_site_proto_rawDesc = "" +
 	"\x17clear_oj_luogu_password\x18\x1d \x01(\bR\x14clearOjLuoguPassword\x12&\n" +
 	"\x0foj_qoj_username\x18\x1e \x01(\tR\rojQojUsername\x12&\n" +
 	"\x0foj_qoj_password\x18\x1f \x01(\tR\rojQojPassword\x121\n" +
-	"\x15clear_oj_qoj_password\x18  \x01(\bR\x12clearOjQojPassword\"\xb4\x01\n" +
+	"\x15clear_oj_qoj_password\x18  \x01(\bR\x12clearOjQojPassword\x12*\n" +
+	"\x11ops_notify_emails\x18! \x01(\tR\x0fopsNotifyEmails\"\xb4\x01\n" +
 	"\x0fUpdateConfigRes\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\x03R\x04code\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12\x1d\n" +

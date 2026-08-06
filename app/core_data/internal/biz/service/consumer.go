@@ -56,6 +56,11 @@ func (c *Consumer) Consume() {
 				log.Warnf("RabbitMQ(Spider): 解析json失败，丢弃消息: %v", err)
 				return nil
 			}
+			// 站管已暂停该 OJ：直接 Ack 丢弃（消息可能是暂停前入队的）
+			if c.spiderTask != nil && c.spiderTask.IsPlatformPaused(msg.Platform) {
+				log.Infof("RabbitMQ(Spider): skip platform=%s user=%d (paused by ops)", msg.Platform, msg.UserId)
+				return nil
+			}
 			// 系统过载时先退避，把 CPU 让给在线访问（最多等 30s 再继续）
 			loadgate.Global().Wait(nil, 30*time.Second)
 			if c.spiderTask != nil {

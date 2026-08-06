@@ -27,6 +27,8 @@ type SiteConfig struct {
 	InactiveDays int `gorm:"column:inactive_days;default:14;comment:不活跃天数阈值"`
 	// AdminNotifyEmails 审核/举报邮件收件人（逗号或换行分隔）；空则发给全部站管账号邮箱
 	AdminNotifyEmails string `gorm:"type:text;column:admin_notify_emails;comment:审核举报邮件收件人"`
+	// OpsNotifyEmails 运维告警邮件收件人（逗号或换行分隔）；空则不发（OJ 大面积同步出错 / 资源长期占用过高等）
+	OpsNotifyEmails string `gorm:"type:text;column:ops_notify_emails;comment:运维告警邮件收件人"`
 	// 又拍云图床（博客/题解）；密码经 secretutil 加密存储
 	UpyunBucket   string `gorm:"size:128;column:upyun_bucket;comment:又拍云服务名"`
 	UpyunOperator string `gorm:"size:128;column:upyun_operator;comment:又拍云操作员"`

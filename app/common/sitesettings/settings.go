@@ -54,6 +54,7 @@ type Runtime struct {
 	SmtpStatus        string `json:"smtpStatus"`
 	SmtpStatusAt      int64  `json:"smtpStatusAt"`
 	SmtpErrMsg        string `json:"smtpErrMsg"`
+	OpsNotifyEmails   string `json:"opsNotifyEmails"`
 }
 
 // Row 与 site_configs 表对齐（轻量，避免依赖 user/internal）
@@ -89,6 +90,7 @@ type Row struct {
 	SmtpStatus        string `gorm:"column:smtp_status"`
 	SmtpStatusAt      int64  `gorm:"column:smtp_status_at"`
 	SmtpErrMsg        string `gorm:"column:smtp_err_msg"`
+	OpsNotifyEmails   string `gorm:"column:ops_notify_emails"`
 }
 
 func (Row) TableName() string { return "site_configs" }
@@ -143,6 +145,7 @@ func (r *Row) ToRuntime() *Runtime {
 		SmtpStatus:        r.SmtpStatus,
 		SmtpStatusAt:      r.SmtpStatusAt,
 		SmtpErrMsg:        r.SmtpErrMsg,
+		OpsNotifyEmails:   strings.TrimSpace(r.OpsNotifyEmails),
 	}
 }
 

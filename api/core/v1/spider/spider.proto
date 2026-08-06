@@ -51,6 +51,13 @@ service Spider {
       get: "/v1/core/spider/monitor"
     };
   }
+  // 站管：暂停 / 恢复某 OJ 的爬虫同步（body: { platform, enabled }）
+  rpc TogglePlatform (TogglePlatformReq) returns (TogglePlatformRes) {
+    option (google.api.http) = {
+      post: "/v1/core/spider/toggle-platform"
+      body: "*"
+    };
+  }
 }
 
 message SetSpiderReq {
@@ -205,5 +212,20 @@ message SpiderPlatformStat {
   int64 accountAt = 17;
   // 账号失败原因
   string accountErr = 18;
+  // 站管是否已暂停该 OJ 的爬虫同步（true=暂停；绑定用户仍在，只是不再同步）
+  bool paused = 19;
+  // 今日新入库（写入数据库）提交记录条数
+  int64 todayRows = 20;
+}
+
+message TogglePlatformReq {
+  string platform = 1;
+  // true=启用（恢复同步）；false=关闭（暂停同步）
+  bool enabled = 2;
+}
+
+message TogglePlatformRes {
+  int64 code = 1;
+  string message = 2;
 }
 

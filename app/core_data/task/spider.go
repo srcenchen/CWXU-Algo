@@ -97,6 +97,61 @@ func OjLastErrKey(platform string) string {
 	return fmt.Sprintf("spider:oj_last_err:%s", platform)
 }
 
+// pausedPlatformsKey 站管暂停同步的 OJ 集合（SET；不带 TTL，Redis 重启后默认恢复全部启用）
+const pausedPlatformsKey = "spider:paused_platforms"
+
+// IsPlatformPaused 站管是否已暂停某 OJ 的爬虫同步
+func IsPlatformPaused(rdb *redis.Client, platform string) bool {
+	if rdb == nil || strings.TrimSpace(platform) == "" {
+		return false
+	}
+	ok, err := rdb.SIsMember(context.Background(), pausedPlatformsKey, strings.TrimSpace(platform)).Result()
+	if err != nil {
+		log.Warnf("SpiderTask: SIsMember paused platform %s: %v", platform, err)
+		return false
+	}
+	return ok
+}
+
+// SetPlatformPaused 暂停 / 恢复某 OJ 的爬虫同步
+func SetPlatformPaused(rdb *redis.Client, platform string, paused bool) {
+	if rdb == nil || strings.TrimSpace(platform) == "" {
+		return
+	}
+	ctx := context.Background()
+	p := strings.TrimSpace(platform)
+	if paused {
+		_ = rdb.SAdd(ctx, pausedPlatformsKey, p).Err()
+	} else {
+		_ = rdb.SRem(ctx, pausedPlatformsKey, p).Err()
+	}
+}
+
+// PausedPlatforms 返回已暂停同步的 OJ 集合（站管监控用）
+func PausedPlatforms(rdb *redis.Client) map[string]bool {
+	out := map[string]bool{}
+	if rdb == nil {
+		return out
+	}
+	members, err := rdb.SMembers(context.Background(), pausedPlatformsKey).Result()
+	if err != nil {
+		log.Warnf("SpiderTask: SMembers paused platforms: %v", err)
+		return out
+	}
+	for _, m := range members {
+		out[m] = true
+	}
+	return out
+}
+
+// IsPlatformPaused 该任务实例是否已暂停该 OJ 的爬虫同步（消费侧用；nil 安全）
+func (t *SpiderTask) IsPlatformPaused(platform string) bool {
+	if t == nil {
+		return false
+	}
+	return IsPlatformPaused(t.rdb, platform)
+}
+
 // EnqueueResult 单次入队结果（供 cron claim 是否保留判断）
 type EnqueueResult struct {
 	Published int // MQ 成功条数
@@ -148,6 +203,11 @@ func (t *SpiderTask) listUserPlatforms(userId int64) []string {
 func (t *SpiderTask) DoPlatform(userId int64, platform string, needAll bool) EnqueueResult {
 	if platform == "" {
 		return t.Do(userId, needAll)
+	}
+	// 站管已暂停该 OJ：不占 pending、不入队（恢复后自然继续）
+	if IsPlatformPaused(t.rdb, platform) {
+		log.Debugf("SpiderTask: skip enqueue user=%d platform=%q (paused by ops)", userId, platform)
+		return EnqueueResult{Platforms: 1}
 	}
 	if t.mq == nil {
 		log.Errorf("SpiderTask: mq not ready")

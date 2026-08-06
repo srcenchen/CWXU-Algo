@@ -185,6 +185,7 @@ func rowToRuntime(row *model.SiteConfig) *sitesettings.Runtime {
 		OjLuoguPassword:   decrypt(row.OjLuoguPassword),
 		OjQojUsername:     strings.TrimSpace(row.OjQojUsername),
 		OjQojPassword:     decrypt(row.OjQojPassword),
+		OpsNotifyEmails:   strings.TrimSpace(row.OpsNotifyEmails),
 	}
 }
 
@@ -271,6 +272,7 @@ func (s *SiteService) GetAdminConfig(ctx context.Context, _ *site.GetAdminConfig
 		SmtpStatus:            smtpSt.Status,
 		SmtpStatusAt:          smtpSt.At,
 		SmtpErrMsg:            smtpSt.ErrMsg,
+		OpsNotifyEmails:       row.OpsNotifyEmails,
 	}, nil
 }
 
@@ -321,6 +323,8 @@ func (s *SiteService) UpdateConfig(ctx context.Context, req *site.UpdateConfigRe
 	}
 	// 审核/举报邮件收件人：整页保存时始终覆盖（允许清空）
 	updates["admin_notify_emails"] = strings.TrimSpace(req.AdminNotifyEmails)
+	// 运维告警邮件收件人：整页保存时始终覆盖（允许清空）
+	updates["ops_notify_emails"] = strings.TrimSpace(req.OpsNotifyEmails)
 	// 又拍云：整页保存非密钥字段
 	updates["upyun_bucket"] = strings.TrimSpace(req.UpyunBucket)
 	updates["upyun_operator"] = strings.TrimSpace(req.UpyunOperator)

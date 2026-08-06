@@ -23,6 +23,7 @@ const OperationSpiderGetSpiderMonitor = "/api.core.v1.spider.Spider/GetSpiderMon
 const OperationSpiderPurgeSubmitsAndRecrawl = "/api.core.v1.spider.Spider/PurgeSubmitsAndRecrawl"
 const OperationSpiderSetSpider = "/api.core.v1.spider.Spider/SetSpider"
 const OperationSpiderSubmitInventory = "/api.core.v1.spider.Spider/SubmitInventory"
+const OperationSpiderTogglePlatform = "/api.core.v1.spider.Spider/TogglePlatform"
 const OperationSpiderUpdate = "/api.core.v1.spider.Spider/Update"
 const OperationSpiderUpdateAll = "/api.core.v1.spider.Spider/UpdateAll"
 
@@ -34,6 +35,8 @@ type SpiderHTTPServer interface {
 	SetSpider(context.Context, *SetSpiderReq) (*SetSpiderRep, error)
 	// SubmitInventory 运维：提交库存（明细 / 账本真实行数，仅站管）
 	SubmitInventory(context.Context, *SubmitInventoryReq) (*SubmitInventoryRes, error)
+	// TogglePlatform 站管：暂停 / 恢复某 OJ 的爬虫同步（body: { platform, enabled }）
+	TogglePlatform(context.Context, *TogglePlatformReq) (*TogglePlatformRes, error)
 	Update(context.Context, *UpdateReq) (*UpdateRes, error)
 	// UpdateAll 管理员一键全量更新所有已绑定 OJ 的用户
 	UpdateAll(context.Context, *UpdateAllReq) (*UpdateAllRes, error)
@@ -47,6 +50,7 @@ func RegisterSpiderHTTPServer(s *http.Server, srv SpiderHTTPServer) {
 	r.GET("/v1/core/spider/submit-inventory", _Spider_SubmitInventory0_HTTP_Handler(srv))
 	r.POST("/v1/core/spider/purge-submits-and-recrawl", _Spider_PurgeSubmitsAndRecrawl0_HTTP_Handler(srv))
 	r.GET("/v1/core/spider/monitor", _Spider_GetSpiderMonitor0_HTTP_Handler(srv))
+	r.POST("/v1/core/spider/toggle-platform", _Spider_TogglePlatform0_HTTP_Handler(srv))
 }
 
 func _Spider_SetSpider0_HTTP_Handler(srv SpiderHTTPServer) func(ctx http.Context) error {
@@ -175,6 +179,28 @@ func _Spider_GetSpiderMonitor0_HTTP_Handler(srv SpiderHTTPServer) func(ctx http.
 	}
 }
 
+func _Spider_TogglePlatform0_HTTP_Handler(srv SpiderHTTPServer) func(ctx http.Context) error {
+	return func(ctx http.Context) error {
+		var in TogglePlatformReq
+		if err := ctx.Bind(&in); err != nil {
+			return err
+		}
+		if err := ctx.BindQuery(&in); err != nil {
+			return err
+		}
+		http.SetOperation(ctx, OperationSpiderTogglePlatform)
+		h := ctx.Middleware(func(ctx context.Context, req interface{}) (interface{}, error) {
+			return srv.TogglePlatform(ctx, req.(*TogglePlatformReq))
+		})
+		out, err := h(ctx, &in)
+		if err != nil {
+			return err
+		}
+		reply := out.(*TogglePlatformRes)
+		return ctx.Result(200, reply)
+	}
+}
+
 type SpiderHTTPClient interface {
 	// GetSpiderMonitor 运维：各 OJ 爬虫模块监控（仅站管）
 	GetSpiderMonitor(ctx context.Context, req *SpiderMonitorReq, opts ...http.CallOption) (rsp *SpiderMonitorRes, err error)
@@ -183,6 +209,8 @@ type SpiderHTTPClient interface {
 	SetSpider(ctx context.Context, req *SetSpiderReq, opts ...http.CallOption) (rsp *SetSpiderRep, err error)
 	// SubmitInventory 运维：提交库存（明细 / 账本真实行数，仅站管）
 	SubmitInventory(ctx context.Context, req *SubmitInventoryReq, opts ...http.CallOption) (rsp *SubmitInventoryRes, err error)
+	// TogglePlatform 站管：暂停 / 恢复某 OJ 的爬虫同步（body: { platform, enabled }）
+	TogglePlatform(ctx context.Context, req *TogglePlatformReq, opts ...http.CallOption) (rsp *TogglePlatformRes, err error)
 	Update(ctx context.Context, req *UpdateReq, opts ...http.CallOption) (rsp *UpdateRes, err error)
 	// UpdateAll 管理员一键全量更新所有已绑定 OJ 的用户
 	UpdateAll(ctx context.Context, req *UpdateAllReq, opts ...http.CallOption) (rsp *UpdateAllRes, err error)
@@ -245,6 +273,20 @@ func (c *SpiderHTTPClientImpl) SubmitInventory(ctx context.Context, in *SubmitIn
 	opts = append(opts, http.Operation(OperationSpiderSubmitInventory))
 	opts = append(opts, http.PathTemplate(pattern))
 	err := c.cc.Invoke(ctx, "GET", path, nil, &out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// TogglePlatform 站管：暂停 / 恢复某 OJ 的爬虫同步（body: { platform, enabled }）
+func (c *SpiderHTTPClientImpl) TogglePlatform(ctx context.Context, in *TogglePlatformReq, opts ...http.CallOption) (*TogglePlatformRes, error) {
+	var out TogglePlatformRes
+	pattern := "/v1/core/spider/toggle-platform"
+	path := binding.EncodeURL(pattern, in, false)
+	opts = append(opts, http.Operation(OperationSpiderTogglePlatform))
+	opts = append(opts, http.PathTemplate(pattern))
+	err := c.cc.Invoke(ctx, "POST", path, in, &out, opts...)
 	if err != nil {
 		return nil, err
 	}

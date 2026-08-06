@@ -182,6 +182,55 @@ func ResolveAdminNotifyEmails(db *gorm.DB) []string {
 	return out
 }
 
+// ResolveOpsNotifyEmails 运维告警收件人（站点设置「运维告警邮件接收人」）。
+// 未配置返回 nil（运维告警不发邮件，避免误发骚扰）。
+func ResolveOpsNotifyEmails(db *gorm.DB) []string {
+	if db == nil {
+		return nil
+	}
+	var raw string
+	_ = db.Table("site_configs").Select("ops_notify_emails").Where("id = ?", 1).Scan(&raw).Error
+	return ParseEmailList(raw)
+}
+
+// EmailOpsRecipientsRuntime 给运维告警收件人发邮件（Runtime 由调用方提供，支持 user 服务读 DB / core_data 读 Redis）。
+// 未配置收件人或 SMTP 不可用则静默跳过。
+func EmailOpsRecipientsRuntime(rt *sitesettings.Runtime, subject, html string) {
+	if rt == nil {
+		return
+	}
+	emails := ParseEmailList(rt.OpsNotifyEmails)
+	if len(emails) == 0 {
+		return
+	}
+	sender := rt.MailSender()
+	if sender == nil || !sender.Configured() {
+		return
+	}
+	subject = strings.TrimSpace(subject)
+	if subject == "" {
+		subject = "[GoAlgo] 运维告警"
+	}
+	if !strings.HasPrefix(subject, "[GoAlgo]") {
+		subject = "[GoAlgo] " + subject
+	}
+	for _, email := range emails {
+		_ = sender.Send(email, subject, html)
+	}
+}
+
+// EmailOpsRecipients 给运维告警收件人发邮件；未配置收件人或 SMTP 不可用则静默跳过
+func EmailOpsRecipients(db *gorm.DB, subject, html string) {
+	if db == nil {
+		return
+	}
+	rt, err := sitesettings.LoadFromDB(db)
+	if err != nil || rt == nil {
+		return
+	}
+	EmailOpsRecipientsRuntime(rt, subject, html)
+}
+
 // EmailConfiguredRecipients 按站点配置（或站管 fallback）发邮件；SMTP 未配则静默跳过
 func EmailConfiguredRecipients(db *gorm.DB, subject, html string) {
 	if db == nil {

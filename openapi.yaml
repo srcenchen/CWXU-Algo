@@ -1331,6 +1331,25 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/api.core.v1.spider.SubmitInventoryRes'
+    /v1/core/spider/toggle-platform:
+        post:
+            tags:
+                - Spider
+            description: '站管：暂停 / 恢复某 OJ 的爬虫同步（body: { platform, enabled }）'
+            operationId: Spider_TogglePlatform
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/api.core.v1.spider.TogglePlatformReq'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.core.v1.spider.TogglePlatformRes'
     /v1/core/spider/update:
         post:
             tags:
@@ -4125,6 +4144,12 @@ components:
                 accountErr:
                     type: string
                     description: 账号失败原因
+                paused:
+                    type: boolean
+                    description: 站管是否已暂停该 OJ 的爬虫同步（true=暂停；绑定用户仍在，只是不再同步）
+                todayRows:
+                    type: string
+                    description: 今日新入库（写入数据库）提交记录条数
             description: 单个 OJ 的爬虫各模块监控
         api.core.v1.spider.SubmitInventoryRes:
             type: object
@@ -4146,6 +4171,21 @@ components:
                     type: string
                     description: 明细时间范围（unix 秒；无数据为 0）
                 newestTime:
+                    type: string
+        api.core.v1.spider.TogglePlatformReq:
+            type: object
+            properties:
+                platform:
+                    type: string
+                enabled:
+                    type: boolean
+                    description: true=启用（恢复同步）；false=关闭（暂停同步）
+        api.core.v1.spider.TogglePlatformRes:
+            type: object
+            properties:
+                code:
+                    type: string
+                message:
                     type: string
         api.core.v1.spider.UpdateAllReq:
             type: object
@@ -5255,6 +5295,9 @@ components:
                     type: string
                 smtpErrMsg:
                     type: string
+                opsNotifyEmails:
+                    type: string
+                    description: 运维告警邮件收件人（逗号或换行分隔）；空则不发（OJ 大面积同步出错 / 资源长期占用过高等）
         api.user.v1.site.GetConfigRes:
             type: object
             properties:
@@ -5374,6 +5417,9 @@ components:
                     type: string
                 clearOjQojPassword:
                     type: boolean
+                opsNotifyEmails:
+                    type: string
+                    description: 运维告警邮件收件人；始终覆盖保存（可清空）
         api.user.v1.site.UpdateConfigRes:
             type: object
             properties:
