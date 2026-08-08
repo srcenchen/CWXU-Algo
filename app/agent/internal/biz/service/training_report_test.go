@@ -897,7 +897,7 @@ func TestRenderRuleTemplate_CompactAndFull(t *testing.T) {
 	full := RenderRuleTemplateHTML(data, "GoAlgo", DetailModeFull)
 	compact := RenderRuleTemplateHTML(data, "GoAlgo", DetailModeCompact)
 	for _, html := range []string{full, compact} {
-		for _, s := range []string{"综合维度评价", "知识沉淀", "做题概览", "成员排行榜", "活跃度", "viewport", "<table"} {
+		for _, s := range []string{"综合维度评价", "做题概览", "成员排行榜", "活跃度", "viewport", "<table"} {
 			if !strings.Contains(html, s) {
 				t.Errorf("missing dim %q", s)
 			}
@@ -916,8 +916,8 @@ func TestRenderRuleTemplate_CompactAndFull(t *testing.T) {
 	if !strings.Contains(full, "训练报告") {
 		t.Error("full title")
 	}
-	if !strings.Contains(full, "CF Round") || !strings.Contains(full, "DP 笔记") {
-		t.Error("fixture contest/blog")
+	if !strings.Contains(full, "CF Round") {
+		t.Error("fixture contest missing")
 	}
 }
 

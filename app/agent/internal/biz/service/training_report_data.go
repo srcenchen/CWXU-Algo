@@ -958,7 +958,9 @@ func (uc *SummaryUseCase) fetchContestRankSnaps(ctx context.Context, contests []
 		}
 		seen[key] = struct{}{}
 		res, err := cli.GetContestRanking(ctx, &contest_log.GetContestRankingReq{
-			ContestId: c.ContestID,
+			// ContestId 语义是 contest_logs 主键 id（core 侧 Where("id = ?")），
+			// 不能传 contest_id 列（比赛标识），否则查不到行 → 组织榜恒空
+			ContestId: fmt.Sprintf("%d", c.ID),
 			Limit:     int64(topN),
 			Offset:    0,
 		})

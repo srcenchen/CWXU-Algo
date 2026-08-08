@@ -53,19 +53,18 @@ func renderTemplateHTML(data *TrainingReportData, brand string, mode []string, c
 		acRate = float64(data.TotalAC) / float64(data.TotalSubmits) * 100
 	}
 
-	rankCap, inactiveN, feedN, contestN, blogN, probN, tagN := 80, 40, 12, 10, 8, 12, 16
+	rankCap, inactiveN, feedN, contestN, probN, tagN := 80, 40, 12, 10, 12, 16
 	if compact {
-		rankCap, inactiveN, feedN, contestN, blogN, probN, tagN = 10, 12, 6, 5, 5, 8, 10
+		rankCap, inactiveN, feedN, contestN, probN, tagN = 10, 12, 6, 5, 8, 10
 	}
 
-	title, badge := "训练报告", "规则模板"
+	title, badge := "训练报告", ""
 	if compact {
 		title, badge = "教练周报", "上周简版"
 	}
 
 	moreAct := SiteBaseURL + "/all-activities"
 	moreContest := SiteBaseURL + "/contest"
-	moreBlog := SiteBaseURL + "/blog-plaza"
 	moreHome := SiteBaseURL + "/"
 
 	// —— 纯表格 + 内联样式（QQ 内置浏览器 / 邮件客户端兼容）——
@@ -79,7 +78,11 @@ func renderTemplateHTML(data *TrainingReportData, brand string, mode []string, c
 
 	// Header — shadcn primary
 	b.WriteString(`<tr><td style="background:#171717;color:#fafafa;padding:20px 18px;">`)
-	fmt.Fprintf(&b, `<div style="font-size:12px;font-weight:500;opacity:0.85;">%s · %s</div>`, html.EscapeString(brand), html.EscapeString(badge))
+	if badge != "" {
+		fmt.Fprintf(&b, `<div style="font-size:12px;font-weight:500;opacity:0.85;">%s · %s</div>`, html.EscapeString(brand), html.EscapeString(badge))
+	} else {
+		fmt.Fprintf(&b, `<div style="font-size:12px;font-weight:500;opacity:0.85;">%s</div>`, html.EscapeString(brand))
+	}
 	fmt.Fprintf(&b, `<div style="font-size:20px;font-weight:600;letter-spacing:-0.02em;margin:6px 0 4px;">%s %s</div>`, html.EscapeString(title), statusEmoji)
 	fmt.Fprintf(&b, `<div style="font-size:12px;opacity:0.8;">%s ~ %s · %s · 成员%d · 活跃%d · AC率%.1f%%</div>`,
 		html.EscapeString(data.StartDate), html.EscapeString(data.EndDate), html.EscapeString(data.ScopeLabel),
@@ -142,6 +145,14 @@ func renderTemplateHTML(data *TrainingReportData, brand string, mode []string, c
 			ranking = append(ranking, MemberStat{Rank: r.Rank, UserID: r.UserID, Name: r.Name, Submits: r.Score})
 		}
 	}
+	// 隐藏 0 提交成员（数据层用于凑满榜单与点名，展示层不出现）
+	filtered := make([]MemberStat, 0, len(ranking))
+	for _, m := range ranking {
+		if m.Submits > 0 {
+			filtered = append(filtered, m)
+		}
+	}
+	ranking = filtered
 	if len(ranking) == 0 {
 		emptyRow(&b, "本区间无人提交")
 	} else {
@@ -198,7 +209,7 @@ func renderTemplateHTML(data *TrainingReportData, brand string, mode []string, c
 		probs = aggregateProblemOverview(data.OrgSubmitSample, probN)
 	}
 	if len(probs) > 0 {
-		b.WriteString(`<p style="margin:0 0 6px;font-size:13px;font-weight:600;color:#0a0a0a;">热门题目（谁在交）</p>`)
+		b.WriteString(`<p style="margin:0 0 6px;font-size:13px;font-weight:600;color:#0a0a0a;">热门题目</p>`)
 		b.WriteString(`<table width="100%" cellpadding="6" cellspacing="0" border="0" style="border-collapse:collapse;font-size:12px;">`)
 		b.WriteString(`<tr style="background:#f5f5f5;"><th align="left" style="border-bottom:1px solid #e5e5e5;">题目</th><th align="right" style="border-bottom:1px solid #e5e5e5;">尝试</th><th align="right" style="border-bottom:1px solid #e5e5e5;">AC</th><th align="left" style="border-bottom:1px solid #e5e5e5;">AC成员</th></tr>`)
 		for i, p := range probs {
@@ -304,38 +315,10 @@ func renderTemplateHTML(data *TrainingReportData, brand string, mode []string, c
 		sectionEnd(&b)
 	}
 
-	// 6 博客（compact 顺延为 5）
-	blogTitle := "6. 知识沉淀（博客）"
+	// 6 不活跃（compact 顺延为 5；知识沉淀区块已移除）
+	inactiveTitle := "6. 不活跃成员"
 	if compact {
-		blogTitle = "5. 知识沉淀（博客）"
-	}
-	sectionStart(&b, blogTitle)
-	if len(data.RecentBlogs) == 0 {
-		emptyRow(&b, "暂无组织公开博客。")
-		fmt.Fprintf(&b, `<p style="margin:8px 0 0;font-size:12px;"><a href="%s" style="color:#171717;">博客广场 →</a></p>`, moreBlog)
-	} else {
-		n := 0
-		for _, bl := range data.RecentBlogs {
-			if n >= blogN {
-				break
-			}
-			fmt.Fprintf(&b, `<div style="border:1px solid #e5e5e5;border-radius:10px;padding:10px;margin-bottom:8px;background:#fafbff;">`)
-			fmt.Fprintf(&b, `<div style="font-weight:600;font-size:14px;">%s</div>`, html.EscapeString(bl.Title))
-			fmt.Fprintf(&b, `<div style="font-size:12px;color:#737373;margin:4px 0;">%s</div>`, html.EscapeString(bl.Author))
-			if bl.Summary != "" {
-				fmt.Fprintf(&b, `<div style="font-size:12px;color:#737373;">%s</div>`, html.EscapeString(bl.Summary))
-			}
-			b.WriteString(`</div>`)
-			n++
-		}
-		fmt.Fprintf(&b, `<p style="margin:4px 0 0;font-size:12px;"><a href="%s" style="color:#171717;">更多博客 →</a></p>`, moreBlog)
-	}
-	sectionEnd(&b)
-
-	// 7 不活跃（compact 顺延为 6）
-	inactiveTitle := "7. 不活跃成员"
-	if compact {
-		inactiveTitle = "6. 不活跃成员"
+		inactiveTitle = "5. 不活跃成员"
 	}
 	sectionStart(&b, inactiveTitle)
 	if len(data.InactiveMembers) == 0 {
@@ -355,10 +338,10 @@ func renderTemplateHTML(data *TrainingReportData, brand string, mode []string, c
 	}
 	sectionEnd(&b)
 
-	// 8 评价（评论参数：AI 或规则生成；compact 顺延为 7）
-	evalTitle := "8. 综合维度评价"
+	// 7 评价（评论参数：AI 或规则生成；compact 顺延为 6）
+	evalTitle := "7. 综合维度评价"
 	if compact {
-		evalTitle = "7. 综合维度评价"
+		evalTitle = "6. 综合维度评价"
 	}
 	sectionStart(&b, evalTitle)
 	if strings.TrimSpace(comment.Headline) != "" {
@@ -388,7 +371,7 @@ func renderTemplateHTML(data *TrainingReportData, brand string, mode []string, c
 	sectionEnd(&b)
 
 	// Footer
-	fmt.Fprintf(&b, `<tr><td style="padding:12px 14px 18px;text-align:center;font-size:11px;color:#737373;border-top:1px solid #e5e5e5;">由 %s 规则模板生成 · 教练不计入统计 · <a href="%s" style="color:#171717;">主站</a></td></tr>`,
+	fmt.Fprintf(&b, `<tr><td style="padding:12px 14px 18px;text-align:center;font-size:11px;color:#737373;border-top:1px solid #e5e5e5;">由 %s 生成 · 教练不计入统计 · <a href="%s" style="color:#171717;">主站</a></td></tr>`,
 		html.EscapeString(brand), moreHome)
 
 	b.WriteString(`</table></td></tr></table></body></html>`)
