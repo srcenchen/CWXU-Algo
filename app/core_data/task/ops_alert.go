@@ -14,33 +14,37 @@ import (
 	"github.com/go-kratos/kratos/v2/log"
 )
 
-// 运维告警：系统长时间处于异常状态时给「运维告警邮件接收人」发邮件。
+// 运维告警：系统处于异常状态时给「运维告警邮件接收人」发邮件。
 //
 // 覆盖两类异常（站点设置里配置收件人；未配置则不发送）：
-//  1. OJ 同步大面积出错：多个 OJ 同时在最近 15 分钟内失败且尚未恢复，持续 ≥30 分钟；
+//  1. OJ 同步异常：任一 OJ 最近失败且未恢复（15 分钟窗口内）即发异常邮件；
+//     该 OJ 恢复后再发一封恢复邮件。异常期间不重复轰炸（每平台一个已通知标记，恢复才清除）；
 //  2. 系统资源长期占用过高：最近 30 分钟平均 CPU ≥90% 或内存 ≥92%，持续 ≥30 分钟
 //     （取长窗均值，正常同步的短时尖峰不计）。
 //
-// 去重：条件首次满足记录起点，超过阈值时长才告警；发信后置 sent（2 小时窗口），
-// 条件恢复即清空起点，下一次新异常会重新告警。Redis 锁保证多实例只跑一次。
+// 去重：OJ 告警按平台标记（异常发信置位、恢复发信清位）；资源告警持续 ≥30 分钟才发、
+// 发信后 2 小时窗口。Redis 锁保证多实例只跑一次。
 
 const (
-	alertOjSinceKey  = "ops:alert:oj:since"
-	alertOjSentKey   = "ops:alert:oj:sent"
-	alertResSinceKey = "ops:alert:res:since"
-	alertResSentKey  = "ops:alert:res:sent"
-	alertSentTTL     = 2 * time.Hour
-	alertSustainMin  = 30 * time.Minute
+	// alertOjNotifiedPrefix 单平台「已发异常邮件」标记前缀；恢复后删除
+	alertOjNotifiedPrefix = "ops:alert:oj:notified:"
+	alertResSinceKey      = "ops:alert:res:since"
+	alertResSentKey       = "ops:alert:res:sent"
+	alertSentTTL          = 2 * time.Hour
+	alertSustainMin       = 30 * time.Minute
 	// alertOJAbnormalWindow 判定 OJ 处于「同步异常」的最近失败时间窗口
 	alertOJAbnormalWindow = 15 * time.Minute
-	// alertOJMinAbnormal 至少多少个 OJ 同时异常才算「大面积」
-	alertOJMinAbnormal = 2
 	// alertCPUThreshold / alertMemThreshold 资源长期占用阈值（百分比）
 	alertCPUThreshold = 90.0
 	alertMemThreshold = 92.0
 	// alertResourceWindow 资源均值窗口（排除短时同步高峰）
 	alertResourceWindow = 30 * time.Minute
 )
+
+// alertOjNotifiedKey 该 OJ 是否已发过异常告警邮件（存在即已发，等待恢复）
+func alertOjNotifiedKey(platform string) string {
+	return alertOjNotifiedPrefix + platform
+}
 
 // opsAlertOJPlatforms 参与 OJ 同步异常统计的平台（与站管监控 ojCaps 对齐）
 var opsAlertOJPlatforms = []string{
@@ -57,24 +61,24 @@ func (t *CronTask) runOpsAlertTick() {
 	}
 	ctx := context.Background()
 
-	// —— 1. OJ 同步大面积出错 ——
-	abnormal := 0
-	var names []string
+	// —— 1. OJ 同步异常（单平台）：任一 OJ 异常即报，恢复即报 ——
 	for _, p := range opsAlertOJPlatforms {
 		lastFail, _ := t.rdb.Get(ctx, OjLastFailKey(p)).Int64()
 		lastOK, _ := t.rdb.Get(ctx, OjLastOKKey(p)).Int64()
-		if lastFail > 0 && time.Since(time.Unix(lastFail, 0)) <= alertOJAbnormalWindow && lastFail >= lastOK {
-			abnormal++
-			names = append(names, p)
+		abnormal := lastFail > 0 && time.Since(time.Unix(lastFail, 0)) <= alertOJAbnormalWindow && lastFail >= lastOK
+		notifiedKey := alertOjNotifiedKey(p)
+		notified, _ := t.rdb.Exists(ctx, notifiedKey).Result()
+
+		switch {
+		case abnormal && notified == 0:
+			// 新异常：立即告警（不等待持续时长）
+			t.sendOpsAlertMail(ctx, "OJ 同步异常："+p, buildOJAlertHTML(p, false))
+			_ = t.rdb.Set(ctx, notifiedKey, time.Now().Unix(), 0).Err()
+		case !abnormal && notified > 0:
+			// 已恢复：发恢复邮件并清除标记
+			t.sendOpsAlertMail(ctx, "OJ 同步恢复："+p, buildOJAlertHTML(p, true))
+			_ = t.rdb.Del(ctx, notifiedKey).Err()
 		}
-	}
-	if abnormal >= alertOJMinAbnormal {
-		_ = t.rdb.SetNX(ctx, alertOjSinceKey, time.Now().Unix(), 0)
-		if t.alertReady(ctx, alertOjSinceKey, alertOjSentKey) {
-			t.sendOpsAlertMail(ctx, "OJ 同步大面积出错", buildOJAlertHTML(names))
-		}
-	} else {
-		_ = t.rdb.Del(ctx, alertOjSinceKey, alertOjSentKey).Err()
 	}
 
 	// —— 2. 系统资源长期占用过高 ——
@@ -156,14 +160,14 @@ func (t *CronTask) sendOpsAlertMail(ctx context.Context, title, inner string) {
 	notify.EmailOpsRecipientsRuntime(rt, subject, body)
 }
 
-func buildOJAlertHTML(platforms []string) string {
-	items := make([]string, 0, len(platforms))
-	for _, p := range platforms {
-		items = append(items, "<li>"+mail.Escape(p)+"</li>")
-	}
+// buildOJAlertHTML 生成单平台同步异常 / 恢复邮件正文
+func buildOJAlertHTML(platform string, recovered bool) string {
 	now := time.Now().Format("2006-01-02 15:04:05")
-	return "<p style=\"margin:0 0 12px;\">多个 OJ 的提交同步持续异常（15 分钟内失败且未恢复）。</p>" +
-		"<p style=\"margin:0 0 8px;\">异常 OJ：</p><ul>" + strings.Join(items, "") + "</ul>" +
+	if recovered {
+		return "<p style=\"margin:0 0 12px;\">OJ 提交同步已恢复：<b>" + mail.Escape(platform) + "</b>。</p>" +
+			"<p style=\"margin:12px 0 0;font-size:12px;color:#737373;\">检测时间：" + mail.Escape(now) + "</p>"
+	}
+	return "<p style=\"margin:0 0 12px;\">OJ 提交同步异常：<b>" + mail.Escape(platform) + "</b>（最近 15 分钟内失败且未恢复）。</p>" +
 		"<p style=\"margin:12px 0 0;font-size:12px;color:#737373;\">检测时间：" + mail.Escape(now) + "</p>"
 }
 
