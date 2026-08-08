@@ -72,11 +72,11 @@ func (t *CronTask) runOpsAlertTick() {
 		switch {
 		case abnormal && notified == 0:
 			// 新异常：立即告警（不等待持续时长）
-			t.sendOpsAlertMail(ctx, "OJ 同步异常："+p, buildOJAlertHTML(p, false))
+			t.sendOpsAlertMail(ctx, "OJ 同步异常："+p, buildOJAlertHTML(p, false), false)
 			_ = t.rdb.Set(ctx, notifiedKey, time.Now().Unix(), 0).Err()
 		case !abnormal && notified > 0:
 			// 已恢复：发恢复邮件并清除标记
-			t.sendOpsAlertMail(ctx, "OJ 同步恢复："+p, buildOJAlertHTML(p, true))
+			t.sendOpsAlertMail(ctx, "OJ 同步恢复："+p, buildOJAlertHTML(p, true), true)
 			_ = t.rdb.Del(ctx, notifiedKey).Err()
 		}
 	}
@@ -87,7 +87,7 @@ func (t *CronTask) runOpsAlertTick() {
 		if t.alertReady(ctx, alertResSinceKey, alertResSentKey) {
 			snap := resmon.SnapshotNow()
 			t.sendOpsAlertMail(ctx, "系统资源长期占用过高",
-				buildResourceAlertHTML(snap.CPUUsedPercent, snap.MemUsedPercent))
+				buildResourceAlertHTML(snap.CPUUsedPercent, snap.MemUsedPercent), false)
 		}
 	} else {
 		_ = t.rdb.Del(ctx, alertResSinceKey, alertResSentKey).Err()
@@ -141,7 +141,8 @@ func (t *CronTask) alertReady(ctx context.Context, sinceKey, sentKey string) boo
 }
 
 // sendOpsAlertMail 给配置的运维告警收件人发邮件（从 Redis 共享配置读取 SMTP + 收件人）
-func (t *CronTask) sendOpsAlertMail(ctx context.Context, title, inner string) {
+// recovered 为 true 时（OJ 恢复邮件）preheader 用「已恢复正常」，避免收件箱预览仍显示异常告警。
+func (t *CronTask) sendOpsAlertMail(ctx context.Context, title, inner string, recovered bool) {
 	rt, err := sitesettings.LoadFromRedis(ctx, t.rdb)
 	if err != nil || rt == nil {
 		log.Warnf("OpsAlert: 读取站点共享配置失败，跳过告警邮件: %v", err)
@@ -152,10 +153,14 @@ func (t *CronTask) sendOpsAlertMail(ctx context.Context, title, inner string) {
 		brand = "GoAlgo"
 	}
 	subject := fmt.Sprintf("【%s】%s", brand, title)
+	pre := "系统长时间异常，请及时处理"
+	if recovered {
+		pre = "服务已恢复正常"
+	}
 	body := mail.Wrap(mail.LayoutOpts{
 		Brand:     brand,
 		Title:     title,
-		Preheader: "系统长时间异常，请及时处理",
+		Preheader: pre,
 	}, inner)
 	notify.EmailOpsRecipientsRuntime(rt, subject, body)
 }
@@ -163,11 +168,12 @@ func (t *CronTask) sendOpsAlertMail(ctx context.Context, title, inner string) {
 // buildOJAlertHTML 生成单平台同步异常 / 恢复邮件正文
 func buildOJAlertHTML(platform string, recovered bool) string {
 	now := time.Now().Format("2006-01-02 15:04:05")
+	name := spiderDisplayName(platform)
 	if recovered {
-		return "<p style=\"margin:0 0 12px;\">OJ 提交同步已恢复：<b>" + mail.Escape(platform) + "</b>。</p>" +
+		return "<p style=\"margin:0 0 12px;\">OJ 提交同步已恢复：<b>" + mail.Escape(name) + "</b>。</p>" +
 			"<p style=\"margin:12px 0 0;font-size:12px;color:#737373;\">检测时间：" + mail.Escape(now) + "</p>"
 	}
-	return "<p style=\"margin:0 0 12px;\">OJ 提交同步异常：<b>" + mail.Escape(platform) + "</b>（最近 15 分钟内失败且未恢复）。</p>" +
+	return "<p style=\"margin:0 0 12px;\">OJ 提交同步异常：<b>" + mail.Escape(name) + "</b>（最近 15 分钟内失败且未恢复）。</p>" +
 		"<p style=\"margin:12px 0 0;font-size:12px;color:#737373;\">检测时间：" + mail.Escape(now) + "</p>"
 }
 

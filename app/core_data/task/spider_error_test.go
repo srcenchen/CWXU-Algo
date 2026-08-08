@@ -96,3 +96,28 @@ func TestFormatSpiderLastError_LuoGuFeInjection(t *testing.T) {
 		t.Fatalf("transient must not say system: %q", got)
 	}
 }
+
+// TestBuildOJAlertHTML 锁定恢复/异常邮件的正文文案与平台中文名。
+func TestBuildOJAlertHTML(t *testing.T) {
+	abnormal := buildOJAlertHTML("LuoGu", false)
+	if !strings.Contains(abnormal, "同步异常") {
+		t.Fatalf("abnormal mail must say 同步异常: %q", abnormal)
+	}
+	if !strings.Contains(abnormal, "洛谷") {
+		t.Fatalf("abnormal mail must use Chinese platform name: %q", abnormal)
+	}
+	if strings.Contains(abnormal, "LuoGu") {
+		t.Fatalf("abnormal mail must not leak raw platform id: %q", abnormal)
+	}
+
+	recovered := buildOJAlertHTML("LuoGu", true)
+	if !strings.Contains(recovered, "同步已恢复") {
+		t.Fatalf("recovered mail must say 同步已恢复: %q", recovered)
+	}
+	if !strings.Contains(recovered, "洛谷") {
+		t.Fatalf("recovered mail must use Chinese platform name: %q", recovered)
+	}
+	if strings.Contains(recovered, "异常") {
+		t.Fatalf("recovered mail must not say 异常: %q", recovered)
+	}
+}
