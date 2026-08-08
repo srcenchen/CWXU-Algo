@@ -89,15 +89,15 @@ type ContestRankSnap struct {
 
 // MemberStat 活跃成员综合行（排行榜用；不含 0 提交、不含教练）
 type MemberStat struct {
-	Rank     int64   `json:"rank"`
-	UserID   int64   `json:"userId"`
-	Name     string  `json:"name"`
-	Username string  `json:"username,omitempty"`
-	Submits  int64   `json:"submits"`
-	AC       int64   `json:"ac"`
-	ACRate   float64 `json:"acRate"` // 百分比 0-100
-	Share    float64 `json:"share"`  // 提交占组织总提交 %
-	ProfileURL string `json:"profileUrl,omitempty"`
+	Rank       int64   `json:"rank"`
+	UserID     int64   `json:"userId"`
+	Name       string  `json:"name"`
+	Username   string  `json:"username,omitempty"`
+	Submits    int64   `json:"submits"`
+	AC         int64   `json:"ac"`
+	ACRate     float64 `json:"acRate"` // 百分比 0-100
+	Share      float64 `json:"share"`  // 提交占组织总提交 %
+	ProfileURL string  `json:"profileUrl,omitempty"`
 }
 
 // TagHit 团队标签计数
@@ -254,65 +254,28 @@ func (uc *SummaryUseCase) resolveMemberIDs(ctx context.Context, orgID, groupID, 
 	return ids, nil
 }
 
-
-func (uc *SummaryUseCase) fetchCoachUserIDSet(ctx context.Context, orgID int64) map[int64]struct{} {
+// fetchCoachUserIDSet 组织教练名单（gRPC 直取，供成员/提交/排行过滤）。
+// 拉取失败返回 error：宁可报告生成失败，也不能把教练算进统计。
+func (uc *SummaryUseCase) fetchCoachUserIDSet(ctx context.Context, orgID int64) (map[int64]struct{}, error) {
 	out := map[int64]struct{}{}
 	if orgID <= 0 || uc == nil || uc.reg == nil {
-		return out
+		return out, nil
 	}
-	// 分页拉全员，筛 coach
-	for page := 1; page <= 20; page++ {
-		path := fmt.Sprintf("/v1/user/org/members?orgId=%d&page=%d&pageSize=100", orgID, page)
-		body, code, err := httpDiscoveryGet(ctx, uc.reg, "user", path)
-		if err != nil || code >= 400 {
-			log.Warnf("fetchCoachUserIDSet org=%d page=%d: code=%d err=%v", orgID, page, code, err)
-			break
-		}
-		var raw map[string]interface{}
-		if err := jsonUnmarshal(body, &raw); err != nil {
-			break
-		}
-		list, _ := raw["list"].([]interface{})
-		if list == nil {
-			if data, ok := raw["data"].(map[string]interface{}); ok {
-				list, _ = data["list"].([]interface{})
-			}
-		}
-		if len(list) == 0 {
-			break
-		}
-		for _, it := range list {
-			m, ok := it.(map[string]interface{})
-			if !ok {
-				continue
-			}
-			role, _ := m["role"].(string)
-			if strings.EqualFold(strings.TrimSpace(role), orgRoleCoach) {
-				var uid int64
-				switch v := m["userId"].(type) {
-				case float64:
-					uid = int64(v)
-				case int64:
-					uid = v
-				}
-				if uid > 0 {
-					out[uid] = struct{}{}
-				}
-			}
-		}
-		total := 0
-		switch v := raw["total"].(type) {
-		case float64:
-			total = int(v)
-		}
-		if page*100 >= total && total > 0 {
-			break
-		}
-		if len(list) < 100 {
-			break
+	conn, err := uc.dialUserCtx(ctx)
+	if err != nil {
+		return out, fmt.Errorf("coach ids dial user org=%d: %w", orgID, err)
+	}
+	cli := profile2.NewProfileClient(conn)
+	res, err := cli.GetOrgCoachIds(ctx, &profile2.GetOrgCoachIdsReq{OrgId: orgID})
+	if err != nil {
+		return out, fmt.Errorf("coach ids org=%d: %w", orgID, err)
+	}
+	for _, id := range res.GetUserIds() {
+		if id > 0 {
+			out[id] = struct{}{}
 		}
 	}
-	return out
+	return out, nil
 }
 
 type userIdentity struct {
@@ -410,8 +373,11 @@ func (uc *SummaryUseCase) LoadTrainingReportData(ctx context.Context, orgID, gro
 		log.Warnf("training report elevated: %v", eerr)
 		elevated = ctx
 	}
-	// 教练名单只拉一次：成员过滤与提交动态过滤共用
-	coachSet := uc.fetchCoachUserIDSet(elevated, orgID)
+	// 教练名单只拉一次：成员过滤与提交动态过滤共用；拉取失败宁可报错也不把教练算进统计
+	coachSet, err := uc.fetchCoachUserIDSet(elevated, orgID)
+	if err != nil {
+		return nil, err
+	}
 	// 用 elevated 上下文解析成员并排除教练
 	memberIDs, err := uc.resolveMemberIDs(elevated, orgID, groupID, squadID, coachSet)
 	if err != nil {
@@ -589,13 +555,14 @@ func (uc *SummaryUseCase) LoadTrainingReportData(ctx context.Context, orgID, gro
 	data.TeamTags = aggregateTeamTags(data.OrgSubmitSample, 24)
 	data.ProblemOverview = aggregateProblemOverview(data.OrgSubmitSample, 25)
 	data.Contests = uc.fetchOrgContests(elevated, start, end, 20, memberIDs)
-	data.ContestRankings = uc.fetchContestRankSnaps(elevated, data.Contests, 4, 15)
+	data.ContestRankings = uc.fetchContestRankSnaps(elevated, data.Contests, 4, 15, coachSet)
 	data.RecentBlogs = uc.fetchOrgBlogBriefs(elevated, orgID, 12)
 
 	return data, nil
 }
 
-// buildActiveRanking 仅有提交成员，按提交降序
+// buildActiveRanking 全成员排行（含 0 提交，排在有提交之后），按提交降序。
+// 教练已在成员解析阶段剔除；0 提交成员用于周报凑满榜单与点名跟进。
 func buildActiveRanking(submit, ac map[int64]int64, idMap map[int64]userIdentity) []MemberStat {
 	type pair struct {
 		id  int64
@@ -605,13 +572,15 @@ func buildActiveRanking(submit, ac map[int64]int64, idMap map[int64]userIdentity
 	arr := make([]pair, 0, len(submit))
 	var totalSub int64
 	for id, s := range submit {
-		if s <= 0 {
-			continue
-		}
 		arr = append(arr, pair{id: id, sub: s, ac: ac[id]})
 		totalSub += s
 	}
 	sort.Slice(arr, func(i, j int) bool {
+		// 有提交的排在 0 提交之前
+		hasI, hasJ := arr[i].sub > 0, arr[j].sub > 0
+		if hasI != hasJ {
+			return hasI
+		}
 		if arr[i].sub == arr[j].sub {
 			if arr[i].ac == arr[j].ac {
 				return arr[i].id < arr[j].id
@@ -965,7 +934,7 @@ func filterContestsInRange(in []ContestBrief, start, end time.Time) []ContestBri
 	return out
 }
 
-func (uc *SummaryUseCase) fetchContestRankSnaps(ctx context.Context, contests []ContestBrief, maxContests, topN int) []ContestRankSnap {
+func (uc *SummaryUseCase) fetchContestRankSnaps(ctx context.Context, contests []ContestBrief, maxContests, topN int, coachSet map[int64]struct{}) []ContestRankSnap {
 	if maxContests <= 0 {
 		maxContests = 3
 	}
@@ -1012,6 +981,9 @@ func (uc *SummaryUseCase) fetchContestRankSnaps(ctx context.Context, contests []
 		}
 		for _, r := range res.GetData() {
 			if r == nil {
+				continue
+			}
+			if _, isCoach := coachSet[r.UserId]; isCoach {
 				continue
 			}
 			snap.Top = append(snap.Top, ContestRankRow{

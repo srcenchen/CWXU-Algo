@@ -962,6 +962,30 @@ func (p *ProfileService) GetStaffOrgIds(ctx context.Context, req *profile.GetSta
 	return &profile.GetStaffOrgIdsRes{OrgIds: out}, nil
 }
 
+// GetOrgCoachIds 组织教练 userId 列表（agent 训练报告/周报排除教练；内部调用）
+func (p *ProfileService) GetOrgCoachIds(ctx context.Context, req *profile.GetOrgCoachIdsReq) (*profile.GetOrgCoachIdsRes, error) {
+	orgID := uint(req.GetOrgId())
+	if orgID == 0 {
+		if pd := auth.GetCurrentUser(ctx); pd != nil && pd.OrgID > 0 {
+			orgID = pd.OrgID
+		}
+	}
+	if orgID == 0 {
+		return &profile.GetOrgCoachIdsRes{UserIds: []int64{}}, nil
+	}
+	var ids []int64
+	err := p.profileDal.DB().WithContext(ctx).Model(&model.OrgMember{}).
+		Where("org_id = ? AND role = ?", orgID, model.OrgRoleCoach).
+		Pluck("user_id", &ids).Error
+	if err != nil {
+		return nil, errors.InternalServer("内部错误", err.Error())
+	}
+	if ids == nil {
+		ids = []int64{}
+	}
+	return &profile.GetOrgCoachIdsRes{UserIds: ids}, nil
+}
+
 // GetNonPublicOrgUserIds 题面流水线资格用户（爬取 / AI；含个人覆盖）
 func (p *ProfileService) GetNonPublicOrgUserIds(ctx context.Context, _ *profile.GetNonPublicOrgUserIdsReq) (*profile.GetNonPublicOrgUserIdsRes, error) {
 	fetchIDs, aiIDs, err := p.profileDal.GetProblemPipelineUserIds(ctx)

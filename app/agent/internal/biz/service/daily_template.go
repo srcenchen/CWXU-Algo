@@ -9,8 +9,18 @@ import (
 	"cwxu-algo/app/common/mail"
 )
 
-// RenderDailyRuleHTML 非 AI 日报：shadcn 风格 table + 内联样式。
+// RenderDailyRuleHTML 非 AI 日报：规则文案参数 + 统一模板。
 func RenderDailyRuleHTML(data *DailyReportData, brand string) string {
+	return renderDailyHTML(data, brand, RuleDailyComment(data))
+}
+
+// RenderDailyHTMLWithComment AI 日报：LLM 文案参数 + 统一模板。
+// 数字/表格/走势图全部由数据层渲染，comment 仅作点评/建议。
+func RenderDailyHTMLWithComment(data *DailyReportData, brand string, comment AIReportComment) string {
+	return renderDailyHTML(data, brand, comment)
+}
+
+func renderDailyHTML(data *DailyReportData, brand string, comment AIReportComment) string {
 	if data == nil {
 		return ""
 	}
@@ -59,6 +69,14 @@ func RenderDailyRuleHTML(data *DailyReportData, brand string) string {
 			b.WriteString(`;font-size:13px;">暂无数据</p>`)
 			return
 		}
+		labels := make([]string, 0, len(data.Last7Days))
+		values := make([]int64, 0, len(data.Last7Days))
+		for _, d := range data.Last7Days {
+			labels = append(labels, shortDate(d.Date))
+			values = append(values, d.Count)
+		}
+		b.WriteString(BarChartSVG(labels, values, "#171717"))
+		b.WriteString(`<div style="height:8px;"></div>`)
 		b.WriteString(mail.DataTableOpen())
 		b.WriteString(`<tr>`)
 		b.WriteString(mail.TH("日期", "left"))
@@ -164,12 +182,12 @@ func RenderDailyRuleHTML(data *DailyReportData, brand string) string {
 		}
 	})
 
-	// 比赛
-	writeDailySection(&b, "近期比赛", func() {
+	// 比赛（数据层已按昨日过滤）
+	writeDailySection(&b, "昨日比赛", func() {
 		if len(data.RecentContests) == 0 {
 			b.WriteString(`<p style="margin:0;color:`)
 			b.WriteString(mail.ColorMutedFg)
-			b.WriteString(`;font-size:13px;">暂无近期比赛记录</p>`)
+			b.WriteString(`;font-size:13px;">昨日暂无比赛记录</p>`)
 			return
 		}
 		b.WriteString(mail.DataTableOpen())
@@ -195,16 +213,41 @@ func RenderDailyRuleHTML(data *DailyReportData, brand string) string {
 		b.WriteString(`</table>`)
 	})
 
-	// 小结
+	// 小结（评论参数：AI 或规则生成）
 	writeDailySection(&b, "小结", func() {
-		if data.YesterdayCount == 0 {
-			b.WriteString(`<p style="margin:0;font-size:13px;color:`)
+		if strings.TrimSpace(comment.Headline) != "" {
+			b.WriteString(`<p style="margin:0;font-size:14px;font-weight:600;color:`)
 			b.WriteString(mail.ColorForeground)
-			b.WriteString(`;">昨天没动笔也没关系，今天挑一题热热身，保持节奏最重要。</p>`)
-		} else {
-			b.WriteString(`<p style="margin:0;font-size:13px;color:`)
-			b.WriteString(mail.ColorForeground)
-			b.WriteString(`;">昨天有提交，继续保持；可结合标签弱项补一题巩固。</p>`)
+			b.WriteString(`;">`)
+			b.WriteString(html.EscapeString(comment.Headline))
+			b.WriteString(`</p>`)
+		}
+		if len(comment.Highlights) > 0 {
+			b.WriteString(`<p style="margin:8px 0 2px;font-size:12px;color:`)
+			b.WriteString(mail.ColorMutedFg)
+			b.WriteString(`;">亮点</p><ul style="margin:4px 0 0;padding-left:18px;font-size:13px;color:#0a0a0a;">`)
+			for _, h := range comment.Highlights {
+				b.WriteString(`<li style="margin-bottom:3px;">` + html.EscapeString(h) + `</li>`)
+			}
+			b.WriteString(`</ul>`)
+		}
+		if len(comment.Issues) > 0 {
+			b.WriteString(`<p style="margin:8px 0 2px;font-size:12px;color:`)
+			b.WriteString(mail.ColorMutedFg)
+			b.WriteString(`;">问题</p><ul style="margin:4px 0 0;padding-left:18px;font-size:13px;color:#0a0a0a;">`)
+			for _, it := range comment.Issues {
+				b.WriteString(`<li style="margin-bottom:3px;">` + html.EscapeString(it) + `</li>`)
+			}
+			b.WriteString(`</ul>`)
+		}
+		if len(comment.Suggestions) > 0 {
+			b.WriteString(`<p style="margin:8px 0 2px;font-size:12px;color:`)
+			b.WriteString(mail.ColorMutedFg)
+			b.WriteString(`;">建议</p><ul style="margin:4px 0 0;padding-left:18px;font-size:13px;color:#0a0a0a;">`)
+			for _, s := range comment.Suggestions {
+				b.WriteString(`<li style="margin-bottom:3px;">` + html.EscapeString(s) + `</li>`)
+			}
+			b.WriteString(`</ul>`)
 		}
 		b.WriteString(`<p style="margin:14px 0 0;font-size:12px;">`)
 		b.WriteString(mail.Link(home, "在主站查看完整提交 →"))
@@ -213,6 +256,14 @@ func RenderDailyRuleHTML(data *DailyReportData, brand string) string {
 
 	b.WriteString(mail.DocShellClose())
 	return b.String()
+}
+
+// shortDate 2006-01-02 → MM-DD（图表横轴标签）
+func shortDate(ymd string) string {
+	if len(ymd) >= 10 {
+		return ymd[5:]
+	}
+	return ymd
 }
 
 func writeDailySection(b *strings.Builder, title string, body func()) {

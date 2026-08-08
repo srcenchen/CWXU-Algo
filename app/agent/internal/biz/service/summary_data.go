@@ -71,28 +71,28 @@ type DailyReportData struct {
 }
 
 type RecentReportData struct {
-	UserID     int64                  `json:"userId"`
-	Name       string                 `json:"name"`
-	NowUnix    int64                  `json:"nowUnix"`
-	Submit     *statistic.SubmitCount `json:"submit"`
-	Ac         *statistic.AcCount     `json:"ac"`
-	Last7Days  []DayCount             `json:"last7Days"`
+	UserID    int64                  `json:"userId"`
+	Name      string                 `json:"name"`
+	NowUnix   int64                  `json:"nowUnix"`
+	Submit    *statistic.SubmitCount `json:"submit"`
+	Ac        *statistic.AcCount     `json:"ac"`
+	Last7Days []DayCount             `json:"last7Days"`
 }
 
 type WeeklyReportData struct {
-	CoachUserID      int64       `json:"coachUserId"`
-	CoachName        string      `json:"coachName"`
-	CoachEmail       string      `json:"coachEmail"`
-	WeekStart        string      `json:"weekStart"`
-	WeekEnd          string      `json:"weekEnd"`
-	PrevWeekStart    string      `json:"prevWeekStart"`
-	PrevWeekEnd      string      `json:"prevWeekEnd"`
-	ThisWeekTotal    int64       `json:"thisWeekTotal"`
-	PrevWeekTotal    int64       `json:"prevWeekTotal"`
-	DailyTrend       []DayCount  `json:"dailyTrend"`
-	TopSubmit        []RankEntry `json:"topSubmit"`
-	TopAC            []RankEntry `json:"topAC"`
-	InactiveMembers  []string    `json:"inactiveMembers"`
+	CoachUserID     int64       `json:"coachUserId"`
+	CoachName       string      `json:"coachName"`
+	CoachEmail      string      `json:"coachEmail"`
+	WeekStart       string      `json:"weekStart"`
+	WeekEnd         string      `json:"weekEnd"`
+	PrevWeekStart   string      `json:"prevWeekStart"`
+	PrevWeekEnd     string      `json:"prevWeekEnd"`
+	ThisWeekTotal   int64       `json:"thisWeekTotal"`
+	PrevWeekTotal   int64       `json:"prevWeekTotal"`
+	DailyTrend      []DayCount  `json:"dailyTrend"`
+	TopSubmit       []RankEntry `json:"topSubmit"`
+	TopAC           []RankEntry `json:"topAC"`
+	InactiveMembers []string    `json:"inactiveMembers"`
 }
 
 // dialUser / dialCoreData 返回按服务名缓存的共享长连接（调用方不得 Close）。
@@ -500,7 +500,8 @@ func (uc *SummaryUseCase) loadDailyReportData(ctx context.Context, userId int64)
 		logs = []SubmitItem{}
 	}
 	radar := uc.fetchUserTagRadar(ctx, userId)
-	contests := uc.fetchUserRecentContests(ctx, userId, 15)
+	// 日报只显示昨日比赛：[昨日0点, 今日0点)
+	contests := uc.fetchUserRecentContests(ctx, userId, 15, yesterday.Unix(), yesterday.AddDate(0, 0, 1).Unix())
 
 	return &DailyReportData{
 		UserID:           userId,
@@ -517,7 +518,9 @@ func (uc *SummaryUseCase) loadDailyReportData(ctx context.Context, userId int64)
 	}, nil
 }
 
-func (uc *SummaryUseCase) fetchUserRecentContests(ctx context.Context, userId int64, limit int64) []ContestBrief {
+// fetchUserRecentContests 用户比赛历史。since/until 为 unix 秒（0=不限）：
+// 日报传 [昨日0点, 今日0点) 只显示昨日比赛。
+func (uc *SummaryUseCase) fetchUserRecentContests(ctx context.Context, userId int64, limit int64, since, until int64) []ContestBrief {
 	if userId <= 0 {
 		return nil
 	}
@@ -544,6 +547,16 @@ func (uc *SummaryUseCase) fetchUserRecentContests(ctx context.Context, userId in
 	out := make([]ContestBrief, 0, len(res.Data))
 	for _, v := range res.Data {
 		if v == nil {
+			continue
+		}
+		t := v.Time
+		if t <= 0 {
+			t = v.StartTime
+		}
+		if since > 0 && t < since {
+			continue
+		}
+		if until > 0 && t >= until {
 			continue
 		}
 		ts := ""

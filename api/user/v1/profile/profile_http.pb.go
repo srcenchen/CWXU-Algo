@@ -30,6 +30,7 @@ const OperationProfileGetByUsername = "/api.user.v1.Profile/GetByUsername"
 const OperationProfileGetFollowingIds = "/api.user.v1.Profile/GetFollowingIds"
 const OperationProfileGetList = "/api.user.v1.Profile/GetList"
 const OperationProfileGetNonPublicOrgUserIds = "/api.user.v1.Profile/GetNonPublicOrgUserIds"
+const OperationProfileGetOrgCoachIds = "/api.user.v1.Profile/GetOrgCoachIds"
 const OperationProfileGetStaffOrgIds = "/api.user.v1.Profile/GetStaffOrgIds"
 const OperationProfileGetSyncPolicies = "/api.user.v1.Profile/GetSyncPolicies"
 const OperationProfileGetUserIdsByGroup = "/api.user.v1.Profile/GetUserIdsByGroup"
@@ -62,6 +63,8 @@ type ProfileHTTPServer interface {
 	// GetNonPublicOrgUserIds 题面流水线资格用户（供 core 闸门；内部调用）
 	// 默认=非公共域组织成员；可被个人 problem_fetch / problem_ai 覆盖
 	GetNonPublicOrgUserIds(context.Context, *GetNonPublicOrgUserIdsReq) (*GetNonPublicOrgUserIdsRes, error)
+	// GetOrgCoachIds 组织教练 userId 列表（agent 训练报告/周报排除教练；内部调用）
+	GetOrgCoachIds(context.Context, *GetOrgCoachIdsReq) (*GetOrgCoachIdsRes, error)
 	// GetStaffOrgIds 用户可收周报/训练报告的 staff 组织 id 列表（内部/agent）
 	GetStaffOrgIds(context.Context, *GetStaffOrgIdsReq) (*GetStaffOrgIdsRes, error)
 	// GetSyncPolicies 定时任务策略：一人多组织时间隔取 MIN，开关为任一开启；每人一条（去重）
@@ -87,7 +90,7 @@ func RegisterProfileHTTPServer(s *http.Server, srv ProfileHTTPServer) {
 	r.GET("/v1/user/profile/get-by-id", _Profile_GetById0_HTTP_Handler(srv))
 	r.GET("/v1/user/profile/get-by-name", _Profile_GetByName0_HTTP_Handler(srv))
 	r.GET("/v1/user/profile/list", _Profile_GetList0_HTTP_Handler(srv))
-	r.POST("/v1/user/profile/update", _Profile_Update5_HTTP_Handler(srv))
+	r.POST("/v1/user/profile/update", _Profile_Update7_HTTP_Handler(srv))
 	r.POST("/v1/user/profile/move-group", _Profile_MoveGroup0_HTTP_Handler(srv))
 	r.POST("/v1/user/profile/set-email-enabled", _Profile_SetEmailEnabled0_HTTP_Handler(srv))
 	r.POST("/v1/user/profile/set-problem-pipeline", _Profile_SetProblemPipeline0_HTTP_Handler(srv))
@@ -99,10 +102,11 @@ func RegisterProfileHTTPServer(s *http.Server, srv ProfileHTTPServer) {
 	r.GET("/v1/user/profile/ids-by-group", _Profile_GetUserIdsByGroup0_HTTP_Handler(srv))
 	r.GET("/v1/user/profile/ids-by-org", _Profile_GetUserIdsByOrg0_HTTP_Handler(srv))
 	r.GET("/v1/user/profile/staff-org-ids", _Profile_GetStaffOrgIds0_HTTP_Handler(srv))
+	r.GET("/v1/user/profile/org-coach-ids", _Profile_GetOrgCoachIds0_HTTP_Handler(srv))
 	r.GET("/v1/user/profile/non-public-org-user-ids", _Profile_GetNonPublicOrgUserIds0_HTTP_Handler(srv))
 	r.POST("/v1/user/profile/get-by-ids", _Profile_GetByIds0_HTTP_Handler(srv))
 	r.POST("/v1/user/profile/sync-policies", _Profile_GetSyncPolicies0_HTTP_Handler(srv))
-	r.POST("/v1/user/profile/delete", _Profile_Delete4_HTTP_Handler(srv))
+	r.POST("/v1/user/profile/delete", _Profile_Delete6_HTTP_Handler(srv))
 	r.GET("/v1/user/profile/get-by-username", _Profile_GetByUsername0_HTTP_Handler(srv))
 	r.GET("/v1/user/profile/following-ids", _Profile_GetFollowingIds0_HTTP_Handler(srv))
 	r.POST("/v1/user/profile/filter-public-feed-user-ids", _Profile_FilterPublicFeedUserIds0_HTTP_Handler(srv))
@@ -165,7 +169,7 @@ func _Profile_GetList0_HTTP_Handler(srv ProfileHTTPServer) func(ctx http.Context
 	}
 }
 
-func _Profile_Update5_HTTP_Handler(srv ProfileHTTPServer) func(ctx http.Context) error {
+func _Profile_Update7_HTTP_Handler(srv ProfileHTTPServer) func(ctx http.Context) error {
 	return func(ctx http.Context) error {
 		var in UpdateReq
 		if err := ctx.Bind(&in); err != nil {
@@ -420,6 +424,25 @@ func _Profile_GetStaffOrgIds0_HTTP_Handler(srv ProfileHTTPServer) func(ctx http.
 	}
 }
 
+func _Profile_GetOrgCoachIds0_HTTP_Handler(srv ProfileHTTPServer) func(ctx http.Context) error {
+	return func(ctx http.Context) error {
+		var in GetOrgCoachIdsReq
+		if err := ctx.BindQuery(&in); err != nil {
+			return err
+		}
+		http.SetOperation(ctx, OperationProfileGetOrgCoachIds)
+		h := ctx.Middleware(func(ctx context.Context, req interface{}) (interface{}, error) {
+			return srv.GetOrgCoachIds(ctx, req.(*GetOrgCoachIdsReq))
+		})
+		out, err := h(ctx, &in)
+		if err != nil {
+			return err
+		}
+		reply := out.(*GetOrgCoachIdsRes)
+		return ctx.Result(200, reply)
+	}
+}
+
 func _Profile_GetNonPublicOrgUserIds0_HTTP_Handler(srv ProfileHTTPServer) func(ctx http.Context) error {
 	return func(ctx http.Context) error {
 		var in GetNonPublicOrgUserIdsReq
@@ -483,7 +506,7 @@ func _Profile_GetSyncPolicies0_HTTP_Handler(srv ProfileHTTPServer) func(ctx http
 	}
 }
 
-func _Profile_Delete4_HTTP_Handler(srv ProfileHTTPServer) func(ctx http.Context) error {
+func _Profile_Delete6_HTTP_Handler(srv ProfileHTTPServer) func(ctx http.Context) error {
 	return func(ctx http.Context) error {
 		var in DeleteReq
 		if err := ctx.Bind(&in); err != nil {
@@ -585,6 +608,8 @@ type ProfileHTTPClient interface {
 	// GetNonPublicOrgUserIds 题面流水线资格用户（供 core 闸门；内部调用）
 	// 默认=非公共域组织成员；可被个人 problem_fetch / problem_ai 覆盖
 	GetNonPublicOrgUserIds(ctx context.Context, req *GetNonPublicOrgUserIdsReq, opts ...http.CallOption) (rsp *GetNonPublicOrgUserIdsRes, err error)
+	// GetOrgCoachIds 组织教练 userId 列表（agent 训练报告/周报排除教练；内部调用）
+	GetOrgCoachIds(ctx context.Context, req *GetOrgCoachIdsReq, opts ...http.CallOption) (rsp *GetOrgCoachIdsRes, err error)
 	// GetStaffOrgIds 用户可收周报/训练报告的 staff 组织 id 列表（内部/agent）
 	GetStaffOrgIds(ctx context.Context, req *GetStaffOrgIdsReq, opts ...http.CallOption) (rsp *GetStaffOrgIdsRes, err error)
 	// GetSyncPolicies 定时任务策略：一人多组织时间隔取 MIN，开关为任一开启；每人一条（去重）
@@ -756,6 +781,20 @@ func (c *ProfileHTTPClientImpl) GetNonPublicOrgUserIds(ctx context.Context, in *
 	pattern := "/v1/user/profile/non-public-org-user-ids"
 	path := binding.EncodeURL(pattern, in, true)
 	opts = append(opts, http.Operation(OperationProfileGetNonPublicOrgUserIds))
+	opts = append(opts, http.PathTemplate(pattern))
+	err := c.cc.Invoke(ctx, "GET", path, nil, &out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// GetOrgCoachIds 组织教练 userId 列表（agent 训练报告/周报排除教练；内部调用）
+func (c *ProfileHTTPClientImpl) GetOrgCoachIds(ctx context.Context, in *GetOrgCoachIdsReq, opts ...http.CallOption) (*GetOrgCoachIdsRes, error) {
+	var out GetOrgCoachIdsRes
+	pattern := "/v1/user/profile/org-coach-ids"
+	path := binding.EncodeURL(pattern, in, true)
+	opts = append(opts, http.Operation(OperationProfileGetOrgCoachIds))
 	opts = append(opts, http.PathTemplate(pattern))
 	err := c.cc.Invoke(ctx, "GET", path, nil, &out, opts...)
 	if err != nil {

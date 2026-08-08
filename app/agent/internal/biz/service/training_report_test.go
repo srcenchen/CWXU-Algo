@@ -13,8 +13,8 @@ import (
 	_const "cwxu-algo/app/common/const"
 
 	"github.com/alicebob/miniredis/v2"
-	"github.com/golang-jwt/jwt/v5"
 	"github.com/go-kratos/kratos/v2/registry"
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/redis/go-redis/v9"
 	"github.com/volcengine/volcengine-go-sdk/service/arkruntime/model"
 )
@@ -105,7 +105,7 @@ func TestRenderRuleTemplateHTML_UsesFixtureNumbers(t *testing.T) {
 	mustContain := []string{
 		"42", "18", "Alice", "Bob", "Carol", "Dave", "Eve",
 		"2026-07-06", "2026-07-12", "整组织", "30",
-		"viewport", "活跃成员排行榜", "题目标签", "做题概览", "不活跃成员",
+		"viewport", "成员排行榜", "题目标签", "做题概览", "不活跃成员",
 		"综合维度评价", "dp", "A+B", "<table", "style=",
 		"algo.zhiyuansofts.cn",
 	}
@@ -120,7 +120,7 @@ func TestRenderRuleTemplateHTML_UsesFixtureNumbers(t *testing.T) {
 	}
 }
 
-func TestBuildActiveRanking_ExcludesZero(t *testing.T) {
+func TestBuildActiveRanking_IncludesZeroLast(t *testing.T) {
 	submit := map[int64]int64{1: 10, 2: 0, 3: 5}
 	ac := map[int64]int64{1: 4, 2: 0, 3: 5}
 	idMap := map[int64]userIdentity{
@@ -129,11 +129,14 @@ func TestBuildActiveRanking_ExcludesZero(t *testing.T) {
 		3: {Name: "C", Username: "c"},
 	}
 	r := buildActiveRanking(submit, ac, idMap)
-	if len(r) != 2 {
-		t.Fatalf("want 2 active, got %+v", r)
+	if len(r) != 3 {
+		t.Fatalf("want 3 members (incl. zero-submit), got %+v", r)
 	}
-	if r[0].Name != "A" || r[1].Name != "C" {
-		t.Fatalf("%+v", r)
+	if r[0].Name != "A" || r[1].Name != "C" || r[2].Name != "B" {
+		t.Fatalf("order wrong: %+v", r)
+	}
+	if r[2].Submits != 0 || r[2].ACRate != 0 {
+		t.Fatalf("zero-submit row wrong: %+v", r[2])
 	}
 	if r[0].ProfileURL == "" || !strings.Contains(r[0].ProfileURL, "/profile/") {
 		t.Fatalf("profile url %s", r[0].ProfileURL)
@@ -155,7 +158,6 @@ func TestAggregateTeamTagsAndProblems(t *testing.T) {
 		t.Fatalf("probs %+v", probs)
 	}
 }
-
 
 func TestLastWeekRange_Monday(t *testing.T) {
 	// 2026-07-13 is Monday → last week 07-06 ~ 07-12
@@ -180,8 +182,8 @@ func TestParseDateRange(t *testing.T) {
 func TestJobTTL_DownloadWindow(t *testing.T) {
 	now := time.Date(2026, 7, 17, 12, 0, 0, 0, time.UTC)
 	job := &TrainingReportJob{
-		Status:   ReportStatusDone,
-		HTMLPath: "/tmp/x.html",
+		Status:    ReportStatusDone,
+		HTMLPath:  "/tmp/x.html",
 		ExpiresAt: now.Add(1 * time.Hour).Unix(),
 	}
 	if !job.IsDownloadable(now) {
@@ -895,11 +897,18 @@ func TestRenderRuleTemplate_CompactAndFull(t *testing.T) {
 	full := RenderRuleTemplateHTML(data, "GoAlgo", DetailModeFull)
 	compact := RenderRuleTemplateHTML(data, "GoAlgo", DetailModeCompact)
 	for _, html := range []string{full, compact} {
-		for _, s := range []string{"综合维度评价", "比赛表现", "知识沉淀", "做题概览", "活跃成员排行榜", "活跃度", "viewport", "<table"} {
+		for _, s := range []string{"综合维度评价", "知识沉淀", "做题概览", "成员排行榜", "活跃度", "viewport", "<table"} {
 			if !strings.Contains(html, s) {
 				t.Errorf("missing dim %q", s)
 			}
 		}
+	}
+	// 比赛表现仅 full 展示（compact 周报去除个人参赛史板块）
+	if !strings.Contains(full, "比赛表现") {
+		t.Error("full should have contest section")
+	}
+	if strings.Contains(compact, "比赛表现") {
+		t.Error("compact should not have contest section")
 	}
 	if !strings.Contains(compact, "教练周报") {
 		t.Error("compact title")

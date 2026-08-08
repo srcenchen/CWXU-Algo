@@ -261,7 +261,7 @@ func (uc *SummaryUseCase) generateTrainingReportAI(ctx context.Context, data *Tr
 	if uc.chat == nil {
 		return "", fmt.Errorf("chat 未初始化")
 	}
-	// 预置 JSON 已含全量统计：首轮不用工具（工具失败会诱发模型写废话/残缺 HTML）。
+	// 预置 JSON 已含全量统计：LLM 只输出评价文案参数，数字由模板渲染（防幻觉/格式乱）
 	msgs := []*model.ChatCompletionMessage{
 		{
 			Role: model.ChatMessageRoleSystem,
@@ -281,36 +281,28 @@ func (uc *SummaryUseCase) generateTrainingReportAI(ctx context.Context, data *Tr
 	if err != nil {
 		return "", err
 	}
-	html, ok, reason := SanitizeAndValidateReportHTML(raw)
-	if ok {
-		return html, nil
+	comment, cerr := ParseAIReportComment(raw)
+	if cerr == nil {
+		return RenderTemplateHTMLWithComment(data, uc.brandTitle(ctx), comment, mode), nil
 	}
-	log.Warnf("training report AI output invalid: %s; retry strict", reason)
+	log.Warnf("training report AI output invalid: %v; retry strict", cerr)
 
-	// 严格重试：禁止工具、禁止任何非 HTML
-	retryMsgs := []*model.ChatCompletionMessage{
-		{
-			Role: model.ChatMessageRoleSystem,
-			Content: &model.ChatCompletionMessageContent{
-				StringValue: volcengine.String(trainingReportSystemPromptStrict(mode)),
-			},
+	// 严格重试：强调只输出 JSON
+	retryMsgs := append(msgs, &model.ChatCompletionMessage{
+		Role: model.ChatMessageRoleUser,
+		Content: &model.ChatCompletionMessageContent{
+			StringValue: volcengine.String("【重试】上次输出无法解析（" + cerr.Error() + "）。只输出 JSON 对象 {\"headline\":\"...\",\"highlights\":[],\"issues\":[],\"suggestions\":[]}，不要任何其它文字。"),
 		},
-		{
-			Role: model.ChatMessageRoleUser,
-			Content: &model.ChatCompletionMessageContent{
-				StringValue: volcengine.String(trainingReportUserPrompt(data, mode) + "\n\n【重试】上次输出无效（" + reason + "）。本次必须从 <!DOCTYPE html> 或 <html 起笔，直接输出完整 HTML，禁止任何前言、Markdown、代码围栏。"),
-			},
-		},
-	}
+	})
 	raw2, err2 := uc.chat.Complete(ctx, retryMsgs)
 	if err2 != nil {
-		return "", fmt.Errorf("AI 重试失败: %w（首次校验: %s）", err2, reason)
+		return "", fmt.Errorf("AI 重试失败: %w（首次校验: %v）", err2, cerr)
 	}
-	html2, ok2, reason2 := SanitizeAndValidateReportHTML(raw2)
-	if !ok2 {
-		return "", fmt.Errorf("AI 输出校验失败: %s；重试仍失败: %s", reason, reason2)
+	comment2, cerr2 := ParseAIReportComment(raw2)
+	if cerr2 != nil {
+		return "", fmt.Errorf("AI 输出校验失败: %v；重试仍失败: %v", cerr, cerr2)
 	}
-	return html2, nil
+	return RenderTemplateHTMLWithComment(data, uc.brandTitle(ctx), comment2, mode), nil
 }
 
 // BuildNotifyEmail 纯函数：构造通知邮件主题/正文/附件名（可单测，不依赖 SMTP）。

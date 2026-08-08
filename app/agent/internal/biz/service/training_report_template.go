@@ -6,12 +6,26 @@ import (
 	"strings"
 )
 
-// RenderRuleTemplateHTML 非 AI：邮件/QQ 可渲染的表格布局 + 内联样式 + 主站链接。
+// RenderRuleTemplateHTML 非 AI：规则文案参数 + 统一模板。
 // mode: full | compact
 func RenderRuleTemplateHTML(data *TrainingReportData, brand string, mode ...string) string {
 	if data == nil {
 		return ""
 	}
+	delta := data.TotalSubmits - data.PrevTotalSubmits
+	return renderTemplateHTML(data, brand, mode, RuleReportComment(data, delta))
+}
+
+// RenderTemplateHTMLWithComment AI 模式：LLM 文案参数 + 统一模板。
+// 数字/表格/排行/走势图全部由数据层渲染，comment 仅作点评/建议。
+func RenderTemplateHTMLWithComment(data *TrainingReportData, brand string, comment AIReportComment, mode ...string) string {
+	if data == nil {
+		return ""
+	}
+	return renderTemplateHTML(data, brand, mode, comment)
+}
+
+func renderTemplateHTML(data *TrainingReportData, brand string, mode []string, comment AIReportComment) string {
 	if brand == "" {
 		brand = "GoAlgo"
 	}
@@ -29,7 +43,7 @@ func RenderRuleTemplateHTML(data *TrainingReportData, brand string, mode ...stri
 	} else if delta < 0 {
 		trendLabel = "下降"
 	}
-	statusEmoji, dimLines, advice := ruleComprehensiveEval(data, delta)
+	statusEmoji, _, _ := ruleComprehensiveEval(data, delta)
 	activeRatio := 0.0
 	if data.MemberCount > 0 {
 		activeRatio = float64(data.ActiveMembers) / float64(data.MemberCount) * 100
@@ -41,7 +55,7 @@ func RenderRuleTemplateHTML(data *TrainingReportData, brand string, mode ...stri
 
 	rankCap, inactiveN, feedN, contestN, blogN, probN, tagN := 80, 40, 12, 10, 8, 12, 16
 	if compact {
-		rankCap, inactiveN, feedN, contestN, blogN, probN, tagN = 20, 12, 6, 5, 5, 8, 10
+		rankCap, inactiveN, feedN, contestN, blogN, probN, tagN = 10, 12, 6, 5, 5, 8, 10
 	}
 
 	title, badge := "训练报告", "规则模板"
@@ -83,7 +97,7 @@ func RenderRuleTemplateHTML(data *TrainingReportData, brand string, mode ...stri
 	b.WriteString(`</tr><tr>`)
 	fmt.Fprintf(&b, `<td width="50%%" valign="top" style="background:#f5f5f5;border:1px solid #e5e5e5;border-radius:10px;padding:12px 10px;"><div style="font-size:22px;font-weight:600;color:#0a0a0a;">%d<span style="font-size:12px;color:#737373;">/%d</span></div><div style="font-size:12px;color:#737373;">活跃成员</div><div style="font-size:11px;color:#737373;margin-top:4px;">活跃率 %.0f%%</div></td>`,
 		data.ActiveMembers, data.MemberCount, activeRatio)
-	fmt.Fprintf(&b, `<td width="50%%" valign="top" style="background:#f5f5f5;border:1px solid #e5e5e5;border-radius:10px;padding:12px 10px;"><div style="font-size:22px;font-weight:600;color:#0a0a0a;">%d</div><div style="font-size:12px;color:#737373;">未提交</div><div style="font-size:11px;color:#737373;margin-top:4px;">已剔除出活跃榜</div></td>`,
+	fmt.Fprintf(&b, `<td width="50%%" valign="top" style="background:#f5f5f5;border:1px solid #e5e5e5;border-radius:10px;padding:12px 10px;"><div style="font-size:22px;font-weight:600;color:#0a0a0a;">%d</div><div style="font-size:12px;color:#737373;">未提交</div><div style="font-size:11px;color:#737373;margin-top:4px;">待跟进</div></td>`,
 		len(data.InactiveMembers))
 	b.WriteString(`</tr></table></td></tr>`)
 
@@ -92,6 +106,20 @@ func RenderRuleTemplateHTML(data *TrainingReportData, brand string, mode ...stri
 	if len(data.DailyTrend) == 0 {
 		emptyRow(&b, "暂无日走势")
 	} else {
+		labels := make([]string, 0, len(data.DailyTrend))
+		subSeries := make([]int64, 0, len(data.DailyTrend))
+		acSeries := make([]int64, 0, len(data.DailyTrend))
+		for i, d := range data.DailyTrend {
+			labels = append(labels, shortDate(d.Date))
+			subSeries = append(subSeries, d.Count)
+			ac := int64(0)
+			if i < len(data.DailyACTrend) {
+				ac = data.DailyACTrend[i].Count
+			}
+			acSeries = append(acSeries, ac)
+		}
+		b.WriteString(LineChartSVG(labels, [][]int64{subSeries, acSeries}, []string{"提交", "AC"}, []string{"#171717", "#f97316"}))
+		b.WriteString(`<div style="height:8px;"></div>`)
 		b.WriteString(`<table width="100%" cellpadding="6" cellspacing="0" border="0" style="border-collapse:collapse;font-size:13px;">`)
 		b.WriteString(`<tr style="background:#f5f5f5;"><th align="left" style="border-bottom:1px solid #e5e5e5;">日期</th><th align="right" style="border-bottom:1px solid #e5e5e5;">提交</th><th align="right" style="border-bottom:1px solid #e5e5e5;">AC</th></tr>`)
 		for i, d := range data.DailyTrend {
@@ -106,9 +134,8 @@ func RenderRuleTemplateHTML(data *TrainingReportData, brand string, mode ...stri
 	}
 	sectionEnd(&b)
 
-	// 2 活跃榜
-	sectionStart(&b, "2. 活跃成员排行榜")
-	b.WriteString(`<p style="margin:0 0 8px;font-size:12px;color:#737373;">仅含区间有提交成员；教练与 0 提交已剔除。点姓名看资料。</p>`)
+	// 2 成员榜
+	sectionStart(&b, "2. 成员排行榜")
 	ranking := data.ActiveRanking
 	if len(ranking) == 0 {
 		for _, r := range data.TopSubmit {
@@ -123,12 +150,16 @@ func RenderRuleTemplateHTML(data *TrainingReportData, brand string, mode ...stri
 		shown := 0
 		for _, m := range ranking {
 			if shown >= rankCap {
-				fmt.Fprintf(&b, `<tr><td colspan="5" style="padding:8px;color:#737373;font-size:12px;">…共 %d 人活跃 · <a href="%s" style="color:#171717;">主站查看更多</a></td></tr>`, len(ranking), moreAct)
+				fmt.Fprintf(&b, `<tr><td colspan="5" style="padding:8px;color:#737373;font-size:12px;">…共 %d 人 · <a href="%s" style="color:#171717;">主站查看更多</a></td></tr>`, len(ranking), moreAct)
 				break
 			}
 			nameHTML := nameLink(m.Name, m.Username, m.UserID, m.ProfileURL)
-			fmt.Fprintf(&b, `<tr><td style="border-bottom:1px solid #e5e5e5;">%d</td><td style="border-bottom:1px solid #e5e5e5;">%s</td><td align="right" style="border-bottom:1px solid #e5e5e5;">%d</td><td align="right" style="border-bottom:1px solid #e5e5e5;">%d</td><td align="right" style="border-bottom:1px solid #e5e5e5;">%.1f%%</td></tr>`,
-				m.Rank, nameHTML, m.Submits, m.AC, m.ACRate)
+			acRate := "—"
+			if m.Submits > 0 {
+				acRate = fmt.Sprintf("%.1f%%", m.ACRate)
+			}
+			fmt.Fprintf(&b, `<tr><td style="border-bottom:1px solid #e5e5e5;">%d</td><td style="border-bottom:1px solid #e5e5e5;">%s</td><td align="right" style="border-bottom:1px solid #e5e5e5;">%d</td><td align="right" style="border-bottom:1px solid #e5e5e5;">%d</td><td align="right" style="border-bottom:1px solid #e5e5e5;">%s</td></tr>`,
+				m.Rank, nameHTML, m.Submits, m.AC, acRate)
 			shown++
 		}
 		if shown >= len(ranking) && len(ranking) > 0 {
@@ -221,58 +252,64 @@ func RenderRuleTemplateHTML(data *TrainingReportData, brand string, mode ...stri
 	}
 	sectionEnd(&b)
 
-	// 5 比赛
-	sectionStart(&b, "5. 比赛表现")
-	if len(data.Contests) == 0 {
-		emptyRow(&b, "区间内未匹配到比赛记录。")
-		fmt.Fprintf(&b, `<p style="margin:8px 0 0;font-size:12px;"><a href="%s" style="color:#171717;">打开主站比赛页核对 →</a></p>`, moreContest)
-	} else {
-		b.WriteString(`<table width="100%" cellpadding="6" cellspacing="0" border="0" style="border-collapse:collapse;font-size:12px;">`)
-		b.WriteString(`<tr style="background:#f5f5f5;"><th align="left" style="border-bottom:1px solid #e5e5e5;">比赛</th><th align="left" style="border-bottom:1px solid #e5e5e5;">平台</th><th align="right" style="border-bottom:1px solid #e5e5e5;">过题</th><th align="left" style="border-bottom:1px solid #e5e5e5;">日期</th></tr>`)
-		n := 0
-		for _, c := range data.Contests {
-			if n >= contestN {
-				break
-			}
-			name := html.EscapeString(c.ContestName)
-			if c.ID > 0 {
-				name = fmt.Sprintf(`<a href="%s/contest/%d" style="color:#171717;text-decoration:none;">%s</a>`, SiteBaseURL, c.ID, name)
-			}
-			fmt.Fprintf(&b, `<tr><td style="border-bottom:1px solid #e5e5e5;">%s</td><td style="border-bottom:1px solid #e5e5e5;">%s</td><td align="right" style="border-bottom:1px solid #e5e5e5;">%d/%d</td><td style="border-bottom:1px solid #e5e5e5;">%s</td></tr>`,
-				name, html.EscapeString(c.Platform), c.ACCount, c.TotalCount, html.EscapeString(c.Time))
-			n++
-		}
-		b.WriteString(`</table>`)
-		for i, snap := range data.ContestRankings {
-			if compact && i >= 2 {
-				break
-			}
-			if i >= 4 {
-				break
-			}
-			fmt.Fprintf(&b, `<p style="margin:12px 0 6px;font-size:13px;font-weight:600;">%s · 组织榜（%d人）</p>`,
-				html.EscapeString(snap.ContestName), snap.Total)
+	// 5 比赛（compact 周报不展示：组织流无组织级比赛数据，个人参赛史不适合进组织周报）
+	if !compact {
+		sectionStart(&b, "5. 比赛表现")
+		if len(data.Contests) == 0 {
+			emptyRow(&b, "区间内未匹配到比赛记录。")
+			fmt.Fprintf(&b, `<p style="margin:8px 0 0;font-size:12px;"><a href="%s" style="color:#171717;">打开主站比赛页核对 →</a></p>`, moreContest)
+		} else {
 			b.WriteString(`<table width="100%" cellpadding="6" cellspacing="0" border="0" style="border-collapse:collapse;font-size:12px;">`)
-			b.WriteString(`<tr style="background:#f5f5f5;"><th align="left" style="border-bottom:1px solid #e5e5e5;">#</th><th align="left" style="border-bottom:1px solid #e5e5e5;">成员</th><th align="right" style="border-bottom:1px solid #e5e5e5;">过题</th><th align="right" style="border-bottom:1px solid #e5e5e5;">分</th></tr>`)
-			rowN := 10
-			if compact {
-				rowN = 5
-			}
-			for j, r := range snap.Top {
-				if j >= rowN {
+			b.WriteString(`<tr style="background:#f5f5f5;"><th align="left" style="border-bottom:1px solid #e5e5e5;">比赛</th><th align="left" style="border-bottom:1px solid #e5e5e5;">平台</th><th align="right" style="border-bottom:1px solid #e5e5e5;">过题</th><th align="left" style="border-bottom:1px solid #e5e5e5;">日期</th></tr>`)
+			n := 0
+			for _, c := range data.Contests {
+				if n >= contestN {
 					break
 				}
-				fmt.Fprintf(&b, `<tr><td style="border-bottom:1px solid #e5e5e5;">%d</td><td style="border-bottom:1px solid #e5e5e5;">%s</td><td align="right" style="border-bottom:1px solid #e5e5e5;">%d/%d</td><td align="right" style="border-bottom:1px solid #e5e5e5;">%d</td></tr>`,
-					r.Rank, html.EscapeString(r.Name), r.ACCount, r.TotalCount, r.Score)
+				name := html.EscapeString(c.ContestName)
+				if c.ID > 0 {
+					name = fmt.Sprintf(`<a href="%s/contest/%d" style="color:#171717;text-decoration:none;">%s</a>`, SiteBaseURL, c.ID, name)
+				}
+				fmt.Fprintf(&b, `<tr><td style="border-bottom:1px solid #e5e5e5;">%s</td><td style="border-bottom:1px solid #e5e5e5;">%s</td><td align="right" style="border-bottom:1px solid #e5e5e5;">%d/%d</td><td style="border-bottom:1px solid #e5e5e5;">%s</td></tr>`,
+					name, html.EscapeString(c.Platform), c.ACCount, c.TotalCount, html.EscapeString(c.Time))
+				n++
 			}
 			b.WriteString(`</table>`)
+			for i, snap := range data.ContestRankings {
+				if compact && i >= 2 {
+					break
+				}
+				if i >= 4 {
+					break
+				}
+				fmt.Fprintf(&b, `<p style="margin:12px 0 6px;font-size:13px;font-weight:600;">%s · 组织榜（%d人）</p>`,
+					html.EscapeString(snap.ContestName), snap.Total)
+				b.WriteString(`<table width="100%" cellpadding="6" cellspacing="0" border="0" style="border-collapse:collapse;font-size:12px;">`)
+				b.WriteString(`<tr style="background:#f5f5f5;"><th align="left" style="border-bottom:1px solid #e5e5e5;">#</th><th align="left" style="border-bottom:1px solid #e5e5e5;">成员</th><th align="right" style="border-bottom:1px solid #e5e5e5;">过题</th><th align="right" style="border-bottom:1px solid #e5e5e5;">分</th></tr>`)
+				rowN := 10
+				if compact {
+					rowN = 5
+				}
+				for j, r := range snap.Top {
+					if j >= rowN {
+						break
+					}
+					fmt.Fprintf(&b, `<tr><td style="border-bottom:1px solid #e5e5e5;">%d</td><td style="border-bottom:1px solid #e5e5e5;">%s</td><td align="right" style="border-bottom:1px solid #e5e5e5;">%d/%d</td><td align="right" style="border-bottom:1px solid #e5e5e5;">%d</td></tr>`,
+						r.Rank, html.EscapeString(r.Name), r.ACCount, r.TotalCount, r.Score)
+				}
+				b.WriteString(`</table>`)
+			}
+			fmt.Fprintf(&b, `<p style="margin:8px 0 0;font-size:12px;"><a href="%s" style="color:#171717;">主站比赛列表 →</a></p>`, moreContest)
 		}
-		fmt.Fprintf(&b, `<p style="margin:8px 0 0;font-size:12px;"><a href="%s" style="color:#171717;">主站比赛列表 →</a></p>`, moreContest)
+		sectionEnd(&b)
 	}
-	sectionEnd(&b)
 
-	// 6 博客
-	sectionStart(&b, "6. 知识沉淀（博客）")
+	// 6 博客（compact 顺延为 5）
+	blogTitle := "6. 知识沉淀（博客）"
+	if compact {
+		blogTitle = "5. 知识沉淀（博客）"
+	}
+	sectionStart(&b, blogTitle)
 	if len(data.RecentBlogs) == 0 {
 		emptyRow(&b, "暂无组织公开博客。")
 		fmt.Fprintf(&b, `<p style="margin:8px 0 0;font-size:12px;"><a href="%s" style="color:#171717;">博客广场 →</a></p>`, moreBlog)
@@ -295,8 +332,12 @@ func RenderRuleTemplateHTML(data *TrainingReportData, brand string, mode ...stri
 	}
 	sectionEnd(&b)
 
-	// 7 不活跃
-	sectionStart(&b, "7. 不活跃成员（已从排行榜剔除）")
+	// 7 不活跃（compact 顺延为 6）
+	inactiveTitle := "7. 不活跃成员"
+	if compact {
+		inactiveTitle = "6. 不活跃成员"
+	}
+	sectionStart(&b, inactiveTitle)
 	if len(data.InactiveMembers) == 0 {
 		b.WriteString(`<p style="margin:0;color:#15803d;font-weight:600;">全员都有提交，给力！</p>`)
 	} else {
@@ -314,17 +355,36 @@ func RenderRuleTemplateHTML(data *TrainingReportData, brand string, mode ...stri
 	}
 	sectionEnd(&b)
 
-	// 8 评价
-	sectionStart(&b, "8. 综合维度评价")
-	for _, line := range dimLines {
-		fmt.Fprintf(&b, `<div style="font-size:13px;color:#0a0a0a;margin:2px 0;">%s</div>`, html.EscapeString(line))
+	// 8 评价（评论参数：AI 或规则生成；compact 顺延为 7）
+	evalTitle := "8. 综合维度评价"
+	if compact {
+		evalTitle = "7. 综合维度评价"
 	}
-	fmt.Fprintf(&b, `<div style="margin-top:10px;font-size:15px;font-weight:600;color:#0a0a0a;">总评 %s</div>`, statusEmoji)
-	b.WriteString(`<ul style="margin:8px 0 0;padding-left:18px;color:#737373;font-size:13px;">`)
-	for _, a := range advice {
-		fmt.Fprintf(&b, `<li style="margin-bottom:4px;">%s</li>`, html.EscapeString(a))
+	sectionStart(&b, evalTitle)
+	if strings.TrimSpace(comment.Headline) != "" {
+		fmt.Fprintf(&b, `<div style="margin:0 0 8px;font-size:15px;font-weight:600;color:#0a0a0a;">%s</div>`, html.EscapeString(comment.Headline))
 	}
-	b.WriteString(`</ul>`)
+	if len(comment.Highlights) > 0 {
+		b.WriteString(`<p style="margin:6px 0 2px;font-size:12px;color:#737373;">亮点</p><ul style="margin:4px 0 0;padding-left:18px;font-size:13px;color:#0a0a0a;">`)
+		for _, h := range comment.Highlights {
+			fmt.Fprintf(&b, `<li style="margin-bottom:4px;">%s</li>`, html.EscapeString(h))
+		}
+		b.WriteString(`</ul>`)
+	}
+	if len(comment.Issues) > 0 {
+		b.WriteString(`<p style="margin:8px 0 2px;font-size:12px;color:#737373;">问题</p><ul style="margin:4px 0 0;padding-left:18px;font-size:13px;color:#0a0a0a;">`)
+		for _, it := range comment.Issues {
+			fmt.Fprintf(&b, `<li style="margin-bottom:4px;">%s</li>`, html.EscapeString(it))
+		}
+		b.WriteString(`</ul>`)
+	}
+	if len(comment.Suggestions) > 0 {
+		b.WriteString(`<p style="margin:8px 0 2px;font-size:12px;color:#737373;">建议</p><ul style="margin:4px 0 0;padding-left:18px;font-size:13px;color:#0a0a0a;">`)
+		for _, s := range comment.Suggestions {
+			fmt.Fprintf(&b, `<li style="margin-bottom:4px;">%s</li>`, html.EscapeString(s))
+		}
+		b.WriteString(`</ul>`)
+	}
 	sectionEnd(&b)
 
 	// Footer
@@ -401,8 +461,8 @@ func ruleComprehensiveEval(data *TrainingReportData, delta int64) (emoji string,
 	lines = append(lines, fmt.Sprintf("· 比赛：%d 场，重点榜 %d 场",
 		len(data.Contests), len(data.ContestRankings)))
 	lines = append(lines, fmt.Sprintf("· 博客：%d 篇", len(data.RecentBlogs)))
-	lines = append(lines, fmt.Sprintf("· 排行：活跃 %d 人（已剔除教练与 0 提交），不活跃 %d 人",
-		len(data.ActiveRanking), len(data.InactiveMembers)))
+	lines = append(lines, fmt.Sprintf("· 排行：有提交 %d 人（已剔除教练），不活跃 %d 人",
+		data.ActiveMembers, len(data.InactiveMembers)))
 
 	if data.TotalSubmits == 0 {
 		advice = append(advice, "本区间零提交，建议组织统一训练日并检查账号绑定。")
@@ -436,43 +496,33 @@ func trainingReportSystemPrompt(mode string) string {
 
 func trainingReportSystemPromptStrict(mode string) string {
 	compact := mode == DetailModeCompact
-	depth := "详版：activeRanking 全表列出有提交成员；不活跃单独一节；标签/做题/动态/博客/比赛都要有实质内容（无数据则写暂无）。"
+	depth := "详版：结合各维度做全面点评，活跃榜/标签/做题/动态/博客/比赛都要有实质评价（无数据写暂无）。"
 	if compact {
-		depth = "简版：活跃榜最多 15 行并写「共 N 人」；八个章节都要有，每节简短。"
+		depth = "简版：突出整体活跃度、环比、关键问题与 2-3 条建议。"
 	}
-	return fmt.Sprintf(`你是 HTML 报告生成器，不是聊天助手。
+	return fmt.Sprintf(`你是训练报告（教练周报）的文案助手，不是聊天助手。
+你的任务：基于给定数据，输出一份报告「评价文案参数」JSON，供系统套模板渲染。
 
 【输出格式 — 违反即失败】
-1. 你的回复必须且只能是一份完整 HTML 文档。
-2. 第一个非空白字符必须是「<」（推荐以 <!DOCTYPE html> 或 <html 开头）。
-3. 禁止输出：思考过程、分析说明、工具调用说明、「现在我已获取…」、Markdown、`+"```"+` 代码围栏、任何 HTML 之外的文字。
-4. 禁止输出半截标签、未闭合的主要结构；必须以 </html> 结束（若以片段输出则至少含完整 table 结构与 8 个章节标题）。
+1. 只输出一个 JSON 对象，不要 Markdown、不要代码围栏、不要任何其它文字。
+2. JSON 结构：
+{"headline":"一句话总评（含合适的 emoji，80 字内）","highlights":["亮点1","亮点2"],"issues":["问题1"],"suggestions":["建议1","建议2"]}
+3. highlights/issues/suggestions 各 0-5 条，单条 100 字内；没有就留空数组。
 
-【版式 — shadcn/ui 浅色主题 + QQ/邮件兼容】
-- table 布局 + 元素上写 style="..." 内联样式
-- 禁止 CSS Grid / Flex / clamp / 复杂 @media
-- 外层 max-width:640px；字号用 px
-- 配色（必须）：页面背景 #fafafa；卡片 #ffffff；主色/按钮 #171717；主色文字 #fafafa；正文 #0a0a0a；次要文字 #737373；边框 #e5e5e5；muted 面 #f5f5f5
-- 卡片：1px 边框 + border-radius:10px；按钮：背景 #171717、白字、radius 8px
-- 禁止 indigo/蓝紫系（如 #4f46e5、#6366f1）
+【铁律 — 防幻觉】
+- 所有数字（提交次数、AC 数、排名、成员数、日期、环比）由系统渲染，你不得在文案中编造或改动任何数字。
+- 只能评价数据中已出现的事实；某维度为空数组就写「暂无」或跳过，禁止编造比赛/博客/成员表现。
+- 禁止输出 HTML、表格、标签代码。
 
-【数据 — 只用用户消息里的 JSON】
-- activeRanking：活跃榜（已剔除教练与 0 提交），禁止只写 Top5 假装全员
-- inactiveMembers：不活跃，禁止进榜
-- teamTags / problemOverview / orgSubmitSample / recentBlogs / contests / dailyTrend
-- 数字与姓名必须与 JSON 一致，禁止编造
-- 若某字段为空数组，对应章节写「暂无」并给主站链接，不要编造比赛/博客
+【数据说明】
+- activeRanking：活跃榜（已剔除教练与 0 提交）
+- inactiveMembers：不活跃成员；teamTags 团队标签；problemOverview 做题概览
+- orgSubmitSample 提交动态；recentBlogs 博客；contests 比赛；dailyTrend 日走势
+- totalSubmits 对比 prevTotalSubmits 即环比
 
-【链接】
-- 姓名：profileUrl 或 https://algo.zhiyuansofts.cn/profile/{username}
-- 更多：动态 /all-activities · 比赛 /contest · 博客 /blog-plaza（域名 https://algo.zhiyuansofts.cn）
-
-【必须 8 节（h2 或加粗标题文字需包含关键词）】
-1 活跃度与趋势  2 活跃成员排行榜  3 知识点  4 做题概览与提交动态
-5 比赛表现  6 知识沉淀  7 不活跃成员  8 综合维度评价
-%s
-
-可选：仅当 JSON 标签为空时，可调用 problem_tags；工具失败则忽略，继续用 JSON，不要在 HTML 里写工具错误。`, depth)
+【点评维度】
+活跃度（有提交占比/环比）、AC 率与榜首、团队知识点、做题广度、比赛表现、博客沉淀、不活跃跟进建议。
+%s`, depth)
 }
 
 func trainingReportUserPrompt(data *TrainingReportData, mode string) string {
@@ -484,19 +534,18 @@ func trainingReportUserPrompt(data *TrainingReportData, mode string) string {
 	payload := *data
 	payload.MemberIDs = nil
 
-	return fmt.Sprintf(`请直接输出 %s 的完整 HTML（从 <!DOCTYPE html> 开始，到 </html> 结束）。
+	return fmt.Sprintf(`请根据以下真实数据，输出 %s 的评价文案参数 JSON（结构见系统提示）。
+【禁止】前言、Markdown、代码围栏；只输出 JSON 对象。
+【数字铁律】数据里的数字由系统渲染，你的文案不得编造或改动任何数字。
 
-【禁止】任何前言、后记、Markdown、代码围栏、工具状态说明。
-【必须使用下列真实数据】activeRanking=%d inactive=%d tags=%d problems=%d feed=%d blogs=%d contests=%d
-范围 %s %s~%s org=%d 提交%d(上期%d) AC%d
+范围 %s %s~%s org=%d 提交%d(上期%d) AC%d 活跃%d/%d
 
 数据 JSON：
 %s`,
 		label,
-		len(data.ActiveRanking), len(data.InactiveMembers), len(data.TeamTags),
-		len(data.ProblemOverview), len(data.OrgSubmitSample), len(data.RecentBlogs), len(data.Contests),
 		data.ScopeLabel, data.StartDate, data.EndDate, data.OrgID,
 		data.TotalSubmits, data.PrevTotalSubmits, data.TotalAC,
+		data.ActiveMembers, data.MemberCount,
 		mustJSON(payload))
 }
 

@@ -88,25 +88,20 @@ func (uc *SummaryUseCase) PersonalLastDay(userId int64) error {
 			},
 		},
 	}
-	// 日报开放题目标签 function calling（与周报/训练报告同一套 problem_tags 工具）
-	toolCtx, terr := ContextWithElevatedAgent(ctx, 0)
-	if terr != nil {
-		log.Warnf("daily elevated agent: %v", terr)
-		toolCtx = ctx
-	}
-	tools := DailyAgentTools(uc.reg, toolCtx)
 	brand := uc.brandTitle(ctx)
-	html, err := uc.chat.Chat(ctx, msgs, tools...)
+	// LLM 只输出评价文案参数，HTML 由统一模板渲染（数字全来自数据层，防幻觉/格式乱）
+	html := ""
+	raw, err := uc.chat.Complete(ctx, msgs)
 	if err != nil {
 		log.Warnf("用户 %d 日报 AI 失败: %v；回退规则模板", userId, err)
 		html = RenderDailyRuleHTML(data, brand)
 	} else {
-		cleaned, ok, reason := SanitizeDailyHTML(html)
-		if !ok {
-			log.Warnf("用户 %d 日报 AI 输出无效: %s；回退规则模板", userId, reason)
+		comment, cerr := ParseAIReportComment(raw)
+		if cerr != nil {
+			log.Warnf("用户 %d 日报 AI 输出无效: %v；回退规则模板", userId, cerr)
 			html = RenderDailyRuleHTML(data, brand)
 		} else {
-			html = cleaned
+			html = RenderDailyHTMLWithComment(data, brand, comment)
 		}
 	}
 	if strings.TrimSpace(html) == "" {

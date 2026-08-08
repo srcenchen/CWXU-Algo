@@ -99,6 +99,12 @@ service Profile {
       get: "/v1/user/profile/staff-org-ids"
     };
   }
+  // 组织教练 userId 列表（agent 训练报告/周报排除教练；内部调用）
+  rpc GetOrgCoachIds (GetOrgCoachIdsReq) returns (GetOrgCoachIdsRes) {
+    option (google.api.http) = {
+      get: "/v1/user/profile/org-coach-ids"
+    };
+  }
   // 题面流水线资格用户（供 core 闸门；内部调用）
   // 默认=非公共域组织成员；可被个人 problem_fetch / problem_ai 覆盖
   rpc GetNonPublicOrgUserIds (GetNonPublicOrgUserIdsReq) returns (GetNonPublicOrgUserIdsRes) {
@@ -410,6 +416,14 @@ message GetStaffOrgIdsReq {
 
 message GetStaffOrgIdsRes {
   repeated int64 orgIds = 1;
+}
+
+message GetOrgCoachIdsReq {
+  int64 orgId = 1;
+}
+
+message GetOrgCoachIdsRes {
+  repeated int64 userIds = 1;
 }
 
 message GetNonPublicOrgUserIdsReq {}
