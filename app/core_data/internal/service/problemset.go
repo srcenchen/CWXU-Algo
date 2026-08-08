@@ -176,7 +176,8 @@ func (s *ProblemsetService) Mine(ctx context.Context, req *pb.MineReq) (*pb.Mine
 	for i := range list {
 		b := s.toBrief(&list[i], uid, liked[list[i].ID], favorited[list[i].ID], false)
 		if checkPID > 0 {
-			b.ContainsProblem = contains[list[i].ID]
+			c := contains[list[i].ID]
+			b.ContainsProblem = &c
 		}
 		items = append(items, b)
 	}

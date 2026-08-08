@@ -174,8 +174,8 @@ type ProblemsetInfo struct {
 	Items       []*ProblemsetItem      `protobuf:"bytes,15,rep,name=items,proto3" json:"items,omitempty"`
 	Locked      bool                   `protobuf:"varint,16,opt,name=locked,proto3" json:"locked,omitempty"`
 	Favorited   bool                   `protobuf:"varint,17,opt,name=favorited,proto3" json:"favorited,omitempty"`
-	// 仅 mine 接口带 problemId 时输出：本题是否已在该题单
-	ContainsProblem bool `protobuf:"varint,18,opt,name=containsProblem,proto3" json:"containsProblem,omitempty"`
+	// 仅 mine 接口带 problemId 时输出：本题是否已在该题单（optional：未请求时整键省略）
+	ContainsProblem *bool `protobuf:"varint,18,opt,name=containsProblem,proto3,oneof" json:"containsProblem,omitempty"`
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
 }
@@ -330,8 +330,8 @@ func (x *ProblemsetInfo) GetFavorited() bool {
 }
 
 func (x *ProblemsetInfo) GetContainsProblem() bool {
-	if x != nil {
-		return x.ContainsProblem
+	if x != nil && x.ContainsProblem != nil {
+		return *x.ContainsProblem
 	}
 	return false
 }
@@ -2404,7 +2404,7 @@ const file_core_v1_problemset_problemset_proto_rawDesc = "" +
 	"\n" +
 	"userStatus\x18\v \x01(\tR\n" +
 	"userStatus\x12\x12\n" +
-	"\x04tags\x18\f \x03(\tR\x04tags\"\xa6\x04\n" +
+	"\x04tags\x18\f \x03(\tR\x04tags\"\xbf\x04\n" +
 	"\x0eProblemsetInfo\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\x03R\x02id\x12\x18\n" +
 	"\aownerId\x18\x02 \x01(\x03R\aownerId\x12\x1c\n" +
@@ -2425,8 +2425,9 @@ const file_core_v1_problemset_problemset_proto_rawDesc = "" +
 	"\tupdatedAt\x18\x0e \x01(\x03R\tupdatedAt\x12<\n" +
 	"\x05items\x18\x0f \x03(\v2&.api.core.v1.problemset.ProblemsetItemR\x05items\x12\x16\n" +
 	"\x06locked\x18\x10 \x01(\bR\x06locked\x12\x1c\n" +
-	"\tfavorited\x18\x11 \x01(\bR\tfavorited\x12(\n" +
-	"\x0fcontainsProblem\x18\x12 \x01(\bR\x0fcontainsProblem\"'\n" +
+	"\tfavorited\x18\x11 \x01(\bR\tfavorited\x12-\n" +
+	"\x0fcontainsProblem\x18\x12 \x01(\bH\x00R\x0fcontainsProblem\x88\x01\x01B\x12\n" +
+	"\x10_containsProblem\"'\n" +
 	"\aMineReq\x12\x1c\n" +
 	"\tproblemId\x18\x01 \x01(\x03R\tproblemId\"y\n" +
 	"\aMineRes\x12\x18\n" +
@@ -2696,6 +2697,7 @@ func file_core_v1_problemset_problemset_proto_init() {
 	if File_core_v1_problemset_problemset_proto != nil {
 		return
 	}
+	file_core_v1_problemset_problemset_proto_msgTypes[1].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{

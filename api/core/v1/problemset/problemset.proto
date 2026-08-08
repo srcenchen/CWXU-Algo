@@ -95,8 +95,8 @@ message ProblemsetInfo {
   repeated ProblemsetItem items = 15;
   bool locked = 16;
   bool favorited = 17;
-  // 仅 mine 接口带 problemId 时输出：本题是否已在该题单
-  bool containsProblem = 18;
+  // 仅 mine 接口带 problemId 时输出：本题是否已在该题单（optional：未请求时整键省略）
+  optional bool containsProblem = 18;
 }
 
 message MineReq {
