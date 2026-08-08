@@ -50,6 +50,8 @@ func FormatSpiderLastError(platform string, err error) string {
 	switch fault {
 	case spiderFaultUser:
 		return fmt.Sprintf("%s：%s。请检查绑定的用户名是否正确", name, reason)
+	case spiderFaultTransient:
+		return fmt.Sprintf("%s：%s。请稍后再试", name, reason)
 	case spiderFaultSystem:
 		return fmt.Sprintf("%s：%s。一般不是账号问题，请稍后再试", name, reason)
 	default:
@@ -59,6 +61,7 @@ func FormatSpiderLastError(platform string, err error) string {
 
 // IsUserSideSpiderErr 判断爬虫失败是否属于「用户侧」（绑定用户名错误等）。
 // 用户侧失败不算平台/系统异常：不计入今日失败、不写 OJ 级最近失败、MQ 不再重试。
+// transient（页面结构变化/需登录/风控）同样按用户侧处理：只提示本人，不刷运维。
 func IsUserSideSpiderErr(platform string, err error) bool {
 	if err == nil {
 		return false
@@ -68,7 +71,7 @@ func IsUserSideSpiderErr(platform string, err error) bool {
 		return false
 	}
 	fault, _ := classifySpiderErr(raw)
-	return fault == spiderFaultUser
+	return fault == spiderFaultUser || fault == spiderFaultTransient
 }
 
 type spiderFaultKind int
@@ -76,6 +79,7 @@ type spiderFaultKind int
 const (
 	spiderFaultUnknown spiderFaultKind = iota
 	spiderFaultUser
+	spiderFaultTransient
 	spiderFaultSystem
 )
 
@@ -119,6 +123,12 @@ func classifySpiderErr(raw string) (spiderFaultKind, string) {
 		if strings.Contains(lower, h) {
 			return spiderFaultUser, "未找到该用户"
 		}
+	}
+
+	// —— 暂态：页面结构变化 / 需要登录 / 风控页 ——
+	// 不 blame 用户名，也不算平台故障；按用户侧处理（只提示本人，不刷运维）
+	if strings.Contains(lower, "未找到 _feinjection") || strings.Contains(lower, "_feinjection") {
+		return spiderFaultTransient, "对方页面暂时无法解析"
 	}
 
 	// —— 系统侧：封禁 / 网关 / 超时 / HTML 墙 ——
