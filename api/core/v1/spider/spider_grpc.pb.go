@@ -32,6 +32,7 @@ const (
 	Spider_UpdatePlatform_FullMethodName         = "/api.core.v1.spider.Spider/UpdatePlatform"
 	Spider_RepairContestCells_FullMethodName     = "/api.core.v1.spider.Spider/RepairContestCells"
 	Spider_GetPlatformUsers_FullMethodName       = "/api.core.v1.spider.Spider/GetPlatformUsers"
+	Spider_RefreshSpider_FullMethodName          = "/api.core.v1.spider.Spider/RefreshSpider"
 )
 
 // SpiderClient is the client API for Spider service.
@@ -62,6 +63,8 @@ type SpiderClient interface {
 	RepairContestCells(ctx context.Context, in *RepairContestCellsReq, opts ...grpc.CallOption) (*RepairContestCellsRes, error)
 	// 站管：某 OJ 的绑定用户列表（仅站管）
 	GetPlatformUsers(ctx context.Context, in *GetPlatformUsersReq, opts ...grpc.CallOption) (*GetPlatformUsersRes, error)
+	// 用户：手动增量刷新自己的 OJ 做题记录（每日限 2 次；返回剩余次数）
+	RefreshSpider(ctx context.Context, in *RefreshSpiderReq, opts ...grpc.CallOption) (*RefreshSpiderRes, error)
 }
 
 type spiderClient struct {
@@ -202,6 +205,16 @@ func (c *spiderClient) GetPlatformUsers(ctx context.Context, in *GetPlatformUser
 	return out, nil
 }
 
+func (c *spiderClient) RefreshSpider(ctx context.Context, in *RefreshSpiderReq, opts ...grpc.CallOption) (*RefreshSpiderRes, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RefreshSpiderRes)
+	err := c.cc.Invoke(ctx, Spider_RefreshSpider_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // SpiderServer is the server API for Spider service.
 // All implementations must embed UnimplementedSpiderServer
 // for forward compatibility.
@@ -230,6 +243,8 @@ type SpiderServer interface {
 	RepairContestCells(context.Context, *RepairContestCellsReq) (*RepairContestCellsRes, error)
 	// 站管：某 OJ 的绑定用户列表（仅站管）
 	GetPlatformUsers(context.Context, *GetPlatformUsersReq) (*GetPlatformUsersRes, error)
+	// 用户：手动增量刷新自己的 OJ 做题记录（每日限 2 次；返回剩余次数）
+	RefreshSpider(context.Context, *RefreshSpiderReq) (*RefreshSpiderRes, error)
 	mustEmbedUnimplementedSpiderServer()
 }
 
@@ -278,6 +293,9 @@ func (UnimplementedSpiderServer) RepairContestCells(context.Context, *RepairCont
 }
 func (UnimplementedSpiderServer) GetPlatformUsers(context.Context, *GetPlatformUsersReq) (*GetPlatformUsersRes, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetPlatformUsers not implemented")
+}
+func (UnimplementedSpiderServer) RefreshSpider(context.Context, *RefreshSpiderReq) (*RefreshSpiderRes, error) {
+	return nil, status.Error(codes.Unimplemented, "method RefreshSpider not implemented")
 }
 func (UnimplementedSpiderServer) mustEmbedUnimplementedSpiderServer() {}
 func (UnimplementedSpiderServer) testEmbeddedByValue()                {}
@@ -534,6 +552,24 @@ func _Spider_GetPlatformUsers_Handler(srv interface{}, ctx context.Context, dec 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Spider_RefreshSpider_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RefreshSpiderReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SpiderServer).RefreshSpider(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Spider_RefreshSpider_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SpiderServer).RefreshSpider(ctx, req.(*RefreshSpiderReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Spider_ServiceDesc is the grpc.ServiceDesc for Spider service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -592,6 +628,10 @@ var Spider_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetPlatformUsers",
 			Handler:    _Spider_GetPlatformUsers_Handler,
+		},
+		{
+			MethodName: "RefreshSpider",
+			Handler:    _Spider_RefreshSpider_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

@@ -55,6 +55,8 @@ type Runtime struct {
 	SmtpStatusAt      int64  `json:"smtpStatusAt"`
 	SmtpErrMsg        string `json:"smtpErrMsg"`
 	OpsNotifyEmails   string `json:"opsNotifyEmails"`
+	// DataDiskPath 运维磁盘统计目录（数据盘挂载点；空=默认 /data，未挂载回退 /）
+	DataDiskPath string `json:"dataDiskPath"`
 }
 
 // Row 与 site_configs 表对齐（轻量，避免依赖 user/internal）
@@ -91,6 +93,7 @@ type Row struct {
 	SmtpStatusAt      int64  `gorm:"column:smtp_status_at"`
 	SmtpErrMsg        string `gorm:"column:smtp_err_msg"`
 	OpsNotifyEmails   string `gorm:"column:ops_notify_emails"`
+	DataDiskPath      string `gorm:"column:data_disk_path"`
 }
 
 func (Row) TableName() string { return "site_configs" }
@@ -146,6 +149,7 @@ func (r *Row) ToRuntime() *Runtime {
 		SmtpStatusAt:      r.SmtpStatusAt,
 		SmtpErrMsg:        r.SmtpErrMsg,
 		OpsNotifyEmails:   strings.TrimSpace(r.OpsNotifyEmails),
+		DataDiskPath:      strings.TrimSpace(r.DataDiskPath),
 	}
 }
 

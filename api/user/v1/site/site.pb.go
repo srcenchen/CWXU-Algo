@@ -244,8 +244,10 @@ type GetAdminConfigRes struct {
 	SmtpErrMsg   string `protobuf:"bytes,48,opt,name=smtp_err_msg,json=smtpErrMsg,proto3" json:"smtp_err_msg,omitempty"`
 	// 运维告警邮件收件人（逗号或换行分隔）；空则不发（OJ 大面积同步出错 / 资源长期占用过高等）
 	OpsNotifyEmails string `protobuf:"bytes,49,opt,name=ops_notify_emails,json=opsNotifyEmails,proto3" json:"ops_notify_emails,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// 运维磁盘统计目录（数据盘挂载点；空=默认 /data，未挂载回退 /）
+	DataDiskPath  string `protobuf:"bytes,50,opt,name=data_disk_path,json=dataDiskPath,proto3" json:"data_disk_path,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *GetAdminConfigRes) Reset() {
@@ -621,6 +623,13 @@ func (x *GetAdminConfigRes) GetOpsNotifyEmails() string {
 	return ""
 }
 
+func (x *GetAdminConfigRes) GetDataDiskPath() string {
+	if x != nil {
+		return x.DataDiskPath
+	}
+	return ""
+}
+
 type UpdateConfigReq struct {
 	state     protoimpl.MessageState `protogen:"open.v1"`
 	SiteTitle string                 `protobuf:"bytes,1,opt,name=site_title,json=siteTitle,proto3" json:"site_title,omitempty"`
@@ -666,8 +675,10 @@ type UpdateConfigReq struct {
 	ClearOjQojPassword   bool   `protobuf:"varint,32,opt,name=clear_oj_qoj_password,json=clearOjQojPassword,proto3" json:"clear_oj_qoj_password,omitempty"`
 	// 运维告警邮件收件人；始终覆盖保存（可清空）
 	OpsNotifyEmails string `protobuf:"bytes,33,opt,name=ops_notify_emails,json=opsNotifyEmails,proto3" json:"ops_notify_emails,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// 运维磁盘统计目录（数据盘挂载点；空=默认 /data，未挂载回退 /）
+	DataDiskPath  string `protobuf:"bytes,34,opt,name=data_disk_path,json=dataDiskPath,proto3" json:"data_disk_path,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *UpdateConfigReq) Reset() {
@@ -927,6 +938,13 @@ func (x *UpdateConfigReq) GetClearOjQojPassword() bool {
 func (x *UpdateConfigReq) GetOpsNotifyEmails() string {
 	if x != nil {
 		return x.OpsNotifyEmails
+	}
+	return ""
+}
+
+func (x *UpdateConfigReq) GetDataDiskPath() string {
+	if x != nil {
+		return x.DataDiskPath
 	}
 	return ""
 }
@@ -1993,7 +2011,7 @@ const file_user_v1_site_site_proto_rawDesc = "" +
 	"\afavicon\x18\x05 \x01(\tR\afavicon\x12\x1d\n" +
 	"\n" +
 	"footer_icp\x18\x06 \x01(\tR\tfooterIcp\"\x13\n" +
-	"\x11GetAdminConfigReq\"\xba\x0f\n" +
+	"\x11GetAdminConfigReq\"\xe0\x0f\n" +
 	"\x11GetAdminConfigRes\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\x03R\x04code\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12\x1d\n" +
@@ -2049,7 +2067,8 @@ const file_user_v1_site_site_proto_rawDesc = "" +
 	"\x0esmtp_status_at\x18/ \x01(\x03R\fsmtpStatusAt\x12 \n" +
 	"\fsmtp_err_msg\x180 \x01(\tR\n" +
 	"smtpErrMsg\x12*\n" +
-	"\x11ops_notify_emails\x181 \x01(\tR\x0fopsNotifyEmails\"\xae\n" +
+	"\x11ops_notify_emails\x181 \x01(\tR\x0fopsNotifyEmails\x12$\n" +
+	"\x0edata_disk_path\x182 \x01(\tR\fdataDiskPath\"\xd4\n" +
 	"\n" +
 	"\x0fUpdateConfigReq\x12\x1d\n" +
 	"\n" +
@@ -2088,7 +2107,8 @@ const file_user_v1_site_site_proto_rawDesc = "" +
 	"\x0foj_qoj_username\x18\x1e \x01(\tR\rojQojUsername\x12&\n" +
 	"\x0foj_qoj_password\x18\x1f \x01(\tR\rojQojPassword\x121\n" +
 	"\x15clear_oj_qoj_password\x18  \x01(\bR\x12clearOjQojPassword\x12*\n" +
-	"\x11ops_notify_emails\x18! \x01(\tR\x0fopsNotifyEmails\"\xb4\x01\n" +
+	"\x11ops_notify_emails\x18! \x01(\tR\x0fopsNotifyEmails\x12$\n" +
+	"\x0edata_disk_path\x18\" \x01(\tR\fdataDiskPath\"\xb4\x01\n" +
 	"\x0fUpdateConfigRes\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\x03R\x04code\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12\x1d\n" +

@@ -1797,6 +1797,25 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/api.core.v1.spider.PurgeSubmitsAndRecrawlRes'
+    /v1/core/spider/refresh:
+        post:
+            tags:
+                - Spider
+            description: 用户：手动增量刷新自己的 OJ 做题记录（每日限 2 次；返回剩余次数）
+            operationId: Spider_RefreshSpider
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/api.core.v1.spider.RefreshSpiderReq'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.core.v1.spider.RefreshSpiderRes'
     /v1/core/spider/repair-contest-cells:
         post:
             tags:
@@ -7913,6 +7932,20 @@ components:
                     type: string
                 enqueuedUsers:
                     type: string
+        api.core.v1.spider.RefreshSpiderReq:
+            type: object
+            properties: {}
+        api.core.v1.spider.RefreshSpiderRes:
+            type: object
+            properties:
+                code:
+                    type: string
+                message:
+                    type: string
+                remaining:
+                    type: integer
+                    description: 今日剩余手动刷新次数（0=已用完）
+                    format: int32
         api.core.v1.spider.RepairContestCellsReq:
             type: object
             properties: {}
@@ -12037,6 +12070,9 @@ components:
                 opsNotifyEmails:
                     type: string
                     description: 运维告警邮件收件人（逗号或换行分隔）；空则不发（OJ 大面积同步出错 / 资源长期占用过高等）
+                dataDiskPath:
+                    type: string
+                    description: 运维磁盘统计目录（数据盘挂载点；空=默认 /data，未挂载回退 /）
         api.user.v1.site.GetConfigRes:
             type: object
             properties:
@@ -12159,6 +12195,9 @@ components:
                 opsNotifyEmails:
                     type: string
                     description: 运维告警邮件收件人；始终覆盖保存（可清空）
+                dataDiskPath:
+                    type: string
+                    description: 运维磁盘统计目录（数据盘挂载点；空=默认 /data，未挂载回退 /）
         api.user.v1.site.UpdateConfigRes:
             type: object
             properties:

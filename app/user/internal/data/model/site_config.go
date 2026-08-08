@@ -29,6 +29,8 @@ type SiteConfig struct {
 	AdminNotifyEmails string `gorm:"type:text;column:admin_notify_emails;comment:审核举报邮件收件人"`
 	// OpsNotifyEmails 运维告警邮件收件人（逗号或换行分隔）；空则不发（OJ 大面积同步出错 / 资源长期占用过高等）
 	OpsNotifyEmails string `gorm:"type:text;column:ops_notify_emails;comment:运维告警邮件收件人"`
+	// DataDiskPath 运维磁盘统计目录（数据盘挂载点；空=默认 /data，未挂载回退 /）
+	DataDiskPath string `gorm:"size:256;column:data_disk_path;comment:运维磁盘统计目录"`
 	// 又拍云图床（博客/题解）；密码经 secretutil 加密存储
 	UpyunBucket   string `gorm:"size:128;column:upyun_bucket;comment:又拍云服务名"`
 	UpyunOperator string `gorm:"size:128;column:upyun_operator;comment:又拍云操作员"`

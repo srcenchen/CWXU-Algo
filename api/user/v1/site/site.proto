@@ -133,6 +133,8 @@ message GetAdminConfigRes {
   string smtp_err_msg = 48;
   // 运维告警邮件收件人（逗号或换行分隔）；空则不发（OJ 大面积同步出错 / 资源长期占用过高等）
   string ops_notify_emails = 49;
+  // 运维磁盘统计目录（数据盘挂载点；空=默认 /data，未挂载回退 /）
+  string data_disk_path = 50;
 }
 
 message UpdateConfigReq {
@@ -179,6 +181,8 @@ message UpdateConfigReq {
   bool clear_oj_qoj_password = 32;
   // 运维告警邮件收件人；始终覆盖保存（可清空）
   string ops_notify_emails = 33;
+  // 运维磁盘统计目录（数据盘挂载点；空=默认 /data，未挂载回退 /）
+  string data_disk_path = 34;
 }
 
 message UpdateConfigRes {

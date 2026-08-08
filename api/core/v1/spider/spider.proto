@@ -79,6 +79,13 @@ service Spider {
       get: "/v1/core/spider/platform-users"
     };
   }
+  // 用户：手动增量刷新自己的 OJ 做题记录（每日限 2 次；返回剩余次数）
+  rpc RefreshSpider (RefreshSpiderReq) returns (RefreshSpiderRes) {
+    option (google.api.http) = {
+      post: "/v1/core/spider/refresh"
+      body: "*"
+    };
+  }
 }
 
 message SetSpiderReq {
@@ -300,5 +307,14 @@ message GetPlatformUsersRes {
   string message = 2;
   int64 total = 3;
   repeated PlatformUserItem list = 4;
+}
+
+message RefreshSpiderReq {}
+
+message RefreshSpiderRes {
+  int64 code = 1;
+  string message = 2;
+  // 今日剩余手动刷新次数（0=已用完）
+  int32 remaining = 3;
 }
 

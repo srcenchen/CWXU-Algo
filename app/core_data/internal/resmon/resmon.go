@@ -8,8 +8,10 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
+	"cwxu-algo/app/common/sitesettings"
 	"cwxu-algo/app/core_data/internal/loadgate"
 
 	"github.com/redis/go-redis/v9"
@@ -65,6 +67,8 @@ var (
 	snap      Snapshot
 	rdb       *redis.Client
 	ncpu      float64
+	// dataDiskPath 运维磁盘统计目录（站点配置 data_disk_path；空=默认 /data）
+	dataDiskPath atomic.Value
 )
 
 // Start 启动后台采样（幂等；在 core_data 启动健康服务时调用）。
@@ -81,12 +85,24 @@ func Start(client *redis.Client) {
 	})
 }
 
+// refreshDataDiskPath 每轮采样前刷新数据盘路径（读站点共享配置，25s 一次成本可忽略）
+func refreshDataDiskPath(client *redis.Client) {
+	path := ""
+	if client != nil {
+		if rt, err := sitesettings.LoadFromRedis(context.Background(), client); err == nil && rt != nil {
+			path = strings.TrimSpace(rt.DataDiskPath)
+		}
+	}
+	dataDiskPath.Store(path)
+}
+
 func loop() {
 	// 首轮丢基线
 	_, _ = cpu.Percent(0, false)
 	ticker := time.NewTicker(SampleInterval)
 	defer ticker.Stop()
 	for range ticker.C {
+		refreshDataDiskPath(rdb)
 		s := collect()
 		mu.Lock()
 		snap = s
@@ -108,8 +124,8 @@ func collect() Snapshot {
 		s.MemUsedPercent = vm.UsedPercent
 		s.MemUsed, s.MemTotal = int64(vm.Used), int64(vm.Total)
 	}
-	// 磁盘（根分区）
-	if du, err := disk.Usage("/"); err == nil {
+	// 磁盘（数据盘 /data 优先，未挂载回退根分区）
+	if du, err := dataDiskUsage(); err == nil {
 		s.DiskUsedPercent = du.UsedPercent
 		s.DiskUsed, s.DiskTotal = int64(du.Used), int64(du.Total)
 	}
@@ -226,9 +242,21 @@ func downsample(samples []Sample, points int) []Sample {
 	return out
 }
 
+// dataDiskUsage 站点配置的数据盘路径优先（空=默认 /data），未挂载回退根分区（运维监控磁盘口径）
+func dataDiskUsage() (*disk.UsageStat, error) {
+	path, _ := dataDiskPath.Load().(string)
+	if strings.TrimSpace(path) == "" {
+		path = "/data"
+	}
+	if du, err := disk.Usage(path); err == nil && du.Total > 0 {
+		return du, nil
+	}
+	return disk.Usage("/")
+}
+
 // DiskRootUsage 供健康接口兜底/校验用（读取失败返回 0）
 func DiskRootUsage() (used, total int64, pct float64) {
-	if du, err := disk.Usage("/"); err == nil {
+	if du, err := dataDiskUsage(); err == nil {
 		return int64(du.Used), int64(du.Total), du.UsedPercent
 	}
 	return 0, 0, 0

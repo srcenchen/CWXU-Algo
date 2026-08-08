@@ -186,6 +186,7 @@ func rowToRuntime(row *model.SiteConfig) *sitesettings.Runtime {
 		OjQojUsername:     strings.TrimSpace(row.OjQojUsername),
 		OjQojPassword:     decrypt(row.OjQojPassword),
 		OpsNotifyEmails:   strings.TrimSpace(row.OpsNotifyEmails),
+		DataDiskPath:      strings.TrimSpace(row.DataDiskPath),
 	}
 }
 
@@ -273,6 +274,7 @@ func (s *SiteService) GetAdminConfig(ctx context.Context, _ *site.GetAdminConfig
 		SmtpStatusAt:          smtpSt.At,
 		SmtpErrMsg:            smtpSt.ErrMsg,
 		OpsNotifyEmails:       row.OpsNotifyEmails,
+		DataDiskPath:          strings.TrimSpace(row.DataDiskPath),
 	}, nil
 }
 
@@ -325,6 +327,8 @@ func (s *SiteService) UpdateConfig(ctx context.Context, req *site.UpdateConfigRe
 	updates["admin_notify_emails"] = strings.TrimSpace(req.AdminNotifyEmails)
 	// 运维告警邮件收件人：整页保存时始终覆盖（允许清空）
 	updates["ops_notify_emails"] = strings.TrimSpace(req.OpsNotifyEmails)
+	// 运维磁盘统计目录：始终覆盖保存（可清空=默认 /data）
+	updates["data_disk_path"] = strings.TrimSpace(req.DataDiskPath)
 	// 又拍云：整页保存非密钥字段
 	updates["upyun_bucket"] = strings.TrimSpace(req.UpyunBucket)
 	updates["upyun_operator"] = strings.TrimSpace(req.UpyunOperator)

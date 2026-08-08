@@ -828,6 +828,66 @@ func (s SpiderService) GetPlatformUsers(ctx context.Context, req *spider.GetPlat
 	return &spider.GetPlatformUsersRes{Code: 0, Message: "success", Total: total, List: list}, nil
 }
 
+// manualRefreshDailyLimit 每个用户每日手动刷新做题记录次数
+const manualRefreshDailyLimit = 2
+
+// manualRefreshLoc 手动刷新限流按上海自然日
+var manualRefreshLoc = func() *time.Location {
+	loc, err := time.LoadLocation("Asia/Shanghai")
+	if err != nil {
+		return time.FixedZone("CST", 8*3600)
+	}
+	return loc
+}()
+
+// manualRefreshKeyTTL 计数 key 存活到次日 0 点（+1 分钟缓冲），过期自动清零
+func manualRefreshKeyTTL() time.Duration {
+	now := time.Now().In(manualRefreshLoc)
+	next := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, manualRefreshLoc).AddDate(0, 0, 1)
+	return time.Until(next) + time.Minute
+}
+
+// RefreshSpider 用户手动增量刷新自己的 OJ 做题记录（每日限 manualRefreshDailyLimit 次）。
+// 计数用 Redis INCR 原子自增；超出限额返回剩余 0 并拒绝入队。
+func (s SpiderService) RefreshSpider(ctx context.Context, _ *spider.RefreshSpiderReq) (*spider.RefreshSpiderRes, error) {
+	uid := auth.GetCurrentUserId(ctx)
+	if uid == 0 {
+		return &spider.RefreshSpiderRes{Code: 1, Message: "请先登录"}, nil
+	}
+	if s.rdb == nil {
+		return &spider.RefreshSpiderRes{Code: 1, Message: "服务未就绪，稍后再试"}, nil
+	}
+	day := time.Now().In(manualRefreshLoc).Format("20060102")
+	key := fmt.Sprintf("spider:manual_refresh:%d:%s", uid, day)
+	used, err := s.rdb.Incr(ctx, key).Result()
+	if err != nil {
+		log.Warnf("RefreshSpider incr user=%d: %v", uid, err)
+		return &spider.RefreshSpiderRes{Code: 1, Message: "刷新失败，稍后再试"}, nil
+	}
+	if used == 1 {
+		_ = s.rdb.Expire(ctx, key, manualRefreshKeyTTL()).Err()
+	}
+	remaining := manualRefreshDailyLimit - int(used)
+	if remaining < 0 {
+		remaining = 0
+	}
+	if used > manualRefreshDailyLimit {
+		// 已用完：不入队，提示剩余次数
+		return &spider.RefreshSpiderRes{
+			Code:      1,
+			Message:   fmt.Sprintf("每个用户每日拥有两次手动刷新做题记录次数，当前还剩下 %d 次", remaining),
+			Remaining: int32(remaining),
+		}, nil
+	}
+	// 增量刷新：入队该用户全部已绑定平台（needAll=false，只拉增量）
+	s.spider.Do(int64(uid), false)
+	return &spider.RefreshSpiderRes{
+		Code:      0,
+		Message:   fmt.Sprintf("已开始刷新做题记录，今日剩余 %d 次", remaining),
+		Remaining: int32(remaining),
+	}, nil
+}
+
 // TogglePlatform 站管：暂停 / 恢复某 OJ 的爬虫同步（仅站点管理员）。
 // 暂停不清空任何绑定或历史数据，只是不再入队/消费该平台；绑定用户仍可继续绑定。
 func (s SpiderService) TogglePlatform(ctx context.Context, req *spider.TogglePlatformReq) (*spider.TogglePlatformRes, error) {
