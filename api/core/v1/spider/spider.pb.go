@@ -1550,6 +1550,222 @@ func (x *RepairContestCellsRes) GetData() map[string]int32 {
 	return nil
 }
 
+type GetPlatformUsersReq struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Platform      string                 `protobuf:"bytes,1,opt,name=platform,proto3" json:"platform,omitempty"`
+	Offset        int64                  `protobuf:"varint,2,opt,name=offset,proto3" json:"offset,omitempty"`
+	Limit         int64                  `protobuf:"varint,3,opt,name=limit,proto3" json:"limit,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetPlatformUsersReq) Reset() {
+	*x = GetPlatformUsersReq{}
+	mi := &file_core_v1_spider_spider_proto_msgTypes[25]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetPlatformUsersReq) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetPlatformUsersReq) ProtoMessage() {}
+
+func (x *GetPlatformUsersReq) ProtoReflect() protoreflect.Message {
+	mi := &file_core_v1_spider_spider_proto_msgTypes[25]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetPlatformUsersReq.ProtoReflect.Descriptor instead.
+func (*GetPlatformUsersReq) Descriptor() ([]byte, []int) {
+	return file_core_v1_spider_spider_proto_rawDescGZIP(), []int{25}
+}
+
+func (x *GetPlatformUsersReq) GetPlatform() string {
+	if x != nil {
+		return x.Platform
+	}
+	return ""
+}
+
+func (x *GetPlatformUsersReq) GetOffset() int64 {
+	if x != nil {
+		return x.Offset
+	}
+	return 0
+}
+
+func (x *GetPlatformUsersReq) GetLimit() int64 {
+	if x != nil {
+		return x.Limit
+	}
+	return 0
+}
+
+type PlatformUserItem struct {
+	state  protoimpl.MessageState `protogen:"open.v1"`
+	UserId int64                  `protobuf:"varint,1,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	// 站内展示名（无则回退站内用户名）
+	Name string `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	// 站内用户名
+	Username string `protobuf:"bytes,3,opt,name=username,proto3" json:"username,omitempty"`
+	// 绑定的该 OJ 账号
+	OjUsername string `protobuf:"bytes,4,opt,name=oj_username,json=ojUsername,proto3" json:"oj_username,omitempty"`
+	// 平台当前 rating（整数；has_rating=false 时忽略）
+	Rating        int32 `protobuf:"varint,5,opt,name=rating,proto3" json:"rating,omitempty"`
+	HasRating     bool  `protobuf:"varint,6,opt,name=has_rating,json=hasRating,proto3" json:"has_rating,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PlatformUserItem) Reset() {
+	*x = PlatformUserItem{}
+	mi := &file_core_v1_spider_spider_proto_msgTypes[26]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PlatformUserItem) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PlatformUserItem) ProtoMessage() {}
+
+func (x *PlatformUserItem) ProtoReflect() protoreflect.Message {
+	mi := &file_core_v1_spider_spider_proto_msgTypes[26]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PlatformUserItem.ProtoReflect.Descriptor instead.
+func (*PlatformUserItem) Descriptor() ([]byte, []int) {
+	return file_core_v1_spider_spider_proto_rawDescGZIP(), []int{26}
+}
+
+func (x *PlatformUserItem) GetUserId() int64 {
+	if x != nil {
+		return x.UserId
+	}
+	return 0
+}
+
+func (x *PlatformUserItem) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *PlatformUserItem) GetUsername() string {
+	if x != nil {
+		return x.Username
+	}
+	return ""
+}
+
+func (x *PlatformUserItem) GetOjUsername() string {
+	if x != nil {
+		return x.OjUsername
+	}
+	return ""
+}
+
+func (x *PlatformUserItem) GetRating() int32 {
+	if x != nil {
+		return x.Rating
+	}
+	return 0
+}
+
+func (x *PlatformUserItem) GetHasRating() bool {
+	if x != nil {
+		return x.HasRating
+	}
+	return false
+}
+
+type GetPlatformUsersRes struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Code          int64                  `protobuf:"varint,1,opt,name=code,proto3" json:"code,omitempty"`
+	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	Total         int64                  `protobuf:"varint,3,opt,name=total,proto3" json:"total,omitempty"`
+	List          []*PlatformUserItem    `protobuf:"bytes,4,rep,name=list,proto3" json:"list,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetPlatformUsersRes) Reset() {
+	*x = GetPlatformUsersRes{}
+	mi := &file_core_v1_spider_spider_proto_msgTypes[27]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetPlatformUsersRes) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetPlatformUsersRes) ProtoMessage() {}
+
+func (x *GetPlatformUsersRes) ProtoReflect() protoreflect.Message {
+	mi := &file_core_v1_spider_spider_proto_msgTypes[27]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetPlatformUsersRes.ProtoReflect.Descriptor instead.
+func (*GetPlatformUsersRes) Descriptor() ([]byte, []int) {
+	return file_core_v1_spider_spider_proto_rawDescGZIP(), []int{27}
+}
+
+func (x *GetPlatformUsersRes) GetCode() int64 {
+	if x != nil {
+		return x.Code
+	}
+	return 0
+}
+
+func (x *GetPlatformUsersRes) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
+func (x *GetPlatformUsersRes) GetTotal() int64 {
+	if x != nil {
+		return x.Total
+	}
+	return 0
+}
+
+func (x *GetPlatformUsersRes) GetList() []*PlatformUserItem {
+	if x != nil {
+		return x.List
+	}
+	return nil
+}
+
 type GetSpiderRep_Data struct {
 	state    protoimpl.MessageState `protogen:"open.v1"`
 	Platform string                 `protobuf:"bytes,1,opt,name=platform,proto3" json:"platform,omitempty"`
@@ -1570,7 +1786,7 @@ type GetSpiderRep_Data struct {
 
 func (x *GetSpiderRep_Data) Reset() {
 	*x = GetSpiderRep_Data{}
-	mi := &file_core_v1_spider_spider_proto_msgTypes[25]
+	mi := &file_core_v1_spider_spider_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1582,7 +1798,7 @@ func (x *GetSpiderRep_Data) String() string {
 func (*GetSpiderRep_Data) ProtoMessage() {}
 
 func (x *GetSpiderRep_Data) ProtoReflect() protoreflect.Message {
-	mi := &file_core_v1_spider_spider_proto_msgTypes[25]
+	mi := &file_core_v1_spider_spider_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1780,7 +1996,25 @@ const file_core_v1_spider_spider_proto_rawDesc = "" +
 	"\x04data\x18\x03 \x03(\v23.api.core.v1.spider.RepairContestCellsRes.DataEntryR\x04data\x1a7\n" +
 	"\tDataEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\x05R\x05value:\x028\x012\xef\v\n" +
+	"\x05value\x18\x02 \x01(\x05R\x05value:\x028\x01\"_\n" +
+	"\x13GetPlatformUsersReq\x12\x1a\n" +
+	"\bplatform\x18\x01 \x01(\tR\bplatform\x12\x16\n" +
+	"\x06offset\x18\x02 \x01(\x03R\x06offset\x12\x14\n" +
+	"\x05limit\x18\x03 \x01(\x03R\x05limit\"\xb3\x01\n" +
+	"\x10PlatformUserItem\x12\x17\n" +
+	"\auser_id\x18\x01 \x01(\x03R\x06userId\x12\x12\n" +
+	"\x04name\x18\x02 \x01(\tR\x04name\x12\x1a\n" +
+	"\busername\x18\x03 \x01(\tR\busername\x12\x1f\n" +
+	"\voj_username\x18\x04 \x01(\tR\n" +
+	"ojUsername\x12\x16\n" +
+	"\x06rating\x18\x05 \x01(\x05R\x06rating\x12\x1d\n" +
+	"\n" +
+	"has_rating\x18\x06 \x01(\bR\thasRating\"\x93\x01\n" +
+	"\x13GetPlatformUsersRes\x12\x12\n" +
+	"\x04code\x18\x01 \x01(\x03R\x04code\x12\x18\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\x12\x14\n" +
+	"\x05total\x18\x03 \x01(\x03R\x05total\x128\n" +
+	"\x04list\x18\x04 \x03(\v2$.api.core.v1.spider.PlatformUserItemR\x04list2\xfe\f\n" +
 	"\x06Spider\x12o\n" +
 	"\tSetSpider\x12 .api.core.v1.spider.SetSpiderReq\x1a .api.core.v1.spider.SetSpiderRep\"\x1e\x82\xd3\xe4\x93\x02\x18:\x01*\"\x13/v1/core/spider/set\x12Q\n" +
 	"\tGetSpider\x12 .api.core.v1.spider.GetSpiderReq\x1a .api.core.v1.spider.GetSpiderRep\"\x00\x12i\n" +
@@ -1793,7 +2027,8 @@ const file_core_v1_spider_spider_proto_rawDesc = "" +
 	"\x10GetSpiderMonitor\x12$.api.core.v1.spider.SpiderMonitorReq\x1a$.api.core.v1.spider.SpiderMonitorRes\"\x1f\x82\xd3\xe4\x93\x02\x19\x12\x17/v1/core/spider/monitor\x12\x8a\x01\n" +
 	"\x0eTogglePlatform\x12%.api.core.v1.spider.TogglePlatformReq\x1a%.api.core.v1.spider.TogglePlatformRes\"*\x82\xd3\xe4\x93\x02$:\x01*\"\x1f/v1/core/spider/toggle-platform\x12\x8a\x01\n" +
 	"\x0eUpdatePlatform\x12%.api.core.v1.spider.UpdatePlatformReq\x1a%.api.core.v1.spider.UpdatePlatformRes\"*\x82\xd3\xe4\x93\x02$:\x01*\"\x1f/v1/core/spider/update-platform\x12\x9b\x01\n" +
-	"\x12RepairContestCells\x12).api.core.v1.spider.RepairContestCellsReq\x1a).api.core.v1.spider.RepairContestCellsRes\"/\x82\xd3\xe4\x93\x02):\x01*\"$/v1/core/spider/repair-contest-cellsB;\n" +
+	"\x12RepairContestCells\x12).api.core.v1.spider.RepairContestCellsReq\x1a).api.core.v1.spider.RepairContestCellsRes\"/\x82\xd3\xe4\x93\x02):\x01*\"$/v1/core/spider/repair-contest-cells\x12\x8c\x01\n" +
+	"\x10GetPlatformUsers\x12'.api.core.v1.spider.GetPlatformUsersReq\x1a'.api.core.v1.spider.GetPlatformUsersRes\"&\x82\xd3\xe4\x93\x02 \x12\x1e/v1/core/spider/platform-usersB;\n" +
 	"\x12api.core.v1.spiderP\x01Z#cwxu-algo/api/core/v1/spider;spiderb\x06proto3"
 
 var (
@@ -1808,7 +2043,7 @@ func file_core_v1_spider_spider_proto_rawDescGZIP() []byte {
 	return file_core_v1_spider_spider_proto_rawDescData
 }
 
-var file_core_v1_spider_spider_proto_msgTypes = make([]protoimpl.MessageInfo, 27)
+var file_core_v1_spider_spider_proto_msgTypes = make([]protoimpl.MessageInfo, 30)
 var file_core_v1_spider_spider_proto_goTypes = []any{
 	(*SetSpiderReq)(nil),              // 0: api.core.v1.spider.SetSpiderReq
 	(*SetSpiderRep)(nil),              // 1: api.core.v1.spider.SetSpiderRep
@@ -1835,42 +2070,48 @@ var file_core_v1_spider_spider_proto_goTypes = []any{
 	(*UpdatePlatformRes)(nil),         // 22: api.core.v1.spider.UpdatePlatformRes
 	(*RepairContestCellsReq)(nil),     // 23: api.core.v1.spider.RepairContestCellsReq
 	(*RepairContestCellsRes)(nil),     // 24: api.core.v1.spider.RepairContestCellsRes
-	(*GetSpiderRep_Data)(nil),         // 25: api.core.v1.spider.GetSpiderRep.Data
-	nil,                               // 26: api.core.v1.spider.RepairContestCellsRes.DataEntry
+	(*GetPlatformUsersReq)(nil),       // 25: api.core.v1.spider.GetPlatformUsersReq
+	(*PlatformUserItem)(nil),          // 26: api.core.v1.spider.PlatformUserItem
+	(*GetPlatformUsersRes)(nil),       // 27: api.core.v1.spider.GetPlatformUsersRes
+	(*GetSpiderRep_Data)(nil),         // 28: api.core.v1.spider.GetSpiderRep.Data
+	nil,                               // 29: api.core.v1.spider.RepairContestCellsRes.DataEntry
 }
 var file_core_v1_spider_spider_proto_depIdxs = []int32{
-	25, // 0: api.core.v1.spider.GetSpiderRep.data:type_name -> api.core.v1.spider.GetSpiderRep.Data
+	28, // 0: api.core.v1.spider.GetSpiderRep.data:type_name -> api.core.v1.spider.GetSpiderRep.Data
 	18, // 1: api.core.v1.spider.SpiderMonitorRes.platforms:type_name -> api.core.v1.spider.SpiderPlatformStat
-	26, // 2: api.core.v1.spider.RepairContestCellsRes.data:type_name -> api.core.v1.spider.RepairContestCellsRes.DataEntry
-	0,  // 3: api.core.v1.spider.Spider.SetSpider:input_type -> api.core.v1.spider.SetSpiderReq
-	2,  // 4: api.core.v1.spider.Spider.GetSpider:input_type -> api.core.v1.spider.GetSpiderReq
-	4,  // 5: api.core.v1.spider.Spider.Update:input_type -> api.core.v1.spider.UpdateReq
-	6,  // 6: api.core.v1.spider.Spider.UpdateAll:input_type -> api.core.v1.spider.UpdateAllReq
-	8,  // 7: api.core.v1.spider.Spider.PurgeUserData:input_type -> api.core.v1.spider.PurgeUserDataReq
-	10, // 8: api.core.v1.spider.Spider.SubmitInventory:input_type -> api.core.v1.spider.SubmitInventoryReq
-	12, // 9: api.core.v1.spider.Spider.PurgeSubmitsAndRecrawl:input_type -> api.core.v1.spider.PurgeSubmitsAndRecrawlReq
-	14, // 10: api.core.v1.spider.Spider.EnqueueUserSpider:input_type -> api.core.v1.spider.EnqueueUserSpiderReq
-	16, // 11: api.core.v1.spider.Spider.GetSpiderMonitor:input_type -> api.core.v1.spider.SpiderMonitorReq
-	19, // 12: api.core.v1.spider.Spider.TogglePlatform:input_type -> api.core.v1.spider.TogglePlatformReq
-	21, // 13: api.core.v1.spider.Spider.UpdatePlatform:input_type -> api.core.v1.spider.UpdatePlatformReq
-	23, // 14: api.core.v1.spider.Spider.RepairContestCells:input_type -> api.core.v1.spider.RepairContestCellsReq
-	1,  // 15: api.core.v1.spider.Spider.SetSpider:output_type -> api.core.v1.spider.SetSpiderRep
-	3,  // 16: api.core.v1.spider.Spider.GetSpider:output_type -> api.core.v1.spider.GetSpiderRep
-	5,  // 17: api.core.v1.spider.Spider.Update:output_type -> api.core.v1.spider.UpdateRes
-	7,  // 18: api.core.v1.spider.Spider.UpdateAll:output_type -> api.core.v1.spider.UpdateAllRes
-	9,  // 19: api.core.v1.spider.Spider.PurgeUserData:output_type -> api.core.v1.spider.PurgeUserDataRes
-	11, // 20: api.core.v1.spider.Spider.SubmitInventory:output_type -> api.core.v1.spider.SubmitInventoryRes
-	13, // 21: api.core.v1.spider.Spider.PurgeSubmitsAndRecrawl:output_type -> api.core.v1.spider.PurgeSubmitsAndRecrawlRes
-	15, // 22: api.core.v1.spider.Spider.EnqueueUserSpider:output_type -> api.core.v1.spider.EnqueueUserSpiderRes
-	17, // 23: api.core.v1.spider.Spider.GetSpiderMonitor:output_type -> api.core.v1.spider.SpiderMonitorRes
-	20, // 24: api.core.v1.spider.Spider.TogglePlatform:output_type -> api.core.v1.spider.TogglePlatformRes
-	22, // 25: api.core.v1.spider.Spider.UpdatePlatform:output_type -> api.core.v1.spider.UpdatePlatformRes
-	24, // 26: api.core.v1.spider.Spider.RepairContestCells:output_type -> api.core.v1.spider.RepairContestCellsRes
-	15, // [15:27] is the sub-list for method output_type
-	3,  // [3:15] is the sub-list for method input_type
-	3,  // [3:3] is the sub-list for extension type_name
-	3,  // [3:3] is the sub-list for extension extendee
-	0,  // [0:3] is the sub-list for field type_name
+	29, // 2: api.core.v1.spider.RepairContestCellsRes.data:type_name -> api.core.v1.spider.RepairContestCellsRes.DataEntry
+	26, // 3: api.core.v1.spider.GetPlatformUsersRes.list:type_name -> api.core.v1.spider.PlatformUserItem
+	0,  // 4: api.core.v1.spider.Spider.SetSpider:input_type -> api.core.v1.spider.SetSpiderReq
+	2,  // 5: api.core.v1.spider.Spider.GetSpider:input_type -> api.core.v1.spider.GetSpiderReq
+	4,  // 6: api.core.v1.spider.Spider.Update:input_type -> api.core.v1.spider.UpdateReq
+	6,  // 7: api.core.v1.spider.Spider.UpdateAll:input_type -> api.core.v1.spider.UpdateAllReq
+	8,  // 8: api.core.v1.spider.Spider.PurgeUserData:input_type -> api.core.v1.spider.PurgeUserDataReq
+	10, // 9: api.core.v1.spider.Spider.SubmitInventory:input_type -> api.core.v1.spider.SubmitInventoryReq
+	12, // 10: api.core.v1.spider.Spider.PurgeSubmitsAndRecrawl:input_type -> api.core.v1.spider.PurgeSubmitsAndRecrawlReq
+	14, // 11: api.core.v1.spider.Spider.EnqueueUserSpider:input_type -> api.core.v1.spider.EnqueueUserSpiderReq
+	16, // 12: api.core.v1.spider.Spider.GetSpiderMonitor:input_type -> api.core.v1.spider.SpiderMonitorReq
+	19, // 13: api.core.v1.spider.Spider.TogglePlatform:input_type -> api.core.v1.spider.TogglePlatformReq
+	21, // 14: api.core.v1.spider.Spider.UpdatePlatform:input_type -> api.core.v1.spider.UpdatePlatformReq
+	23, // 15: api.core.v1.spider.Spider.RepairContestCells:input_type -> api.core.v1.spider.RepairContestCellsReq
+	25, // 16: api.core.v1.spider.Spider.GetPlatformUsers:input_type -> api.core.v1.spider.GetPlatformUsersReq
+	1,  // 17: api.core.v1.spider.Spider.SetSpider:output_type -> api.core.v1.spider.SetSpiderRep
+	3,  // 18: api.core.v1.spider.Spider.GetSpider:output_type -> api.core.v1.spider.GetSpiderRep
+	5,  // 19: api.core.v1.spider.Spider.Update:output_type -> api.core.v1.spider.UpdateRes
+	7,  // 20: api.core.v1.spider.Spider.UpdateAll:output_type -> api.core.v1.spider.UpdateAllRes
+	9,  // 21: api.core.v1.spider.Spider.PurgeUserData:output_type -> api.core.v1.spider.PurgeUserDataRes
+	11, // 22: api.core.v1.spider.Spider.SubmitInventory:output_type -> api.core.v1.spider.SubmitInventoryRes
+	13, // 23: api.core.v1.spider.Spider.PurgeSubmitsAndRecrawl:output_type -> api.core.v1.spider.PurgeSubmitsAndRecrawlRes
+	15, // 24: api.core.v1.spider.Spider.EnqueueUserSpider:output_type -> api.core.v1.spider.EnqueueUserSpiderRes
+	17, // 25: api.core.v1.spider.Spider.GetSpiderMonitor:output_type -> api.core.v1.spider.SpiderMonitorRes
+	20, // 26: api.core.v1.spider.Spider.TogglePlatform:output_type -> api.core.v1.spider.TogglePlatformRes
+	22, // 27: api.core.v1.spider.Spider.UpdatePlatform:output_type -> api.core.v1.spider.UpdatePlatformRes
+	24, // 28: api.core.v1.spider.Spider.RepairContestCells:output_type -> api.core.v1.spider.RepairContestCellsRes
+	27, // 29: api.core.v1.spider.Spider.GetPlatformUsers:output_type -> api.core.v1.spider.GetPlatformUsersRes
+	17, // [17:30] is the sub-list for method output_type
+	4,  // [4:17] is the sub-list for method input_type
+	4,  // [4:4] is the sub-list for extension type_name
+	4,  // [4:4] is the sub-list for extension extendee
+	0,  // [0:4] is the sub-list for field type_name
 }
 
 func init() { file_core_v1_spider_spider_proto_init() }
@@ -1884,7 +2125,7 @@ func file_core_v1_spider_spider_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_core_v1_spider_spider_proto_rawDesc), len(file_core_v1_spider_spider_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   27,
+			NumMessages:   30,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

@@ -1752,6 +1752,32 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/api.core.v1.spider.SpiderMonitorRes'
+    /v1/core/spider/platform-users:
+        get:
+            tags:
+                - Spider
+            description: 站管：某 OJ 的绑定用户列表（仅站管）
+            operationId: Spider_GetPlatformUsers
+            parameters:
+                - name: platform
+                  in: query
+                  schema:
+                    type: string
+                - name: offset
+                  in: query
+                  schema:
+                    type: string
+                - name: limit
+                  in: query
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.core.v1.spider.GetPlatformUsersRes'
     /v1/core/spider/purge-submits-and-recrawl:
         post:
             tags:
@@ -7830,6 +7856,39 @@ components:
                     type: string
                 data:
                     $ref: '#/components/schemas/api.core.v1.problemset.ProblemsetInfo'
+        api.core.v1.spider.GetPlatformUsersRes:
+            type: object
+            properties:
+                code:
+                    type: string
+                message:
+                    type: string
+                total:
+                    type: string
+                list:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/api.core.v1.spider.PlatformUserItem'
+        api.core.v1.spider.PlatformUserItem:
+            type: object
+            properties:
+                userId:
+                    type: string
+                name:
+                    type: string
+                    description: 站内展示名（无则回退站内用户名）
+                username:
+                    type: string
+                    description: 站内用户名
+                ojUsername:
+                    type: string
+                    description: 绑定的该 OJ 账号
+                rating:
+                    type: integer
+                    description: 平台当前 rating（整数；has_rating=false 时忽略）
+                    format: int32
+                hasRating:
+                    type: boolean
         api.core.v1.spider.PurgeSubmitsAndRecrawlReq:
             type: object
             properties:

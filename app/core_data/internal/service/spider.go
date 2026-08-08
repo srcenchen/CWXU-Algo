@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"cwxu-algo/api/core/v1/spider"
+	"cwxu-algo/api/user/v1/profile"
+	"cwxu-algo/app/common/discovery"
 	"cwxu-algo/app/common/opsmetrics"
 	"cwxu-algo/app/common/rbac"
 	"cwxu-algo/app/common/sitesettings"
@@ -17,6 +19,7 @@ import (
 	"cwxu-algo/app/core_data/internal/data"
 	"cwxu-algo/app/core_data/internal/data/dal"
 	"cwxu-algo/app/core_data/internal/data/model"
+	"cwxu-algo/app/core_data/internal/userrpc"
 	spiderregistry "cwxu-algo/app/core_data/internal/spider"
 	calspider "cwxu-algo/app/core_data/internal/spider/calendar"
 	"cwxu-algo/app/core_data/task"
@@ -39,6 +42,7 @@ type SpiderService struct {
 	db     *gorm.DB
 	rdb    *redis.Client
 	spider *task.SpiderTask
+	reg    *discovery.Register
 }
 
 func (s SpiderService) allow(ctx context.Context, key string, interval time.Duration) bool {
@@ -600,7 +604,7 @@ func (s SpiderService) PurgeUserData(ctx context.Context, req *spider.PurgeUserD
 	return &spider.PurgeUserDataRes{Code: 0, Message: "已清空该用户的训练与绑定数据"}, nil
 }
 
-func NewSpiderService(data *data.Data, spider *task.SpiderTask) *SpiderService {
+func NewSpiderService(data *data.Data, spider *task.SpiderTask, reg *discovery.Register) *SpiderService {
 	// 进程启动清除残留 purge 锁（上次崩溃 / 未 defer 的旧版本）
 	if data != nil {
 		ClearPurgeLock(data.RDB)
@@ -609,6 +613,7 @@ func NewSpiderService(data *data.Data, spider *task.SpiderTask) *SpiderService {
 		db:     data.DB,
 		rdb:    data.RDB,
 		spider: spider,
+		reg:    reg,
 	}
 }
 
@@ -743,6 +748,84 @@ func (s SpiderService) GetSpiderMonitor(ctx context.Context, _ *spider.SpiderMon
 		Platforms:   stats,
 		CollectedAt: now.Unix(),
 	}, nil
+}
+
+// GetPlatformUsers 站管：某 OJ 的绑定用户列表（含站内展示名 + 绑定的 OJ 账号）
+func (s SpiderService) GetPlatformUsers(ctx context.Context, req *spider.GetPlatformUsersReq) (*spider.GetPlatformUsersRes, error) {
+	if !auth.HasPerm(ctx, rbac.PermSiteConfigRead) {
+		return &spider.GetPlatformUsersRes{Code: 1, Message: "需要查看站点配置权限"}, nil
+	}
+	platform := strings.TrimSpace(req.GetPlatform())
+	if platform == "" {
+		return &spider.GetPlatformUsersRes{Code: 1, Message: "platform 不能为空"}, nil
+	}
+	platform = calspider.NormalizePlatform(platform)
+	limit := int(req.GetLimit())
+	if limit <= 0 {
+		limit = 20
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	offset := int(req.GetOffset())
+	if offset < 0 {
+		offset = 0
+	}
+
+	var total int64
+	if err := s.db.WithContext(ctx).Model(&model.Platform{}).
+		Where("platform = ?", platform).Count(&total).Error; err != nil {
+		log.Warnf("GetPlatformUsers count %s: %v", platform, err)
+		return &spider.GetPlatformUsersRes{Code: 1, Message: "查询失败"}, nil
+	}
+	var rows []model.Platform
+	if err := s.db.WithContext(ctx).Where("platform = ?", platform).
+		Order("id ASC").Offset(offset).Limit(limit).Find(&rows).Error; err != nil {
+		log.Warnf("GetPlatformUsers list %s: %v", platform, err)
+		return &spider.GetPlatformUsersRes{Code: 1, Message: "查询失败"}, nil
+	}
+
+	// 批量取站内展示名（user 服务 GetByIds，带当前组织）
+	nameMap := map[int64]string{}
+	if len(rows) > 0 && s.reg != nil {
+		if cli, err := userrpc.ProfileClient(&s.reg.Reg); err == nil && cli != nil {
+			ids := make([]int64, 0, len(rows))
+			for _, r := range rows {
+				ids = append(ids, r.UserID)
+			}
+			var orgID int64
+			if pd := auth.GetCurrentUser(ctx); pd != nil {
+				orgID = int64(pd.OrgID)
+			}
+			res, err := cli.GetByIds(ctx, &profile.GetByIdsReq{UserIds: ids, OrgId: orgID})
+			if err != nil {
+				log.Warnf("GetPlatformUsers GetByIds: %v", err)
+			} else {
+				for _, p := range res.Profiles {
+					name := strings.TrimSpace(p.Name)
+					if name == "" {
+						name = strings.TrimSpace(p.Username)
+					}
+					nameMap[p.UserId] = name
+				}
+			}
+		}
+	}
+
+	list := make([]*spider.PlatformUserItem, 0, len(rows))
+	for _, r := range rows {
+		item := &spider.PlatformUserItem{
+			UserId:     r.UserID,
+			Name:       nameMap[r.UserID],
+			Username:   nameMap[r.UserID],
+			OjUsername: r.Username,
+			Rating:     int32(r.Rating),
+			HasRating:  r.HasRating,
+		}
+		// 展示名与站内用户名分离：name 无展示名时回退 username（前端展示用 name）
+		list = append(list, item)
+	}
+	return &spider.GetPlatformUsersRes{Code: 0, Message: "success", Total: total, List: list}, nil
 }
 
 // TogglePlatform 站管：暂停 / 恢复某 OJ 的爬虫同步（仅站点管理员）。

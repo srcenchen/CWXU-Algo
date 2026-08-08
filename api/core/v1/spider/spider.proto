@@ -73,6 +73,12 @@ service Spider {
       body: "*"
     };
   }
+  // 站管：某 OJ 的绑定用户列表（仅站管）
+  rpc GetPlatformUsers (GetPlatformUsersReq) returns (GetPlatformUsersRes) {
+    option (google.api.http) = {
+      get: "/v1/core/spider/platform-users"
+    };
+  }
 }
 
 message SetSpiderReq {
@@ -268,5 +274,31 @@ message RepairContestCellsRes {
   string message = 2;
   // 各项修复计数（key: submit_external_id / practice_cells_to_upsolve / relative_sec_updated）
   map<string, int32> data = 3;
+}
+
+message GetPlatformUsersReq {
+  string platform = 1;
+  int64 offset = 2;
+  int64 limit = 3;
+}
+
+message PlatformUserItem {
+  int64 user_id = 1;
+  // 站内展示名（无则回退站内用户名）
+  string name = 2;
+  // 站内用户名
+  string username = 3;
+  // 绑定的该 OJ 账号
+  string oj_username = 4;
+  // 平台当前 rating（整数；has_rating=false 时忽略）
+  int32 rating = 5;
+  bool has_rating = 6;
+}
+
+message GetPlatformUsersRes {
+  int64 code = 1;
+  string message = 2;
+  int64 total = 3;
+  repeated PlatformUserItem list = 4;
 }
 

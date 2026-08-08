@@ -31,6 +31,7 @@ const (
 	Spider_TogglePlatform_FullMethodName         = "/api.core.v1.spider.Spider/TogglePlatform"
 	Spider_UpdatePlatform_FullMethodName         = "/api.core.v1.spider.Spider/UpdatePlatform"
 	Spider_RepairContestCells_FullMethodName     = "/api.core.v1.spider.Spider/RepairContestCells"
+	Spider_GetPlatformUsers_FullMethodName       = "/api.core.v1.spider.Spider/GetPlatformUsers"
 )
 
 // SpiderClient is the client API for Spider service.
@@ -59,6 +60,8 @@ type SpiderClient interface {
 	UpdatePlatform(ctx context.Context, in *UpdatePlatformReq, opts ...grpc.CallOption) (*UpdatePlatformRes, error)
 	// 站管：幂等修复 AtCoder 赛时提交明细相关脏数据（external_id / 赛后练习格 / relative_sec）
 	RepairContestCells(ctx context.Context, in *RepairContestCellsReq, opts ...grpc.CallOption) (*RepairContestCellsRes, error)
+	// 站管：某 OJ 的绑定用户列表（仅站管）
+	GetPlatformUsers(ctx context.Context, in *GetPlatformUsersReq, opts ...grpc.CallOption) (*GetPlatformUsersRes, error)
 }
 
 type spiderClient struct {
@@ -189,6 +192,16 @@ func (c *spiderClient) RepairContestCells(ctx context.Context, in *RepairContest
 	return out, nil
 }
 
+func (c *spiderClient) GetPlatformUsers(ctx context.Context, in *GetPlatformUsersReq, opts ...grpc.CallOption) (*GetPlatformUsersRes, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetPlatformUsersRes)
+	err := c.cc.Invoke(ctx, Spider_GetPlatformUsers_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // SpiderServer is the server API for Spider service.
 // All implementations must embed UnimplementedSpiderServer
 // for forward compatibility.
@@ -215,6 +228,8 @@ type SpiderServer interface {
 	UpdatePlatform(context.Context, *UpdatePlatformReq) (*UpdatePlatformRes, error)
 	// 站管：幂等修复 AtCoder 赛时提交明细相关脏数据（external_id / 赛后练习格 / relative_sec）
 	RepairContestCells(context.Context, *RepairContestCellsReq) (*RepairContestCellsRes, error)
+	// 站管：某 OJ 的绑定用户列表（仅站管）
+	GetPlatformUsers(context.Context, *GetPlatformUsersReq) (*GetPlatformUsersRes, error)
 	mustEmbedUnimplementedSpiderServer()
 }
 
@@ -260,6 +275,9 @@ func (UnimplementedSpiderServer) UpdatePlatform(context.Context, *UpdatePlatform
 }
 func (UnimplementedSpiderServer) RepairContestCells(context.Context, *RepairContestCellsReq) (*RepairContestCellsRes, error) {
 	return nil, status.Error(codes.Unimplemented, "method RepairContestCells not implemented")
+}
+func (UnimplementedSpiderServer) GetPlatformUsers(context.Context, *GetPlatformUsersReq) (*GetPlatformUsersRes, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetPlatformUsers not implemented")
 }
 func (UnimplementedSpiderServer) mustEmbedUnimplementedSpiderServer() {}
 func (UnimplementedSpiderServer) testEmbeddedByValue()                {}
@@ -498,6 +516,24 @@ func _Spider_RepairContestCells_Handler(srv interface{}, ctx context.Context, de
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Spider_GetPlatformUsers_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetPlatformUsersReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SpiderServer).GetPlatformUsers(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Spider_GetPlatformUsers_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SpiderServer).GetPlatformUsers(ctx, req.(*GetPlatformUsersReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Spider_ServiceDesc is the grpc.ServiceDesc for Spider service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -552,6 +588,10 @@ var Spider_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "RepairContestCells",
 			Handler:    _Spider_RepairContestCells_Handler,
+		},
+		{
+			MethodName: "GetPlatformUsers",
+			Handler:    _Spider_GetPlatformUsers_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

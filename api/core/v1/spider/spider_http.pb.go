@@ -19,6 +19,7 @@ var _ = binding.EncodeURL
 
 const _ = http.SupportPackageIsVersion1
 
+const OperationSpiderGetPlatformUsers = "/api.core.v1.spider.Spider/GetPlatformUsers"
 const OperationSpiderGetSpiderMonitor = "/api.core.v1.spider.Spider/GetSpiderMonitor"
 const OperationSpiderPurgeSubmitsAndRecrawl = "/api.core.v1.spider.Spider/PurgeSubmitsAndRecrawl"
 const OperationSpiderRepairContestCells = "/api.core.v1.spider.Spider/RepairContestCells"
@@ -30,6 +31,8 @@ const OperationSpiderUpdateAll = "/api.core.v1.spider.Spider/UpdateAll"
 const OperationSpiderUpdatePlatform = "/api.core.v1.spider.Spider/UpdatePlatform"
 
 type SpiderHTTPServer interface {
+	// GetPlatformUsers 站管：某 OJ 的绑定用户列表（仅站管）
+	GetPlatformUsers(context.Context, *GetPlatformUsersReq) (*GetPlatformUsersRes, error)
 	// GetSpiderMonitor 运维：各 OJ 爬虫模块监控（仅站管）
 	GetSpiderMonitor(context.Context, *SpiderMonitorReq) (*SpiderMonitorRes, error)
 	// PurgeSubmitsAndRecrawl 运维：清空全部提交相关数据并全量重爬（仅站管；confirm=PURGE_SUBMITS）
@@ -60,6 +63,7 @@ func RegisterSpiderHTTPServer(s *http.Server, srv SpiderHTTPServer) {
 	r.POST("/v1/core/spider/toggle-platform", _Spider_TogglePlatform0_HTTP_Handler(srv))
 	r.POST("/v1/core/spider/update-platform", _Spider_UpdatePlatform0_HTTP_Handler(srv))
 	r.POST("/v1/core/spider/repair-contest-cells", _Spider_RepairContestCells0_HTTP_Handler(srv))
+	r.GET("/v1/core/spider/platform-users", _Spider_GetPlatformUsers0_HTTP_Handler(srv))
 }
 
 func _Spider_SetSpider0_HTTP_Handler(srv SpiderHTTPServer) func(ctx http.Context) error {
@@ -254,7 +258,28 @@ func _Spider_RepairContestCells0_HTTP_Handler(srv SpiderHTTPServer) func(ctx htt
 	}
 }
 
+func _Spider_GetPlatformUsers0_HTTP_Handler(srv SpiderHTTPServer) func(ctx http.Context) error {
+	return func(ctx http.Context) error {
+		var in GetPlatformUsersReq
+		if err := ctx.BindQuery(&in); err != nil {
+			return err
+		}
+		http.SetOperation(ctx, OperationSpiderGetPlatformUsers)
+		h := ctx.Middleware(func(ctx context.Context, req interface{}) (interface{}, error) {
+			return srv.GetPlatformUsers(ctx, req.(*GetPlatformUsersReq))
+		})
+		out, err := h(ctx, &in)
+		if err != nil {
+			return err
+		}
+		reply := out.(*GetPlatformUsersRes)
+		return ctx.Result(200, reply)
+	}
+}
+
 type SpiderHTTPClient interface {
+	// GetPlatformUsers 站管：某 OJ 的绑定用户列表（仅站管）
+	GetPlatformUsers(ctx context.Context, req *GetPlatformUsersReq, opts ...http.CallOption) (rsp *GetPlatformUsersRes, err error)
 	// GetSpiderMonitor 运维：各 OJ 爬虫模块监控（仅站管）
 	GetSpiderMonitor(ctx context.Context, req *SpiderMonitorReq, opts ...http.CallOption) (rsp *SpiderMonitorRes, err error)
 	// PurgeSubmitsAndRecrawl 运维：清空全部提交相关数据并全量重爬（仅站管；confirm=PURGE_SUBMITS）
@@ -280,6 +305,20 @@ type SpiderHTTPClientImpl struct {
 
 func NewSpiderHTTPClient(client *http.Client) SpiderHTTPClient {
 	return &SpiderHTTPClientImpl{client}
+}
+
+// GetPlatformUsers 站管：某 OJ 的绑定用户列表（仅站管）
+func (c *SpiderHTTPClientImpl) GetPlatformUsers(ctx context.Context, in *GetPlatformUsersReq, opts ...http.CallOption) (*GetPlatformUsersRes, error) {
+	var out GetPlatformUsersRes
+	pattern := "/v1/core/spider/platform-users"
+	path := binding.EncodeURL(pattern, in, true)
+	opts = append(opts, http.Operation(OperationSpiderGetPlatformUsers))
+	opts = append(opts, http.PathTemplate(pattern))
+	err := c.cc.Invoke(ctx, "GET", path, nil, &out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
 }
 
 // GetSpiderMonitor 运维：各 OJ 爬虫模块监控（仅站管）
