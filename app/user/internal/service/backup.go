@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -11,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	backuppb "cwxu-algo/api/user/v1/site/backup"
 	"cwxu-algo/app/common/backup"
 	"cwxu-algo/app/common/rbac"
 	"cwxu-algo/app/common/utils/auth"
@@ -31,7 +33,9 @@ const (
 	maxListedJobs      = 30
 )
 
-// RegisterBackupRoutes 站点数据备份/恢复（仅站点管理员；自定义路由以支持大文件与长下载）
+// RegisterBackupRoutes 站点数据备份/恢复中仍需手写的路由（自定义路由以支持大文件与长下载）：
+// import（multipart 大文件上传）、jobs/{id}/download（zip 流式下载）、jobs/{id}（删除）。
+// export / jobs / jobs/{id} 查询已迁移为 proto 服务（BackupService，见本文件）。
 func RegisterBackupRoutes(srv *khttp.Server, d *data.Data) {
 	if d == nil {
 		return
@@ -40,58 +44,6 @@ func RegisterBackupRoutes(srv *khttp.Server, d *data.Data) {
 	go startBackupCleanupLoop(d)
 
 	r := srv.Route("/")
-
-	r.POST("/v1/user/site/backup/export", func(ctx khttp.Context) error {
-		if !auth.HasPerm(ctx, rbac.PermSiteBackup) {
-			return ctx.JSON(http.StatusForbidden, map[string]interface{}{
-				"code": 1, "message": "需要站点备份权限",
-			})
-		}
-		var body struct {
-			Scopes []string `json:"scopes"`
-		}
-		_ = ctx.Bind(&body)
-		scopes, err := backup.NormalizeScopes(body.Scopes)
-		if err != nil {
-			return ctx.JSON(http.StatusBadRequest, map[string]interface{}{
-				"code": 1, "message": err.Error(),
-			})
-		}
-		if busy, _ := hasActiveJob(d, model.BackupKindExport); busy {
-			return ctx.JSON(http.StatusConflict, map[string]interface{}{
-				"code": 1, "message": "已有导出任务进行中，请稍后再试",
-			})
-		}
-		pd := auth.GetCurrentUser(ctx)
-		uid := uint(0)
-		if pd != nil {
-			uid = pd.UserID
-		}
-		scopesJSON, _ := json.Marshal(scopes)
-		job := model.BackupJob{
-			Kind:      model.BackupKindExport,
-			Status:    model.BackupStatusPending,
-			Scopes:    string(scopesJSON),
-			Progress:  0,
-			Message:   "排队中",
-			CreatedBy: uid,
-		}
-		if err := d.DB.Create(&job).Error; err != nil {
-			// 部分唯一索引（kind + pending/running）兜底并发：同类任务同时只允许一个
-			if isUniqueViolation(err) {
-				return ctx.JSON(http.StatusConflict, map[string]interface{}{
-					"code": 1, "message": "已有导出任务进行中，请稍后再试",
-				})
-			}
-			return ctx.JSON(http.StatusInternalServerError, map[string]interface{}{
-				"code": 1, "message": "创建任务失败",
-			})
-		}
-		go runExportJob(d, job.ID)
-		return ctx.JSON(http.StatusOK, map[string]interface{}{
-			"code": 0, "message": "导出任务已创建", "jobId": job.ID,
-		})
-	})
 
 	r.POST("/v1/user/site/backup/import", func(ctx khttp.Context) error {
 		if !auth.HasPerm(ctx, rbac.PermSiteBackup) {
@@ -185,46 +137,6 @@ func RegisterBackupRoutes(srv *khttp.Server, d *data.Data) {
 		})
 	})
 
-	r.GET("/v1/user/site/backup/jobs", func(ctx khttp.Context) error {
-		if !auth.HasPerm(ctx, rbac.PermSiteBackup) {
-			return ctx.JSON(http.StatusForbidden, map[string]interface{}{
-				"code": 1, "message": "需要站点备份权限",
-			})
-		}
-		var jobs []model.BackupJob
-		_ = d.DB.Order("id DESC").Limit(maxListedJobs).Find(&jobs).Error
-		list := make([]map[string]interface{}, 0, len(jobs))
-		for _, j := range jobs {
-			list = append(list, jobToMap(j))
-		}
-		return ctx.JSON(http.StatusOK, map[string]interface{}{
-			"code": 0, "message": "ok", "jobs": list,
-		})
-	})
-
-	r.GET("/v1/user/site/backup/jobs/{id}", func(ctx khttp.Context) error {
-		if !auth.HasPerm(ctx, rbac.PermSiteBackup) {
-			return ctx.JSON(http.StatusForbidden, map[string]interface{}{
-				"code": 1, "message": "需要站点备份权限",
-			})
-		}
-		id, _ := strconv.ParseUint(ctx.Vars().Get("id"), 10, 64)
-		if id == 0 {
-			return ctx.JSON(http.StatusBadRequest, map[string]interface{}{
-				"code": 1, "message": "无效任务 id",
-			})
-		}
-		var job model.BackupJob
-		if err := d.DB.First(&job, id).Error; err != nil {
-			return ctx.JSON(http.StatusNotFound, map[string]interface{}{
-				"code": 1, "message": "任务不存在",
-			})
-		}
-		return ctx.JSON(http.StatusOK, map[string]interface{}{
-			"code": 0, "message": "ok", "job": jobToMap(job),
-		})
-	})
-
 	r.GET("/v1/user/site/backup/jobs/{id}/download", func(ctx khttp.Context) error {
 		if !auth.HasPerm(ctx, rbac.PermSiteBackup) {
 			return ctx.JSON(http.StatusForbidden, map[string]interface{}{
@@ -302,30 +214,106 @@ func RegisterBackupRoutes(srv *khttp.Server, d *data.Data) {
 	})
 }
 
-func jobToMap(j model.BackupJob) map[string]interface{} {
+// BackupService 站点数据备份任务（proto：api/user/v1/site/backup/backup.proto）。
+// 持有 *data.Data（与手写路由 RegisterBackupRoutes 同源）。
+type BackupService struct {
+	d *data.Data
+}
+
+func NewBackupService(d *data.Data) *BackupService {
+	return &BackupService{d: d}
+}
+
+// Export 创建全量/按 scope 导出任务（后台异步执行）。
+func (s *BackupService) Export(ctx context.Context, req *backuppb.ExportReq) (*backuppb.ExportRes, error) {
+	if !auth.HasPerm(ctx, rbac.PermSiteBackup) {
+		return &backuppb.ExportRes{Code: 1, Message: "需要站点备份权限"}, nil
+	}
+	scopes, err := backup.NormalizeScopes(req.Scopes)
+	if err != nil {
+		return &backuppb.ExportRes{Code: 1, Message: err.Error()}, nil
+	}
+	if busy, _ := hasActiveJob(s.d, model.BackupKindExport); busy {
+		return &backuppb.ExportRes{Code: 1, Message: "已有导出任务进行中，请稍后再试"}, nil
+	}
+	pd := auth.GetCurrentUser(ctx)
+	uid := uint(0)
+	if pd != nil {
+		uid = pd.UserID
+	}
+	scopesJSON, _ := json.Marshal(scopes)
+	job := model.BackupJob{
+		Kind:      model.BackupKindExport,
+		Status:    model.BackupStatusPending,
+		Scopes:    string(scopesJSON),
+		Progress:  0,
+		Message:   "排队中",
+		CreatedBy: uid,
+	}
+	if err := s.d.DB.WithContext(ctx).Create(&job).Error; err != nil {
+		// 部分唯一索引（kind + pending/running）兜底并发：同类任务同时只允许一个
+		if isUniqueViolation(err) {
+			return &backuppb.ExportRes{Code: 1, Message: "已有导出任务进行中，请稍后再试"}, nil
+		}
+		return &backuppb.ExportRes{Code: 1, Message: "创建任务失败"}, nil
+	}
+	go runExportJob(s.d, job.ID)
+	return &backuppb.ExportRes{Code: 0, Message: "导出任务已创建", JobId: int64(job.ID)}, nil
+}
+
+// ListJobs 最近备份任务列表。
+func (s *BackupService) ListJobs(ctx context.Context, req *backuppb.ListJobsReq) (*backuppb.ListJobsRes, error) {
+	if !auth.HasPerm(ctx, rbac.PermSiteBackup) {
+		return &backuppb.ListJobsRes{Code: 1, Message: "需要站点备份权限"}, nil
+	}
+	var jobs []model.BackupJob
+	_ = s.d.DB.WithContext(ctx).Order("id DESC").Limit(maxListedJobs).Find(&jobs).Error
+	list := make([]*backuppb.JobInfo, 0, len(jobs))
+	for i := range jobs {
+		list = append(list, jobToInfo(jobs[i]))
+	}
+	return &backuppb.ListJobsRes{Code: 0, Message: "ok", Jobs: list}, nil
+}
+
+// GetJob 单个任务状态。
+func (s *BackupService) GetJob(ctx context.Context, req *backuppb.GetJobReq) (*backuppb.GetJobRes, error) {
+	if !auth.HasPerm(ctx, rbac.PermSiteBackup) {
+		return &backuppb.GetJobRes{Code: 1, Message: "需要站点备份权限"}, nil
+	}
+	if req.Id == 0 {
+		return &backuppb.GetJobRes{Code: 1, Message: "无效任务 id"}, nil
+	}
+	var job model.BackupJob
+	if err := s.d.DB.WithContext(ctx).First(&job, req.Id).Error; err != nil {
+		return &backuppb.GetJobRes{Code: 1, Message: "任务不存在"}, nil
+	}
+	return &backuppb.GetJobRes{Code: 0, Message: "ok", Job: jobToInfo(job)}, nil
+}
+
+func jobToInfo(j model.BackupJob) *backuppb.JobInfo {
 	var scopes []string
 	_ = json.Unmarshal([]byte(j.Scopes), &scopes)
-	m := map[string]interface{}{
-		"id":          j.ID,
-		"kind":        j.Kind,
-		"status":      j.Status,
-		"scopes":      scopes,
-		"progress":    j.Progress,
-		"message":     j.Message,
-		"fileSize":    j.FileSize,
-		"createdBy":   j.CreatedBy,
-		"errorDetail": j.ErrorDetail,
-		"createdAt":   j.CreatedAt.UTC().Format(time.RFC3339),
-		"downloadable": j.Kind == model.BackupKindExport &&
+	info := &backuppb.JobInfo{
+		Id:          int64(j.ID),
+		Kind:        j.Kind,
+		Status:      j.Status,
+		Scopes:      scopes,
+		Progress:    int32(j.Progress),
+		Message:     j.Message,
+		FileSize:    j.FileSize,
+		CreatedBy:   int64(j.CreatedBy),
+		ErrorDetail: j.ErrorDetail,
+		CreatedAt:   j.CreatedAt.UTC().Format(time.RFC3339),
+		Downloadable: j.Kind == model.BackupKindExport &&
 			j.Status == model.BackupStatusDone && j.FilePath != "",
 	}
 	if j.StartedAt != nil {
-		m["startedAt"] = j.StartedAt.UTC().Format(time.RFC3339)
+		info.StartedAt = j.StartedAt.UTC().Format(time.RFC3339)
 	}
 	if j.FinishedAt != nil {
-		m["finishedAt"] = j.FinishedAt.UTC().Format(time.RFC3339)
+		info.FinishedAt = j.FinishedAt.UTC().Format(time.RFC3339)
 	}
-	return m
+	return info
 }
 
 func hasActiveJob(d *data.Data, kind string) (bool, error) {

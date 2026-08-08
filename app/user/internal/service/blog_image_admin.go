@@ -1,128 +1,120 @@
 package service
 
 import (
-	"encoding/json"
+	"context"
 	"errors"
 	"net/http"
-	"strconv"
 	"strings"
+	"time"
 
+	pb "cwxu-algo/api/user/v1/blog"
 	"cwxu-algo/app/common/blogimg"
 	"cwxu-algo/app/common/utils/auth"
-
-	khttp "github.com/go-kratos/kratos/v2/transport/http"
 )
 
-func requireAdminBlogImages(ctx khttp.Context) bool {
+// requireAdminBlogImages 校验站点管理员；未通过返回带状态码的 Kratos 错误。
+func requireAdminBlogImages(ctx context.Context) error {
 	pd := auth.GetCurrentUser(ctx)
 	if pd == nil || pd.UserID == 0 {
-		writeJSON(ctx.Response(), http.StatusUnauthorized, map[string]interface{}{
-			"code": 1, "message": "请先登录",
-		})
-		return false
+		return blogErr(http.StatusUnauthorized, "请先登录")
 	}
 	if !pd.IsSiteAdmin {
-		writeJSON(ctx.Response(), http.StatusForbidden, map[string]interface{}{
-			"code": 1, "message": "仅站点管理员可操作",
-		})
-		return false
+		return blogErr(http.StatusForbidden, "仅站点管理员可操作")
 	}
-	return true
-}
-
-func adminBlogImageListOptions(ctx khttp.Context) blogimg.AdminImageListOptions {
-	page, _ := strconv.Atoi(strings.TrimSpace(ctx.Query().Get("page")))
-	pageSize, _ := strconv.Atoi(strings.TrimSpace(ctx.Query().Get("pageSize")))
-	return blogimg.AdminImageListOptions{
-		Mode: strings.TrimSpace(ctx.Query().Get("mode")), Page: page, PageSize: pageSize,
-	}
-}
-
-func (s *BlogService) handleAdminBlogImages(ctx khttp.Context) error {
-	if !requireAdminBlogImages(ctx) {
-		return nil
-	}
-	client := blogimg.LoadUpyunClient(s.db)
-	result, err := blogimg.ListAdminImageAssets(s.db, client.PublicBaseURL(), adminBlogImageListOptions(ctx))
-	if err != nil {
-		writeJSON(ctx.Response(), http.StatusInternalServerError, map[string]interface{}{
-			"code": 1, "message": "加载图片失败",
-		})
-		return nil
-	}
-	writeJSON(ctx.Response(), http.StatusOK, map[string]interface{}{
-		"code": 0, "message": "success", "data": result,
-	})
 	return nil
 }
 
-func writeAdminBlogImageDeleteError(ctx khttp.Context, err error, deleted int) {
-	if errors.Is(err, blogimg.ErrAdminImageNotCandidate) ||
-		errors.Is(err, blogimg.ErrAdminImageSnapshotStale) {
-		writeJSON(ctx.Response(), http.StatusConflict, map[string]interface{}{
-			"code": 1, "message": "图片状态已变化，请刷新后重试",
-			"data": map[string]interface{}{"deleted": deleted, "stale": true},
-		})
-		return
+// AdminBlogImages GET /v1/user/blog/admin/images（mode=all|cleanup）
+func (s *BlogService) AdminBlogImages(ctx context.Context, req *pb.AdminBlogImagesReq) (*pb.AdminBlogImagesRes, error) {
+	if err := requireAdminBlogImages(ctx); err != nil {
+		return nil, err
 	}
-	writeJSON(ctx.Response(), http.StatusBadGateway, map[string]interface{}{
-		"code": 1, "message": "删除图片失败",
-		"data": map[string]interface{}{"deleted": deleted},
+	client := blogimg.LoadUpyunClient(s.db)
+	result, err := blogimg.ListAdminImageAssets(s.db, client.PublicBaseURL(), blogimg.AdminImageListOptions{
+		Mode:     strings.TrimSpace(req.Mode),
+		Page:     int(req.Page),
+		PageSize: int(req.PageSize),
 	})
+	if err != nil {
+		return nil, blogErr(http.StatusInternalServerError, "加载图片失败")
+	}
+	data := &pb.AdminImageListData{
+		Total:        int64(result.Total),
+		Page:         int64(result.Page),
+		PageSize:     int64(result.PageSize),
+		Mode:         result.Mode,
+		CandidateIds: toInt64s(result.CandidateIDs),
+		Snapshot:     result.Snapshot,
+	}
+	for i := range result.List {
+		item := &result.List[i]
+		data.List = append(data.List, &pb.AdminImageAssetInfo{
+			Id:          int64(item.ID),
+			UserId:      int64(item.UserID),
+			Username:    item.Username,
+			Name:        item.Name,
+			ObjectKey:   item.ObjectKey,
+			Url:         item.URL,
+			ContentHash: item.ContentHash,
+			Purpose:     item.Purpose,
+			CreatedAt:   item.CreatedAt.Format(time.RFC3339Nano),
+			Referenced:  item.Referenced,
+		})
+	}
+	return &pb.AdminBlogImagesRes{Code: 0, Message: "success", Data: data}, nil
 }
 
-func (s *BlogService) handleAdminBlogImageDelete(ctx khttp.Context) error {
-	if !requireAdminBlogImages(ctx) {
-		return nil
+// adminBlogImageDeleteErr 删除失败：候选/快照变化 → 409，其余 → 502。
+func adminBlogImageDeleteErr(err error) error {
+	if errors.Is(err, blogimg.ErrAdminImageNotCandidate) ||
+		errors.Is(err, blogimg.ErrAdminImageSnapshotStale) {
+		return blogErr(http.StatusConflict, "图片状态已变化，请刷新后重试")
 	}
-	var body struct {
-		ID uint `json:"id"`
+	return blogErr(http.StatusBadGateway, "删除图片失败")
+}
+
+// AdminBlogImageDelete POST /v1/user/blog/admin/images/delete
+func (s *BlogService) AdminBlogImageDelete(ctx context.Context, req *pb.AdminBlogImageDeleteReq) (*pb.AdminBlogImageDeleteRes, error) {
+	if err := requireAdminBlogImages(ctx); err != nil {
+		return nil, err
 	}
-	if err := json.NewDecoder(ctx.Request().Body).Decode(&body); err != nil || body.ID == 0 {
-		writeJSON(ctx.Response(), http.StatusBadRequest, map[string]interface{}{
-			"code": 1, "message": "缺少图片 id",
-		})
-		return nil
+	if req.Id == 0 {
+		return nil, blogErr(http.StatusBadRequest, "缺少图片 id")
 	}
-	deleted, err := blogimg.DeleteAdminImage(s.db, blogimg.LoadUpyunClient(s.db), body.ID)
+	deleted, err := blogimg.DeleteAdminImage(s.db, blogimg.LoadUpyunClient(s.db), uint(req.Id))
 	if err != nil {
-		writeAdminBlogImageDeleteError(ctx, err, 0)
-		return nil
+		return nil, adminBlogImageDeleteErr(err)
 	}
 	count := 0
 	if deleted {
 		count = 1
 	}
-	writeJSON(ctx.Response(), http.StatusOK, map[string]interface{}{
-		"code": 0, "message": "success", "data": map[string]interface{}{"deleted": count},
-	})
-	return nil
+	return &pb.AdminBlogImageDeleteRes{
+		Code: 0, Message: "success",
+		Data: &pb.AdminImageDeleteData{Deleted: int32(count)},
+	}, nil
 }
 
-func (s *BlogService) handleAdminBlogImagesDeleteBatch(ctx khttp.Context) error {
-	if !requireAdminBlogImages(ctx) {
-		return nil
+// AdminBlogImagesDeleteBatch POST /v1/user/blog/admin/images/delete-batch
+func (s *BlogService) AdminBlogImagesDeleteBatch(ctx context.Context, req *pb.AdminBlogImagesDeleteBatchReq) (*pb.AdminBlogImagesDeleteBatchRes, error) {
+	if err := requireAdminBlogImages(ctx); err != nil {
+		return nil, err
 	}
-	var body struct {
-		IDs      []uint `json:"ids"`
-		Snapshot string `json:"snapshot"`
+	if len(req.Ids) == 0 || strings.TrimSpace(req.Snapshot) == "" {
+		return nil, blogErr(http.StatusBadRequest, "缺少清理候选或快照")
 	}
-	if err := json.NewDecoder(ctx.Request().Body).Decode(&body); err != nil ||
-		len(body.IDs) == 0 || strings.TrimSpace(body.Snapshot) == "" {
-		writeJSON(ctx.Response(), http.StatusBadRequest, map[string]interface{}{
-			"code": 1, "message": "缺少清理候选或快照",
-		})
-		return nil
+	ids := make([]uint, 0, len(req.Ids))
+	for _, id := range req.Ids {
+		ids = append(ids, uint(id))
 	}
 	deleted, err := blogimg.DeleteAdminImagesSnapshot(
-		s.db, blogimg.LoadUpyunClient(s.db), body.IDs, body.Snapshot,
+		s.db, blogimg.LoadUpyunClient(s.db), ids, req.Snapshot,
 	)
 	if err != nil {
-		writeAdminBlogImageDeleteError(ctx, err, deleted)
-		return nil
+		return nil, adminBlogImageDeleteErr(err)
 	}
-	writeJSON(ctx.Response(), http.StatusOK, map[string]interface{}{
-		"code": 0, "message": "success", "data": map[string]interface{}{"deleted": deleted},
-	})
-	return nil
+	return &pb.AdminBlogImagesDeleteBatchRes{
+		Code: 0, Message: "success",
+		Data: &pb.AdminImageDeleteData{Deleted: int32(deleted)},
+	}, nil
 }

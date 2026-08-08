@@ -5,12 +5,14 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	blogpb "cwxu-algo/api/user/v1/blog"
+
 	khttp "github.com/go-kratos/kratos/v2/transport/http"
 )
 
 func TestBlogImageCleanupRoutesAreAdminOnly(t *testing.T) {
 	srv := khttp.NewServer()
-	RegisterBlogRoutes(srv, &BlogService{})
+	blogpb.RegisterBlogHTTPServer(srv, &BlogService{})
 
 	for _, request := range []*http.Request{
 		httptest.NewRequest(http.MethodGet, "/v1/user/blog/images/orphans", nil),

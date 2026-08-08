@@ -48,7 +48,7 @@ func RegisterEmergencyHTTPServer(s *http.Server, srv EmergencyHTTPServer) {
 	r.DELETE("/v1/core/emergency/delete", _Emergency_Delete1_HTTP_Handler(srv))
 	r.GET("/v1/core/emergency/list", _Emergency_List1_HTTP_Handler(srv))
 	r.GET("/v1/core/emergency/active", _Emergency_Active0_HTTP_Handler(srv))
-	r.POST("/v1/core/emergency/reorder", _Emergency_Reorder0_HTTP_Handler(srv))
+	r.POST("/v1/core/emergency/reorder", _Emergency_Reorder1_HTTP_Handler(srv))
 }
 
 func _Emergency_Create1_HTTP_Handler(srv EmergencyHTTPServer) func(ctx http.Context) error {
@@ -152,7 +152,7 @@ func _Emergency_Active0_HTTP_Handler(srv EmergencyHTTPServer) func(ctx http.Cont
 	}
 }
 
-func _Emergency_Reorder0_HTTP_Handler(srv EmergencyHTTPServer) func(ctx http.Context) error {
+func _Emergency_Reorder1_HTTP_Handler(srv EmergencyHTTPServer) func(ctx http.Context) error {
 	return func(ctx http.Context) error {
 		var in ReorderEmergencyReq
 		if err := ctx.Bind(&in); err != nil {

@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"strings"
 	"time"
 
@@ -23,7 +22,6 @@ import (
 
 	"github.com/go-kratos/kratos/v2/errors"
 	"github.com/go-kratos/kratos/v2/log"
-	khttp "github.com/go-kratos/kratos/v2/transport/http"
 	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 )
@@ -94,62 +92,20 @@ func (s SpiderService) UpdateAll(ctx context.Context, _ *spider.UpdateAllReq) (*
 	}, nil
 }
 
-// RegisterSpiderExtraRoutes 站管：按平台全量回填（如力扣比赛记录）
-func RegisterSpiderExtraRoutes(srv *khttp.Server, s *SpiderService) {
-	if srv == nil || s == nil {
-		return
-	}
-	r := srv.Route("/")
-	r.POST("/v1/core/spider/update-platform", s.handleUpdatePlatform)
-	// 站内榜 cell-submits 脏数据修复（external_id / 赛后练习格 / relative_sec）
-	r.POST("/v1/core/spider/repair-contest-cells", s.handleRepairContestCells)
-}
-
-// handleRepairContestCells 幂等修复 AtCoder 赛时提交明细相关脏数据（仅站管）。
-func (s *SpiderService) handleRepairContestCells(ctx khttp.Context) error {
-	if !auth.HasPerm(ctx, rbac.PermSiteSpiderOps) {
-		writeSpiderJSON(ctx, 403, map[string]interface{}{"success": false, "message": "仅管理员可操作"})
-		return nil
-	}
-	// 顺带规范日历 platform 大小写
-	if s.db != nil {
-		_ = dal.NewContestCalendarDalDB(s.db).NormalizeLegacyPlatformNames()
-	}
-	stats, err := bizservice.RepairContestCellSubmitData(s.db)
-	if err != nil {
-		log.Errorf("repair-contest-cells: %v", err)
-		writeSpiderJSON(ctx, 500, map[string]interface{}{"success": false, "message": err.Error()})
-		return nil
-	}
-	writeSpiderJSON(ctx, 200, map[string]interface{}{
-		"success": true,
-		"message": "ok",
-		"data":    stats,
-	})
-	return nil
-}
-
-// handleUpdatePlatform body: { "platform": "LeetCode" }
+// UpdatePlatform 站管：按平台全量回填（如力扣比赛记录）。
+// body: { "platform": "LeetCode" }
 // 仅入队该平台已绑定用户的 needAll 任务，并强制清去重（避免与刚跑完的 update-all 撞 pending）。
-func (s *SpiderService) handleUpdatePlatform(ctx khttp.Context) error {
+func (s *SpiderService) UpdatePlatform(ctx context.Context, req *spider.UpdatePlatformReq) (*spider.UpdatePlatformRes, error) {
 	if !auth.HasPerm(ctx, rbac.PermSiteSpiderOps) {
-		writeSpiderJSON(ctx, 403, map[string]interface{}{"code": 1, "message": "仅站点管理员可操作", "count": 0})
-		return nil
+		return &spider.UpdatePlatformRes{Code: 1, Message: "仅站点管理员可操作"}, nil
 	}
 	adminId := int64(auth.GetCurrentUserId(ctx))
 	if !s.allow(ctx, ratelimit.SpiderUpdateAllKey(adminId)+":plat", 2*time.Minute) {
-		writeSpiderJSON(ctx, 429, map[string]interface{}{"code": 1, "message": "请求过于频繁，请稍后再试", "count": 0})
-		return nil
+		return &spider.UpdatePlatformRes{Code: 1, Message: "请求过于频繁，请稍后再试"}, nil
 	}
-	var req struct {
-		Platform string `json:"platform"`
-	}
-	body, _ := io.ReadAll(ctx.Request().Body)
-	_ = json.Unmarshal(body, &req)
 	plat := strings.TrimSpace(req.Platform)
 	if plat == "" {
-		writeSpiderJSON(ctx, 400, map[string]interface{}{"code": 1, "message": "缺少 platform", "count": 0})
-		return nil
+		return &spider.UpdatePlatformRes{Code: 1, Message: "缺少 platform"}, nil
 	}
 	// 规范化已知平台名
 	switch strings.ToLower(plat) {
@@ -171,28 +127,41 @@ func (s *SpiderService) handleUpdatePlatform(ctx khttp.Context) error {
 		plat = spiderregistry.UOJ
 	}
 	if _, ok := spiderregistry.Get(plat); !ok {
-		writeSpiderJSON(ctx, 400, map[string]interface{}{"code": 1, "message": "不支持的平台: " + plat, "count": 0})
-		return nil
+		return &spider.UpdatePlatformRes{Code: 1, Message: "不支持的平台: " + plat}, nil
 	}
 	users, published := 0, 0
 	if s.spider != nil {
 		users, published = s.spider.DoBatchPlatform(context.Background(), plat, true, true)
 	}
-	writeSpiderJSON(ctx, 200, map[string]interface{}{
-		"code":      0,
-		"message":   fmt.Sprintf("已为平台 %s 的 %d 名用户入队全量同步（published=%d），后台抓取中", plat, users, published),
-		"count":     users,
-		"published": published,
-		"platform":  plat,
-	})
-	return nil
+	return &spider.UpdatePlatformRes{
+		Code:      0,
+		Message:   fmt.Sprintf("已为平台 %s 的 %d 名用户入队全量同步（published=%d），后台抓取中", plat, users, published),
+		Count:     int32(users),
+		Published: int32(published),
+		Platform:  plat,
+	}, nil
 }
 
-func writeSpiderJSON(ctx khttp.Context, status int, v interface{}) {
-	w := ctx.Response()
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(v)
+// RepairContestCells 幂等修复 AtCoder 赛时提交明细相关脏数据（仅站管）。
+// 站内榜 cell-submits 脏数据修复（external_id / 赛后练习格 / relative_sec）。
+func (s *SpiderService) RepairContestCells(ctx context.Context, _ *spider.RepairContestCellsReq) (*spider.RepairContestCellsRes, error) {
+	if !auth.HasPerm(ctx, rbac.PermSiteSpiderOps) {
+		return &spider.RepairContestCellsRes{Success: false, Message: "仅管理员可操作"}, nil
+	}
+	// 顺带规范日历 platform 大小写
+	if s.db != nil {
+		_ = dal.NewContestCalendarDalDB(s.db).NormalizeLegacyPlatformNames()
+	}
+	stats, err := bizservice.RepairContestCellSubmitData(s.db)
+	if err != nil {
+		log.Errorf("repair-contest-cells: %v", err)
+		return &spider.RepairContestCellsRes{Success: false, Message: err.Error()}, nil
+	}
+	data := make(map[string]int32, len(stats))
+	for k, v := range stats {
+		data[k] = int32(v)
+	}
+	return &spider.RepairContestCellsRes{Success: true, Message: "ok", Data: data}, nil
 }
 
 func (s SpiderService) GetSpider(ctx context.Context, req *spider.GetSpiderReq) (*spider.GetSpiderRep, error) {

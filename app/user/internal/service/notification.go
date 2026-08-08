@@ -1,36 +1,25 @@
 package service
 
 import (
-	"strconv"
-	"strings"
-	"time"
+	"context"
 
+	pb "cwxu-algo/api/user/v1/notification"
 	"cwxu-algo/app/common/notify"
 	"cwxu-algo/app/common/utils/auth"
 	"cwxu-algo/app/user/internal/data"
 	"cwxu-algo/app/user/internal/data/model"
 
-	khttp "github.com/go-kratos/kratos/v2/transport/http"
 	"gorm.io/gorm"
 )
 
 // NotificationService 站内信
+// 实现 proto：api/user/v1/notification/notification.proto（NotificationHTTPServer）。
 type NotificationService struct {
 	db *gorm.DB
 }
 
 func NewNotificationService(d *data.Data) *NotificationService {
 	return &NotificationService{db: d.DB}
-}
-
-// RegisterNotificationRoutes 注册通知路由
-func RegisterNotificationRoutes(srv *khttp.Server, s *NotificationService) {
-	r := srv.Route("/")
-	r.GET("/v1/user/notification/list", s.handleList)
-	r.GET("/v1/user/notification/unread-count", s.handleUnreadCount)
-	r.POST("/v1/user/notification/read", s.handleRead)
-	r.POST("/v1/user/notification/read-all", s.handleReadAll)
-	r.POST("/v1/user/notification/clear-all", s.handleClearAll)
 }
 
 // CreateNotification 进程内写入（join review 等）
@@ -52,147 +41,117 @@ func CreateNotification(db *gorm.DB, n model.Notification) error {
 	})
 }
 
-func (s *NotificationService) handleList(ctx khttp.Context) error {
-	pd := auth.GetCurrentUser(ctx)
-	if pd == nil || pd.UserID == 0 {
-		writeJSON(ctx.Response(), 401, map[string]interface{}{"success": false, "message": "请先登录"})
-		return nil
+func (s *NotificationService) List(ctx context.Context, req *pb.ListReq) (*pb.ListRes, error) {
+	uid := auth.GetCurrentUserId(ctx)
+	if uid == 0 {
+		return &pb.ListRes{Success: false, Message: "请先登录"}, nil
 	}
-	page, pageSize := pageParams(ctx, 1, 20, 50)
-	q := s.db.Model(&model.Notification{}).Where("user_id = ?", pd.UserID)
+	page := int(req.Page)
+	pageSize := int(req.PageSize)
+	if page <= 0 {
+		page = 1
+	}
+	if pageSize <= 0 {
+		pageSize = 20
+	}
+	if pageSize > 50 {
+		pageSize = 50
+	}
+	q := s.db.WithContext(ctx).Model(&model.Notification{}).Where("user_id = ?", uid)
 	var total int64
 	if err := q.Count(&total).Error; err != nil {
-		writeJSON(ctx.Response(), 500, map[string]interface{}{"success": false, "message": "加载失败"})
-		return nil
+		return &pb.ListRes{Success: false, Message: "加载失败"}, nil
 	}
 	var list []model.Notification
 	if err := q.Order("id desc").Offset((page - 1) * pageSize).Limit(pageSize).Find(&list).Error; err != nil {
-		writeJSON(ctx.Response(), 500, map[string]interface{}{"success": false, "message": "加载失败"})
-		return nil
+		return &pb.ListRes{Success: false, Message: "加载失败"}, nil
 	}
 	var unread int64
-	_ = s.db.Model(&model.Notification{}).Where("user_id = ? AND is_read = false", pd.UserID).Count(&unread).Error
+	_ = s.db.WithContext(ctx).Model(&model.Notification{}).Where("user_id = ? AND is_read = false", uid).Count(&unread).Error
 
-	items := make([]map[string]interface{}, 0, len(list))
-	for _, n := range list {
-		items = append(items, notifJSON(n))
+	items := make([]*pb.NotificationItem, 0, len(list))
+	for i := range list {
+		items = append(items, notifItem(list[i]))
 	}
-	writeJSON(ctx.Response(), 200, map[string]interface{}{
-		"success":     true,
-		"message":     "ok",
-		"list":        items,
-		"total":       total,
-		"page":        page,
-		"pageSize":    pageSize,
-		"unreadCount": unread,
-	})
-	return nil
+	return &pb.ListRes{
+		Success:     true,
+		Message:     "ok",
+		List:        items,
+		Total:       total,
+		Page:        int64(page),
+		PageSize:    int64(pageSize),
+		UnreadCount: unread,
+	}, nil
 }
 
-func (s *NotificationService) handleUnreadCount(ctx khttp.Context) error {
-	pd := auth.GetCurrentUser(ctx)
-	if pd == nil || pd.UserID == 0 {
-		writeJSON(ctx.Response(), 401, map[string]interface{}{"success": false, "message": "请先登录"})
-		return nil
+func (s *NotificationService) UnreadCount(ctx context.Context, req *pb.UnreadCountReq) (*pb.UnreadCountRes, error) {
+	uid := auth.GetCurrentUserId(ctx)
+	if uid == 0 {
+		return &pb.UnreadCountRes{Success: false, Message: "请先登录"}, nil
 	}
 	var unread int64
-	_ = s.db.Model(&model.Notification{}).Where("user_id = ? AND is_read = false", pd.UserID).Count(&unread).Error
-	writeJSON(ctx.Response(), 200, map[string]interface{}{
-		"success": true, "message": "ok", "unreadCount": unread,
-	})
-	return nil
+	_ = s.db.WithContext(ctx).Model(&model.Notification{}).Where("user_id = ? AND is_read = false", uid).Count(&unread).Error
+	return &pb.UnreadCountRes{Success: true, Message: "ok", UnreadCount: unread}, nil
 }
 
-func (s *NotificationService) handleRead(ctx khttp.Context) error {
-	pd := auth.GetCurrentUser(ctx)
-	if pd == nil || pd.UserID == 0 {
-		writeJSON(ctx.Response(), 401, map[string]interface{}{"success": false, "message": "请先登录"})
-		return nil
+func (s *NotificationService) Read(ctx context.Context, req *pb.ReadReq) (*pb.ReadRes, error) {
+	uid := auth.GetCurrentUserId(ctx)
+	if uid == 0 {
+		return &pb.ReadRes{Success: false, Message: "请先登录"}, nil
 	}
-	var req struct {
-		IDs []uint `json:"ids"`
+	if len(req.Ids) == 0 {
+		return &pb.ReadRes{Success: false, Message: "请指定通知"}, nil
 	}
-	if err := readJSON(ctx.Request(), &req); err != nil || len(req.IDs) == 0 {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"success": false, "message": "请指定通知"})
-		return nil
+	ids := req.Ids
+	if len(ids) > 100 {
+		ids = ids[:100]
 	}
-	if len(req.IDs) > 100 {
-		req.IDs = req.IDs[:100]
+	idsU := make([]uint, 0, len(ids))
+	for _, id := range ids {
+		idsU = append(idsU, uint(id))
 	}
-	_ = s.db.Model(&model.Notification{}).
-		Where("user_id = ? AND id IN ?", pd.UserID, req.IDs).
+	_ = s.db.WithContext(ctx).Model(&model.Notification{}).
+		Where("user_id = ? AND id IN ?", uid, idsU).
 		Update("is_read", true).Error
-	writeJSON(ctx.Response(), 200, map[string]interface{}{"success": true, "message": "已标记已读"})
-	return nil
+	return &pb.ReadRes{Success: true, Message: "已标记已读"}, nil
 }
 
-func (s *NotificationService) handleReadAll(ctx khttp.Context) error {
-	pd := auth.GetCurrentUser(ctx)
-	if pd == nil || pd.UserID == 0 {
-		writeJSON(ctx.Response(), 401, map[string]interface{}{"success": false, "message": "请先登录"})
-		return nil
+func (s *NotificationService) ReadAll(ctx context.Context, req *pb.ReadAllReq) (*pb.ReadAllRes, error) {
+	uid := auth.GetCurrentUserId(ctx)
+	if uid == 0 {
+		return &pb.ReadAllRes{Success: false, Message: "请先登录"}, nil
 	}
-	_ = s.db.Model(&model.Notification{}).
-		Where("user_id = ? AND is_read = false", pd.UserID).
+	_ = s.db.WithContext(ctx).Model(&model.Notification{}).
+		Where("user_id = ? AND is_read = false", uid).
 		Update("is_read", true).Error
-	writeJSON(ctx.Response(), 200, map[string]interface{}{"success": true, "message": "全部已读"})
-	return nil
+	return &pb.ReadAllRes{Success: true, Message: "全部已读"}, nil
 }
 
-// handleClearAll 硬删除当前用户全部站内信（不可恢复）
-func (s *NotificationService) handleClearAll(ctx khttp.Context) error {
-	pd := auth.GetCurrentUser(ctx)
-	if pd == nil || pd.UserID == 0 {
-		writeJSON(ctx.Response(), 401, map[string]interface{}{"success": false, "message": "请先登录"})
-		return nil
+// ClearAll 硬删除当前用户全部站内信（不可恢复）
+func (s *NotificationService) ClearAll(ctx context.Context, req *pb.ClearAllReq) (*pb.ClearAllRes, error) {
+	uid := auth.GetCurrentUserId(ctx)
+	if uid == 0 {
+		return &pb.ClearAllRes{Success: false, Message: "请先登录"}, nil
 	}
-	res := s.db.Where("user_id = ?", pd.UserID).Delete(&model.Notification{})
+	res := s.db.WithContext(ctx).Where("user_id = ?", uid).Delete(&model.Notification{})
 	if res.Error != nil {
-		writeJSON(ctx.Response(), 500, map[string]interface{}{"success": false, "message": "清空失败"})
-		return nil
+		return &pb.ClearAllRes{Success: false, Message: "清空失败"}, nil
 	}
-	writeJSON(ctx.Response(), 200, map[string]interface{}{
-		"success": true,
-		"message": "已清空",
-		"deleted": res.RowsAffected,
-	})
-	return nil
+	return &pb.ClearAllRes{Success: true, Message: "已清空", Deleted: res.RowsAffected}, nil
 }
 
-func notifJSON(n model.Notification) map[string]interface{} {
-	return map[string]interface{}{
-		"id":        n.ID,
-		"type":      n.Type,
-		"title":     n.Title,
-		"body":      n.Body,
-		"actorId":   n.ActorID,
-		"refType":   n.RefType,
-		"refId":     n.RefID,
-		"problemId": n.ProblemID,
-		"payload":   n.Payload,
-		"isRead":    n.IsRead,
-		"createdAt": n.CreatedAt.Unix(),
+func notifItem(n model.Notification) *pb.NotificationItem {
+	return &pb.NotificationItem{
+		Id:        int64(n.ID),
+		Type:      n.Type,
+		Title:     n.Title,
+		Body:      n.Body,
+		ActorId:   int64(n.ActorID),
+		RefType:   n.RefType,
+		RefId:     int64(n.RefID),
+		ProblemId: int64(n.ProblemID),
+		Payload:   n.Payload,
+		IsRead:    n.IsRead,
+		CreatedAt: n.CreatedAt.Unix(),
 	}
 }
-
-func pageParams(ctx khttp.Context, defPage, defSize, maxSize int) (page, pageSize int) {
-	page = defPage
-	pageSize = defSize
-	if v := strings.TrimSpace(ctx.Query().Get("page")); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			page = n
-		}
-	}
-	if v := strings.TrimSpace(ctx.Query().Get("pageSize")); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			pageSize = n
-		}
-	}
-	if pageSize > maxSize {
-		pageSize = maxSize
-	}
-	return
-}
-
-// Ensure created_at default for raw inserts
-var _ = time.Now

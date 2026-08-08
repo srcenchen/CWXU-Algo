@@ -58,6 +58,21 @@ service Spider {
       body: "*"
     };
   }
+  // 站管：按平台全量回填（body: { platform }；如力扣比赛记录）。
+  // 仅入队该平台已绑定用户的 needAll 任务，并强制清去重。
+  rpc UpdatePlatform (UpdatePlatformReq) returns (UpdatePlatformRes) {
+    option (google.api.http) = {
+      post: "/v1/core/spider/update-platform"
+      body: "*"
+    };
+  }
+  // 站管：幂等修复 AtCoder 赛时提交明细相关脏数据（external_id / 赛后练习格 / relative_sec）
+  rpc RepairContestCells (RepairContestCellsReq) returns (RepairContestCellsRes) {
+    option (google.api.http) = {
+      post: "/v1/core/spider/repair-contest-cells"
+      body: "*"
+    };
+  }
 }
 
 message SetSpiderReq {
@@ -227,5 +242,31 @@ message TogglePlatformReq {
 message TogglePlatformRes {
   int64 code = 1;
   string message = 2;
+}
+
+message UpdatePlatformReq {
+  // 平台名（支持别名：力扣/洛谷/cf 等，服务端规范化）
+  string platform = 1;
+}
+
+message UpdatePlatformRes {
+  // 0=成功；1=业务失败（未授权 / 限流 / 参数错误）
+  int32 code = 1;
+  string message = 2;
+  // 入队用户数
+  int32 count = 3;
+  // 实际 publish 成功数
+  int32 published = 4;
+  // 规范化后的平台名
+  string platform = 5;
+}
+
+message RepairContestCellsReq {}
+
+message RepairContestCellsRes {
+  bool success = 1;
+  string message = 2;
+  // 各项修复计数（key: submit_external_id / practice_cells_to_upsolve / relative_sec_updated）
+  map<string, int32> data = 3;
 }
 

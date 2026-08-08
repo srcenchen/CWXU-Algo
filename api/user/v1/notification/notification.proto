@@ -1,0 +1,84 @@
+syntax = "proto3";
+
+package api.user.v1.notification;
+
+import "google/api/annotations.proto";
+option go_package = "cwxu-algo/api/user/v1/notification;notification";
+option java_multiple_files = true;
+option java_package = "api.user.v1.notification";
+
+// 站内信服务（迁移自手写 RegisterNotificationRoutes）
+// 路径前缀：/v1/user/notification/*
+service Notification {
+  rpc List (ListReq) returns (ListRes) {
+    option (google.api.http) = { get: "/v1/user/notification/list" };
+  }
+  rpc UnreadCount (UnreadCountReq) returns (UnreadCountRes) {
+    option (google.api.http) = { get: "/v1/user/notification/unread-count" };
+  }
+  rpc Read (ReadReq) returns (ReadRes) {
+    option (google.api.http) = { post: "/v1/user/notification/read" body: "*" };
+  }
+  rpc ReadAll (ReadAllReq) returns (ReadAllRes) {
+    option (google.api.http) = { post: "/v1/user/notification/read-all" body: "*" };
+  }
+  rpc ClearAll (ClearAllReq) returns (ClearAllRes) {
+    option (google.api.http) = { post: "/v1/user/notification/clear-all" body: "*" };
+  }
+}
+
+message NotificationItem {
+  int64 id = 1;
+  string type = 2;
+  string title = 3;
+  string body = 4;
+  int64 actorId = 5;
+  string refType = 6;
+  int64 refId = 7;
+  int64 problemId = 8;
+  string payload = 9;
+  bool isRead = 10;
+  int64 createdAt = 11; // unix 秒
+}
+
+message ListReq {
+  int64 page = 1;
+  int64 pageSize = 2;
+}
+message ListRes {
+  bool success = 1;
+  string message = 2;
+  repeated NotificationItem list = 3;
+  int64 total = 4;
+  int64 page = 5;
+  int64 pageSize = 6;
+  int64 unreadCount = 7;
+}
+
+message UnreadCountReq {}
+message UnreadCountRes {
+  bool success = 1;
+  string message = 2;
+  int64 unreadCount = 3;
+}
+
+message ReadReq {
+  repeated int64 ids = 1;
+}
+message ReadRes {
+  bool success = 1;
+  string message = 2;
+}
+
+message ReadAllReq {}
+message ReadAllRes {
+  bool success = 1;
+  string message = 2;
+}
+
+message ClearAllReq {}
+message ClearAllRes {
+  bool success = 1;
+  string message = 2;
+  int64 deleted = 3;
+}

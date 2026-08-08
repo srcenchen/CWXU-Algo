@@ -20,26 +20,34 @@ var _ = binding.EncodeURL
 const _ = http.SupportPackageIsVersion1
 
 const OperationProblemsetAdd = "/api.core.v1.problemset.Problemset/Add"
+const OperationProblemsetAddManual = "/api.core.v1.problemset.Problemset/AddManual"
 const OperationProblemsetByProblem = "/api.core.v1.problemset.Problemset/ByProblem"
 const OperationProblemsetCreate = "/api.core.v1.problemset.Problemset/Create"
 const OperationProblemsetDelete = "/api.core.v1.problemset.Problemset/Delete"
+const OperationProblemsetFavorite = "/api.core.v1.problemset.Problemset/Favorite"
+const OperationProblemsetFavorites = "/api.core.v1.problemset.Problemset/Favorites"
 const OperationProblemsetGet = "/api.core.v1.problemset.Problemset/Get"
 const OperationProblemsetLike = "/api.core.v1.problemset.Problemset/Like"
 const OperationProblemsetMine = "/api.core.v1.problemset.Problemset/Mine"
 const OperationProblemsetRemove = "/api.core.v1.problemset.Problemset/Remove"
+const OperationProblemsetReorder = "/api.core.v1.problemset.Problemset/Reorder"
 const OperationProblemsetSquare = "/api.core.v1.problemset.Problemset/Square"
 const OperationProblemsetUnlock = "/api.core.v1.problemset.Problemset/Unlock"
 const OperationProblemsetUpdate = "/api.core.v1.problemset.Problemset/Update"
 
 type ProblemsetHTTPServer interface {
 	Add(context.Context, *AddReq) (*AddRes, error)
+	AddManual(context.Context, *AddManualReq) (*AddManualRes, error)
 	ByProblem(context.Context, *ByProblemReq) (*ByProblemRes, error)
 	Create(context.Context, *CreateReq) (*CreateRes, error)
 	Delete(context.Context, *DeleteReq) (*DeleteRes, error)
+	Favorite(context.Context, *FavoriteReq) (*FavoriteRes, error)
+	Favorites(context.Context, *FavoritesReq) (*FavoritesRes, error)
 	Get(context.Context, *GetReq) (*GetRes, error)
 	Like(context.Context, *LikeReq) (*LikeRes, error)
 	Mine(context.Context, *MineReq) (*MineRes, error)
 	Remove(context.Context, *RemoveReq) (*RemoveRes, error)
+	Reorder(context.Context, *ReorderReq) (*ReorderRes, error)
 	Square(context.Context, *SquareReq) (*SquareRes, error)
 	Unlock(context.Context, *UnlockReq) (*UnlockRes, error)
 	Update(context.Context, *UpdateReq) (*UpdateRes, error)
@@ -58,6 +66,10 @@ func RegisterProblemsetHTTPServer(s *http.Server, srv ProblemsetHTTPServer) {
 	r.POST("/v1/core/problemset/add", _Problemset_Add0_HTTP_Handler(srv))
 	r.POST("/v1/core/problemset/remove", _Problemset_Remove0_HTTP_Handler(srv))
 	r.POST("/v1/core/problemset/like", _Problemset_Like0_HTTP_Handler(srv))
+	r.POST("/v1/core/problemset/add-manual", _Problemset_AddManual0_HTTP_Handler(srv))
+	r.POST("/v1/core/problemset/reorder", _Problemset_Reorder0_HTTP_Handler(srv))
+	r.POST("/v1/core/problemset/favorite", _Problemset_Favorite0_HTTP_Handler(srv))
+	r.GET("/v1/core/problemset/favorites", _Problemset_Favorites0_HTTP_Handler(srv))
 }
 
 func _Problemset_Mine0_HTTP_Handler(srv ProblemsetHTTPServer) func(ctx http.Context) error {
@@ -290,15 +302,104 @@ func _Problemset_Like0_HTTP_Handler(srv ProblemsetHTTPServer) func(ctx http.Cont
 	}
 }
 
+func _Problemset_AddManual0_HTTP_Handler(srv ProblemsetHTTPServer) func(ctx http.Context) error {
+	return func(ctx http.Context) error {
+		var in AddManualReq
+		if err := ctx.Bind(&in); err != nil {
+			return err
+		}
+		if err := ctx.BindQuery(&in); err != nil {
+			return err
+		}
+		http.SetOperation(ctx, OperationProblemsetAddManual)
+		h := ctx.Middleware(func(ctx context.Context, req interface{}) (interface{}, error) {
+			return srv.AddManual(ctx, req.(*AddManualReq))
+		})
+		out, err := h(ctx, &in)
+		if err != nil {
+			return err
+		}
+		reply := out.(*AddManualRes)
+		return ctx.Result(200, reply)
+	}
+}
+
+func _Problemset_Reorder0_HTTP_Handler(srv ProblemsetHTTPServer) func(ctx http.Context) error {
+	return func(ctx http.Context) error {
+		var in ReorderReq
+		if err := ctx.Bind(&in); err != nil {
+			return err
+		}
+		if err := ctx.BindQuery(&in); err != nil {
+			return err
+		}
+		http.SetOperation(ctx, OperationProblemsetReorder)
+		h := ctx.Middleware(func(ctx context.Context, req interface{}) (interface{}, error) {
+			return srv.Reorder(ctx, req.(*ReorderReq))
+		})
+		out, err := h(ctx, &in)
+		if err != nil {
+			return err
+		}
+		reply := out.(*ReorderRes)
+		return ctx.Result(200, reply)
+	}
+}
+
+func _Problemset_Favorite0_HTTP_Handler(srv ProblemsetHTTPServer) func(ctx http.Context) error {
+	return func(ctx http.Context) error {
+		var in FavoriteReq
+		if err := ctx.Bind(&in); err != nil {
+			return err
+		}
+		if err := ctx.BindQuery(&in); err != nil {
+			return err
+		}
+		http.SetOperation(ctx, OperationProblemsetFavorite)
+		h := ctx.Middleware(func(ctx context.Context, req interface{}) (interface{}, error) {
+			return srv.Favorite(ctx, req.(*FavoriteReq))
+		})
+		out, err := h(ctx, &in)
+		if err != nil {
+			return err
+		}
+		reply := out.(*FavoriteRes)
+		return ctx.Result(200, reply)
+	}
+}
+
+func _Problemset_Favorites0_HTTP_Handler(srv ProblemsetHTTPServer) func(ctx http.Context) error {
+	return func(ctx http.Context) error {
+		var in FavoritesReq
+		if err := ctx.BindQuery(&in); err != nil {
+			return err
+		}
+		http.SetOperation(ctx, OperationProblemsetFavorites)
+		h := ctx.Middleware(func(ctx context.Context, req interface{}) (interface{}, error) {
+			return srv.Favorites(ctx, req.(*FavoritesReq))
+		})
+		out, err := h(ctx, &in)
+		if err != nil {
+			return err
+		}
+		reply := out.(*FavoritesRes)
+		return ctx.Result(200, reply)
+	}
+}
+
 type ProblemsetHTTPClient interface {
 	Add(ctx context.Context, req *AddReq, opts ...http.CallOption) (rsp *AddRes, err error)
+	AddManual(ctx context.Context, req *AddManualReq, opts ...http.CallOption) (rsp *AddManualRes, err error)
 	ByProblem(ctx context.Context, req *ByProblemReq, opts ...http.CallOption) (rsp *ByProblemRes, err error)
 	Create(ctx context.Context, req *CreateReq, opts ...http.CallOption) (rsp *CreateRes, err error)
 	Delete(ctx context.Context, req *DeleteReq, opts ...http.CallOption) (rsp *DeleteRes, err error)
+	Favorite(ctx context.Context, req *FavoriteReq, opts ...http.CallOption) (rsp *FavoriteRes, err error)
+	Favorites(ctx context.Context, req *FavoritesReq, opts ...http.CallOption) (rsp *FavoritesRes, err error)
 	Get(ctx context.Context, req *GetReq, opts ...http.CallOption) (rsp *GetRes, err error)
 	Like(ctx context.Context, req *LikeReq, opts ...http.CallOption) (rsp *LikeRes, err error)
 	Mine(ctx context.Context, req *MineReq, opts ...http.CallOption) (rsp *MineRes, err error)
 	Remove(ctx context.Context, req *RemoveReq, opts ...http.CallOption) (rsp *RemoveRes, err error)
+	Reorder(ctx context.Context, req *ReorderReq, opts ...http.CallOption) (rsp *ReorderRes, err error)
 	Square(ctx context.Context, req *SquareReq, opts ...http.CallOption) (rsp *SquareRes, err error)
 	Unlock(ctx context.Context, req *UnlockReq, opts ...http.CallOption) (rsp *UnlockRes, err error)
 	Update(ctx context.Context, req *UpdateReq, opts ...http.CallOption) (rsp *UpdateRes, err error)
@@ -317,6 +418,19 @@ func (c *ProblemsetHTTPClientImpl) Add(ctx context.Context, in *AddReq, opts ...
 	pattern := "/v1/core/problemset/add"
 	path := binding.EncodeURL(pattern, in, false)
 	opts = append(opts, http.Operation(OperationProblemsetAdd))
+	opts = append(opts, http.PathTemplate(pattern))
+	err := c.cc.Invoke(ctx, "POST", path, in, &out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (c *ProblemsetHTTPClientImpl) AddManual(ctx context.Context, in *AddManualReq, opts ...http.CallOption) (*AddManualRes, error) {
+	var out AddManualRes
+	pattern := "/v1/core/problemset/add-manual"
+	path := binding.EncodeURL(pattern, in, false)
+	opts = append(opts, http.Operation(OperationProblemsetAddManual))
 	opts = append(opts, http.PathTemplate(pattern))
 	err := c.cc.Invoke(ctx, "POST", path, in, &out, opts...)
 	if err != nil {
@@ -358,6 +472,32 @@ func (c *ProblemsetHTTPClientImpl) Delete(ctx context.Context, in *DeleteReq, op
 	opts = append(opts, http.Operation(OperationProblemsetDelete))
 	opts = append(opts, http.PathTemplate(pattern))
 	err := c.cc.Invoke(ctx, "POST", path, in, &out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (c *ProblemsetHTTPClientImpl) Favorite(ctx context.Context, in *FavoriteReq, opts ...http.CallOption) (*FavoriteRes, error) {
+	var out FavoriteRes
+	pattern := "/v1/core/problemset/favorite"
+	path := binding.EncodeURL(pattern, in, false)
+	opts = append(opts, http.Operation(OperationProblemsetFavorite))
+	opts = append(opts, http.PathTemplate(pattern))
+	err := c.cc.Invoke(ctx, "POST", path, in, &out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (c *ProblemsetHTTPClientImpl) Favorites(ctx context.Context, in *FavoritesReq, opts ...http.CallOption) (*FavoritesRes, error) {
+	var out FavoritesRes
+	pattern := "/v1/core/problemset/favorites"
+	path := binding.EncodeURL(pattern, in, true)
+	opts = append(opts, http.Operation(OperationProblemsetFavorites))
+	opts = append(opts, http.PathTemplate(pattern))
+	err := c.cc.Invoke(ctx, "GET", path, nil, &out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -408,6 +548,19 @@ func (c *ProblemsetHTTPClientImpl) Remove(ctx context.Context, in *RemoveReq, op
 	pattern := "/v1/core/problemset/remove"
 	path := binding.EncodeURL(pattern, in, false)
 	opts = append(opts, http.Operation(OperationProblemsetRemove))
+	opts = append(opts, http.PathTemplate(pattern))
+	err := c.cc.Invoke(ctx, "POST", path, in, &out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (c *ProblemsetHTTPClientImpl) Reorder(ctx context.Context, in *ReorderReq, opts ...http.CallOption) (*ReorderRes, error) {
+	var out ReorderRes
+	pattern := "/v1/core/problemset/reorder"
+	path := binding.EncodeURL(pattern, in, false)
+	opts = append(opts, http.Operation(OperationProblemsetReorder))
 	opts = append(opts, http.PathTemplate(pattern))
 	err := c.cc.Invoke(ctx, "POST", path, in, &out, opts...)
 	if err != nil {

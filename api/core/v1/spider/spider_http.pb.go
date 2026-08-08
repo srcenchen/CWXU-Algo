@@ -21,17 +21,21 @@ const _ = http.SupportPackageIsVersion1
 
 const OperationSpiderGetSpiderMonitor = "/api.core.v1.spider.Spider/GetSpiderMonitor"
 const OperationSpiderPurgeSubmitsAndRecrawl = "/api.core.v1.spider.Spider/PurgeSubmitsAndRecrawl"
+const OperationSpiderRepairContestCells = "/api.core.v1.spider.Spider/RepairContestCells"
 const OperationSpiderSetSpider = "/api.core.v1.spider.Spider/SetSpider"
 const OperationSpiderSubmitInventory = "/api.core.v1.spider.Spider/SubmitInventory"
 const OperationSpiderTogglePlatform = "/api.core.v1.spider.Spider/TogglePlatform"
 const OperationSpiderUpdate = "/api.core.v1.spider.Spider/Update"
 const OperationSpiderUpdateAll = "/api.core.v1.spider.Spider/UpdateAll"
+const OperationSpiderUpdatePlatform = "/api.core.v1.spider.Spider/UpdatePlatform"
 
 type SpiderHTTPServer interface {
 	// GetSpiderMonitor 运维：各 OJ 爬虫模块监控（仅站管）
 	GetSpiderMonitor(context.Context, *SpiderMonitorReq) (*SpiderMonitorRes, error)
 	// PurgeSubmitsAndRecrawl 运维：清空全部提交相关数据并全量重爬（仅站管；confirm=PURGE_SUBMITS）
 	PurgeSubmitsAndRecrawl(context.Context, *PurgeSubmitsAndRecrawlReq) (*PurgeSubmitsAndRecrawlRes, error)
+	// RepairContestCells 站管：幂等修复 AtCoder 赛时提交明细相关脏数据（external_id / 赛后练习格 / relative_sec）
+	RepairContestCells(context.Context, *RepairContestCellsReq) (*RepairContestCellsRes, error)
 	SetSpider(context.Context, *SetSpiderReq) (*SetSpiderRep, error)
 	// SubmitInventory 运维：提交库存（明细 / 账本真实行数，仅站管）
 	SubmitInventory(context.Context, *SubmitInventoryReq) (*SubmitInventoryRes, error)
@@ -40,6 +44,9 @@ type SpiderHTTPServer interface {
 	Update(context.Context, *UpdateReq) (*UpdateRes, error)
 	// UpdateAll 管理员一键全量更新所有已绑定 OJ 的用户
 	UpdateAll(context.Context, *UpdateAllReq) (*UpdateAllRes, error)
+	// UpdatePlatform 站管：按平台全量回填（body: { platform }；如力扣比赛记录）。
+	// 仅入队该平台已绑定用户的 needAll 任务，并强制清去重。
+	UpdatePlatform(context.Context, *UpdatePlatformReq) (*UpdatePlatformRes, error)
 }
 
 func RegisterSpiderHTTPServer(s *http.Server, srv SpiderHTTPServer) {
@@ -51,6 +58,8 @@ func RegisterSpiderHTTPServer(s *http.Server, srv SpiderHTTPServer) {
 	r.POST("/v1/core/spider/purge-submits-and-recrawl", _Spider_PurgeSubmitsAndRecrawl0_HTTP_Handler(srv))
 	r.GET("/v1/core/spider/monitor", _Spider_GetSpiderMonitor0_HTTP_Handler(srv))
 	r.POST("/v1/core/spider/toggle-platform", _Spider_TogglePlatform0_HTTP_Handler(srv))
+	r.POST("/v1/core/spider/update-platform", _Spider_UpdatePlatform0_HTTP_Handler(srv))
+	r.POST("/v1/core/spider/repair-contest-cells", _Spider_RepairContestCells0_HTTP_Handler(srv))
 }
 
 func _Spider_SetSpider0_HTTP_Handler(srv SpiderHTTPServer) func(ctx http.Context) error {
@@ -201,11 +210,57 @@ func _Spider_TogglePlatform0_HTTP_Handler(srv SpiderHTTPServer) func(ctx http.Co
 	}
 }
 
+func _Spider_UpdatePlatform0_HTTP_Handler(srv SpiderHTTPServer) func(ctx http.Context) error {
+	return func(ctx http.Context) error {
+		var in UpdatePlatformReq
+		if err := ctx.Bind(&in); err != nil {
+			return err
+		}
+		if err := ctx.BindQuery(&in); err != nil {
+			return err
+		}
+		http.SetOperation(ctx, OperationSpiderUpdatePlatform)
+		h := ctx.Middleware(func(ctx context.Context, req interface{}) (interface{}, error) {
+			return srv.UpdatePlatform(ctx, req.(*UpdatePlatformReq))
+		})
+		out, err := h(ctx, &in)
+		if err != nil {
+			return err
+		}
+		reply := out.(*UpdatePlatformRes)
+		return ctx.Result(200, reply)
+	}
+}
+
+func _Spider_RepairContestCells0_HTTP_Handler(srv SpiderHTTPServer) func(ctx http.Context) error {
+	return func(ctx http.Context) error {
+		var in RepairContestCellsReq
+		if err := ctx.Bind(&in); err != nil {
+			return err
+		}
+		if err := ctx.BindQuery(&in); err != nil {
+			return err
+		}
+		http.SetOperation(ctx, OperationSpiderRepairContestCells)
+		h := ctx.Middleware(func(ctx context.Context, req interface{}) (interface{}, error) {
+			return srv.RepairContestCells(ctx, req.(*RepairContestCellsReq))
+		})
+		out, err := h(ctx, &in)
+		if err != nil {
+			return err
+		}
+		reply := out.(*RepairContestCellsRes)
+		return ctx.Result(200, reply)
+	}
+}
+
 type SpiderHTTPClient interface {
 	// GetSpiderMonitor 运维：各 OJ 爬虫模块监控（仅站管）
 	GetSpiderMonitor(ctx context.Context, req *SpiderMonitorReq, opts ...http.CallOption) (rsp *SpiderMonitorRes, err error)
 	// PurgeSubmitsAndRecrawl 运维：清空全部提交相关数据并全量重爬（仅站管；confirm=PURGE_SUBMITS）
 	PurgeSubmitsAndRecrawl(ctx context.Context, req *PurgeSubmitsAndRecrawlReq, opts ...http.CallOption) (rsp *PurgeSubmitsAndRecrawlRes, err error)
+	// RepairContestCells 站管：幂等修复 AtCoder 赛时提交明细相关脏数据（external_id / 赛后练习格 / relative_sec）
+	RepairContestCells(ctx context.Context, req *RepairContestCellsReq, opts ...http.CallOption) (rsp *RepairContestCellsRes, err error)
 	SetSpider(ctx context.Context, req *SetSpiderReq, opts ...http.CallOption) (rsp *SetSpiderRep, err error)
 	// SubmitInventory 运维：提交库存（明细 / 账本真实行数，仅站管）
 	SubmitInventory(ctx context.Context, req *SubmitInventoryReq, opts ...http.CallOption) (rsp *SubmitInventoryRes, err error)
@@ -214,6 +269,9 @@ type SpiderHTTPClient interface {
 	Update(ctx context.Context, req *UpdateReq, opts ...http.CallOption) (rsp *UpdateRes, err error)
 	// UpdateAll 管理员一键全量更新所有已绑定 OJ 的用户
 	UpdateAll(ctx context.Context, req *UpdateAllReq, opts ...http.CallOption) (rsp *UpdateAllRes, err error)
+	// UpdatePlatform 站管：按平台全量回填（body: { platform }；如力扣比赛记录）。
+	// 仅入队该平台已绑定用户的 needAll 任务，并强制清去重。
+	UpdatePlatform(ctx context.Context, req *UpdatePlatformReq, opts ...http.CallOption) (rsp *UpdatePlatformRes, err error)
 }
 
 type SpiderHTTPClientImpl struct {
@@ -244,6 +302,20 @@ func (c *SpiderHTTPClientImpl) PurgeSubmitsAndRecrawl(ctx context.Context, in *P
 	pattern := "/v1/core/spider/purge-submits-and-recrawl"
 	path := binding.EncodeURL(pattern, in, false)
 	opts = append(opts, http.Operation(OperationSpiderPurgeSubmitsAndRecrawl))
+	opts = append(opts, http.PathTemplate(pattern))
+	err := c.cc.Invoke(ctx, "POST", path, in, &out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// RepairContestCells 站管：幂等修复 AtCoder 赛时提交明细相关脏数据（external_id / 赛后练习格 / relative_sec）
+func (c *SpiderHTTPClientImpl) RepairContestCells(ctx context.Context, in *RepairContestCellsReq, opts ...http.CallOption) (*RepairContestCellsRes, error) {
+	var out RepairContestCellsRes
+	pattern := "/v1/core/spider/repair-contest-cells"
+	path := binding.EncodeURL(pattern, in, false)
+	opts = append(opts, http.Operation(OperationSpiderRepairContestCells))
 	opts = append(opts, http.PathTemplate(pattern))
 	err := c.cc.Invoke(ctx, "POST", path, in, &out, opts...)
 	if err != nil {
@@ -312,6 +384,21 @@ func (c *SpiderHTTPClientImpl) UpdateAll(ctx context.Context, in *UpdateAllReq, 
 	pattern := "/v1/core/spider/update-all"
 	path := binding.EncodeURL(pattern, in, false)
 	opts = append(opts, http.Operation(OperationSpiderUpdateAll))
+	opts = append(opts, http.PathTemplate(pattern))
+	err := c.cc.Invoke(ctx, "POST", path, in, &out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// UpdatePlatform 站管：按平台全量回填（body: { platform }；如力扣比赛记录）。
+// 仅入队该平台已绑定用户的 needAll 任务，并强制清去重。
+func (c *SpiderHTTPClientImpl) UpdatePlatform(ctx context.Context, in *UpdatePlatformReq, opts ...http.CallOption) (*UpdatePlatformRes, error) {
+	var out UpdatePlatformRes
+	pattern := "/v1/core/spider/update-platform"
+	path := binding.EncodeURL(pattern, in, false)
+	opts = append(opts, http.Operation(OperationSpiderUpdatePlatform))
 	opts = append(opts, http.PathTemplate(pattern))
 	err := c.cc.Invoke(ctx, "POST", path, in, &out, opts...)
 	if err != nil {

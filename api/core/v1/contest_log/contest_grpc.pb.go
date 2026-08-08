@@ -22,6 +22,9 @@ const (
 	Contest_GetContestList_FullMethodName        = "/api.core.v1.contest_log.Contest/GetContestList"
 	Contest_GetUserContestHistory_FullMethodName = "/api.core.v1.contest_log.Contest/GetUserContestHistory"
 	Contest_GetContestRanking_FullMethodName     = "/api.core.v1.contest_log.Contest/GetContestRanking"
+	Contest_GetContestProblems_FullMethodName    = "/api.core.v1.contest_log.Contest/GetContestProblems"
+	Contest_GetContestBoard_FullMethodName       = "/api.core.v1.contest_log.Contest/GetContestBoard"
+	Contest_GetContestCellSubmits_FullMethodName = "/api.core.v1.contest_log.Contest/GetContestCellSubmits"
 )
 
 // ContestClient is the client API for Contest service.
@@ -36,6 +39,12 @@ type ContestClient interface {
 	GetUserContestHistory(ctx context.Context, in *GetUserContestHistoryReq, opts ...grpc.CallOption) (*GetUserContestHistoryRes, error)
 	// 获取竞赛排行榜
 	GetContestRanking(ctx context.Context, in *GetContestRankingReq, opts ...grpc.CallOption) (*GetContestRankingRes, error)
+	// 比赛题目目录（?id=|contestId=；force=1 管理员强制重跑 ensure）
+	GetContestProblems(ctx context.Context, in *GetContestProblemsReq, opts ...grpc.CallOption) (*GetContestProblemsRes, error)
+	// XCPCIO 风格站内榜（?id=|contestId=；组织成员过滤与 ranking 一致）
+	GetContestBoard(ctx context.Context, in *GetContestBoardReq, opts ...grpc.CallOption) (*GetContestBoardRes, error)
+	// 站内榜格子：该用户本场该题的提交明细（赛时 + 赛后补题）
+	GetContestCellSubmits(ctx context.Context, in *GetContestCellSubmitsReq, opts ...grpc.CallOption) (*GetContestCellSubmitsRes, error)
 }
 
 type contestClient struct {
@@ -76,6 +85,36 @@ func (c *contestClient) GetContestRanking(ctx context.Context, in *GetContestRan
 	return out, nil
 }
 
+func (c *contestClient) GetContestProblems(ctx context.Context, in *GetContestProblemsReq, opts ...grpc.CallOption) (*GetContestProblemsRes, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetContestProblemsRes)
+	err := c.cc.Invoke(ctx, Contest_GetContestProblems_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *contestClient) GetContestBoard(ctx context.Context, in *GetContestBoardReq, opts ...grpc.CallOption) (*GetContestBoardRes, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetContestBoardRes)
+	err := c.cc.Invoke(ctx, Contest_GetContestBoard_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *contestClient) GetContestCellSubmits(ctx context.Context, in *GetContestCellSubmitsReq, opts ...grpc.CallOption) (*GetContestCellSubmitsRes, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetContestCellSubmitsRes)
+	err := c.cc.Invoke(ctx, Contest_GetContestCellSubmits_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ContestServer is the server API for Contest service.
 // All implementations must embed UnimplementedContestServer
 // for forward compatibility.
@@ -88,6 +127,12 @@ type ContestServer interface {
 	GetUserContestHistory(context.Context, *GetUserContestHistoryReq) (*GetUserContestHistoryRes, error)
 	// 获取竞赛排行榜
 	GetContestRanking(context.Context, *GetContestRankingReq) (*GetContestRankingRes, error)
+	// 比赛题目目录（?id=|contestId=；force=1 管理员强制重跑 ensure）
+	GetContestProblems(context.Context, *GetContestProblemsReq) (*GetContestProblemsRes, error)
+	// XCPCIO 风格站内榜（?id=|contestId=；组织成员过滤与 ranking 一致）
+	GetContestBoard(context.Context, *GetContestBoardReq) (*GetContestBoardRes, error)
+	// 站内榜格子：该用户本场该题的提交明细（赛时 + 赛后补题）
+	GetContestCellSubmits(context.Context, *GetContestCellSubmitsReq) (*GetContestCellSubmitsRes, error)
 	mustEmbedUnimplementedContestServer()
 }
 
@@ -106,6 +151,15 @@ func (UnimplementedContestServer) GetUserContestHistory(context.Context, *GetUse
 }
 func (UnimplementedContestServer) GetContestRanking(context.Context, *GetContestRankingReq) (*GetContestRankingRes, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetContestRanking not implemented")
+}
+func (UnimplementedContestServer) GetContestProblems(context.Context, *GetContestProblemsReq) (*GetContestProblemsRes, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetContestProblems not implemented")
+}
+func (UnimplementedContestServer) GetContestBoard(context.Context, *GetContestBoardReq) (*GetContestBoardRes, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetContestBoard not implemented")
+}
+func (UnimplementedContestServer) GetContestCellSubmits(context.Context, *GetContestCellSubmitsReq) (*GetContestCellSubmitsRes, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetContestCellSubmits not implemented")
 }
 func (UnimplementedContestServer) mustEmbedUnimplementedContestServer() {}
 func (UnimplementedContestServer) testEmbeddedByValue()                 {}
@@ -182,6 +236,60 @@ func _Contest_GetContestRanking_Handler(srv interface{}, ctx context.Context, de
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Contest_GetContestProblems_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetContestProblemsReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ContestServer).GetContestProblems(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Contest_GetContestProblems_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ContestServer).GetContestProblems(ctx, req.(*GetContestProblemsReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Contest_GetContestBoard_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetContestBoardReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ContestServer).GetContestBoard(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Contest_GetContestBoard_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ContestServer).GetContestBoard(ctx, req.(*GetContestBoardReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Contest_GetContestCellSubmits_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetContestCellSubmitsReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ContestServer).GetContestCellSubmits(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Contest_GetContestCellSubmits_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ContestServer).GetContestCellSubmits(ctx, req.(*GetContestCellSubmitsReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Contest_ServiceDesc is the grpc.ServiceDesc for Contest service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -200,6 +308,18 @@ var Contest_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetContestRanking",
 			Handler:    _Contest_GetContestRanking_Handler,
+		},
+		{
+			MethodName: "GetContestProblems",
+			Handler:    _Contest_GetContestProblems_Handler,
+		},
+		{
+			MethodName: "GetContestBoard",
+			Handler:    _Contest_GetContestBoard_Handler,
+		},
+		{
+			MethodName: "GetContestCellSubmits",
+			Handler:    _Contest_GetContestCellSubmits_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

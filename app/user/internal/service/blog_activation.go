@@ -1,19 +1,20 @@
 package service
 
 import (
+	"context"
 	"cwxu-algo/app/common/utils/sqllike"
 	"encoding/json"
-	"strconv"
+	"net/http"
 	"strings"
 	"time"
 	"unicode/utf8"
 
+	pb "cwxu-algo/api/user/v1/blog"
 	"cwxu-algo/app/common/blogimg"
 	"cwxu-algo/app/common/rbac"
 	"cwxu-algo/app/common/utils/auth"
 	"cwxu-algo/app/user/internal/data/model"
 
-	khttp "github.com/go-kratos/kratos/v2/transport/http"
 	"gorm.io/gorm"
 )
 
@@ -113,15 +114,11 @@ func (s *BlogService) isBlogActivated(userID uint) bool {
 	return cfg.AgreementAcceptedAt != nil
 }
 
-func (s *BlogService) requireActivated(ctx khttp.Context, userID uint) bool {
+func (s *BlogService) requireActivated(ctx context.Context, userID uint) error {
 	if s.isBlogActivated(userID) {
-		return true
+		return nil
 	}
-	writeJSON(ctx.Response(), 403, map[string]interface{}{
-		"code": 1, "message": "请先签署开通协议后再使用博客功能",
-		"needAgreement": true,
-	})
-	return false
+	return blogErr(http.StatusForbidden, "请先签署开通协议后再使用博客功能")
 }
 
 func normalizeEmailNotifyStrategy(raw string) string {
@@ -137,39 +134,40 @@ func normalizeEmailNotifyStrategy(raw string) string {
 	}
 }
 
-func (s *BlogService) activationJSON(cfg *model.BlogSiteConfig, username string) map[string]interface{} {
+func (s *BlogService) activationData(cfg *model.BlogSiteConfig, username string) *pb.ActivationData {
 	activated := cfg != nil && cfg.AgreementAcceptedAt != nil
-	out := map[string]interface{}{
-		"activated":           activated,
-		"agreementVersion":    model.BlogAgreementVersionCurrent,
-		"needAgreement":       !activated,
-		"emailNotifyEnabled":  false,
-		"emailNotifyStrategy": model.BlogEmailNotifyOff,
+	out := &pb.ActivationData{
+		Activated:           activated,
+		AgreementVersion:    model.BlogAgreementVersionCurrent,
+		NeedAgreement:       !activated,
+		EmailNotifyEnabled:  false,
+		EmailNotifyStrategy: model.BlogEmailNotifyOff,
 	}
 	if cfg != nil {
 		if cfg.AgreementVersion != "" {
-			out["signedAgreementVersion"] = cfg.AgreementVersion
+			out.SignedAgreementVersion = cfg.AgreementVersion
 		}
 		if cfg.AgreementAcceptedAt != nil {
-			out["agreementAcceptedAt"] = cfg.AgreementAcceptedAt.Unix()
+			out.AgreementAcceptedAt = cfg.AgreementAcceptedAt.Unix()
 		}
 		if cfg.ActivatedAt != nil {
-			out["activatedAt"] = cfg.ActivatedAt.Unix()
+			out.ActivatedAt = cfg.ActivatedAt.Unix()
 		}
-		out["emailNotifyEnabled"] = cfg.EmailNotifyEnabled
-		out["emailNotifyStrategy"] = normalizeEmailNotifyStrategy(cfg.EmailNotifyStrategy)
-		out["themeId"] = normalizeThemeID(cfg.ThemeID)
-		out["subtitle"] = strings.TrimSpace(cfg.Subtitle)
-		out["imageUploadEnabled"] = cfg.ImageUploadEnabled
+		out.EmailNotifyEnabled = cfg.EmailNotifyEnabled
+		out.EmailNotifyStrategy = normalizeEmailNotifyStrategy(cfg.EmailNotifyStrategy)
+		out.ThemeId = normalizeThemeID(cfg.ThemeID)
+		out.Subtitle = strings.TrimSpace(cfg.Subtitle)
+		out.ImageUploadEnabled = cfg.ImageUploadEnabled
 	}
 	if username != "" {
-		out["username"] = username
+		out.Username = username
 	}
 	return out
 }
 
 // handleAgreementGet 返回协议正文与当前用户开通状态（可匿名看正文）
-func (s *BlogService) handleAgreementGet(ctx khttp.Context) error {
+// AgreementGet 公开：协议正文 + 当前用户开通状态（可匿名看正文）
+func (s *BlogService) AgreementGet(ctx context.Context, req *pb.AgreementGetReq) (*pb.AgreementGetRes, error) {
 	viewer := blogViewerID(ctx)
 	var cfg *model.BlogSiteConfig
 	username := ""
@@ -183,63 +181,46 @@ func (s *BlogService) handleAgreementGet(ctx khttp.Context) error {
 			username = u.Username
 		}
 	}
-	data := s.activationJSON(cfg, username)
-	data["title"] = "GoAlgo 个人博客开通协议"
-	data["content"] = blogAgreementTextCN
-	writeJSON(ctx.Response(), 200, map[string]interface{}{
-		"code": 0, "message": "success", "data": data,
-	})
-	return nil
+	data := s.activationData(cfg, username)
+	data.Title = "GoAlgo 个人博客开通协议"
+	data.Content = blogAgreementTextCN
+	return &pb.AgreementGetRes{Code: 0, Message: "success", Data: data}, nil
 }
 
 // handleActivationStatus 当前登录用户开通状态
-func (s *BlogService) handleActivationStatus(ctx khttp.Context) error {
+// ActivationStatus 登录：当前用户开通状态
+func (s *BlogService) ActivationStatus(ctx context.Context, req *pb.ActivationStatusReq) (*pb.ActivationStatusRes, error) {
 	pd := auth.GetCurrentUser(ctx)
 	if pd == nil || pd.UserID == 0 {
-		writeJSON(ctx.Response(), 401, map[string]interface{}{"code": 1, "message": "请先登录"})
-		return nil
+		return nil, blogErr(http.StatusUnauthorized, "请先登录")
 	}
 	var cfg *model.BlogSiteConfig
 	var row model.BlogSiteConfig
 	if err := s.db.Where("user_id = ?", pd.UserID).First(&row).Error; err == nil {
 		cfg = &row
 	}
-	writeJSON(ctx.Response(), 200, map[string]interface{}{
-		"code": 0, "message": "success",
-		"data": s.activationJSON(cfg, pd.Username),
-	})
-	return nil
+	return &pb.ActivationStatusRes{
+		Code: 0, Message: "success",
+		Data: s.activationData(cfg, pd.Username),
+	}, nil
 }
 
 // handleActivate 签署协议并开通博客
-func (s *BlogService) handleActivate(ctx khttp.Context) error {
+// Activate 登录：签署协议并开通博客
+func (s *BlogService) Activate(ctx context.Context, req *pb.ActivateReq) (*pb.ActivateRes, error) {
 	pd := auth.GetCurrentUser(ctx)
 	if pd == nil || pd.UserID == 0 {
-		writeJSON(ctx.Response(), 401, map[string]interface{}{"code": 1, "message": "请先登录"})
-		return nil
+		return nil, blogErr(http.StatusUnauthorized, "请先登录")
 	}
-	var body struct {
-		Accept              bool   `json:"accept"`
-		AgreementVersion    string `json:"agreementVersion"`
-		EmailNotifyEnabled  *bool  `json:"emailNotifyEnabled"`
-		EmailNotifyStrategy string `json:"emailNotifyStrategy"`
+	if !req.Accept {
+		return nil, blogErr(http.StatusBadRequest, "须勾选同意开通协议后才能开通博客")
 	}
-	_ = json.NewDecoder(ctx.Request().Body).Decode(&body)
-	if !body.Accept {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{
-			"code": 1, "message": "须勾选同意开通协议后才能开通博客",
-		})
-		return nil
-	}
-	ver := strings.TrimSpace(body.AgreementVersion)
+	ver := strings.TrimSpace(req.AgreementVersion)
 	if ver == "" {
 		ver = model.BlogAgreementVersionCurrent
 	}
 	if ver != model.BlogAgreementVersionCurrent {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{
-			"code": 1, "message": "协议版本已更新，请刷新后重新阅读并同意",
-		})
-		return nil
+		return nil, blogErr(http.StatusBadRequest, "协议版本已更新，请刷新后重新阅读并同意")
 	}
 	now := time.Now()
 	var cfg model.BlogSiteConfig
@@ -260,11 +241,11 @@ func (s *BlogService) handleActivate(ctx khttp.Context) error {
 			cfg.ActivatedAt = &now
 		}
 	}
-	if body.EmailNotifyEnabled != nil {
-		cfg.EmailNotifyEnabled = *body.EmailNotifyEnabled
+	if req.EmailNotifyEnabled != nil {
+		cfg.EmailNotifyEnabled = req.EmailNotifyEnabled.Value
 	}
-	if body.EmailNotifyStrategy != "" {
-		cfg.EmailNotifyStrategy = normalizeEmailNotifyStrategy(body.EmailNotifyStrategy)
+	if req.EmailNotifyStrategy != "" {
+		cfg.EmailNotifyStrategy = normalizeEmailNotifyStrategy(req.EmailNotifyStrategy)
 	}
 	if !cfg.EmailNotifyEnabled {
 		cfg.EmailNotifyStrategy = model.BlogEmailNotifyOff
@@ -273,23 +254,20 @@ func (s *BlogService) handleActivate(ctx khttp.Context) error {
 	}
 	if cfg.ID == 0 {
 		if err := s.db.Create(&cfg).Error; err != nil {
-			writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "开通失败"})
-			return nil
+			return nil, blogErr(http.StatusInternalServerError, "开通失败")
 		}
 	} else {
 		if err := s.db.Save(&cfg).Error; err != nil {
-			writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "开通失败"})
-			return nil
+			return nil, blogErr(http.StatusInternalServerError, "开通失败")
 		}
 	}
 	// 确保默认分类存在
 	_, _ = blogsyncEnsureDefaultCategory(s.db, pd.UserID)
 
-	writeJSON(ctx.Response(), 200, map[string]interface{}{
-		"code": 0, "message": "已开通个人博客",
-		"data": s.activationJSON(&cfg, pd.Username),
-	})
-	return nil
+	return &pb.ActivateRes{
+		Code: 0, Message: "已开通个人博客",
+		Data: s.activationData(&cfg, pd.Username),
+	}, nil
 }
 
 // 轻量：确保默认分类（避免循环依赖 blogsync 包的复杂逻辑）
@@ -312,33 +290,24 @@ func blogsyncEnsureDefaultCategory(db *gorm.DB, userID uint) (uint, error) {
 }
 
 // handleNotifyPref 更新互动邮件通知偏好（默认关）
-func (s *BlogService) handleNotifyPref(ctx khttp.Context) error {
+// NotifyPref 登录：更新互动邮件通知偏好（默认关）
+func (s *BlogService) NotifyPref(ctx context.Context, req *pb.NotifyPrefReq) (*pb.NotifyPrefRes, error) {
 	pd := auth.GetCurrentUser(ctx)
 	if pd == nil || pd.UserID == 0 {
-		writeJSON(ctx.Response(), 401, map[string]interface{}{"code": 1, "message": "请先登录"})
-		return nil
+		return nil, blogErr(http.StatusUnauthorized, "请先登录")
 	}
-	if !s.requireActivated(ctx, pd.UserID) {
-		return nil
-	}
-	var body struct {
-		EmailNotifyEnabled  *bool  `json:"emailNotifyEnabled"`
-		EmailNotifyStrategy string `json:"emailNotifyStrategy"`
-	}
-	if err := json.NewDecoder(ctx.Request().Body).Decode(&body); err != nil {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "参数错误"})
-		return nil
+	if err := s.requireActivated(ctx, pd.UserID); err != nil {
+		return nil, err
 	}
 	var cfg model.BlogSiteConfig
 	if err := s.db.Where("user_id = ?", pd.UserID).First(&cfg).Error; err != nil {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "请先开通博客"})
-		return nil
+		return nil, blogErr(http.StatusBadRequest, "请先开通博客")
 	}
-	if body.EmailNotifyEnabled != nil {
-		cfg.EmailNotifyEnabled = *body.EmailNotifyEnabled
+	if req.EmailNotifyEnabled != nil {
+		cfg.EmailNotifyEnabled = req.EmailNotifyEnabled.Value
 	}
-	if body.EmailNotifyStrategy != "" {
-		cfg.EmailNotifyStrategy = normalizeEmailNotifyStrategy(body.EmailNotifyStrategy)
+	if req.EmailNotifyStrategy != "" {
+		cfg.EmailNotifyStrategy = normalizeEmailNotifyStrategy(req.EmailNotifyStrategy)
 	}
 	if !cfg.EmailNotifyEnabled {
 		cfg.EmailNotifyStrategy = model.BlogEmailNotifyOff
@@ -346,26 +315,24 @@ func (s *BlogService) handleNotifyPref(ctx khttp.Context) error {
 		cfg.EmailNotifyStrategy = model.BlogEmailNotifyImmediate
 	}
 	if err := s.db.Save(&cfg).Error; err != nil {
-		writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "保存失败"})
-		return nil
+		return nil, blogErr(http.StatusInternalServerError, "保存失败")
 	}
-	writeJSON(ctx.Response(), 200, map[string]interface{}{
-		"code": 0, "message": "success",
-		"data": map[string]interface{}{
-			"emailNotifyEnabled":  cfg.EmailNotifyEnabled,
-			"emailNotifyStrategy": normalizeEmailNotifyStrategy(cfg.EmailNotifyStrategy),
+	return &pb.NotifyPrefRes{
+		Code: 0, Message: "success",
+		Data: &pb.NotifyPrefData{
+			EmailNotifyEnabled:  cfg.EmailNotifyEnabled,
+			EmailNotifyStrategy: normalizeEmailNotifyStrategy(cfg.EmailNotifyStrategy),
 		},
-	})
-	return nil
+	}, nil
 }
 
 // ---------- 站管：博客管理 ----------
 
-func (s *BlogService) handleAdminOverview(ctx khttp.Context) error {
+// AdminOverview 站管：博客数据看板概览
+func (s *BlogService) AdminOverview(ctx context.Context, req *pb.AdminOverviewReq) (*pb.AdminOverviewRes, error) {
 	pd := auth.GetCurrentUser(ctx)
 	if !auth.PayloadHasPerm(pd, rbac.PermSiteBlogBoard) {
-		writeJSON(ctx.Response(), 403, map[string]interface{}{"code": 1, "message": "需要博客数据看板权限"})
-		return nil
+		return nil, blogErr(http.StatusForbidden, "需要博客数据看板权限")
 	}
 	var activated int64
 	_ = s.db.Model(&model.BlogSiteConfig{}).Where("agreement_accepted_at IS NOT NULL").Count(&activated).Error
@@ -386,30 +353,35 @@ func (s *BlogService) handleAdminOverview(ctx khttp.Context) error {
 	var rejected int64
 	_ = s.db.Model(&model.BlogArticle{}).Where("moderation_status = ?", model.BlogModerationRejected).Count(&rejected).Error
 
-	writeJSON(ctx.Response(), 200, map[string]interface{}{
-		"code": 0, "message": "success",
-		"data": map[string]interface{}{
-			"activatedUsers": activated,
-			"totalArticles":  articles,
-			"totalViews":     views,
-			"totalLikes":     likes,
-			"totalComments":  comments,
-			"pendingReview":  pending,
-			"rejected":       rejected,
+	return &pb.AdminOverviewRes{
+		Code: 0, Message: "success",
+		Data: &pb.AdminOverviewData{
+			ActivatedUsers: activated,
+			TotalArticles:  articles,
+			TotalViews:     views,
+			TotalLikes:     likes,
+			TotalComments:  comments,
+			PendingReview:  pending,
+			Rejected:       rejected,
 		},
-	})
-	return nil
+	}, nil
 }
 
-func (s *BlogService) handleAdminAuthors(ctx khttp.Context) error {
+// AdminAuthors 站管：已开通作者列表
+func (s *BlogService) AdminAuthors(ctx context.Context, req *pb.AdminAuthorsReq) (*pb.AdminAuthorsRes, error) {
 	imgBase := s.publicImageBase()
 	pd := auth.GetCurrentUser(ctx)
 	if !auth.PayloadHasPerm(pd, rbac.PermSiteBlogBoard) {
-		writeJSON(ctx.Response(), 403, map[string]interface{}{"code": 1, "message": "需要博客数据看板权限"})
-		return nil
+		return nil, blogErr(http.StatusForbidden, "需要博客数据看板权限")
 	}
-	page, pageSize := parsePage(ctx.Request())
-	keyword := strings.TrimSpace(ctx.Request().URL.Query().Get("keyword"))
+	page, pageSize := int(req.Page), int(req.PageSize)
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 || pageSize > 50 {
+		pageSize = 20
+	}
+	keyword := strings.TrimSpace(req.Keyword)
 
 	// 以 site_config 中已签署协议的用户为主
 	type row struct {
@@ -459,51 +431,54 @@ func (s *BlogService) handleAdminAuthors(ctx khttp.Context) error {
 		Offset((page - 1) * pageSize).Limit(pageSize).
 		Scan(&list).Error
 
-	out := make([]map[string]interface{}, 0, len(list))
+	out := make([]*pb.AdminAuthorInfo, 0, len(list))
 	for _, r := range list {
-		item := map[string]interface{}{
-			"userId":              r.UserID,
-			"username":            r.Username,
-			"name":                r.Name,
-			"avatar":              expandAvatarBase(imgBase, r.Avatar),
-			"agreementVersion":    r.AgreementVersion,
-			"emailNotifyEnabled":  r.EmailNotifyEnabled,
-			"emailNotifyStrategy": normalizeEmailNotifyStrategy(r.EmailNotifyStrategy),
-			"themeId":             normalizeThemeID(r.ThemeID),
-			"imageUploadEnabled":  r.ImageUploadEnabled,
-			"articleCount":        r.ArticleCount,
-			"viewCount":           r.ViewCount,
-			"likeCount":           r.LikeCount,
-			"commentCount":        r.CommentCount,
-			"activated":           true,
+		item := &pb.AdminAuthorInfo{
+			UserId:              int64(r.UserID),
+			Username:            r.Username,
+			Name:                r.Name,
+			Avatar:              expandAvatarBase(imgBase, r.Avatar),
+			AgreementVersion:    r.AgreementVersion,
+			EmailNotifyEnabled:  r.EmailNotifyEnabled,
+			EmailNotifyStrategy: normalizeEmailNotifyStrategy(r.EmailNotifyStrategy),
+			ThemeId:             normalizeThemeID(r.ThemeID),
+			ImageUploadEnabled:  r.ImageUploadEnabled,
+			ArticleCount:        r.ArticleCount,
+			ViewCount:           r.ViewCount,
+			LikeCount:           r.LikeCount,
+			CommentCount:        r.CommentCount,
+			Activated:           true,
 		}
 		if r.ActivatedAt != nil {
-			item["activatedAt"] = r.ActivatedAt.Unix()
+			item.ActivatedAt = r.ActivatedAt.Unix()
 		}
 		if r.AgreementAcceptedAt != nil {
-			item["agreementAcceptedAt"] = r.AgreementAcceptedAt.Unix()
+			item.AgreementAcceptedAt = r.AgreementAcceptedAt.Unix()
 		}
 		out = append(out, item)
 	}
-	writeJSON(ctx.Response(), 200, map[string]interface{}{
-		"code": 0, "message": "success",
-		"data": map[string]interface{}{
-			"list": out, "total": total, "page": page, "pageSize": pageSize,
-		},
-	})
-	return nil
+	return &pb.AdminAuthorsRes{
+		Code: 0, Message: "success",
+		Data: &pb.AdminAuthorListData{List: out, Total: total, Page: int64(page), PageSize: int64(pageSize)},
+	}, nil
 }
 
-func (s *BlogService) handleAdminArticles(ctx khttp.Context) error {
+// AdminArticles 站管：文章审查列表（含 private/password）
+func (s *BlogService) AdminArticles(ctx context.Context, req *pb.AdminArticlesReq) (*pb.AdminArticlesRes, error) {
 	pd := auth.GetCurrentUser(ctx)
 	if !auth.PayloadHasPerm(pd, rbac.PermSiteBlogBoard) {
-		writeJSON(ctx.Response(), 403, map[string]interface{}{"code": 1, "message": "需要博客数据看板权限"})
-		return nil
+		return nil, blogErr(http.StatusForbidden, "需要博客数据看板权限")
 	}
-	page, pageSize := parsePage(ctx.Request())
-	keyword := strings.TrimSpace(ctx.Request().URL.Query().Get("keyword"))
-	status := strings.TrimSpace(ctx.Request().URL.Query().Get("status"))
-	visibility := strings.TrimSpace(ctx.Request().URL.Query().Get("visibility"))
+	page, pageSize := int(req.Page), int(req.PageSize)
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 || pageSize > 50 {
+		pageSize = 20
+	}
+	keyword := strings.TrimSpace(req.Keyword)
+	status := strings.TrimSpace(req.Status)
+	visibility := strings.TrimSpace(req.Visibility)
 
 	q := s.db.Model(&model.BlogArticle{})
 	if status != "" {
@@ -533,42 +508,39 @@ func (s *BlogService) handleAdminArticles(ctx khttp.Context) error {
 			authors[u.ID] = u
 		}
 	}
-	out := make([]map[string]interface{}, 0, len(list))
+	out := make([]*pb.AdminArticleInfo, 0, len(list))
 	for i := range list {
 		a := &list[i]
 		author := authors[a.UserID]
-		item := map[string]interface{}{
-			"id":               a.ID,
-			"slug":             a.Slug,
-			"title":            a.Title,
-			"summary":          a.Summary,
-			"visibility":       a.Visibility,
-			"recommend":        a.Recommend,
-			"viewCount":        a.ViewCount,
-			"likeCount":        a.LikeCount,
-			"commentCount":     a.CommentCount,
-			"moderationStatus": normalizeModeration(a.ModerationStatus),
-			"moderationNote":   a.ModerationNote,
-			"userId":           a.UserID,
-			"username":         author.Username,
-			"authorName":       author.Name,
-			"createdAt":        a.CreatedAt.Unix(),
+		item := &pb.AdminArticleInfo{
+			Id:               int64(a.ID),
+			Slug:             a.Slug,
+			Title:            a.Title,
+			Summary:          a.Summary,
+			Visibility:       a.Visibility,
+			Recommend:        a.Recommend,
+			ViewCount:        int64(a.ViewCount),
+			LikeCount:        int64(a.LikeCount),
+			CommentCount:     int64(a.CommentCount),
+			ModerationStatus: normalizeModeration(a.ModerationStatus),
+			ModerationNote:   a.ModerationNote,
+			UserId:           int64(a.UserID),
+			Username:         author.Username,
+			AuthorName:       author.Name,
+			CreatedAt:        a.CreatedAt.Unix(),
 		}
 		if a.PublishedAt != nil {
-			item["publishedAt"] = a.PublishedAt.Unix()
+			item.PublishedAt = a.PublishedAt.Unix()
 		}
 		if a.ModeratedAt != nil {
-			item["moderatedAt"] = a.ModeratedAt.Unix()
+			item.ModeratedAt = a.ModeratedAt.Unix()
 		}
 		out = append(out, item)
 	}
-	writeJSON(ctx.Response(), 200, map[string]interface{}{
-		"code": 0, "message": "success",
-		"data": map[string]interface{}{
-			"list": out, "total": total, "page": page, "pageSize": pageSize,
-		},
-	})
-	return nil
+	return &pb.AdminArticlesRes{
+		Code: 0, Message: "success",
+		Data: &pb.AdminArticleListData{List: out, Total: total, Page: int64(page), PageSize: int64(pageSize)},
+	}, nil
 }
 
 func normalizeModeration(raw string) string {
@@ -582,26 +554,19 @@ func normalizeModeration(raw string) string {
 	}
 }
 
-func (s *BlogService) handleAdminModerate(ctx khttp.Context) error {
+// AdminModerate 站管/博客审核：文章审核（approve|reject|pending|feature|unfeature）
+func (s *BlogService) AdminModerate(ctx context.Context, req *pb.AdminModerateReq) (*pb.AdminModerateRes, error) {
 	pd := auth.GetCurrentUser(ctx)
 	if !auth.PayloadHasPerm(pd, rbac.PermContentBlogModerate) {
-		writeJSON(ctx.Response(), 403, map[string]interface{}{"code": 1, "message": "需要博客审核权限"})
-		return nil
+		return nil, blogErr(http.StatusForbidden, "需要博客审核权限")
 	}
-	var body struct {
-		ID     uint   `json:"id"`
-		Action string `json:"action"` // approve | reject | pending | feature | unfeature
-		Note   string `json:"note"`
+	if req.Id == 0 {
+		return nil, blogErr(http.StatusBadRequest, "参数错误")
 	}
-	if err := json.NewDecoder(ctx.Request().Body).Decode(&body); err != nil || body.ID == 0 {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "参数错误"})
-		return nil
-	}
-	action := strings.ToLower(strings.TrimSpace(body.Action))
+	action := strings.ToLower(strings.TrimSpace(req.Action))
 	var a model.BlogArticle
-	if err := s.db.First(&a, body.ID).Error; err != nil {
-		writeJSON(ctx.Response(), 404, map[string]interface{}{"code": 1, "message": "文章不存在"})
-		return nil
+	if err := s.db.First(&a, req.Id).Error; err != nil {
+		return nil, blogErr(http.StatusNotFound, "文章不存在")
 	}
 
 	// 精选开关：不改审核状态
@@ -609,27 +574,24 @@ func (s *BlogService) handleAdminModerate(ctx khttp.Context) error {
 		want := action == "feature" || action == "recommend"
 		if want {
 			if strings.TrimSpace(a.Visibility) != model.BlogVisPublic {
-				writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "仅公开文章可设为精选"})
-				return nil
+				return nil, blogErr(http.StatusBadRequest, "仅公开文章可设为精选")
 			}
 			if normalizeModeration(a.ModerationStatus) != model.BlogModerationApproved {
-				writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "请先通过审核再设精选"})
-				return nil
+				return nil, blogErr(http.StatusBadRequest, "请先通过审核再设精选")
 			}
 		}
 		a.Recommend = want
 		if err := s.db.Model(&a).Update("recommend", want).Error; err != nil {
-			writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "操作失败"})
-			return nil
+			return nil, blogErr(http.StatusInternalServerError, "操作失败")
 		}
-		writeJSON(ctx.Response(), 200, map[string]interface{}{
-			"code": 0, "message": "success",
-			"data": map[string]interface{}{
-				"id": a.ID, "recommend": want,
-				"moderationStatus": normalizeModeration(a.ModerationStatus),
+		return &pb.AdminModerateRes{
+			Code: 0, Message: "success",
+			Data: &pb.AdminModerateData{
+				Id:               int64(a.ID),
+				Recommend:        want,
+				ModerationStatus: normalizeModeration(a.ModerationStatus),
 			},
-		})
-		return nil
+		}, nil
 	}
 
 	status := ""
@@ -641,17 +603,15 @@ func (s *BlogService) handleAdminModerate(ctx khttp.Context) error {
 	case "pending":
 		status = model.BlogModerationPending
 	default:
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "action 须为 approve|reject|pending|feature|unfeature"})
-		return nil
+		return nil, blogErr(http.StatusBadRequest, "action 须为 approve|reject|pending|feature|unfeature")
 	}
-	note := strings.TrimSpace(body.Note)
+	note := strings.TrimSpace(req.Note)
 	if utf8.RuneCountInString(note) > 500 {
 		note = string([]rune(note)[:500])
 	}
 	a, err := updateBlogArticleModeration(s.db, a.ID, pd.UserID, status, note)
 	if err != nil {
-		writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "审核失败"})
-		return nil
+		return nil, blogErr(http.StatusInternalServerError, "审核失败")
 	}
 	// 通知作者
 	title := "博客文章审核结果"
@@ -684,13 +644,14 @@ func (s *BlogService) handleAdminModerate(ctx khttp.Context) error {
 			}),
 		})
 	}
-	writeJSON(ctx.Response(), 200, map[string]interface{}{
-		"code": 0, "message": "success",
-		"data": map[string]interface{}{
-			"id": a.ID, "moderationStatus": status, "moderationNote": note,
+	return &pb.AdminModerateRes{
+		Code: 0, Message: "success",
+		Data: &pb.AdminModerateData{
+			Id:               int64(a.ID),
+			ModerationStatus: status,
+			ModerationNote:   note,
 		},
-	})
-	return nil
+	}, nil
 }
 
 func mustJSON(v interface{}) string {
@@ -703,8 +664,5 @@ func moderationVisibleToPublic(status string) bool {
 	return normalizeModeration(status) == model.BlogModerationApproved
 }
 
-// parseUintQuery helper
-func parseUintQuery(ctx khttp.Context, key string) uint {
-	v, _ := strconv.ParseUint(strings.TrimSpace(ctx.Request().URL.Query().Get(key)), 10, 64)
-	return uint(v)
-}
+
+

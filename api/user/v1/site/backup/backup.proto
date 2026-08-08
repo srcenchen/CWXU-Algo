@@ -1,0 +1,72 @@
+syntax = "proto3";
+
+package api.user.v1.site.backup;
+
+import "google/api/annotations.proto";
+option go_package = "cwxu-algo/api/user/v1/site/backup;backup";
+option java_multiple_files = true;
+option java_package = "api.user.v1.site.backup";
+
+// 站点数据备份/恢复任务（仅站点管理员；后台异步执行）。
+// 路径前缀：/v1/user/site/backup/*
+//
+// 注：import（multipart 大文件上传）与 jobs/{id}/download（zip 流式下载）以及
+// jobs/{id} 删除仍为手写路由（见 app/user/internal/service/backup.go RegisterBackupRoutes）。
+service Backup {
+  // 创建全量/按 scope 导出任务；返回任务 id（jobId），后台慢慢导出
+  rpc Export (ExportReq) returns (ExportRes) {
+    option (google.api.http) = { post: "/v1/user/site/backup/export" body: "*" };
+  }
+  // 最近备份任务列表
+  rpc ListJobs (ListJobsReq) returns (ListJobsRes) {
+    option (google.api.http) = { get: "/v1/user/site/backup/jobs" };
+  }
+  // 单个任务状态：pending|running|done|failed、progress、message、downloadable
+  rpc GetJob (GetJobReq) returns (GetJobRes) {
+    option (google.api.http) = { get: "/v1/user/site/backup/jobs/{id}" };
+  }
+}
+
+message ExportReq {
+  repeated string scopes = 1;
+}
+
+message ExportRes {
+  int32 code = 1;
+  string message = 2;
+  int64 jobId = 3;
+}
+
+message ListJobsReq {}
+
+message JobInfo {
+  int64 id = 1;
+  string kind = 2;
+  string status = 3;
+  repeated string scopes = 4;
+  int32 progress = 5;
+  string message = 6;
+  int64 fileSize = 7;
+  int64 createdBy = 8;
+  string errorDetail = 9;
+  string createdAt = 10;
+  string startedAt = 11;
+  string finishedAt = 12;
+  bool downloadable = 13;
+}
+
+message ListJobsRes {
+  int32 code = 1;
+  string message = 2;
+  repeated JobInfo jobs = 3;
+}
+
+message GetJobReq {
+  int64 id = 1;
+}
+
+message GetJobRes {
+  int32 code = 1;
+  string message = 2;
+  JobInfo job = 3;
+}

@@ -3,6 +3,7 @@ package service
 import (
 	"testing"
 
+	pb "cwxu-algo/api/core/v1/community"
 	"cwxu-algo/app/common/notify"
 	"cwxu-algo/app/core_data/internal/data/model"
 
@@ -283,8 +284,8 @@ func TestSolutionCommentsIsolatedFromProblem(t *testing.T) {
 
 	// commentToMap 带 solutionId
 	m := s.commentToMap(solC, map[uint]userBrief{2: {username: "bob", name: "Bob"}}, map[uint]bool{})
-	if m["solutionId"] != sol.ID {
-		t.Fatalf("solutionId in map=%v", m["solutionId"])
+	if uint(m.SolutionId) != sol.ID {
+		t.Fatalf("solutionId in map=%v", m.SolutionId)
 	}
 
 	// 删除题解级联清评论
@@ -358,29 +359,27 @@ func TestCommentTreeMapAndLikedSet(t *testing.T) {
 		3: {username: "u3", name: "U3"},
 	}
 	all := []model.ProblemComment{root, r1, r2}
-	byID := map[uint]map[string]interface{}{}
+	byID := map[uint]*pb.CommentItem{}
 	for _, c := range all {
 		byID[c.ID] = s.commentToMap(c, users, liked)
-		byID[c.ID]["replies"] = []map[string]interface{}{}
 	}
 	for _, c := range []model.ProblemComment{r1, r2} {
 		parent := byID[c.ParentID]
-		list, _ := parent["replies"].([]map[string]interface{})
-		parent["replies"] = append(list, byID[c.ID])
+		parent.Replies = append(parent.Replies, byID[c.ID])
 	}
 	rootMap := byID[root.ID]
-	if rootMap["liked"] != true {
+	if !rootMap.Liked {
 		t.Fatal("root should be liked")
 	}
-	replies, _ := rootMap["replies"].([]map[string]interface{})
+	replies := rootMap.Replies
 	if len(replies) != 1 {
 		t.Fatalf("root replies=%d", len(replies))
 	}
-	nested, _ := replies[0]["replies"].([]map[string]interface{})
-	if len(nested) != 1 || nested[0]["content"] != "r2" {
+	nested := replies[0].Replies
+	if len(nested) != 1 || nested[0].Content != "r2" {
 		t.Fatalf("nested=%v", nested)
 	}
-	if nested[0]["liked"] != true {
+	if !nested[0].Liked {
 		t.Fatal("r2 should be liked")
 	}
 }

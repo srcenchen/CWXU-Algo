@@ -1,8 +1,8 @@
 package service
 
 import (
+	"context"
 	"crypto/subtle"
-	"encoding/json"
 	"net/http"
 	"net/url"
 	"os"
@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	pb "cwxu-algo/api/user/v1/blog"
 	"cwxu-algo/app/user/internal/data/model"
 
 	khttp "github.com/go-kratos/kratos/v2/transport/http"
@@ -34,14 +35,6 @@ type obsidianPluginView struct {
 	ReleasedAt    int64  `json:"releasedAt,omitempty"`
 	// DownloadBase 云存储该版本目录（无尾 /），客户端从此拉 main.js / manifest.json / styles.css
 	DownloadBase string `json:"downloadBase"`
-}
-
-type obsidianPluginPublishReq struct {
-	Version       string `json:"version"`
-	MinAppVersion string `json:"minAppVersion"`
-	Notes         string `json:"notes"`
-	ReleasedAt    int64  `json:"releasedAt"`
-	DownloadBase  string `json:"downloadBase"`
 }
 
 func obsidianPublishTokenOK(r *http.Request) bool {
@@ -130,51 +123,45 @@ func metaToView(row *model.ObsidianPluginMeta) obsidianPluginView {
 	}
 }
 
-// GET /v1/user/blog/obsidian-plugin/latest — 公开：插件检查更新
-func (s *BlogService) handleObsidianPluginLatest(ctx khttp.Context) error {
-	row, err := s.loadObsidianPluginMeta()
-	if err != nil || row == nil || strings.TrimSpace(row.Version) == "" {
-		writeJSON(ctx.Response(), 404, map[string]interface{}{
-			"code":    1,
-			"message": "暂无插件版本信息",
-		})
-		return nil
+func obsidianPluginViewToProto(v obsidianPluginView) *pb.ObsidianPluginView {
+	return &pb.ObsidianPluginView{
+		Id:            v.ID,
+		Name:          v.Name,
+		Version:       v.Version,
+		MinAppVersion: v.MinAppVersion,
+		Notes:         v.Notes,
+		ReleasedAt:    float64(v.ReleasedAt),
+		DownloadBase:  v.DownloadBase,
 	}
-	view := metaToView(row)
-	writeJSON(ctx.Response(), 200, map[string]interface{}{
-		"code": 0,
-		"data": view,
-	})
-	return nil
 }
 
-// POST /v1/user/blog/obsidian-plugin/publish — 发布脚本 / 站管登记当前版本
-func (s *BlogService) handleObsidianPluginPublish(ctx khttp.Context) error {
-	tokenOK := obsidianPublishTokenOK(ctx.Request())
+// ObsidianPluginLatest GET /v1/user/blog/obsidian-plugin/latest — 公开：插件检查更新
+func (s *BlogService) ObsidianPluginLatest(ctx context.Context, req *pb.ObsidianPluginLatestReq) (*pb.ObsidianPluginLatestRes, error) {
+	row, err := s.loadObsidianPluginMeta()
+	if err != nil || row == nil || strings.TrimSpace(row.Version) == "" {
+		return nil, blogErr(http.StatusNotFound, "暂无插件版本信息")
+	}
+	return &pb.ObsidianPluginLatestRes{
+		Code: 0,
+		Data: obsidianPluginViewToProto(metaToView(row)),
+	}, nil
+}
+
+// ObsidianPluginPublish POST /v1/user/blog/obsidian-plugin/publish — 发布脚本 / 站管登记当前版本
+func (s *BlogService) ObsidianPluginPublish(ctx context.Context, req *pb.ObsidianPluginPublishReq) (*pb.ObsidianPluginPublishRes, error) {
+	httpReq, _ := khttp.RequestFromServerContext(ctx)
+	tokenOK := false
+	if httpReq != nil {
+		tokenOK = obsidianPublishTokenOK(httpReq)
+	}
 	adminOK := blogIsSiteAdmin(ctx)
 	if !tokenOK && !adminOK {
-		writeJSON(ctx.Response(), 403, map[string]interface{}{
-			"code":    1,
-			"message": "需要发布令牌或站管权限",
-		})
-		return nil
+		return nil, blogErr(http.StatusForbidden, "需要发布令牌或站管权限")
 	}
 
-	var req obsidianPluginPublishReq
-	if err := json.NewDecoder(ctx.Request().Body).Decode(&req); err != nil {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{
-			"code":    1,
-			"message": "参数错误",
-		})
-		return nil
-	}
 	version := strings.TrimSpace(req.Version)
 	if !validObsidianVersion(version) {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{
-			"code":    1,
-			"message": "version 应为 semver",
-		})
-		return nil
+		return nil, blogErr(http.StatusBadRequest, "version 应为 semver")
 	}
 
 	minApp := strings.TrimSpace(req.MinAppVersion)
@@ -186,11 +173,7 @@ func (s *BlogService) handleObsidianPluginPublish(ctx khttp.Context) error {
 		base = defaultObsidianDownloadBase(version)
 	}
 	if !validObsidianDownloadBase(version, base) {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{
-			"code":    1,
-			"message": "downloadBase 无效",
-		})
-		return nil
+		return nil, blogErr(http.StatusBadRequest, "downloadBase 无效")
 	}
 	released := req.ReleasedAt
 	if released <= 0 {
@@ -209,11 +192,7 @@ func (s *BlogService) handleObsidianPluginPublish(ctx khttp.Context) error {
 	var existing model.ObsidianPluginMeta
 	if err := s.db.Where("id = ?", obsidianPluginMetaID).First(&existing).Error; err != nil {
 		if err := s.db.Create(&row).Error; err != nil {
-			writeJSON(ctx.Response(), 500, map[string]interface{}{
-				"code":    1,
-				"message": "保存失败",
-			})
-			return nil
+			return nil, blogErr(http.StatusInternalServerError, "保存失败")
 		}
 	} else {
 		if err := s.db.Model(&existing).Updates(map[string]interface{}{
@@ -223,11 +202,7 @@ func (s *BlogService) handleObsidianPluginPublish(ctx khttp.Context) error {
 			"released_at":     row.ReleasedAt,
 			"download_base":   row.DownloadBase,
 		}).Error; err != nil {
-			writeJSON(ctx.Response(), 500, map[string]interface{}{
-				"code":    1,
-				"message": "更新失败",
-			})
-			return nil
+			return nil, blogErr(http.StatusInternalServerError, "更新失败")
 		}
 		row = existing
 		row.Version = version
@@ -237,11 +212,9 @@ func (s *BlogService) handleObsidianPluginPublish(ctx khttp.Context) error {
 		row.DownloadBase = base
 	}
 
-	view := metaToView(&row)
-	writeJSON(ctx.Response(), 200, map[string]interface{}{
-		"code":    0,
-		"message": "ok",
-		"data":    view,
-	})
-	return nil
+	return &pb.ObsidianPluginPublishRes{
+		Code:    0,
+		Message: "ok",
+		Data:    obsidianPluginViewToProto(metaToView(&row)),
+	}, nil
 }

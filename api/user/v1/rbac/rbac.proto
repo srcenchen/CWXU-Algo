@@ -1,0 +1,225 @@
+syntax = "proto3";
+
+package api.user.v1.rbac;
+
+import "google/api/annotations.proto";
+option go_package = "cwxu-algo/api/user/v1/rbac;rbac";
+option java_multiple_files = true;
+option java_package = "api.user.v1.rbac";
+
+// 细粒度 RBAC 服务（权限点目录 / 自定义角色 / 成员指派）。
+// 实现位于 user/internal/service/rbac.go。
+// 路径前缀：/v1/user/rbac/*
+//
+// 内置角色权限集代码锁定；本服务只管理自定义角色与其成员指派。
+// 内置角色的任命仍走既有入口（org members/set-role、platform/set-*），并双写 user_roles 镜像。
+service Rbac {
+  // 权限目录（登录即可；供权限勾选矩阵渲染）
+  rpc Permissions (PermissionsReq) returns (PermissionsRes) {
+    option (google.api.http) = { get: "/v1/user/rbac/permissions" };
+  }
+  // 角色列表：scope=site 站点级；scope=org（默认）为「全局模板 + 该组织自定义」
+  rpc Roles (RolesReq) returns (RolesRes) {
+    option (google.api.http) = { get: "/v1/user/rbac/roles" };
+  }
+  // 新建自定义角色
+  rpc RoleCreate (RoleCreateReq) returns (RoleCreateRes) {
+    option (google.api.http) = { post: "/v1/user/rbac/roles/create" body: "*" };
+  }
+  // 编辑角色：自定义角色可改名称/说明/权限；内置教练/队长只改本组织权限覆盖
+  rpc RoleUpdate (RoleUpdateReq) returns (RoleUpdateRes) {
+    option (google.api.http) = { post: "/v1/user/rbac/roles/update" body: "*" };
+  }
+  // 删除自定义角色
+  rpc RoleDelete (RoleDeleteReq) returns (RoleDeleteRes) {
+    option (google.api.http) = { post: "/v1/user/rbac/roles/delete" body: "*" };
+  }
+  // 角色成员（分页 + 模糊搜索）
+  rpc RoleMembers (RoleMembersReq) returns (RoleMembersRes) {
+    option (google.api.http) = { get: "/v1/user/rbac/roles/members" };
+  }
+  // 把用户拉入自定义角色（内置角色请走成员管理/全站用户任命）
+  rpc RoleAssign (RoleAssignReq) returns (RoleAssignRes) {
+    option (google.api.http) = { post: "/v1/user/rbac/roles/assign" body: "*" };
+  }
+  // 把用户移出自定义角色
+  rpc RoleUnassign (RoleUnassignReq) returns (RoleUnassignRes) {
+    option (google.api.http) = { post: "/v1/user/rbac/roles/unassign" body: "*" };
+  }
+  // 某用户持有的站点级自定义角色 id 列表（org_id=0），消 N+1
+  rpc UserRoles (UserRolesReq) returns (UserRolesRes) {
+    option (google.api.http) = { get: "/v1/user/rbac/user-roles" };
+  }
+  // 当前用户在当前组织的有效权限（查库实时值，供前端兜底/调试）
+  rpc MyPermissions (MyPermissionsReq) returns (MyPermissionsRes) {
+    option (google.api.http) = { get: "/v1/user/rbac/my-permissions" };
+  }
+}
+
+message PermissionsReq {}
+
+message PermInfo {
+  string code = 1;
+  string label = 2;
+  string desc = 3;
+  string scope = 4;
+}
+
+message PermGroup {
+  string key = 1;
+  string label = 2;
+  string scope = 3;
+  repeated PermInfo perms = 4;
+}
+
+message PermissionsRes {
+  bool success = 1;
+  string message = 2;
+  repeated PermGroup groups = 3;
+}
+
+message RoleInfo {
+  int64 roleId = 1;
+  string code = 2;
+  string name = 3;
+  string description = 4;
+  string scope = 5;
+  int64 orgId = 6;
+  bool isSystem = 7;
+  // permsEditable：内置角色是否允许本组织改权限（名称/说明/成员仍锁定）
+  bool permsEditable = 8;
+  // customized：内置角色的权限已被本组织改过（可「恢复默认」）
+  bool customized = 9;
+  repeated string permissions = 10;
+  int32 memberCount = 11;
+}
+
+message RolesReq {
+  string scope = 1; // site | org（缺省 org）
+  int64 orgId = 2;  // scope=org 时可选；缺省为当前组织
+}
+
+message RolesRes {
+  bool success = 1;
+  string message = 2;
+  repeated RoleInfo list = 3;
+  int64 orgId = 4;
+  string scope = 5;
+}
+
+message RoleCreateReq {
+  string scope = 1; // site | org（缺省 org）
+  int64 orgId = 2;
+  string name = 3;
+  string description = 4;
+  repeated string permissions = 5;
+}
+
+message RoleCreateRes {
+  bool success = 1;
+  string message = 2;
+  RoleInfo data = 3;
+}
+
+message RoleUpdateReq {
+  int64 roleId = 1;
+  int64 orgId = 2;
+  // 以下缺省表示不改（optional 保持为空值可显式清空说明）
+  optional string name = 3;
+  optional string description = 4;
+  // 缺省表示不动权限；传 [] 表示清空
+  repeated string permissions = 5;
+  // 内置角色专用：清除本组织的权限覆盖，恢复默认
+  bool resetPermissions = 6;
+}
+
+message RoleUpdateRes {
+  bool success = 1;
+  string message = 2;
+  RoleInfo data = 3;
+}
+
+message RoleDeleteReq {
+  int64 roleId = 1;
+}
+
+message RoleDeleteRes {
+  bool success = 1;
+  string message = 2;
+}
+
+message RoleMemberInfo {
+  int64 userId = 1;
+  string username = 2;
+  string name = 3;
+  string avatar = 4;
+}
+
+message RoleMembersReq {
+  int64 roleId = 1;
+  int64 orgId = 2; // 系统组织角色必传；自定义角色可省略
+  int32 page = 3;
+  int32 pageSize = 4;
+  string keyword = 5;
+}
+
+message RoleMembersRes {
+  bool success = 1;
+  string message = 2;
+  repeated RoleMemberInfo list = 3;
+  int32 total = 4;
+  int32 page = 5;
+  int32 pageSize = 6;
+  int64 roleId = 7;
+  int64 orgId = 8;
+}
+
+message RoleAssignReq {
+  int64 roleId = 1;
+  repeated int64 userIds = 2;
+}
+
+message RoleAssignRes {
+  bool success = 1;
+  string message = 2;
+  int32 added = 3;
+  repeated int32 skipped = 4;
+}
+
+message RoleUnassignReq {
+  int64 roleId = 1;
+  repeated int64 userIds = 2;
+}
+
+message RoleUnassignRes {
+  bool success = 1;
+  string message = 2;
+}
+
+message UserRolesReq {
+  int64 userId = 1;
+}
+
+message UserRolesRes {
+  bool success = 1;
+  string message = 2;
+  repeated int32 roleIds = 3;
+}
+
+message MyPermissionsReq {}
+
+message MyRoleBrief {
+  string name = 1;
+  string scope = 2;
+  string code = 3;
+}
+
+message MyPermissionsRes {
+  bool success = 1;
+  string message = 2;
+  repeated string perms = 3;
+  repeated MyRoleBrief roles = 4;
+  bool isSiteAdmin = 5;
+  int64 orgId = 6;
+  string orgRole = 7;
+}

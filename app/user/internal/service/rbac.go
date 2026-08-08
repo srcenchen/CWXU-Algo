@@ -1,18 +1,18 @@
 package service
 
 import (
-	"cwxu-algo/app/common/utils/sqllike"
-	"strconv"
+	"context"
 	"strings"
 
+	pb "cwxu-algo/api/user/v1/rbac"
 	"cwxu-algo/app/common/permission"
 	"cwxu-algo/app/common/rbac"
 	"cwxu-algo/app/common/utils/auth"
+	"cwxu-algo/app/common/utils/sqllike"
 	"cwxu-algo/app/user/internal/data"
 	"cwxu-algo/app/user/internal/data/model"
 
 	"github.com/go-kratos/kratos/v2/log"
-	khttp "github.com/go-kratos/kratos/v2/transport/http"
 	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 )
@@ -20,6 +20,7 @@ import (
 // RbacService 角色与权限管理（细粒度 RBAC）。
 // 内置角色权限集代码锁定；本服务只管理自定义角色与其成员指派。
 // 内置角色的任命仍走既有入口（org members/set-role、platform/set-*），并双写 user_roles 镜像。
+// 实现 proto：api/user/v1/rbac/rbac.proto（RbacHTTPServer）。
 type RbacService struct {
 	db  *gorm.DB
 	rdb *redis.Client
@@ -27,21 +28,6 @@ type RbacService struct {
 
 func NewRbacService(d *data.Data) *RbacService {
 	return &RbacService{db: d.DB, rdb: d.RDB}
-}
-
-// RegisterRbacRoutes HTTP 路由（与 org 同模式）
-func RegisterRbacRoutes(srv *khttp.Server, s *RbacService) {
-	r := srv.Route("/")
-	r.GET("/v1/user/rbac/permissions", s.handlePermissions)
-	r.GET("/v1/user/rbac/roles", s.handleRoles)
-	r.POST("/v1/user/rbac/roles/create", s.handleRoleCreate)
-	r.POST("/v1/user/rbac/roles/update", s.handleRoleUpdate)
-	r.POST("/v1/user/rbac/roles/delete", s.handleRoleDelete)
-	r.GET("/v1/user/rbac/roles/members", s.handleRoleMembers)
-	r.POST("/v1/user/rbac/roles/assign", s.handleRoleAssign)
-	r.POST("/v1/user/rbac/roles/unassign", s.handleRoleUnassign)
-	r.GET("/v1/user/rbac/user-roles", s.handleUserRoles)
-	r.GET("/v1/user/rbac/my-permissions", s.handleMyPermissions)
 }
 
 // —— 内置组织角色的组织级权限覆盖（教练 / 队长）——
@@ -153,7 +139,7 @@ func hasPermInOrgDB(db *gorm.DB, userID, orgID uint, code string) bool {
 }
 
 // verifyOrgPerm JWT 快路径 + DB 兜底：当前请求对指定组织是否具备组织级权限
-func verifyOrgPerm(ctx khttp.Context, db *gorm.DB, userID, orgID uint, code string) bool {
+func verifyOrgPerm(ctx context.Context, db *gorm.DB, userID, orgID uint, code string) bool {
 	if auth.HasOrgPerm(ctx, orgID, code) {
 		return true
 	}
@@ -265,31 +251,29 @@ func collectUserPerms(db *gorm.DB, u *model.User, orgID uint, orgRole string) []
 	return out
 }
 
-// —— handlers ——
+// —— proto handlers ——
 
-// handlePermissions 权限目录（登录即可；供权限勾选矩阵渲染）
-func (s *RbacService) handlePermissions(ctx khttp.Context) error {
+// Permissions 权限目录（登录即可；供权限勾选矩阵渲染）
+func (s *RbacService) Permissions(ctx context.Context, req *pb.PermissionsReq) (*pb.PermissionsRes, error) {
 	if auth.GetCurrentUser(ctx) == nil {
-		writeJSON(ctx.Response(), 401, map[string]interface{}{"code": 1, "message": "请先登录"})
-		return nil
+		return &pb.PermissionsRes{Success: false, Message: "请先登录"}, nil
 	}
-	groups := make([]map[string]interface{}, 0)
+	groups := make([]*pb.PermGroup, 0)
 	for _, g := range rbac.Groups() {
-		perms := make([]map[string]interface{}, 0, len(g.Perms))
+		perms := make([]*pb.PermInfo, 0, len(g.Perms))
 		for _, p := range g.Perms {
-			perms = append(perms, map[string]interface{}{
-				"code": p.Code, "label": p.Label, "desc": p.Desc, "scope": p.Scope,
+			perms = append(perms, &pb.PermInfo{
+				Code: p.Code, Label: p.Label, Desc: p.Desc, Scope: p.Scope,
 			})
 		}
-		groups = append(groups, map[string]interface{}{
-			"key": g.Key, "label": g.Label, "scope": g.Scope, "perms": perms,
+		groups = append(groups, &pb.PermGroup{
+			Key: g.Key, Label: g.Label, Scope: g.Scope, Perms: perms,
 		})
 	}
-	writeJSON(ctx.Response(), 200, map[string]interface{}{"code": 0, "message": "success", "groups": groups})
-	return nil
+	return &pb.PermissionsRes{Success: true, Message: "success", Groups: groups}, nil
 }
 
-func (s *RbacService) canViewOrgRoles(ctx khttp.Context, userID, orgID uint) bool {
+func (s *RbacService) canViewOrgRoles(ctx context.Context, userID, orgID uint) bool {
 	if auth.VerifySiteAdmin(ctx) {
 		return true
 	}
@@ -297,14 +281,14 @@ func (s *RbacService) canViewOrgRoles(ctx khttp.Context, userID, orgID uint) boo
 		verifyOrgPerm(ctx, s.db, userID, orgID, rbac.PermOrgMemberRole)
 }
 
-func (s *RbacService) canManageOrgRoles(ctx khttp.Context, userID, orgID uint) bool {
+func (s *RbacService) canManageOrgRoles(ctx context.Context, userID, orgID uint) bool {
 	if auth.VerifySiteAdmin(ctx) {
 		return true
 	}
 	return verifyOrgPerm(ctx, s.db, userID, orgID, rbac.PermOrgRoleManage)
 }
 
-func (s *RbacService) roleToMap(r *model.Role, orgID uint) map[string]interface{} {
+func (s *RbacService) roleToMap(r *model.Role, orgID uint) *pb.RoleInfo {
 	var perms []string
 	_ = s.db.Model(&model.RolePermission{}).Where("role_id = ?", r.ID).Pluck("perm_code", &perms).Error
 	if perms == nil {
@@ -332,32 +316,30 @@ func (s *RbacService) roleToMap(r *model.Role, orgID uint) map[string]interface{
 	}
 	var members int64
 	_ = s.db.Model(&model.UserRole{}).Where("role_id = ? AND org_id = ?", r.ID, countOrg).Count(&members).Error
-	return map[string]interface{}{
-		"roleId":      r.ID,
-		"code":        r.Code,
-		"name":        r.Name,
-		"description": r.Description,
-		"scope":       r.Scope,
-		"orgId":       r.OrgID,
-		"isSystem":    r.IsSystem,
+	return &pb.RoleInfo{
+		RoleId:      int64(r.ID),
+		Code:        r.Code,
+		Name:        r.Name,
+		Description: r.Description,
+		Scope:       r.Scope,
+		OrgId:       int64(r.OrgID),
+		IsSystem:    r.IsSystem,
 		// permsEditable：内置角色是否允许本组织改权限（名称/说明/成员仍锁定）
-		"permsEditable": permsEditable,
+		PermsEditable: permsEditable,
 		// customized：内置角色的权限已被本组织改过（可「恢复默认」）
-		"customized":  customized,
-		"permissions": perms,
-		"memberCount": members,
+		Customized:  customized,
+		Permissions: perms,
+		MemberCount: int32(members),
 	}
 }
 
-// handleRoles 角色列表：scope=site 站点级；scope=org（默认）为「全局模板 + 该组织自定义」
-func (s *RbacService) handleRoles(ctx khttp.Context) error {
+// Roles 角色列表：scope=site 站点级；scope=org（默认）为「全局模板 + 该组织自定义」
+func (s *RbacService) Roles(ctx context.Context, req *pb.RolesReq) (*pb.RolesRes, error) {
 	pd := auth.GetCurrentUser(ctx)
 	if pd == nil {
-		writeJSON(ctx.Response(), 401, map[string]interface{}{"code": 1, "message": "请先登录"})
-		return nil
+		return &pb.RolesRes{Success: false, Message: "请先登录"}, nil
 	}
-	q := ctx.Request().URL.Query()
-	scope := q.Get("scope")
+	scope := req.Scope
 	if scope == "" {
 		scope = rbac.ScopeOrg
 	}
@@ -366,36 +348,30 @@ func (s *RbacService) handleRoles(ctx khttp.Context) error {
 	switch scope {
 	case rbac.ScopeSite:
 		if !auth.HasPerm(ctx, rbac.PermSiteRoleManage) {
-			writeJSON(ctx.Response(), 403, map[string]interface{}{"code": 1, "message": "权限不足"})
-			return nil
+			return &pb.RolesRes{Success: false, Message: "权限不足"}, nil
 		}
-		_ = s.db.Where("scope = ? AND org_id = 0", rbac.ScopeSite).Order("is_system DESC, id ASC").Find(&roles).Error
+		_ = s.db.WithContext(ctx).Where("scope = ? AND org_id = 0", rbac.ScopeSite).Order("is_system DESC, id ASC").Find(&roles).Error
 	case rbac.ScopeOrg:
-		id64, _ := strconv.ParseUint(q.Get("orgId"), 10, 64)
-		orgID = uint(id64)
+		orgID = uint(req.OrgId)
 		if orgID == 0 {
 			orgID = pd.OrgID
 		}
 		if orgID == 0 {
-			writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "缺少组织 id"})
-			return nil
+			return &pb.RolesRes{Success: false, Message: "缺少组织 id"}, nil
 		}
 		if !s.canViewOrgRoles(ctx, pd.UserID, orgID) {
-			writeJSON(ctx.Response(), 403, map[string]interface{}{"code": 1, "message": "权限不足"})
-			return nil
+			return &pb.RolesRes{Success: false, Message: "权限不足"}, nil
 		}
-		_ = s.db.Where("scope = ? AND (org_id = ? OR (org_id = 0 AND is_system = ?))", rbac.ScopeOrg, orgID, true).
+		_ = s.db.WithContext(ctx).Where("scope = ? AND (org_id = ? OR (org_id = 0 AND is_system = ?))", rbac.ScopeOrg, orgID, true).
 			Order("is_system DESC, id ASC").Find(&roles).Error
 	default:
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "scope 无效（site|org）"})
-		return nil
+		return &pb.RolesRes{Success: false, Message: "scope 无效（site|org）"}, nil
 	}
-	list := make([]map[string]interface{}, 0, len(roles))
+	list := make([]*pb.RoleInfo, 0, len(roles))
 	for i := range roles {
 		list = append(list, s.roleToMap(&roles[i], orgID))
 	}
-	writeJSON(ctx.Response(), 200, map[string]interface{}{"code": 0, "message": "success", "list": list, "orgId": orgID, "scope": scope})
-	return nil
+	return &pb.RolesRes{Success: true, Message: "success", List: list, OrgId: int64(orgID), Scope: scope}, nil
 }
 
 // validateRolePerms 校验权限点合法且作用域与角色一致；返回去重后的集合
@@ -420,210 +396,164 @@ func validateRolePerms(scope string, perms []string) ([]string, string) {
 	return out, ""
 }
 
-func (s *RbacService) handleRoleCreate(ctx khttp.Context) error {
+func (s *RbacService) RoleCreate(ctx context.Context, req *pb.RoleCreateReq) (*pb.RoleCreateRes, error) {
 	pd := auth.GetCurrentUser(ctx)
 	if pd == nil {
-		writeJSON(ctx.Response(), 401, map[string]interface{}{"code": 1, "message": "请先登录"})
-		return nil
+		return &pb.RoleCreateRes{Success: false, Message: "请先登录"}, nil
 	}
-	var req struct {
-		Scope       string   `json:"scope"`
-		OrgID       uint     `json:"orgId"`
-		Name        string   `json:"name"`
-		Description string   `json:"description"`
-		Permissions []string `json:"permissions"`
-	}
-	if err := readJSON(ctx.Request(), &req); err != nil {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "参数错误"})
-		return nil
-	}
-	if req.Scope == "" {
-		req.Scope = rbac.ScopeOrg
+	scope := req.Scope
+	if scope == "" {
+		scope = rbac.ScopeOrg
 	}
 	name := strings.TrimSpace(req.Name)
 	if name == "" {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "请填写角色名称"})
-		return nil
+		return &pb.RoleCreateRes{Success: false, Message: "请填写角色名称"}, nil
 	}
 	if len([]rune(name)) > 32 {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "角色名称过长（最多 32 字）"})
-		return nil
+		return &pb.RoleCreateRes{Success: false, Message: "角色名称过长（最多 32 字）"}, nil
 	}
 	orgID := uint(0)
-	switch req.Scope {
+	switch scope {
 	case rbac.ScopeSite:
 		if !auth.HasPerm(ctx, rbac.PermSiteRoleManage) {
-			writeJSON(ctx.Response(), 403, map[string]interface{}{"code": 1, "message": "权限不足"})
-			return nil
+			return &pb.RoleCreateRes{Success: false, Message: "权限不足"}, nil
 		}
 	case rbac.ScopeOrg:
-		orgID = req.OrgID
+		orgID = uint(req.OrgId)
 		if orgID == 0 {
 			orgID = pd.OrgID
 		}
 		if orgID == 0 {
-			writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "缺少组织 id"})
-			return nil
+			return &pb.RoleCreateRes{Success: false, Message: "缺少组织 id"}, nil
 		}
 		var o model.Org
-		if s.db.Select("id").First(&o, orgID).Error != nil {
-			writeJSON(ctx.Response(), 404, map[string]interface{}{"code": 1, "message": "组织不存在"})
-			return nil
+		if s.db.WithContext(ctx).Select("id").First(&o, orgID).Error != nil {
+			return &pb.RoleCreateRes{Success: false, Message: "组织不存在"}, nil
 		}
 		if !s.canManageOrgRoles(ctx, pd.UserID, orgID) {
-			writeJSON(ctx.Response(), 403, map[string]interface{}{"code": 1, "message": "权限不足"})
-			return nil
+			return &pb.RoleCreateRes{Success: false, Message: "权限不足"}, nil
 		}
 	default:
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "scope 无效（site|org）"})
-		return nil
+		return &pb.RoleCreateRes{Success: false, Message: "scope 无效（site|org）"}, nil
 	}
-	perms, errMsg := validateRolePerms(req.Scope, req.Permissions)
+	perms, errMsg := validateRolePerms(scope, req.Permissions)
 	if errMsg != "" {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": errMsg})
-		return nil
+		return &pb.RoleCreateRes{Success: false, Message: errMsg}, nil
 	}
 	role := model.Role{
 		Code:        "c_" + strings.ToLower(newInviteCode()),
 		Name:        name,
 		Description: strings.TrimSpace(req.Description),
-		Scope:       req.Scope,
+		Scope:       scope,
 		OrgID:       orgID,
 		IsSystem:    false,
 	}
-	if err := s.db.Create(&role).Error; err != nil {
+	if err := s.db.WithContext(ctx).Create(&role).Error; err != nil {
 		log.Errorf("rbac create role: %v", err)
-		writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "创建失败，请稍后重试"})
-		return nil
+		return &pb.RoleCreateRes{Success: false, Message: "创建失败，请稍后重试"}, nil
 	}
 	for _, c := range perms {
-		_ = s.db.Create(&model.RolePermission{RoleID: role.ID, PermCode: c}).Error
+		_ = s.db.WithContext(ctx).Create(&model.RolePermission{RoleID: role.ID, PermCode: c}).Error
 	}
-	writeJSON(ctx.Response(), 200, map[string]interface{}{"code": 0, "message": "已创建角色", "data": s.roleToMap(&role, orgID)})
-	return nil
+	return &pb.RoleCreateRes{Success: true, Message: "已创建角色", Data: s.roleToMap(&role, orgID)}, nil
 }
 
-// loadEditableRole 加载角色并校验编辑权限；写错误响应时返回 nil
-func (s *RbacService) loadEditableRole(ctx khttp.Context, pd *auth.JwtPayload, roleID uint) *model.Role {
+// loadEditableRole 加载角色并校验编辑权限；返回 (角色, 错误消息)，错误消息非空时角色为 nil。
+func (s *RbacService) loadEditableRole(ctx context.Context, pd *auth.JwtPayload, roleID uint) (*model.Role, string) {
 	var role model.Role
-	if s.db.First(&role, roleID).Error != nil {
-		writeJSON(ctx.Response(), 404, map[string]interface{}{"code": 1, "message": "角色不存在"})
-		return nil
+	if s.db.WithContext(ctx).First(&role, roleID).Error != nil {
+		return nil, "角色不存在"
 	}
 	if role.IsSystem {
-		writeJSON(ctx.Response(), 403, map[string]interface{}{"code": 1, "message": "内置角色不可改名或删除；教练 / 队长可在本组织调整权限，其余请新建自定义角色"})
-		return nil
+		return nil, "内置角色不可改名或删除；教练 / 队长可在本组织调整权限，其余请新建自定义角色"
 	}
 	if role.Scope == rbac.ScopeSite {
 		if !auth.HasPerm(ctx, rbac.PermSiteRoleManage) {
-			writeJSON(ctx.Response(), 403, map[string]interface{}{"code": 1, "message": "权限不足"})
-			return nil
+			return nil, "权限不足"
 		}
 	} else if !s.canManageOrgRoles(ctx, pd.UserID, role.OrgID) {
-		writeJSON(ctx.Response(), 403, map[string]interface{}{"code": 1, "message": "权限不足"})
-		return nil
+		return nil, "权限不足"
 	}
-	return &role
+	return &role, ""
 }
 
 // updateSystemOrgRolePerms 处理内置组织角色的「本组织权限覆盖」。
-// 返回 true 表示本次请求已由这里处理（含错误响应），调用方直接返回。
+// 返回 (响应, 是否已处理)；已处理（含错误响应）时调用方直接返回该响应。
 // 只有教练 / 队长可覆盖；团队管理员与成员是组织基本盘，权限锁定。
 func (s *RbacService) updateSystemOrgRolePerms(
-	ctx khttp.Context, pd *auth.JwtPayload, roleID, reqOrgID uint,
-	perms *[]string, reset bool, metaChange bool,
-) bool {
+	ctx context.Context, pd *auth.JwtPayload, roleID, reqOrgID uint,
+	perms []string, reset bool, metaChange bool,
+) (*pb.RoleUpdateRes, bool) {
 	var role model.Role
-	if s.db.First(&role, roleID).Error != nil || !role.IsSystem {
-		return false // 非内置角色 → 交给自定义角色流程
+	if s.db.WithContext(ctx).First(&role, roleID).Error != nil || !role.IsSystem {
+		return nil, false // 非内置角色 → 交给自定义角色流程
 	}
 	if role.Scope != rbac.ScopeOrg || !rbac.OrgEditableSystemRole(role.Code) {
-		writeJSON(ctx.Response(), 403, map[string]interface{}{"code": 1, "message": "「" + role.Name + "」是基本角色，权限固定，不能修改或删除"})
-		return true
+		return &pb.RoleUpdateRes{Success: false, Message: "「" + role.Name + "」是基本角色，权限固定，不能修改或删除"}, true
 	}
 	if metaChange {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "内置角色的名称与说明不能修改，只能调整本组织的权限"})
-		return true
+		return &pb.RoleUpdateRes{Success: false, Message: "内置角色的名称与说明不能修改，只能调整本组织的权限"}, true
 	}
 	orgID := reqOrgID
 	if orgID == 0 {
 		orgID = pd.OrgID
 	}
 	if orgID == 0 {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "缺少组织 id"})
-		return true
+		return &pb.RoleUpdateRes{Success: false, Message: "缺少组织 id"}, true
 	}
 	if !s.canManageOrgRoles(ctx, pd.UserID, orgID) {
-		writeJSON(ctx.Response(), 403, map[string]interface{}{"code": 1, "message": "权限不足"})
-		return true
+		return &pb.RoleUpdateRes{Success: false, Message: "权限不足"}, true
 	}
 	if reset {
-		_ = s.db.Where("org_id = ? AND role_code = ?", orgID, role.Code).Delete(&model.OrgRolePerm{}).Error
-		writeJSON(ctx.Response(), 200, map[string]interface{}{
-			"code": 0, "message": "已恢复默认权限；成员刷新登录态后生效", "data": s.roleToMap(&role, orgID),
-		})
-		return true
+		_ = s.db.WithContext(ctx).Where("org_id = ? AND role_code = ?", orgID, role.Code).Delete(&model.OrgRolePerm{}).Error
+		return &pb.RoleUpdateRes{
+			Success: true, Message: "已恢复默认权限；成员刷新登录态后生效", Data: s.roleToMap(&role, orgID),
+		}, true
 	}
 	if perms == nil {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "参数错误"})
-		return true
+		return &pb.RoleUpdateRes{Success: false, Message: "参数错误"}, true
 	}
-	list, errMsg := validateRolePerms(rbac.ScopeOrg, *perms)
+	list, errMsg := validateRolePerms(rbac.ScopeOrg, perms)
 	if errMsg != "" {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": errMsg})
-		return true
+		return &pb.RoleUpdateRes{Success: false, Message: errMsg}, true
 	}
 	row := model.OrgRolePerm{OrgID: orgID, RoleCode: role.Code, PermCodes: strings.Join(list, ",")}
-	if err := s.db.Where("org_id = ? AND role_code = ?", orgID, role.Code).
+	if err := s.db.WithContext(ctx).Where("org_id = ? AND role_code = ?", orgID, role.Code).
 		Assign(map[string]interface{}{"perm_codes": row.PermCodes}).
 		FirstOrCreate(&row).Error; err != nil {
 		log.Errorf("rbac update system org role perms: %v", err)
-		writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "保存失败，请稍后重试"})
-		return true
+		return &pb.RoleUpdateRes{Success: false, Message: "保存失败，请稍后重试"}, true
 	}
-	writeJSON(ctx.Response(), 200, map[string]interface{}{
-		"code": 0, "message": "已保存；成员权限在刷新登录态后生效", "data": s.roleToMap(&role, orgID),
-	})
-	return true
+	return &pb.RoleUpdateRes{
+		Success: true, Message: "已保存；成员权限在刷新登录态后生效", Data: s.roleToMap(&role, orgID),
+	}, true
 }
 
-func (s *RbacService) handleRoleUpdate(ctx khttp.Context) error {
+func (s *RbacService) RoleUpdate(ctx context.Context, req *pb.RoleUpdateReq) (*pb.RoleUpdateRes, error) {
 	pd := auth.GetCurrentUser(ctx)
 	if pd == nil {
-		writeJSON(ctx.Response(), 401, map[string]interface{}{"code": 1, "message": "请先登录"})
-		return nil
+		return &pb.RoleUpdateRes{Success: false, Message: "请先登录"}, nil
 	}
-	var req struct {
-		RoleID      uint      `json:"roleId"`
-		OrgID       uint      `json:"orgId"`
-		Name        *string   `json:"name"`
-		Description *string   `json:"description"`
-		Permissions *[]string `json:"permissions"`
-		// ResetPermissions 内置角色专用：清除本组织的权限覆盖，恢复默认
-		ResetPermissions bool `json:"resetPermissions"`
-	}
-	if err := readJSON(ctx.Request(), &req); err != nil || req.RoleID == 0 {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "参数错误"})
-		return nil
+	roleID := uint(req.RoleId)
+	if roleID == 0 {
+		return &pb.RoleUpdateRes{Success: false, Message: "参数错误"}, nil
 	}
 	// 内置组织角色（教练 / 队长）：只改本组织的权限覆盖，名称与成员仍锁定
-	if done := s.updateSystemOrgRolePerms(ctx, pd, req.RoleID, req.OrgID, req.Permissions, req.ResetPermissions, req.Name != nil || req.Description != nil); done {
-		return nil
+	if res, done := s.updateSystemOrgRolePerms(ctx, pd, roleID, uint(req.OrgId), req.Permissions, req.ResetPermissions, req.Name != nil || req.Description != nil); done {
+		return res, nil
 	}
-	role := s.loadEditableRole(ctx, pd, req.RoleID)
+	role, errMsg := s.loadEditableRole(ctx, pd, roleID)
 	if role == nil {
-		return nil
+		return &pb.RoleUpdateRes{Success: false, Message: errMsg}, nil
 	}
 	updates := map[string]interface{}{}
 	if req.Name != nil {
 		name := strings.TrimSpace(*req.Name)
 		if name == "" {
-			writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "角色名称不能为空"})
-			return nil
+			return &pb.RoleUpdateRes{Success: false, Message: "角色名称不能为空"}, nil
 		}
 		if len([]rune(name)) > 32 {
-			writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "角色名称过长（最多 32 字）"})
-			return nil
+			return &pb.RoleUpdateRes{Success: false, Message: "角色名称过长（最多 32 字）"}, nil
 		}
 		updates["name"] = name
 	}
@@ -631,23 +561,20 @@ func (s *RbacService) handleRoleUpdate(ctx khttp.Context) error {
 		updates["description"] = strings.TrimSpace(*req.Description)
 	}
 	if len(updates) > 0 {
-		if err := s.db.Model(role).Updates(updates).Error; err != nil {
+		if err := s.db.WithContext(ctx).Model(role).Updates(updates).Error; err != nil {
 			log.Errorf("rbac update role: %v", err)
-			writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "保存失败，请稍后重试"})
-			return nil
+			return &pb.RoleUpdateRes{Success: false, Message: "保存失败，请稍后重试"}, nil
 		}
 	}
 	if req.Permissions != nil {
-		perms, errMsg := validateRolePerms(role.Scope, *req.Permissions)
+		perms, errMsg := validateRolePerms(role.Scope, req.Permissions)
 		if errMsg != "" {
-			writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": errMsg})
-			return nil
+			return &pb.RoleUpdateRes{Success: false, Message: errMsg}, nil
 		}
 		syncRolePermsService(s.db, role.ID, perms)
 	}
 	orgID := role.OrgID
-	writeJSON(ctx.Response(), 200, map[string]interface{}{"code": 0, "message": "已保存；成员权限在刷新登录态后生效", "data": s.roleToMap(role, orgID)})
-	return nil
+	return &pb.RoleUpdateRes{Success: true, Message: "已保存；成员权限在刷新登录态后生效", Data: s.roleToMap(role, orgID)}, nil
 }
 
 // syncRolePermsService 对齐角色权限集（增缺删多）
@@ -672,24 +599,20 @@ func syncRolePermsService(db *gorm.DB, roleID uint, want []string) {
 	}
 }
 
-func (s *RbacService) handleRoleDelete(ctx khttp.Context) error {
+func (s *RbacService) RoleDelete(ctx context.Context, req *pb.RoleDeleteReq) (*pb.RoleDeleteRes, error) {
 	pd := auth.GetCurrentUser(ctx)
 	if pd == nil {
-		writeJSON(ctx.Response(), 401, map[string]interface{}{"code": 1, "message": "请先登录"})
-		return nil
+		return &pb.RoleDeleteRes{Success: false, Message: "请先登录"}, nil
 	}
-	var req struct {
-		RoleID uint `json:"roleId"`
+	roleID := uint(req.RoleId)
+	if roleID == 0 {
+		return &pb.RoleDeleteRes{Success: false, Message: "参数错误"}, nil
 	}
-	if err := readJSON(ctx.Request(), &req); err != nil || req.RoleID == 0 {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "参数错误"})
-		return nil
-	}
-	role := s.loadEditableRole(ctx, pd, req.RoleID)
+	role, errMsg := s.loadEditableRole(ctx, pd, roleID)
 	if role == nil {
-		return nil
+		return &pb.RoleDeleteRes{Success: false, Message: errMsg}, nil
 	}
-	if err := s.db.Transaction(func(tx *gorm.DB) error {
+	if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Where("role_id = ?", role.ID).Delete(&model.UserRole{}).Error; err != nil {
 			return err
 		}
@@ -699,69 +622,59 @@ func (s *RbacService) handleRoleDelete(ctx khttp.Context) error {
 		return tx.Delete(role).Error
 	}); err != nil {
 		log.Errorf("rbac delete role: %v", err)
-		writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "删除失败，请稍后重试"})
-		return nil
+		return &pb.RoleDeleteRes{Success: false, Message: "删除失败，请稍后重试"}, nil
 	}
-	writeJSON(ctx.Response(), 200, map[string]interface{}{"code": 0, "message": "已删除角色"})
-	return nil
+	return &pb.RoleDeleteRes{Success: true, Message: "已删除角色"}, nil
 }
 
-// handleRoleMembers 角色成员（分页 + 模糊搜索）
-func (s *RbacService) handleRoleMembers(ctx khttp.Context) error {
+// RoleMembers 角色成员（分页 + 模糊搜索）
+func (s *RbacService) RoleMembers(ctx context.Context, req *pb.RoleMembersReq) (*pb.RoleMembersRes, error) {
 	avatarBase := avatarPublicBase(s.db)
 	pd := auth.GetCurrentUser(ctx)
 	if pd == nil {
-		writeJSON(ctx.Response(), 401, map[string]interface{}{"code": 1, "message": "请先登录"})
-		return nil
+		return &pb.RoleMembersRes{Success: false, Message: "请先登录"}, nil
 	}
-	q := ctx.Request().URL.Query()
-	roleID64, _ := strconv.ParseUint(q.Get("roleId"), 10, 64)
-	if roleID64 == 0 {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "缺少 roleId"})
-		return nil
+	roleID := uint(req.RoleId)
+	if roleID == 0 {
+		return &pb.RoleMembersRes{Success: false, Message: "缺少 roleId"}, nil
 	}
 	var role model.Role
-	if s.db.First(&role, uint(roleID64)).Error != nil {
-		writeJSON(ctx.Response(), 404, map[string]interface{}{"code": 1, "message": "角色不存在"})
-		return nil
+	if s.db.WithContext(ctx).First(&role, roleID).Error != nil {
+		return &pb.RoleMembersRes{Success: false, Message: "角色不存在"}, nil
 	}
 	orgID := uint(0)
 	if role.Scope == rbac.ScopeOrg {
 		if role.OrgID > 0 {
 			orgID = role.OrgID
 		} else {
-			id64, _ := strconv.ParseUint(q.Get("orgId"), 10, 64)
-			orgID = uint(id64)
+			orgID = uint(req.OrgId)
 			if orgID == 0 {
 				orgID = pd.OrgID
 			}
 		}
 		if orgID == 0 {
-			writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "缺少组织 id"})
-			return nil
+			return &pb.RoleMembersRes{Success: false, Message: "缺少组织 id"}, nil
 		}
 		if !s.canViewOrgRoles(ctx, pd.UserID, orgID) {
-			writeJSON(ctx.Response(), 403, map[string]interface{}{"code": 1, "message": "权限不足"})
-			return nil
+			return &pb.RoleMembersRes{Success: false, Message: "权限不足"}, nil
 		}
 	} else if !auth.HasPerm(ctx, rbac.PermSiteRoleManage) {
-		writeJSON(ctx.Response(), 403, map[string]interface{}{"code": 1, "message": "权限不足"})
-		return nil
+		return &pb.RoleMembersRes{Success: false, Message: "权限不足"}, nil
 	}
-	page, _ := strconv.Atoi(q.Get("page"))
+	page := int(req.Page)
 	if page < 1 {
 		page = 1
 	}
-	pageSize, _ := strconv.Atoi(q.Get("pageSize"))
+	pageSize := int(req.PageSize)
 	if pageSize < 1 {
 		pageSize = 20
 	}
 	if pageSize > 100 {
 		pageSize = 100
 	}
-	keyword := strings.TrimSpace(q.Get("keyword"))
+	keyword := strings.TrimSpace(req.Keyword)
 
-	base := s.db.Table("user_roles AS ur").
+	base := s.db.WithContext(ctx).Table("user_roles AS ur").
 		Joins("JOIN users u ON u.id = ur.user_id").
 		Where("ur.role_id = ? AND ur.org_id = ?", role.ID, orgID)
 	if keyword != "" {
@@ -785,86 +698,79 @@ func (s *RbacService) handleRoleMembers(ctx khttp.Context) error {
 		Order("ur.id ASC").
 		Offset((page - 1) * pageSize).Limit(pageSize).
 		Scan(&rows).Error
-	list := make([]map[string]interface{}, 0, len(rows))
+	list := make([]*pb.RoleMemberInfo, 0, len(rows))
 	for _, r := range rows {
-		list = append(list, map[string]interface{}{
-			"userId": r.UserID, "username": r.Username, "name": r.Name, "avatar": expandAvatarBase(avatarBase, r.Avatar),
+		list = append(list, &pb.RoleMemberInfo{
+			UserId: int64(r.UserID), Username: r.Username, Name: r.Name, Avatar: expandAvatarBase(avatarBase, r.Avatar),
 		})
 	}
-	writeJSON(ctx.Response(), 200, map[string]interface{}{
-		"code": 0, "message": "success", "list": list, "total": total, "page": page, "pageSize": pageSize,
-		"roleId": role.ID, "orgId": orgID,
-	})
-	return nil
+	return &pb.RoleMembersRes{
+		Success: true, Message: "success", List: list, Total: int32(total),
+		Page: int32(page), PageSize: int32(pageSize),
+		RoleId: int64(role.ID), OrgId: int64(orgID),
+	}, nil
 }
 
-// loadAssignableRole 指派/移除的目标角色：仅自定义角色；内置角色走既有任命入口
-func (s *RbacService) loadAssignableRole(ctx khttp.Context, pd *auth.JwtPayload, roleID uint) (*model.Role, uint) {
+// loadAssignableRole 指派/移除的目标角色：仅自定义角色；内置角色走既有任命入口。
+// 返回 (角色, orgID, 错误消息)，错误消息非空时角色为 nil。
+func (s *RbacService) loadAssignableRole(ctx context.Context, pd *auth.JwtPayload, roleID uint) (*model.Role, uint, string) {
 	var role model.Role
-	if s.db.First(&role, roleID).Error != nil {
-		writeJSON(ctx.Response(), 404, map[string]interface{}{"code": 1, "message": "角色不存在"})
-		return nil, 0
+	if s.db.WithContext(ctx).First(&role, roleID).Error != nil {
+		return nil, 0, "角色不存在"
 	}
 	if role.IsSystem {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "内置角色请在成员管理或全站用户中任命"})
-		return nil, 0
+		return nil, 0, "内置角色请在成员管理或全站用户中任命"
 	}
 	orgID := uint(0)
 	if role.Scope == rbac.ScopeOrg {
 		orgID = role.OrgID
 		if !s.canManageOrgRoles(ctx, pd.UserID, orgID) {
-			writeJSON(ctx.Response(), 403, map[string]interface{}{"code": 1, "message": "权限不足"})
-			return nil, 0
+			return nil, 0, "权限不足"
 		}
 	} else if !auth.HasPerm(ctx, rbac.PermSiteRoleManage) {
-		writeJSON(ctx.Response(), 403, map[string]interface{}{"code": 1, "message": "权限不足"})
-		return nil, 0
+		return nil, 0, "权限不足"
 	}
-	return &role, orgID
+	return &role, orgID, ""
 }
 
-func (s *RbacService) handleRoleAssign(ctx khttp.Context) error {
+func (s *RbacService) RoleAssign(ctx context.Context, req *pb.RoleAssignReq) (*pb.RoleAssignRes, error) {
 	pd := auth.GetCurrentUser(ctx)
 	if pd == nil {
-		writeJSON(ctx.Response(), 401, map[string]interface{}{"code": 1, "message": "请先登录"})
-		return nil
+		return &pb.RoleAssignRes{Success: false, Message: "请先登录"}, nil
 	}
-	var req struct {
-		RoleID  uint   `json:"roleId"`
-		UserIDs []uint `json:"userIds"`
+	roleID := uint(req.RoleId)
+	if roleID == 0 || len(req.UserIds) == 0 {
+		return &pb.RoleAssignRes{Success: false, Message: "参数错误"}, nil
 	}
-	if err := readJSON(ctx.Request(), &req); err != nil || req.RoleID == 0 || len(req.UserIDs) == 0 {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "参数错误"})
-		return nil
-	}
-	role, orgID := s.loadAssignableRole(ctx, pd, req.RoleID)
+	role, orgID, errMsg := s.loadAssignableRole(ctx, pd, roleID)
 	if role == nil {
-		return nil
+		return &pb.RoleAssignRes{Success: false, Message: errMsg}, nil
 	}
 	added := 0
-	skipped := make([]uint, 0)
-	for _, uid := range req.UserIDs {
+	skipped := make([]int32, 0)
+	for _, uid64 := range req.UserIds {
+		uid := uint(uid64)
 		if uid == 0 {
 			continue
 		}
 		var u model.User
-		if s.db.Select("id").First(&u, uid).Error != nil {
-			skipped = append(skipped, uid)
+		if s.db.WithContext(ctx).Select("id").First(&u, uid).Error != nil {
+			skipped = append(skipped, int32(uid))
 			continue
 		}
 		if role.Scope == rbac.ScopeOrg {
 			var n int64
-			s.db.Model(&model.OrgMember{}).Where("org_id = ? AND user_id = ?", orgID, uid).Count(&n)
+			s.db.WithContext(ctx).Model(&model.OrgMember{}).Where("org_id = ? AND user_id = ?", orgID, uid).Count(&n)
 			if n == 0 {
-				skipped = append(skipped, uid)
+				skipped = append(skipped, int32(uid))
 				continue
 			}
 		}
 		var exists int64
-		_ = s.db.Model(&model.UserRole{}).Where("user_id = ? AND role_id = ? AND org_id = ?", uid, role.ID, orgID).Count(&exists).Error
+		_ = s.db.WithContext(ctx).Model(&model.UserRole{}).Where("user_id = ? AND role_id = ? AND org_id = ?", uid, role.ID, orgID).Count(&exists).Error
 		if exists == 0 {
-			if err := s.db.Create(&model.UserRole{UserID: uid, RoleID: role.ID, OrgID: orgID}).Error; err != nil {
-				skipped = append(skipped, uid)
+			if err := s.db.WithContext(ctx).Create(&model.UserRole{UserID: uid, RoleID: role.ID, OrgID: orgID}).Error; err != nil {
+				skipped = append(skipped, int32(uid))
 				continue
 			}
 		}
@@ -874,88 +780,77 @@ func (s *RbacService) handleRoleAssign(ctx khttp.Context) error {
 	if len(skipped) > 0 {
 		msg = "部分用户未能加入（不存在或不在该组织中）"
 	}
-	writeJSON(ctx.Response(), 200, map[string]interface{}{
-		"code": 0, "message": msg, "added": added, "skipped": skipped,
-	})
-	return nil
+	return &pb.RoleAssignRes{Success: true, Message: msg, Added: int32(added), Skipped: skipped}, nil
 }
 
-func (s *RbacService) handleRoleUnassign(ctx khttp.Context) error {
+func (s *RbacService) RoleUnassign(ctx context.Context, req *pb.RoleUnassignReq) (*pb.RoleUnassignRes, error) {
 	pd := auth.GetCurrentUser(ctx)
 	if pd == nil {
-		writeJSON(ctx.Response(), 401, map[string]interface{}{"code": 1, "message": "请先登录"})
-		return nil
+		return &pb.RoleUnassignRes{Success: false, Message: "请先登录"}, nil
 	}
-	var req struct {
-		RoleID  uint   `json:"roleId"`
-		UserIDs []uint `json:"userIds"`
+	roleID := uint(req.RoleId)
+	if roleID == 0 || len(req.UserIds) == 0 {
+		return &pb.RoleUnassignRes{Success: false, Message: "参数错误"}, nil
 	}
-	if err := readJSON(ctx.Request(), &req); err != nil || req.RoleID == 0 || len(req.UserIDs) == 0 {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "参数错误"})
-		return nil
-	}
-	role, orgID := s.loadAssignableRole(ctx, pd, req.RoleID)
+	role, orgID, errMsg := s.loadAssignableRole(ctx, pd, roleID)
 	if role == nil {
-		return nil
+		return &pb.RoleUnassignRes{Success: false, Message: errMsg}, nil
 	}
-	if err := s.db.Where("role_id = ? AND org_id = ? AND user_id IN ?", role.ID, orgID, req.UserIDs).
+	userIDs := make([]uint, 0, len(req.UserIds))
+	for _, uid64 := range req.UserIds {
+		userIDs = append(userIDs, uint(uid64))
+	}
+	if err := s.db.WithContext(ctx).Where("role_id = ? AND org_id = ? AND user_id IN ?", role.ID, orgID, userIDs).
 		Delete(&model.UserRole{}).Error; err != nil {
 		log.Errorf("rbac unassign: %v", err)
-		writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "移除失败，请稍后重试"})
-		return nil
+		return &pb.RoleUnassignRes{Success: false, Message: "移除失败，请稍后重试"}, nil
 	}
-	writeJSON(ctx.Response(), 200, map[string]interface{}{"code": 0, "message": "已移出角色；对方刷新登录态后权限失效"})
-	return nil
+	return &pb.RoleUnassignRes{Success: true, Message: "已移出角色；对方刷新登录态后权限失效"}, nil
 }
 
-// handleUserRoles 某用户持有的站点级自定义角色 id 列表（org_id=0），消 N+1。
+// UserRoles 某用户持有的站点级自定义角色 id 列表（org_id=0），消 N+1。
 // 权限：site.role.manage 或 site.user.list（与站点角色/用户管理一致）。
-func (s *RbacService) handleUserRoles(ctx khttp.Context) error {
+func (s *RbacService) UserRoles(ctx context.Context, req *pb.UserRolesReq) (*pb.UserRolesRes, error) {
 	pd := auth.GetCurrentUser(ctx)
 	if pd == nil {
-		writeJSON(ctx.Response(), 401, map[string]interface{}{"code": 1, "message": "请先登录"})
-		return nil
+		return &pb.UserRolesRes{Success: false, Message: "请先登录"}, nil
 	}
 	if !auth.HasPerm(ctx, rbac.PermSiteRoleManage) && !auth.HasPerm(ctx, rbac.PermSiteUserList) {
-		writeJSON(ctx.Response(), 403, map[string]interface{}{"code": 1, "message": "权限不足"})
-		return nil
+		return &pb.UserRolesRes{Success: false, Message: "权限不足"}, nil
 	}
-	q := ctx.Request().URL.Query()
-	userID64, _ := strconv.ParseUint(q.Get("userId"), 10, 64)
-	if userID64 == 0 {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "缺少 userId"})
-		return nil
+	userID := uint(req.UserId)
+	if userID == 0 {
+		return &pb.UserRolesRes{Success: false, Message: "缺少 userId"}, nil
 	}
 	var roleIDs []uint
-	_ = s.db.Model(&model.UserRole{}).
-		Where("user_id = ? AND org_id = 0", uint(userID64)).
+	_ = s.db.WithContext(ctx).Model(&model.UserRole{}).
+		Where("user_id = ? AND org_id = 0", userID).
 		Order("role_id ASC").
 		Pluck("role_id", &roleIDs).Error
 	if roleIDs == nil {
 		roleIDs = []uint{}
 	}
-	writeJSON(ctx.Response(), 200, map[string]interface{}{
-		"code": 0, "roleIds": roleIDs,
-	})
-	return nil
+	out := make([]int32, 0, len(roleIDs))
+	for _, id := range roleIDs {
+		out = append(out, int32(id))
+	}
+	return &pb.UserRolesRes{Success: true, RoleIds: out}, nil
 }
 
-// handleMyPermissions 当前用户在当前组织的有效权限（查库实时值，供前端兜底/调试）
-func (s *RbacService) handleMyPermissions(ctx khttp.Context) error {
+// MyPermissions 当前用户在当前组织的有效权限（查库实时值，供前端兜底/调试）
+func (s *RbacService) MyPermissions(ctx context.Context, req *pb.MyPermissionsReq) (*pb.MyPermissionsRes, error) {
 	pd := auth.GetCurrentUser(ctx)
 	if pd == nil {
-		writeJSON(ctx.Response(), 401, map[string]interface{}{"code": 1, "message": "请先登录"})
-		return nil
+		return &pb.MyPermissionsRes{Success: false, Message: "请先登录"}, nil
 	}
 	var u model.User
-	if s.db.First(&u, pd.UserID).Error != nil {
-		writeJSON(ctx.Response(), 404, map[string]interface{}{"code": 1, "message": "用户不存在"})
-		return nil
+	if s.db.WithContext(ctx).First(&u, pd.UserID).Error != nil {
+		return &pb.MyPermissionsRes{Success: false, Message: "用户不存在"}, nil
 	}
 	orgID := pd.OrgID
 	orgRole := ""
 	var m model.OrgMember
-	if orgID > 0 && s.db.Select("role").Where("org_id = ? AND user_id = ?", orgID, pd.UserID).First(&m).Error == nil {
+	if orgID > 0 && s.db.WithContext(ctx).Select("role").Where("org_id = ? AND user_id = ?", orgID, pd.UserID).First(&m).Error == nil {
 		orgRole = m.Role
 	}
 	perms := collectUserPerms(s.db, &u, orgID, orgRole)
@@ -968,19 +863,18 @@ func (s *RbacService) handleMyPermissions(ctx khttp.Context) error {
 		Code  string
 	}
 	var roleRows []roleRow
-	_ = s.db.Table("user_roles AS ur").
+	_ = s.db.WithContext(ctx).Table("user_roles AS ur").
 		Joins("JOIN roles r ON r.id = ur.role_id").
 		Where("ur.user_id = ? AND (ur.org_id = 0 OR ur.org_id = ?)", pd.UserID, orgID).
 		Select("r.name AS name, r.scope AS scope, r.code AS code").
 		Scan(&roleRows).Error
-	roles := make([]map[string]interface{}, 0, len(roleRows))
+	roles := make([]*pb.MyRoleBrief, 0, len(roleRows))
 	for _, r := range roleRows {
-		roles = append(roles, map[string]interface{}{"name": r.Name, "scope": r.Scope, "code": r.Code})
+		roles = append(roles, &pb.MyRoleBrief{Name: r.Name, Scope: r.Scope, Code: r.Code})
 	}
-	writeJSON(ctx.Response(), 200, map[string]interface{}{
-		"code": 0, "message": "success",
-		"perms": perms, "roles": roles,
-		"isSiteAdmin": u.IsSiteAdmin, "orgId": orgID, "orgRole": orgRole,
-	})
-	return nil
+	return &pb.MyPermissionsRes{
+		Success: true, Message: "success",
+		Perms: perms, Roles: roles,
+		IsSiteAdmin: u.IsSiteAdmin, OrgId: int64(orgID), OrgRole: orgRole,
+	}, nil
 }

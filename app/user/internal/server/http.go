@@ -3,10 +3,17 @@ package server
 import (
 	"context"
 	"cwxu-algo/api/user/v1/auth"
+	blog "cwxu-algo/api/user/v1/blog"
 	"cwxu-algo/api/user/v1/group"
+	notificationpb "cwxu-algo/api/user/v1/notification"
+	orgpb "cwxu-algo/api/user/v1/org"
+	pastepb "cwxu-algo/api/user/v1/paste"
 	"cwxu-algo/api/user/v1/profile"
+	rbacpb "cwxu-algo/api/user/v1/rbac"
 	"cwxu-algo/api/user/v1/role"
 	"cwxu-algo/api/user/v1/site"
+	backuppb "cwxu-algo/api/user/v1/site/backup"
+	"cwxu-algo/api/user/v1/social"
 	"cwxu-algo/app/common/conf"
 	_const "cwxu-algo/app/common/const"
 	"cwxu-algo/app/common/opsmetrics"
@@ -27,66 +34,54 @@ import (
 
 func NewWhiteListMatcher() selector.MatchFunc {
 	whiteList := map[string]string{
-		"/api.user.v1.Auth/Login":                    "",
-		"/api.user.v1.Auth/Register":                 "",
-		"/api.user.v1.Auth/SendCode":                 "",
-		"/api.user.v1.Auth/ResetPassword":            "",
-		"/api.user.v1.Profile/GetById":               "",
-		"/api.user.v1.Profile/GetByUsername":         "",
-		"/api.user.v1.Profile/GetByName":             "",
-		"/api.user.v1.Profile/GetFollowingIds":       "",
+		"/api.user.v1.Auth/Login":                      "",
+		"/api.user.v1.Auth/Register":                   "",
+		"/api.user.v1.Auth/SendCode":                   "",
+		"/api.user.v1.Auth/ResetPassword":              "",
+		"/api.user.v1.Auth/Logout":                     "",
+		"/api.user.v1.Profile/GetById":                 "",
+		"/api.user.v1.Profile/GetByUsername":           "",
+		"/api.user.v1.Profile/GetByName":               "",
+		"/api.user.v1.Profile/GetFollowingIds":         "",
 		"/api.user.v1.Profile/FilterPublicFeedUserIds": "",
-		"/api.user.v1.role.Role/List":                "",
-		"/api.user.v1.site.Site/GetConfig":           "",
-		"/api.user.v1.site.Site/VisitPing":           "",
+		"/api.user.v1.role.Role/List":                  "",
+		"/api.user.v1.site.Site/GetConfig":             "",
+		"/api.user.v1.site.Site/VisitPing":             "",
+		// 社交：搜索/列表/计数/关系/身份/隐私状态公开读（JWT 可选，有则按当前域解析）；关注操作仍需登录
+		"/api.user.v1.social.Social/Search":        "",
+		"/api.user.v1.social.Social/Following":     "",
+		"/api.user.v1.social.Social/Followers":     "",
+		"/api.user.v1.social.Social/Counts":        "",
+		"/api.user.v1.social.Social/Relation":      "",
+		"/api.user.v1.social.Social/Identity":      "",
+		"/api.user.v1.social.Social/PrivacyStatus": "",
+		// 粘贴板公开查看（单条内容）
+		"/api.user.v1.paste.Paste/Get": "",
+		// 组织广场公开（仅名/logo/人数）；邀请链接预览公开
+		"/api.user.v1.org.Org/Discover":      "",
+		"/api.user.v1.org.Org/InvitePreview": "",
 	}
 	return func(ctx context.Context, operation string) bool {
-		if strings.Contains(operation, "auth/logout") {
-			return false
-		}
 		// 静态资源公开
 		if strings.Contains(operation, "static") {
 			return false
 		}
-		// 粘贴板公开查看
-		if strings.Contains(operation, "paste/get") {
-			return false
-		}
-		// 博客公开读（写仍需登录；JWT 可选，有则识别作者）
-		if strings.Contains(operation, "blog/by-username") ||
-			strings.Contains(operation, "blog/article/get") ||
-			strings.Contains(operation, "blog/article/unlock") ||
-			strings.Contains(operation, "blog/recommend") ||
-			strings.Contains(operation, "blog/plaza") ||
-			strings.Contains(operation, "blog/authors") ||
-			strings.Contains(operation, "blog/categories") ||
-			strings.Contains(operation, "blog/comment/list") ||
-			strings.Contains(operation, "blog/theme/status") ||
-			strings.Contains(operation, "blog/agreement") ||
-			strings.Contains(operation, "blog/obsidian-plugin/latest") ||
-			// publish 用 X-Plugin-Publish-Token，不经 JWT
-			strings.Contains(operation, "blog/obsidian-plugin/publish") {
-			return false
+		// 博客公开读（写仍需登录；JWT 可选，有则识别作者）。
+		// proto 迁移后 operation 形如 /api.user.v1.blog.Blog/ListByUsername，
+		// 白名单按新 operation 名匹配，与迁移前「blog/...」公开读集合完全一致。
+		if strings.HasPrefix(operation, "/api.user.v1.blog.Blog/") {
+			switch strings.TrimPrefix(operation, "/api.user.v1.blog.Blog/") {
+			case "ListByUsername", "GetArticle", "Unlock", "Recommend", "Plaza", "Authors",
+				"ListCategoriesPublic", "ListComments", "ThemeStatus", "AgreementGet",
+				// publish 用 X-Plugin-Publish-Token，不经 JWT
+				"ObsidianPluginLatest", "ObsidianPluginPublish":
+				return false
+			}
 		}
 		// SEO HTML / sitemap 公开
 		if strings.Contains(operation, "seo/html") ||
 			strings.Contains(operation, "seo/meta") ||
 			strings.Contains(operation, "seo/sitemap") {
-			return false
-		}
-		// 社交：搜索/列表/计数/身份展示公开（关注操作仍需登录；JWT 可选，有则按当前域解析）
-		if strings.Contains(operation, "social/search") ||
-			strings.Contains(operation, "social/following") ||
-			strings.Contains(operation, "social/followers") ||
-			strings.Contains(operation, "social/counts") ||
-			strings.Contains(operation, "social/relation") ||
-			strings.Contains(operation, "social/identity") ||
-			strings.Contains(operation, "privacy/status") {
-			return false
-		}
-		// 组织广场公开（仅名/logo/人数）；邀请链接预览公开
-		if strings.Contains(operation, "org/discover") ||
-			strings.Contains(operation, "org/invite/preview") {
 			return false
 		}
 		if _, ok := whiteList[operation]; ok {
@@ -141,20 +136,19 @@ func NewHTTPServer(
 	srv := http.NewServer(opts...)
 	health.Register(srv, health.Checker{DB: d.DB, RDB: d.RDB})
 	auth.RegisterAuthHTTPServer(srv, authService)
-	service.RegisterAuthSessionRoutes(srv)
 	profile.RegisterProfileHTTPServer(srv, profileService)
 	group.RegisterGroupHTTPServer(srv, groupService)
 	role.RegisterRoleHTTPServer(srv, roleService)
 	site.RegisterSiteHTTPServer(srv, siteService)
 	service.RegisterUploadRoutes(srv, d)
-	service.RegisterOrgRoutes(srv, orgService)
-	service.RegisterSquadRoutes(srv, orgService)
-	service.RegisterRbacRoutes(srv, rbacService)
-	service.RegisterPasteRoutes(srv, pasteService)
-	service.RegisterSocialRoutes(srv, socialService)
-	service.RegisterNotificationRoutes(srv, notificationService)
-	service.RegisterBlogRoutes(srv, blogService)
+	orgpb.RegisterOrgHTTPServer(srv, orgService)
+	rbacpb.RegisterRbacHTTPServer(srv, rbacService)
+	pastepb.RegisterPasteHTTPServer(srv, pasteService)
+	social.RegisterSocialHTTPServer(srv, socialService)
+	notificationpb.RegisterNotificationHTTPServer(srv, notificationService)
+	blog.RegisterBlogHTTPServer(srv, blogService)
 	service.RegisterSEORoutes(srv, seoService)
 	service.RegisterBackupRoutes(srv, d)
+	backuppb.RegisterBackupHTTPServer(srv, service.NewBackupService(d))
 	return srv
 }

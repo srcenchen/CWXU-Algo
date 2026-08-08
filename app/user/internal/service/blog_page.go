@@ -1,16 +1,17 @@
 package service
 
 import (
-	"encoding/json"
+	"context"
 	"errors"
+	"net/http"
 	"strings"
 	"unicode/utf8"
 
+	pb "cwxu-algo/api/user/v1/blog"
 	"cwxu-algo/app/common/blogimg"
 	"cwxu-algo/app/common/utils/auth"
 	"cwxu-algo/app/user/internal/data/model"
 
-	khttp "github.com/go-kratos/kratos/v2/transport/http"
 	"gorm.io/gorm"
 )
 
@@ -167,7 +168,7 @@ func (s *BlogService) reorderBlogPages(userID uint, items []blogPageOrderItem) e
 	})
 }
 
-func blogPageToMap(page *model.BlogPage, includeBody bool, imageBase string) map[string]interface{} {
+func blogPageToProto(page *model.BlogPage, includeBody bool, imageBase string) *pb.BlogPageInfo {
 	content := ""
 	if includeBody {
 		content = blogimg.ExpandStoredImageRefs(page.ContentMD, imageBase)
@@ -176,107 +177,111 @@ func blogPageToMap(page *model.BlogPage, includeBody bool, imageBase string) map
 	if label == "" {
 		label = page.Title
 	}
-	return map[string]interface{}{
-		"id":        page.ID,
-		"title":     page.Title,
-		"slug":      page.Slug,
-		"contentMd": content,
-		"status":    page.Status,
-		"showInNav": page.ShowInNav,
-		"navLabel":  label,
-		"navOrder":  page.NavOrder,
-		"createdAt": page.CreatedAt.Unix(),
-		"updatedAt": page.UpdatedAt.Unix(),
+	return &pb.BlogPageInfo{
+		Id:        int64(page.ID),
+		Title:     page.Title,
+		Slug:      page.Slug,
+		ContentMd: content,
+		Status:    page.Status,
+		ShowInNav: page.ShowInNav,
+		NavLabel:  label,
+		NavOrder:  int32(page.NavOrder),
+		CreatedAt: page.CreatedAt.Unix(),
+		UpdatedAt: page.UpdatedAt.Unix(),
 	}
 }
 
-func blogPagesToMaps(list []model.BlogPage, includeBody bool, imageBase string) []map[string]interface{} {
-	out := make([]map[string]interface{}, 0, len(list))
+func blogPagesToProtos(list []model.BlogPage, includeBody bool, imageBase string) []*pb.BlogPageInfo {
+	out := make([]*pb.BlogPageInfo, 0, len(list))
 	for i := range list {
-		out = append(out, blogPageToMap(&list[i], includeBody, imageBase))
+		out = append(out, blogPageToProto(&list[i], includeBody, imageBase))
 	}
 	return out
 }
 
-func (s *BlogService) handlePageListPublic(ctx khttp.Context) error {
-	username := strings.TrimSpace(ctx.Request().URL.Query().Get("username"))
+// PageListPublic GET /v1/user/blog/page/list
+func (s *BlogService) PageListPublic(ctx context.Context, req *pb.PageListPublicReq) (*pb.PageListPublicRes, error) {
+	username := strings.TrimSpace(req.Username)
 	if username == "" {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "缺少用户名"})
-		return nil
+		return nil, blogErr(http.StatusBadRequest, "缺少用户名")
 	}
 	u, err := s.findUserByUsername(username)
 	if err != nil {
-		writeJSON(ctx.Response(), 404, map[string]interface{}{"code": 1, "message": "用户不存在"})
-		return nil
+		return nil, blogErr(http.StatusNotFound, "用户不存在")
 	}
 	viewer := blogViewerID(ctx)
 	if !s.isBlogActivated(u.ID) && viewer != u.ID {
-		writeJSON(ctx.Response(), 200, map[string]interface{}{"code": 0, "message": "success", "data": []interface{}{}})
-		return nil
+		return &pb.PageListPublicRes{Code: 0, Message: "success", Data: []*pb.BlogPageInfo{}}, nil
 	}
 	list, err := s.listPublicBlogPages(u.ID)
 	if err != nil {
-		writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "加载失败"})
-		return nil
+		return nil, blogErr(http.StatusInternalServerError, "加载失败")
 	}
-	writeJSON(ctx.Response(), 200, map[string]interface{}{"code": 0, "message": "success", "data": blogPagesToMaps(list, false, s.publicImageBase())})
-	return nil
+	return &pb.PageListPublicRes{
+		Code: 0, Message: "success",
+		Data: blogPagesToProtos(list, false, s.publicImageBase()),
+	}, nil
 }
 
-func (s *BlogService) handlePageGetPublic(ctx khttp.Context) error {
-	username := strings.TrimSpace(ctx.Request().URL.Query().Get("username"))
-	slug := strings.TrimSpace(ctx.Request().URL.Query().Get("slug"))
+// PageGetPublic GET /v1/user/blog/page/get
+func (s *BlogService) PageGetPublic(ctx context.Context, req *pb.PageGetPublicReq) (*pb.PageGetPublicRes, error) {
+	username := strings.TrimSpace(req.Username)
+	slug := strings.TrimSpace(req.Slug)
 	if username == "" || slug == "" {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "缺少用户名或页面地址"})
-		return nil
+		return nil, blogErr(http.StatusBadRequest, "缺少用户名或页面地址")
 	}
 	u, err := s.findUserByUsername(username)
 	if err != nil || (!s.isBlogActivated(u.ID) && blogViewerID(ctx) != u.ID) {
-		writeJSON(ctx.Response(), 404, map[string]interface{}{"code": 1, "message": "页面不存在"})
-		return nil
+		return nil, blogErr(http.StatusNotFound, "页面不存在")
 	}
 	page, err := s.getPublicBlogPage(u.ID, slug)
 	if err != nil {
-		writeJSON(ctx.Response(), 404, map[string]interface{}{"code": 1, "message": "页面不存在"})
-		return nil
+		return nil, blogErr(http.StatusNotFound, "页面不存在")
 	}
-	writeJSON(ctx.Response(), 200, map[string]interface{}{"code": 0, "message": "success", "data": blogPageToMap(page, true, s.publicImageBase())})
-	return nil
+	return &pb.PageGetPublicRes{
+		Code: 0, Message: "success",
+		Data: blogPageToProto(page, true, s.publicImageBase()),
+	}, nil
 }
 
-func (s *BlogService) handlePageMine(ctx khttp.Context) error {
+// PageMine GET /v1/user/blog/page/mine
+func (s *BlogService) PageMine(ctx context.Context, req *pb.PageMineReq) (*pb.PageMineRes, error) {
 	pd := auth.GetCurrentUser(ctx)
 	if pd == nil || pd.UserID == 0 {
-		writeJSON(ctx.Response(), 401, map[string]interface{}{"code": 1, "message": "请先登录"})
-		return nil
+		return nil, blogErr(http.StatusUnauthorized, "请先登录")
 	}
 	list, err := s.listMineBlogPages(pd.UserID)
 	if err != nil {
-		writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "加载失败"})
-		return nil
+		return nil, blogErr(http.StatusInternalServerError, "加载失败")
 	}
-	writeJSON(ctx.Response(), 200, map[string]interface{}{"code": 0, "message": "success", "data": blogPagesToMaps(list, true, s.publicImageBase())})
-	return nil
+	return &pb.PageMineRes{
+		Code: 0, Message: "success",
+		Data: blogPagesToProtos(list, true, s.publicImageBase()),
+	}, nil
 }
 
-func (s *BlogService) handlePageCreate(ctx khttp.Context) error {
+// PageCreate POST /v1/user/blog/page/create
+func (s *BlogService) PageCreate(ctx context.Context, req *pb.PageCreateReq) (*pb.PageCreateRes, error) {
 	pd := auth.GetCurrentUser(ctx)
 	if pd == nil || pd.UserID == 0 {
-		writeJSON(ctx.Response(), 401, map[string]interface{}{"code": 1, "message": "请先登录"})
-		return nil
+		return nil, blogErr(http.StatusUnauthorized, "请先登录")
 	}
-	if !s.requireActivated(ctx, pd.UserID) {
-		return nil
+	if err := s.requireActivated(ctx, pd.UserID); err != nil {
+		return nil, err
 	}
-	var req blogPageWriteReq
-	if err := json.NewDecoder(ctx.Request().Body).Decode(&req); err != nil {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "参数错误"})
-		return nil
+	writeReq := blogPageWriteReq{
+		Title:     req.Title,
+		Slug:      req.Slug,
+		ContentMD: req.ContentMd,
+		Status:    req.Status,
+		ShowInNav: req.ShowInNav,
+		NavLabel:  req.NavLabel,
+		NavOrder:  int(req.NavOrder),
 	}
 	var page *model.BlogPage
 	var validationMsg string
 	err := blogimg.WithUserImageReferenceTx(s.db, pd.UserID, func(tx *gorm.DB) error {
-		page, validationMsg = normalizeBlogPageWrite(tx, pd.UserID, req)
+		page, validationMsg = normalizeBlogPageWrite(tx, pd.UserID, writeReq)
 		if validationMsg != "" {
 			return gorm.ErrInvalidData
 		}
@@ -285,37 +290,45 @@ func (s *BlogService) handlePageCreate(ctx khttp.Context) error {
 		return tx.Create(page).Error
 	})
 	if validationMsg != "" {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": validationMsg})
-		return nil
+		return nil, blogErr(http.StatusBadRequest, validationMsg)
 	}
 	if err != nil {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "页面地址已被使用"})
-		return nil
+		return nil, blogErr(http.StatusBadRequest, "页面地址已被使用")
 	}
-	writeJSON(ctx.Response(), 200, map[string]interface{}{"code": 0, "message": "success", "data": blogPageToMap(page, true, s.publicImageBase())})
-	return nil
+	return &pb.PageCreateRes{
+		Code: 0, Message: "success",
+		Data: blogPageToProto(page, true, s.publicImageBase()),
+	}, nil
 }
 
-func (s *BlogService) handlePageUpdate(ctx khttp.Context) error {
+// PageUpdate POST /v1/user/blog/page/update
+func (s *BlogService) PageUpdate(ctx context.Context, req *pb.PageUpdateReq) (*pb.PageUpdateRes, error) {
 	pd := auth.GetCurrentUser(ctx)
 	if pd == nil || pd.UserID == 0 {
-		writeJSON(ctx.Response(), 401, map[string]interface{}{"code": 1, "message": "请先登录"})
-		return nil
+		return nil, blogErr(http.StatusUnauthorized, "请先登录")
 	}
-	var req blogPageWriteReq
-	if err := json.NewDecoder(ctx.Request().Body).Decode(&req); err != nil || req.ID == 0 {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "参数错误"})
-		return nil
+	if req.Id == 0 {
+		return nil, blogErr(http.StatusBadRequest, "参数错误")
+	}
+	writeReq := blogPageWriteReq{
+		ID:        uint(req.Id),
+		Title:     req.Title,
+		Slug:      req.Slug,
+		ContentMD: req.ContentMd,
+		Status:    req.Status,
+		ShowInNav: req.ShowInNav,
+		NavLabel:  req.NavLabel,
+		NavOrder:  int(req.NavOrder),
 	}
 	var page *model.BlogPage
 	var existing model.BlogPage
 	var validationMsg string
 	err := blogimg.WithUserImageReferenceTx(s.db, pd.UserID, func(tx *gorm.DB) error {
-		page, validationMsg = normalizeBlogPageWrite(tx, pd.UserID, req)
+		page, validationMsg = normalizeBlogPageWrite(tx, pd.UserID, writeReq)
 		if validationMsg != "" {
 			return gorm.ErrInvalidData
 		}
-		if err := tx.Where("id = ? AND user_id = ?", req.ID, pd.UserID).First(&existing).Error; err != nil {
+		if err := tx.Where("id = ? AND user_id = ?", req.Id, pd.UserID).First(&existing).Error; err != nil {
 			return err
 		}
 		page.ID = existing.ID
@@ -329,69 +342,62 @@ func (s *BlogService) handlePageUpdate(ctx khttp.Context) error {
 		return tx.First(&existing, existing.ID).Error
 	})
 	if validationMsg != "" {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": validationMsg})
-		return nil
+		return nil, blogErr(http.StatusBadRequest, validationMsg)
 	}
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		writeJSON(ctx.Response(), 404, map[string]interface{}{"code": 1, "message": "页面不存在"})
-		return nil
+		return nil, blogErr(http.StatusNotFound, "页面不存在")
 	}
 	if err != nil {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "页面地址已被使用"})
-		return nil
+		return nil, blogErr(http.StatusBadRequest, "页面地址已被使用")
 	}
-	writeJSON(ctx.Response(), 200, map[string]interface{}{"code": 0, "message": "success", "data": blogPageToMap(&existing, true, s.publicImageBase())})
-	return nil
+	return &pb.PageUpdateRes{
+		Code: 0, Message: "success",
+		Data: blogPageToProto(&existing, true, s.publicImageBase()),
+	}, nil
 }
 
-func (s *BlogService) handlePageDelete(ctx khttp.Context) error {
+// PageDelete POST /v1/user/blog/page/delete
+func (s *BlogService) PageDelete(ctx context.Context, req *pb.PageDeleteReq) (*pb.PageDeleteRes, error) {
 	pd := auth.GetCurrentUser(ctx)
 	if pd == nil || pd.UserID == 0 {
-		writeJSON(ctx.Response(), 401, map[string]interface{}{"code": 1, "message": "请先登录"})
-		return nil
+		return nil, blogErr(http.StatusUnauthorized, "请先登录")
 	}
-	var body struct {
-		ID uint `json:"id"`
-	}
-	if err := json.NewDecoder(ctx.Request().Body).Decode(&body); err != nil || body.ID == 0 {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "参数错误"})
-		return nil
+	if req.Id == 0 {
+		return nil, blogErr(http.StatusBadRequest, "参数错误")
 	}
 	var deleted int64
 	err := blogimg.WithUserImageReferenceTx(s.db, pd.UserID, func(tx *gorm.DB) error {
-		res := tx.Where("id = ? AND user_id = ?", body.ID, pd.UserID).Delete(&model.BlogPage{})
+		res := tx.Where("id = ? AND user_id = ?", req.Id, pd.UserID).Delete(&model.BlogPage{})
 		deleted = res.RowsAffected
 		return res.Error
 	})
 	if err != nil {
-		writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "删除失败"})
-		return nil
+		return nil, blogErr(http.StatusInternalServerError, "删除失败")
 	}
 	if deleted == 0 {
-		writeJSON(ctx.Response(), 404, map[string]interface{}{"code": 1, "message": "页面不存在"})
-		return nil
+		return nil, blogErr(http.StatusNotFound, "页面不存在")
 	}
-	writeJSON(ctx.Response(), 200, map[string]interface{}{"code": 0, "message": "已删除"})
-	return nil
+	return &pb.PageDeleteRes{Code: 0, Message: "已删除"}, nil
 }
 
-func (s *BlogService) handlePageReorder(ctx khttp.Context) error {
+// PageReorder POST /v1/user/blog/page/reorder
+func (s *BlogService) PageReorder(ctx context.Context, req *pb.PageReorderReq) (*pb.PageReorderRes, error) {
 	pd := auth.GetCurrentUser(ctx)
 	if pd == nil || pd.UserID == 0 {
-		writeJSON(ctx.Response(), 401, map[string]interface{}{"code": 1, "message": "请先登录"})
-		return nil
+		return nil, blogErr(http.StatusUnauthorized, "请先登录")
 	}
-	var body struct {
-		Items []blogPageOrderItem `json:"items"`
+	if len(req.Items) == 0 {
+		return nil, blogErr(http.StatusBadRequest, "参数错误")
 	}
-	if err := json.NewDecoder(ctx.Request().Body).Decode(&body); err != nil || len(body.Items) == 0 {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "参数错误"})
-		return nil
+	items := make([]blogPageOrderItem, 0, len(req.Items))
+	for _, it := range req.Items {
+		if it == nil {
+			continue
+		}
+		items = append(items, blogPageOrderItem{ID: uint(it.Id), NavOrder: int(it.NavOrder)})
 	}
-	if err := s.reorderBlogPages(pd.UserID, body.Items); err != nil {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "排序内容无效"})
-		return nil
+	if err := s.reorderBlogPages(pd.UserID, items); err != nil {
+		return nil, blogErr(http.StatusBadRequest, "排序内容无效")
 	}
-	writeJSON(ctx.Response(), 200, map[string]interface{}{"code": 0, "message": "已保存"})
-	return nil
+	return &pb.PageReorderRes{Code: 0, Message: "已保存"}, nil
 }

@@ -1,0 +1,393 @@
+syntax = "proto3";
+
+package api.core.v1.community;
+
+import "google/api/annotations.proto";
+option go_package = "cwxu-algo/api/core/v1/community;community";
+option java_multiple_files = true;
+option java_package = "api.core.v1.community";
+
+// 社区服务（题目评论 / 用户题解 / 点赞举报 / 发现动态 / 资料近期）
+// 实现位于 core_data/internal/service/community.go（原手写 HTTP 路由迁移）。
+// 路径前缀：/v1/core/problem/comment/* /v1/core/problem/solution/* /v1/core/problem/{like,report}*
+//           /v1/core/activity/feed /v1/core/user/recent-*
+//
+// 响应统一 {success, message, data|list...}，业务错误也返回 HTTP 200 + success=false。
+// int64 字段在 JSON 中输出为字符串（protojson），前端 request()/num() 已兼容。
+service Community {
+  // 评论列表（公开读）：problemId 或 solutionId 二选一；分页只计顶层评论，树形回复挂 replies
+  rpc CommentList (CommentListReq) returns (CommentListRes) {
+    option (google.api.http) = { get: "/v1/core/problem/comment/list" };
+  }
+  rpc CommentCreate (CommentCreateReq) returns (CommentCreateRes) {
+    option (google.api.http) = { post: "/v1/core/problem/comment/create" body: "*" };
+  }
+  rpc CommentDelete (CommentDeleteReq) returns (CommentDeleteRes) {
+    option (google.api.http) = { post: "/v1/core/problem/comment/delete" body: "*" };
+  }
+  // 题解列表（公开读）
+  rpc SolutionList (SolutionListReq) returns (SolutionListRes) {
+    option (google.api.http) = { get: "/v1/core/problem/solution/list" };
+  }
+  // 题解详情（公开读）
+  rpc SolutionGet (SolutionGetReq) returns (SolutionGetRes) {
+    option (google.api.http) = { get: "/v1/core/problem/solution/get" };
+  }
+  rpc SolutionCreate (SolutionCreateReq) returns (SolutionCreateRes) {
+    option (google.api.http) = { post: "/v1/core/problem/solution/create" body: "*" };
+  }
+  rpc SolutionUpdate (SolutionUpdateReq) returns (SolutionUpdateRes) {
+    option (google.api.http) = { post: "/v1/core/problem/solution/update" body: "*" };
+  }
+  rpc SolutionDelete (SolutionDeleteReq) returns (SolutionDeleteRes) {
+    option (google.api.http) = { post: "/v1/core/problem/solution/delete" body: "*" };
+  }
+  rpc Like (LikeReq) returns (LikeRes) {
+    option (google.api.http) = { post: "/v1/core/problem/like" body: "*" };
+  }
+  rpc Report (ReportReq) returns (ReportRes) {
+    option (google.api.http) = { post: "/v1/core/problem/report" body: "*" };
+  }
+  // 举报处理台（需 content.report.handle 权限）
+  rpc ReportList (ReportListReq) returns (ReportListRes) {
+    option (google.api.http) = { get: "/v1/core/problem/report/list" };
+  }
+  rpc ReportHandle (ReportHandleReq) returns (ReportHandleRes) {
+    option (google.api.http) = { post: "/v1/core/problem/report/handle" body: "*" };
+  }
+  // 发现流（公开读）：orgId=0/公共域 → 全站聚合；私有域 → 按组织成员隔离
+  rpc ActivityFeed (ActivityFeedReq) returns (ActivityFeedRes) {
+    option (google.api.http) = { get: "/v1/core/activity/feed" };
+  }
+  // 资料页近期（公开读）
+  rpc UserRecentComments (UserRecentCommentsReq) returns (UserRecentCommentsRes) {
+    option (google.api.http) = { get: "/v1/core/user/recent-comments" };
+  }
+  rpc UserRecentSolutions (UserRecentSolutionsReq) returns (UserRecentSolutionsRes) {
+    option (google.api.http) = { get: "/v1/core/user/recent-solutions" };
+  }
+}
+
+// ---------- 评论 ----------
+
+message CommentItem {
+  int64 id = 1;
+  int64 problemId = 2;
+  int64 solutionId = 3;
+  int64 userId = 4;
+  string username = 5;
+  string name = 6;
+  string avatar = 7;
+  string content = 8;
+  int64 parentId = 9;
+  int64 rootId = 10;
+  int32 depth = 11;
+  int32 likeCount = 12;
+  bool liked = 13;
+  int64 createdAt = 14;
+  // 仅回复时输出
+  int64 replyToUserId = 15;
+  string replyToUsername = 16;
+  string replyToName = 17;
+  // 本页根下的回复子树（顶层评论挂在 roots 上，reply 挂到其父）
+  repeated CommentItem replies = 18;
+}
+
+message CommentListReq {
+  int64 problemId = 1;
+  int64 solutionId = 2;
+  int64 page = 3;
+  int64 pageSize = 4;
+}
+message CommentListRes {
+  bool success = 1;
+  string message = 2;
+  repeated CommentItem list = 3;
+  int64 total = 4;
+  int64 page = 5;
+  int64 pageSize = 6;
+}
+
+message CommentCreateReq {
+  int64 problemId = 1;
+  int64 solutionId = 2; // 0=题目讨论；>0=题解评论
+  string content = 3;
+  int64 parentId = 4; // 0=顶层；>0 回复某条
+  bool syncToPublic = 5; // 仅题目顶层：非公共域时可选同步公共域发现流
+}
+message CommentCreateRes {
+  bool success = 1;
+  string message = 2;
+  CommentItem data = 3;
+}
+
+message CommentDeleteReq { int64 id = 1; }
+message CommentDeleteRes {
+  bool success = 1;
+  string message = 2;
+}
+
+// ---------- 题解 ----------
+
+message SolutionItem {
+  int64 id = 1;
+  int64 problemId = 2;
+  int64 userId = 3;
+  string username = 4;
+  string name = 5;
+  string avatar = 6;
+  string title = 7;
+  string excerpt = 8;
+  int32 likeCount = 9;
+  int32 viewCount = 10;
+  int32 commentCount = 11;
+  bool liked = 12;
+  int64 createdAt = 13;
+  int64 updatedAt = 14;
+  int64 blogArticleId = 15;
+  string blogSlug = 16;
+  string blogUsername = 17;
+}
+
+message SolutionListReq {
+  int64 problemId = 1;
+  int64 page = 2;
+  int64 pageSize = 3;
+}
+message SolutionListRes {
+  bool success = 1;
+  string message = 2;
+  repeated SolutionItem list = 3;
+  int64 total = 4;
+  int64 page = 5;
+  int64 pageSize = 6;
+}
+
+message SolutionDetail {
+  int64 id = 1;
+  int64 problemId = 2;
+  int64 userId = 3;
+  string username = 4;
+  string name = 5;
+  string avatar = 6;
+  string title = 7;
+  string contentMd = 8;
+  int32 likeCount = 9;
+  int32 viewCount = 10;
+  int32 commentCount = 11;
+  bool liked = 12;
+  int64 createdAt = 13;
+  int64 updatedAt = 14;
+  int64 blogArticleId = 15;
+  string blogSlug = 16;
+  string blogUsername = 17;
+}
+
+message SolutionGetReq { int64 id = 1; }
+message SolutionGetRes {
+  bool success = 1;
+  string message = 2;
+  SolutionDetail data = 3;
+}
+
+message SolutionCreateReq {
+  int64 problemId = 1;
+  string title = 2;
+  string contentMd = 3;
+}
+message SolutionCreateData {
+  int64 id = 1;
+  int64 problemId = 2;
+  int64 userId = 3;
+  string title = 4;
+  string contentMd = 5;
+  int64 createdAt = 6;
+  int64 blogArticleId = 7;
+  string blogSlug = 8;
+  string blogUsername = 9;
+}
+message SolutionCreateRes {
+  bool success = 1;
+  string message = 2;
+  SolutionCreateData data = 3;
+}
+
+message SolutionUpdateReq {
+  int64 id = 1;
+  string title = 2;
+  string contentMd = 3;
+}
+message SolutionUpdateRes {
+  bool success = 1;
+  string message = 2;
+}
+
+message SolutionDeleteReq { int64 id = 1; }
+message SolutionDeleteRes {
+  bool success = 1;
+  string message = 2;
+}
+
+// ---------- 点赞 / 举报 ----------
+
+message LikeReq {
+  string targetType = 1; // comment|solution
+  int64 targetId = 2;
+}
+message LikeData {
+  bool liked = 1;
+  int32 likeCount = 2;
+  string targetType = 3;
+  int64 targetId = 4;
+}
+message LikeRes {
+  bool success = 1;
+  string message = 2;
+  LikeData data = 3;
+}
+
+message ReportReq {
+  string targetType = 1; // comment|solution
+  int64 targetId = 2;
+  string reason = 3;
+}
+message ReportData {
+  int64 id = 1;
+  bool alreadyReported = 2;
+}
+message ReportRes {
+  bool success = 1;
+  string message = 2;
+  ReportData data = 3;
+}
+
+message Reporter {
+  int64 userId = 1;
+  string username = 2;
+}
+
+message ReportTarget {
+  bool exists = 1;
+  int64 problemId = 2;
+  int64 solutionId = 3;
+  string title = 4;
+  string excerpt = 5;
+  int64 authorUserId = 6;
+  string authorUsername = 7;
+}
+
+message ReportItem {
+  int64 id = 1;
+  string createdAt = 2; // RFC3339
+  string status = 3;
+  string reason = 4;
+  string targetType = 5;
+  int64 targetId = 6;
+  Reporter reporter = 7;
+  ReportTarget target = 8;
+}
+
+message ReportListReq {
+  string status = 1; // pending|resolved|dismissed|all（默认 pending）
+  string targetType = 2; // comment|solution（默认全部）
+  int64 page = 3;
+  int64 pageSize = 4;
+}
+message ReportListData {
+  repeated ReportItem list = 1;
+  int64 total = 2;
+}
+message ReportListRes {
+  bool success = 1;
+  string message = 2;
+  ReportListData data = 3;
+}
+
+message ReportHandleReq {
+  int64 id = 1;
+  string action = 2; // resolve|dismiss
+}
+message ReportHandleData {
+  int64 id = 1;
+  string status = 2;
+}
+message ReportHandleRes {
+  bool success = 1;
+  string message = 2;
+  ReportHandleData data = 3;
+}
+
+// ---------- 发现动态 ----------
+
+message ActivityItem {
+  int64 id = 1;
+  int64 orgId = 2;
+  int64 userId = 3;
+  string username = 4;
+  string name = 5;
+  string avatar = 6;
+  string type = 7; // comment|solution
+  int64 refId = 8;
+  int64 problemId = 9;
+  string problemTitle = 10;
+  string platform = 11;
+  string title = 12;
+  string excerpt = 13;
+  int64 createdAt = 14;
+}
+
+message ActivityFeedReq {
+  int64 orgId = 1; // 仅具备全站统计权限者可覆盖；普通用户强制当前组织
+  int64 page = 2;
+  int64 pageSize = 3;
+  string type = 4; // comment|solution|空=全部
+}
+message ActivityFeedRes {
+  bool success = 1;
+  string message = 2;
+  repeated ActivityItem list = 3;
+  int64 total = 4;
+  int64 page = 5;
+  int64 pageSize = 6;
+}
+
+// ---------- 资料近期 ----------
+
+message RecentCommentItem {
+  int64 id = 1;
+  int64 problemId = 2;
+  string problemTitle = 3;
+  string platform = 4;
+  string content = 5;
+  int64 createdAt = 6;
+}
+
+message UserRecentCommentsReq {
+  int64 userId = 1;
+  int64 limit = 2; // 默认 10，上限 50
+}
+message UserRecentCommentsRes {
+  bool success = 1;
+  string message = 2;
+  repeated RecentCommentItem list = 3;
+}
+
+message RecentSolutionItem {
+  int64 id = 1;
+  int64 problemId = 2;
+  string problemTitle = 3;
+  string platform = 4;
+  string title = 5;
+  string excerpt = 6;
+  int64 createdAt = 7;
+}
+
+message UserRecentSolutionsReq {
+  int64 userId = 1;
+  int64 limit = 2; // 默认 10，上限 50
+}
+message UserRecentSolutionsRes {
+  bool success = 1;
+  string message = 2;
+  repeated RecentSolutionItem list = 3;
+}

@@ -29,6 +29,8 @@ const (
 	Spider_EnqueueUserSpider_FullMethodName      = "/api.core.v1.spider.Spider/EnqueueUserSpider"
 	Spider_GetSpiderMonitor_FullMethodName       = "/api.core.v1.spider.Spider/GetSpiderMonitor"
 	Spider_TogglePlatform_FullMethodName         = "/api.core.v1.spider.Spider/TogglePlatform"
+	Spider_UpdatePlatform_FullMethodName         = "/api.core.v1.spider.Spider/UpdatePlatform"
+	Spider_RepairContestCells_FullMethodName     = "/api.core.v1.spider.Spider/RepairContestCells"
 )
 
 // SpiderClient is the client API for Spider service.
@@ -52,6 +54,11 @@ type SpiderClient interface {
 	GetSpiderMonitor(ctx context.Context, in *SpiderMonitorReq, opts ...grpc.CallOption) (*SpiderMonitorRes, error)
 	// 站管：暂停 / 恢复某 OJ 的爬虫同步（body: { platform, enabled }）
 	TogglePlatform(ctx context.Context, in *TogglePlatformReq, opts ...grpc.CallOption) (*TogglePlatformRes, error)
+	// 站管：按平台全量回填（body: { platform }；如力扣比赛记录）。
+	// 仅入队该平台已绑定用户的 needAll 任务，并强制清去重。
+	UpdatePlatform(ctx context.Context, in *UpdatePlatformReq, opts ...grpc.CallOption) (*UpdatePlatformRes, error)
+	// 站管：幂等修复 AtCoder 赛时提交明细相关脏数据（external_id / 赛后练习格 / relative_sec）
+	RepairContestCells(ctx context.Context, in *RepairContestCellsReq, opts ...grpc.CallOption) (*RepairContestCellsRes, error)
 }
 
 type spiderClient struct {
@@ -162,6 +169,26 @@ func (c *spiderClient) TogglePlatform(ctx context.Context, in *TogglePlatformReq
 	return out, nil
 }
 
+func (c *spiderClient) UpdatePlatform(ctx context.Context, in *UpdatePlatformReq, opts ...grpc.CallOption) (*UpdatePlatformRes, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(UpdatePlatformRes)
+	err := c.cc.Invoke(ctx, Spider_UpdatePlatform_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *spiderClient) RepairContestCells(ctx context.Context, in *RepairContestCellsReq, opts ...grpc.CallOption) (*RepairContestCellsRes, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RepairContestCellsRes)
+	err := c.cc.Invoke(ctx, Spider_RepairContestCells_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // SpiderServer is the server API for Spider service.
 // All implementations must embed UnimplementedSpiderServer
 // for forward compatibility.
@@ -183,6 +210,11 @@ type SpiderServer interface {
 	GetSpiderMonitor(context.Context, *SpiderMonitorReq) (*SpiderMonitorRes, error)
 	// 站管：暂停 / 恢复某 OJ 的爬虫同步（body: { platform, enabled }）
 	TogglePlatform(context.Context, *TogglePlatformReq) (*TogglePlatformRes, error)
+	// 站管：按平台全量回填（body: { platform }；如力扣比赛记录）。
+	// 仅入队该平台已绑定用户的 needAll 任务，并强制清去重。
+	UpdatePlatform(context.Context, *UpdatePlatformReq) (*UpdatePlatformRes, error)
+	// 站管：幂等修复 AtCoder 赛时提交明细相关脏数据（external_id / 赛后练习格 / relative_sec）
+	RepairContestCells(context.Context, *RepairContestCellsReq) (*RepairContestCellsRes, error)
 	mustEmbedUnimplementedSpiderServer()
 }
 
@@ -222,6 +254,12 @@ func (UnimplementedSpiderServer) GetSpiderMonitor(context.Context, *SpiderMonito
 }
 func (UnimplementedSpiderServer) TogglePlatform(context.Context, *TogglePlatformReq) (*TogglePlatformRes, error) {
 	return nil, status.Error(codes.Unimplemented, "method TogglePlatform not implemented")
+}
+func (UnimplementedSpiderServer) UpdatePlatform(context.Context, *UpdatePlatformReq) (*UpdatePlatformRes, error) {
+	return nil, status.Error(codes.Unimplemented, "method UpdatePlatform not implemented")
+}
+func (UnimplementedSpiderServer) RepairContestCells(context.Context, *RepairContestCellsReq) (*RepairContestCellsRes, error) {
+	return nil, status.Error(codes.Unimplemented, "method RepairContestCells not implemented")
 }
 func (UnimplementedSpiderServer) mustEmbedUnimplementedSpiderServer() {}
 func (UnimplementedSpiderServer) testEmbeddedByValue()                {}
@@ -424,6 +462,42 @@ func _Spider_TogglePlatform_Handler(srv interface{}, ctx context.Context, dec fu
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Spider_UpdatePlatform_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UpdatePlatformReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SpiderServer).UpdatePlatform(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Spider_UpdatePlatform_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SpiderServer).UpdatePlatform(ctx, req.(*UpdatePlatformReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Spider_RepairContestCells_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RepairContestCellsReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SpiderServer).RepairContestCells(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Spider_RepairContestCells_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SpiderServer).RepairContestCells(ctx, req.(*RepairContestCellsReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Spider_ServiceDesc is the grpc.ServiceDesc for Spider service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -470,6 +544,14 @@ var Spider_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "TogglePlatform",
 			Handler:    _Spider_TogglePlatform_Handler,
+		},
+		{
+			MethodName: "UpdatePlatform",
+			Handler:    _Spider_UpdatePlatform_Handler,
+		},
+		{
+			MethodName: "RepairContestCells",
+			Handler:    _Spider_RepairContestCells_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

@@ -703,6 +703,1362 @@ func (x *GetContestRankingRes) GetTotal() int64 {
 	return 0
 }
 
+// 比赛简要信息（/contest/problems、/contest/board、/contest/cell-submits 内嵌 contest）
+type ContestBrief struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Id            uint32                 `protobuf:"varint,1,opt,name=id,proto3" json:"id,omitempty"`                                     // contest_logs 行 id
+	Platform      string                 `protobuf:"bytes,2,opt,name=platform,proto3" json:"platform,omitempty"`                          // 平台
+	UserId        int64                  `protobuf:"varint,3,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`               // 用户ID
+	ContestId     string                 `protobuf:"bytes,4,opt,name=contest_id,json=contestId,proto3" json:"contest_id,omitempty"`       // 比赛ID
+	ContestName   string                 `protobuf:"bytes,5,opt,name=contest_name,json=contestName,proto3" json:"contest_name,omitempty"` // 比赛名称
+	ContestUrl    string                 `protobuf:"bytes,6,opt,name=contest_url,json=contestUrl,proto3" json:"contest_url,omitempty"`    // 比赛链接
+	Rank          int32                  `protobuf:"varint,7,opt,name=rank,proto3" json:"rank,omitempty"`                                 // 官方排名（0=未知/未出分）
+	TotalCount    int32                  `protobuf:"varint,8,opt,name=total_count,json=totalCount,proto3" json:"total_count,omitempty"`   // 总题数
+	AcCount       int32                  `protobuf:"varint,9,opt,name=ac_count,json=acCount,proto3" json:"ac_count,omitempty"`            // 过题数（力扣为 score）
+	Time          int64                  `protobuf:"varint,10,opt,name=time,proto3" json:"time,omitempty"`                                // 开赛/展示 unix 秒
+	StartTime     int64                  `protobuf:"varint,11,opt,name=start_time,json=startTime,proto3" json:"start_time,omitempty"`     // 开赛 unix 秒（0=未知）
+	EndTime       int64                  `protobuf:"varint,12,opt,name=end_time,json=endTime,proto3" json:"end_time,omitempty"`           // 结束 unix 秒（0=未知）
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ContestBrief) Reset() {
+	*x = ContestBrief{}
+	mi := &file_core_v1_contest_log_contest_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ContestBrief) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ContestBrief) ProtoMessage() {}
+
+func (x *ContestBrief) ProtoReflect() protoreflect.Message {
+	mi := &file_core_v1_contest_log_contest_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ContestBrief.ProtoReflect.Descriptor instead.
+func (*ContestBrief) Descriptor() ([]byte, []int) {
+	return file_core_v1_contest_log_contest_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *ContestBrief) GetId() uint32 {
+	if x != nil {
+		return x.Id
+	}
+	return 0
+}
+
+func (x *ContestBrief) GetPlatform() string {
+	if x != nil {
+		return x.Platform
+	}
+	return ""
+}
+
+func (x *ContestBrief) GetUserId() int64 {
+	if x != nil {
+		return x.UserId
+	}
+	return 0
+}
+
+func (x *ContestBrief) GetContestId() string {
+	if x != nil {
+		return x.ContestId
+	}
+	return ""
+}
+
+func (x *ContestBrief) GetContestName() string {
+	if x != nil {
+		return x.ContestName
+	}
+	return ""
+}
+
+func (x *ContestBrief) GetContestUrl() string {
+	if x != nil {
+		return x.ContestUrl
+	}
+	return ""
+}
+
+func (x *ContestBrief) GetRank() int32 {
+	if x != nil {
+		return x.Rank
+	}
+	return 0
+}
+
+func (x *ContestBrief) GetTotalCount() int32 {
+	if x != nil {
+		return x.TotalCount
+	}
+	return 0
+}
+
+func (x *ContestBrief) GetAcCount() int32 {
+	if x != nil {
+		return x.AcCount
+	}
+	return 0
+}
+
+func (x *ContestBrief) GetTime() int64 {
+	if x != nil {
+		return x.Time
+	}
+	return 0
+}
+
+func (x *ContestBrief) GetStartTime() int64 {
+	if x != nil {
+		return x.StartTime
+	}
+	return 0
+}
+
+func (x *ContestBrief) GetEndTime() int64 {
+	if x != nil {
+		return x.EndTime
+	}
+	return 0
+}
+
+// 比赛题目目录请求
+type GetContestProblemsReq struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Id            uint64                 `protobuf:"varint,1,opt,name=id,proto3" json:"id,omitempty"`                                // contest_logs 行 id
+	ContestId     uint64                 `protobuf:"varint,2,opt,name=contest_id,json=contestId,proto3" json:"contest_id,omitempty"` // 同上（二选一）
+	Force         bool                   `protobuf:"varint,3,opt,name=force,proto3" json:"force,omitempty"`                          // 管理员强制重跑 ensure
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetContestProblemsReq) Reset() {
+	*x = GetContestProblemsReq{}
+	mi := &file_core_v1_contest_log_contest_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetContestProblemsReq) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetContestProblemsReq) ProtoMessage() {}
+
+func (x *GetContestProblemsReq) ProtoReflect() protoreflect.Message {
+	mi := &file_core_v1_contest_log_contest_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetContestProblemsReq.ProtoReflect.Descriptor instead.
+func (*GetContestProblemsReq) Descriptor() ([]byte, []int) {
+	return file_core_v1_contest_log_contest_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *GetContestProblemsReq) GetId() uint64 {
+	if x != nil {
+		return x.Id
+	}
+	return 0
+}
+
+func (x *GetContestProblemsReq) GetContestId() uint64 {
+	if x != nil {
+		return x.ContestId
+	}
+	return 0
+}
+
+func (x *GetContestProblemsReq) GetForce() bool {
+	if x != nil {
+		return x.Force
+	}
+	return false
+}
+
+// 题目目录项
+type ContestProblemItem struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Label         string                 `protobuf:"bytes,1,opt,name=label,proto3" json:"label,omitempty"`                              // 展示题号 A/B/C
+	ExternalId    string                 `protobuf:"bytes,2,opt,name=external_id,json=externalId,proto3" json:"external_id,omitempty"`  // OJ 题目 id
+	Title         string                 `protobuf:"bytes,3,opt,name=title,proto3" json:"title,omitempty"`                              // 题目名
+	Url           string                 `protobuf:"bytes,4,opt,name=url,proto3" json:"url,omitempty"`                                  // 题目链接
+	ProblemId     int64                  `protobuf:"varint,5,opt,name=problem_id,json=problemId,proto3" json:"problem_id,omitempty"`    // 关联题库 problem 行 id（0=未关联）
+	SortOrder     int32                  `protobuf:"varint,6,opt,name=sort_order,json=sortOrder,proto3" json:"sort_order,omitempty"`    // 排序
+	Status        string                 `protobuf:"bytes,7,opt,name=status,proto3" json:"status,omitempty"`                            // 关联题目状态
+	HasContent    bool                   `protobuf:"varint,8,opt,name=has_content,json=hasContent,proto3" json:"has_content,omitempty"` // 是否已有题面内容
+	Difficulty    string                 `protobuf:"bytes,9,opt,name=difficulty,proto3" json:"difficulty,omitempty"`                    // 难度（未关联时为空）
+	Tags          []string               `protobuf:"bytes,10,rep,name=tags,proto3" json:"tags,omitempty"`                               // 题库标签（未关联时为空数组）
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ContestProblemItem) Reset() {
+	*x = ContestProblemItem{}
+	mi := &file_core_v1_contest_log_contest_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ContestProblemItem) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ContestProblemItem) ProtoMessage() {}
+
+func (x *ContestProblemItem) ProtoReflect() protoreflect.Message {
+	mi := &file_core_v1_contest_log_contest_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ContestProblemItem.ProtoReflect.Descriptor instead.
+func (*ContestProblemItem) Descriptor() ([]byte, []int) {
+	return file_core_v1_contest_log_contest_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *ContestProblemItem) GetLabel() string {
+	if x != nil {
+		return x.Label
+	}
+	return ""
+}
+
+func (x *ContestProblemItem) GetExternalId() string {
+	if x != nil {
+		return x.ExternalId
+	}
+	return ""
+}
+
+func (x *ContestProblemItem) GetTitle() string {
+	if x != nil {
+		return x.Title
+	}
+	return ""
+}
+
+func (x *ContestProblemItem) GetUrl() string {
+	if x != nil {
+		return x.Url
+	}
+	return ""
+}
+
+func (x *ContestProblemItem) GetProblemId() int64 {
+	if x != nil {
+		return x.ProblemId
+	}
+	return 0
+}
+
+func (x *ContestProblemItem) GetSortOrder() int32 {
+	if x != nil {
+		return x.SortOrder
+	}
+	return 0
+}
+
+func (x *ContestProblemItem) GetStatus() string {
+	if x != nil {
+		return x.Status
+	}
+	return ""
+}
+
+func (x *ContestProblemItem) GetHasContent() bool {
+	if x != nil {
+		return x.HasContent
+	}
+	return false
+}
+
+func (x *ContestProblemItem) GetDifficulty() string {
+	if x != nil {
+		return x.Difficulty
+	}
+	return ""
+}
+
+func (x *ContestProblemItem) GetTags() []string {
+	if x != nil {
+		return x.Tags
+	}
+	return nil
+}
+
+// 比赛题目目录响应
+type GetContestProblemsRes struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
+	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	Data          *ContestProblemsData   `protobuf:"bytes,3,opt,name=data,proto3" json:"data,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetContestProblemsRes) Reset() {
+	*x = GetContestProblemsRes{}
+	mi := &file_core_v1_contest_log_contest_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetContestProblemsRes) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetContestProblemsRes) ProtoMessage() {}
+
+func (x *GetContestProblemsRes) ProtoReflect() protoreflect.Message {
+	mi := &file_core_v1_contest_log_contest_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetContestProblemsRes.ProtoReflect.Descriptor instead.
+func (*GetContestProblemsRes) Descriptor() ([]byte, []int) {
+	return file_core_v1_contest_log_contest_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *GetContestProblemsRes) GetSuccess() bool {
+	if x != nil {
+		return x.Success
+	}
+	return false
+}
+
+func (x *GetContestProblemsRes) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
+func (x *GetContestProblemsRes) GetData() *ContestProblemsData {
+	if x != nil {
+		return x.Data
+	}
+	return nil
+}
+
+type ContestProblemsData struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Contest       *ContestBrief          `protobuf:"bytes,1,opt,name=contest,proto3" json:"contest,omitempty"`                               // 比赛信息
+	EnsureStatus  string                 `protobuf:"bytes,2,opt,name=ensure_status,json=ensureStatus,proto3" json:"ensure_status,omitempty"` // ensure 状态（""|running|done|failed）
+	EnsureError   string                 `protobuf:"bytes,3,opt,name=ensure_error,json=ensureError,proto3" json:"ensure_error,omitempty"`    // ensure 失败信息
+	List          []*ContestProblemItem  `protobuf:"bytes,4,rep,name=list,proto3" json:"list,omitempty"`                                     // 题目目录
+	Force         bool                   `protobuf:"varint,5,opt,name=force,proto3" json:"force,omitempty"`                                  // 本次是否强制 ensure
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ContestProblemsData) Reset() {
+	*x = ContestProblemsData{}
+	mi := &file_core_v1_contest_log_contest_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ContestProblemsData) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ContestProblemsData) ProtoMessage() {}
+
+func (x *ContestProblemsData) ProtoReflect() protoreflect.Message {
+	mi := &file_core_v1_contest_log_contest_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ContestProblemsData.ProtoReflect.Descriptor instead.
+func (*ContestProblemsData) Descriptor() ([]byte, []int) {
+	return file_core_v1_contest_log_contest_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *ContestProblemsData) GetContest() *ContestBrief {
+	if x != nil {
+		return x.Contest
+	}
+	return nil
+}
+
+func (x *ContestProblemsData) GetEnsureStatus() string {
+	if x != nil {
+		return x.EnsureStatus
+	}
+	return ""
+}
+
+func (x *ContestProblemsData) GetEnsureError() string {
+	if x != nil {
+		return x.EnsureError
+	}
+	return ""
+}
+
+func (x *ContestProblemsData) GetList() []*ContestProblemItem {
+	if x != nil {
+		return x.List
+	}
+	return nil
+}
+
+func (x *ContestProblemsData) GetForce() bool {
+	if x != nil {
+		return x.Force
+	}
+	return false
+}
+
+// 站内榜请求
+type GetContestBoardReq struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Id            uint64                 `protobuf:"varint,1,opt,name=id,proto3" json:"id,omitempty"`                                            // contest_logs 行 id
+	ContestId     uint64                 `protobuf:"varint,2,opt,name=contest_id,json=contestId,proto3" json:"contest_id,omitempty"`             // 同上（二选一）
+	FollowingOnly bool                   `protobuf:"varint,3,opt,name=following_only,json=followingOnly,proto3" json:"following_only,omitempty"` // 仅关注用户（需登录；与组织/分组求交）
+	SquadId       int64                  `protobuf:"varint,4,opt,name=squad_id,json=squadId,proto3" json:"squad_id,omitempty"`                   // 分队过滤（可选）
+	GroupId       int64                  `protobuf:"varint,5,opt,name=group_id,json=groupId,proto3" json:"group_id,omitempty"`                   // 分组过滤（可选）
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetContestBoardReq) Reset() {
+	*x = GetContestBoardReq{}
+	mi := &file_core_v1_contest_log_contest_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetContestBoardReq) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetContestBoardReq) ProtoMessage() {}
+
+func (x *GetContestBoardReq) ProtoReflect() protoreflect.Message {
+	mi := &file_core_v1_contest_log_contest_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetContestBoardReq.ProtoReflect.Descriptor instead.
+func (*GetContestBoardReq) Descriptor() ([]byte, []int) {
+	return file_core_v1_contest_log_contest_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *GetContestBoardReq) GetId() uint64 {
+	if x != nil {
+		return x.Id
+	}
+	return 0
+}
+
+func (x *GetContestBoardReq) GetContestId() uint64 {
+	if x != nil {
+		return x.ContestId
+	}
+	return 0
+}
+
+func (x *GetContestBoardReq) GetFollowingOnly() bool {
+	if x != nil {
+		return x.FollowingOnly
+	}
+	return false
+}
+
+func (x *GetContestBoardReq) GetSquadId() int64 {
+	if x != nil {
+		return x.SquadId
+	}
+	return 0
+}
+
+func (x *GetContestBoardReq) GetGroupId() int64 {
+	if x != nil {
+		return x.GroupId
+	}
+	return 0
+}
+
+// 站内榜响应
+type GetContestBoardRes struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
+	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	Data          *ContestBoardData      `protobuf:"bytes,3,opt,name=data,proto3" json:"data,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetContestBoardRes) Reset() {
+	*x = GetContestBoardRes{}
+	mi := &file_core_v1_contest_log_contest_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetContestBoardRes) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetContestBoardRes) ProtoMessage() {}
+
+func (x *GetContestBoardRes) ProtoReflect() protoreflect.Message {
+	mi := &file_core_v1_contest_log_contest_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetContestBoardRes.ProtoReflect.Descriptor instead.
+func (*GetContestBoardRes) Descriptor() ([]byte, []int) {
+	return file_core_v1_contest_log_contest_proto_rawDescGZIP(), []int{14}
+}
+
+func (x *GetContestBoardRes) GetSuccess() bool {
+	if x != nil {
+		return x.Success
+	}
+	return false
+}
+
+func (x *GetContestBoardRes) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
+func (x *GetContestBoardRes) GetData() *ContestBoardData {
+	if x != nil {
+		return x.Data
+	}
+	return nil
+}
+
+type ContestBoardData struct {
+	state         protoimpl.MessageState    `protogen:"open.v1"`
+	Contest       *ContestBrief             `protobuf:"bytes,1,opt,name=contest,proto3" json:"contest,omitempty"`                                     // 比赛信息
+	Scoring       string                    `protobuf:"bytes,2,opt,name=scoring,proto3" json:"scoring,omitempty"`                                     // icpc | leetcode
+	HasCellDetail bool                      `protobuf:"varint,3,opt,name=has_cell_detail,json=hasCellDetail,proto3" json:"has_cell_detail,omitempty"` // 全场是否有任意逐题明细
+	Problems      []*ContestBoardProblemCol `protobuf:"bytes,4,rep,name=problems,proto3" json:"problems,omitempty"`                                   // 题目列（无明细时为空）
+	Rows          []*ContestBoardRow        `protobuf:"bytes,5,rep,name=rows,proto3" json:"rows,omitempty"`                                           // 参赛行
+	Total         int32                     `protobuf:"varint,6,opt,name=total,proto3" json:"total,omitempty"`                                        // 行数
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ContestBoardData) Reset() {
+	*x = ContestBoardData{}
+	mi := &file_core_v1_contest_log_contest_proto_msgTypes[15]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ContestBoardData) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ContestBoardData) ProtoMessage() {}
+
+func (x *ContestBoardData) ProtoReflect() protoreflect.Message {
+	mi := &file_core_v1_contest_log_contest_proto_msgTypes[15]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ContestBoardData.ProtoReflect.Descriptor instead.
+func (*ContestBoardData) Descriptor() ([]byte, []int) {
+	return file_core_v1_contest_log_contest_proto_rawDescGZIP(), []int{15}
+}
+
+func (x *ContestBoardData) GetContest() *ContestBrief {
+	if x != nil {
+		return x.Contest
+	}
+	return nil
+}
+
+func (x *ContestBoardData) GetScoring() string {
+	if x != nil {
+		return x.Scoring
+	}
+	return ""
+}
+
+func (x *ContestBoardData) GetHasCellDetail() bool {
+	if x != nil {
+		return x.HasCellDetail
+	}
+	return false
+}
+
+func (x *ContestBoardData) GetProblems() []*ContestBoardProblemCol {
+	if x != nil {
+		return x.Problems
+	}
+	return nil
+}
+
+func (x *ContestBoardData) GetRows() []*ContestBoardRow {
+	if x != nil {
+		return x.Rows
+	}
+	return nil
+}
+
+func (x *ContestBoardData) GetTotal() int32 {
+	if x != nil {
+		return x.Total
+	}
+	return 0
+}
+
+type ContestBoardProblemCol struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Label         string                 `protobuf:"bytes,1,opt,name=label,proto3" json:"label,omitempty"`                             // 展示题号
+	ExternalId    string                 `protobuf:"bytes,2,opt,name=external_id,json=externalId,proto3" json:"external_id,omitempty"` // OJ 题目 id
+	Title         string                 `protobuf:"bytes,3,opt,name=title,proto3" json:"title,omitempty"`                             // 题目名
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ContestBoardProblemCol) Reset() {
+	*x = ContestBoardProblemCol{}
+	mi := &file_core_v1_contest_log_contest_proto_msgTypes[16]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ContestBoardProblemCol) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ContestBoardProblemCol) ProtoMessage() {}
+
+func (x *ContestBoardProblemCol) ProtoReflect() protoreflect.Message {
+	mi := &file_core_v1_contest_log_contest_proto_msgTypes[16]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ContestBoardProblemCol.ProtoReflect.Descriptor instead.
+func (*ContestBoardProblemCol) Descriptor() ([]byte, []int) {
+	return file_core_v1_contest_log_contest_proto_rawDescGZIP(), []int{16}
+}
+
+func (x *ContestBoardProblemCol) GetLabel() string {
+	if x != nil {
+		return x.Label
+	}
+	return ""
+}
+
+func (x *ContestBoardProblemCol) GetExternalId() string {
+	if x != nil {
+		return x.ExternalId
+	}
+	return ""
+}
+
+func (x *ContestBoardProblemCol) GetTitle() string {
+	if x != nil {
+		return x.Title
+	}
+	return ""
+}
+
+type ContestBoardRow struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	UserId        int64                  `protobuf:"varint,1,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`                    // 用户ID
+	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`                                       // 展示名（空则回落 username）
+	Username      string                 `protobuf:"bytes,3,opt,name=username,proto3" json:"username,omitempty"`                               // 用户名
+	Avatar        string                 `protobuf:"bytes,4,opt,name=avatar,proto3" json:"avatar,omitempty"`                                   // 头像
+	RankOfficial  int32                  `protobuf:"varint,5,opt,name=rank_official,json=rankOfficial,proto3" json:"rank_official,omitempty"`  // 官方排名（0=未知；纯补题不赋名次）
+	RankLocal     int32                  `protobuf:"varint,6,opt,name=rank_local,json=rankLocal,proto3" json:"rank_local,omitempty"`           // 本地名次（官方 rank<=0 时按赛时序 1..n）
+	Solved        int32                  `protobuf:"varint,7,opt,name=solved,proto3" json:"solved,omitempty"`                                  // 过题数
+	PenaltySec    int32                  `protobuf:"varint,8,opt,name=penalty_sec,json=penaltySec,proto3" json:"penalty_sec,omitempty"`        // ICPC 罚时（秒）
+	Score         int32                  `protobuf:"varint,9,opt,name=score,proto3" json:"score,omitempty"`                                    // 力扣分数
+	AcCount       int32                  `protobuf:"varint,10,opt,name=ac_count,json=acCount,proto3" json:"ac_count,omitempty"`                // 场级 ac_count（力扣为 score）
+	HasDetail     bool                   `protobuf:"varint,11,opt,name=has_detail,json=hasDetail,proto3" json:"has_detail,omitempty"`          // 该行是否有逐题明细
+	IsContestant  bool                   `protobuf:"varint,12,opt,name=is_contestant,json=isContestant,proto3" json:"is_contestant,omitempty"` // 是否赛时参赛（false=纯补题）
+	Cells         []*ContestBoardCell    `protobuf:"bytes,13,rep,name=cells,proto3" json:"cells,omitempty"`                                    // 逐题格子（无明细时为空）
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ContestBoardRow) Reset() {
+	*x = ContestBoardRow{}
+	mi := &file_core_v1_contest_log_contest_proto_msgTypes[17]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ContestBoardRow) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ContestBoardRow) ProtoMessage() {}
+
+func (x *ContestBoardRow) ProtoReflect() protoreflect.Message {
+	mi := &file_core_v1_contest_log_contest_proto_msgTypes[17]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ContestBoardRow.ProtoReflect.Descriptor instead.
+func (*ContestBoardRow) Descriptor() ([]byte, []int) {
+	return file_core_v1_contest_log_contest_proto_rawDescGZIP(), []int{17}
+}
+
+func (x *ContestBoardRow) GetUserId() int64 {
+	if x != nil {
+		return x.UserId
+	}
+	return 0
+}
+
+func (x *ContestBoardRow) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *ContestBoardRow) GetUsername() string {
+	if x != nil {
+		return x.Username
+	}
+	return ""
+}
+
+func (x *ContestBoardRow) GetAvatar() string {
+	if x != nil {
+		return x.Avatar
+	}
+	return ""
+}
+
+func (x *ContestBoardRow) GetRankOfficial() int32 {
+	if x != nil {
+		return x.RankOfficial
+	}
+	return 0
+}
+
+func (x *ContestBoardRow) GetRankLocal() int32 {
+	if x != nil {
+		return x.RankLocal
+	}
+	return 0
+}
+
+func (x *ContestBoardRow) GetSolved() int32 {
+	if x != nil {
+		return x.Solved
+	}
+	return 0
+}
+
+func (x *ContestBoardRow) GetPenaltySec() int32 {
+	if x != nil {
+		return x.PenaltySec
+	}
+	return 0
+}
+
+func (x *ContestBoardRow) GetScore() int32 {
+	if x != nil {
+		return x.Score
+	}
+	return 0
+}
+
+func (x *ContestBoardRow) GetAcCount() int32 {
+	if x != nil {
+		return x.AcCount
+	}
+	return 0
+}
+
+func (x *ContestBoardRow) GetHasDetail() bool {
+	if x != nil {
+		return x.HasDetail
+	}
+	return false
+}
+
+func (x *ContestBoardRow) GetIsContestant() bool {
+	if x != nil {
+		return x.IsContestant
+	}
+	return false
+}
+
+func (x *ContestBoardRow) GetCells() []*ContestBoardCell {
+	if x != nil {
+		return x.Cells
+	}
+	return nil
+}
+
+type ContestBoardCell struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Label         string                 `protobuf:"bytes,1,opt,name=label,proto3" json:"label,omitempty"`                                       // 展示题号
+	ExternalId    string                 `protobuf:"bytes,2,opt,name=external_id,json=externalId,proto3" json:"external_id,omitempty"`           // OJ 题目 id
+	Status        string                 `protobuf:"bytes,3,opt,name=status,proto3" json:"status,omitempty"`                                     // AC|UPSOLVE|UPSOLVE_TRIED|TRIED|NONE
+	Attempts      int32                  `protobuf:"varint,4,opt,name=attempts,proto3" json:"attempts,omitempty"`                                // 尝试次数
+	ScoreDelta    int32                  `protobuf:"varint,5,opt,name=score_delta,json=scoreDelta,proto3" json:"score_delta,omitempty"`          // 力扣单题增量
+	RelativeSec   *int32                 `protobuf:"varint,6,opt,name=relative_sec,json=relativeSec,proto3,oneof" json:"relative_sec,omitempty"` // 相对开赛秒（可空；补题格应为空）
+	FirstAcAt     *int64                 `protobuf:"varint,7,opt,name=first_ac_at,json=firstAcAt,proto3,oneof" json:"first_ac_at,omitempty"`     // 首次 AC 绝对时间 unix 秒（可空）
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ContestBoardCell) Reset() {
+	*x = ContestBoardCell{}
+	mi := &file_core_v1_contest_log_contest_proto_msgTypes[18]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ContestBoardCell) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ContestBoardCell) ProtoMessage() {}
+
+func (x *ContestBoardCell) ProtoReflect() protoreflect.Message {
+	mi := &file_core_v1_contest_log_contest_proto_msgTypes[18]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ContestBoardCell.ProtoReflect.Descriptor instead.
+func (*ContestBoardCell) Descriptor() ([]byte, []int) {
+	return file_core_v1_contest_log_contest_proto_rawDescGZIP(), []int{18}
+}
+
+func (x *ContestBoardCell) GetLabel() string {
+	if x != nil {
+		return x.Label
+	}
+	return ""
+}
+
+func (x *ContestBoardCell) GetExternalId() string {
+	if x != nil {
+		return x.ExternalId
+	}
+	return ""
+}
+
+func (x *ContestBoardCell) GetStatus() string {
+	if x != nil {
+		return x.Status
+	}
+	return ""
+}
+
+func (x *ContestBoardCell) GetAttempts() int32 {
+	if x != nil {
+		return x.Attempts
+	}
+	return 0
+}
+
+func (x *ContestBoardCell) GetScoreDelta() int32 {
+	if x != nil {
+		return x.ScoreDelta
+	}
+	return 0
+}
+
+func (x *ContestBoardCell) GetRelativeSec() int32 {
+	if x != nil && x.RelativeSec != nil {
+		return *x.RelativeSec
+	}
+	return 0
+}
+
+func (x *ContestBoardCell) GetFirstAcAt() int64 {
+	if x != nil && x.FirstAcAt != nil {
+		return *x.FirstAcAt
+	}
+	return 0
+}
+
+// 站内榜格子提交明细请求
+type GetContestCellSubmitsReq struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Id            uint64                 `protobuf:"varint,1,opt,name=id,proto3" json:"id,omitempty"`                                  // contest_logs 行 id
+	ContestId     uint64                 `protobuf:"varint,2,opt,name=contest_id,json=contestId,proto3" json:"contest_id,omitempty"`   // 同上（二选一）
+	UserId        int64                  `protobuf:"varint,3,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`            // 用户ID
+	Label         string                 `protobuf:"bytes,4,opt,name=label,proto3" json:"label,omitempty"`                             // 题目 label（与 external_id 至少一个）
+	ExternalId    string                 `protobuf:"bytes,5,opt,name=external_id,json=externalId,proto3" json:"external_id,omitempty"` // 题目 external id
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetContestCellSubmitsReq) Reset() {
+	*x = GetContestCellSubmitsReq{}
+	mi := &file_core_v1_contest_log_contest_proto_msgTypes[19]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetContestCellSubmitsReq) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetContestCellSubmitsReq) ProtoMessage() {}
+
+func (x *GetContestCellSubmitsReq) ProtoReflect() protoreflect.Message {
+	mi := &file_core_v1_contest_log_contest_proto_msgTypes[19]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetContestCellSubmitsReq.ProtoReflect.Descriptor instead.
+func (*GetContestCellSubmitsReq) Descriptor() ([]byte, []int) {
+	return file_core_v1_contest_log_contest_proto_rawDescGZIP(), []int{19}
+}
+
+func (x *GetContestCellSubmitsReq) GetId() uint64 {
+	if x != nil {
+		return x.Id
+	}
+	return 0
+}
+
+func (x *GetContestCellSubmitsReq) GetContestId() uint64 {
+	if x != nil {
+		return x.ContestId
+	}
+	return 0
+}
+
+func (x *GetContestCellSubmitsReq) GetUserId() int64 {
+	if x != nil {
+		return x.UserId
+	}
+	return 0
+}
+
+func (x *GetContestCellSubmitsReq) GetLabel() string {
+	if x != nil {
+		return x.Label
+	}
+	return ""
+}
+
+func (x *GetContestCellSubmitsReq) GetExternalId() string {
+	if x != nil {
+		return x.ExternalId
+	}
+	return ""
+}
+
+// 站内榜格子提交明细响应
+type GetContestCellSubmitsRes struct {
+	state         protoimpl.MessageState  `protogen:"open.v1"`
+	Success       bool                    `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
+	Message       string                  `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	Data          *ContestCellSubmitsData `protobuf:"bytes,3,opt,name=data,proto3" json:"data,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetContestCellSubmitsRes) Reset() {
+	*x = GetContestCellSubmitsRes{}
+	mi := &file_core_v1_contest_log_contest_proto_msgTypes[20]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetContestCellSubmitsRes) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetContestCellSubmitsRes) ProtoMessage() {}
+
+func (x *GetContestCellSubmitsRes) ProtoReflect() protoreflect.Message {
+	mi := &file_core_v1_contest_log_contest_proto_msgTypes[20]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetContestCellSubmitsRes.ProtoReflect.Descriptor instead.
+func (*GetContestCellSubmitsRes) Descriptor() ([]byte, []int) {
+	return file_core_v1_contest_log_contest_proto_rawDescGZIP(), []int{20}
+}
+
+func (x *GetContestCellSubmitsRes) GetSuccess() bool {
+	if x != nil {
+		return x.Success
+	}
+	return false
+}
+
+func (x *GetContestCellSubmitsRes) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
+func (x *GetContestCellSubmitsRes) GetData() *ContestCellSubmitsData {
+	if x != nil {
+		return x.Data
+	}
+	return nil
+}
+
+type ContestCellSubmitsData struct {
+	state         protoimpl.MessageState   `protogen:"open.v1"`
+	Contest       *ContestBrief            `protobuf:"bytes,1,opt,name=contest,proto3" json:"contest,omitempty"`                              // 比赛信息
+	Platform      string                   `protobuf:"bytes,2,opt,name=platform,proto3" json:"platform,omitempty"`                            // 平台
+	ContestId     string                   `protobuf:"bytes,3,opt,name=contest_id,json=contestId,proto3" json:"contest_id,omitempty"`         // 比赛ID
+	UserId        int64                    `protobuf:"varint,4,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`                 // 用户ID
+	UserName      string                   `protobuf:"bytes,5,opt,name=user_name,json=userName,proto3" json:"user_name,omitempty"`            // 用户展示名
+	Label         string                   `protobuf:"bytes,6,opt,name=label,proto3" json:"label,omitempty"`                                  // 反查补全后的题目 label
+	ExternalId    string                   `protobuf:"bytes,7,opt,name=external_id,json=externalId,proto3" json:"external_id,omitempty"`      // 反查补全后的题目 external id
+	List          []*ContestCellSubmitItem `protobuf:"bytes,8,rep,name=list,proto3" json:"list,omitempty"`                                    // 提交列表（按时间逆序）
+	Total         int32                    `protobuf:"varint,9,opt,name=total,proto3" json:"total,omitempty"`                                 // 提交条数
+	StartTime     *int64                   `protobuf:"varint,10,opt,name=start_time,json=startTime,proto3,oneof" json:"start_time,omitempty"` // 开赛 unix 秒（未知时缺省）
+	EndTime       *int64                   `protobuf:"varint,11,opt,name=end_time,json=endTime,proto3,oneof" json:"end_time,omitempty"`       // 官方结束 unix 秒（未知时缺省）
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ContestCellSubmitsData) Reset() {
+	*x = ContestCellSubmitsData{}
+	mi := &file_core_v1_contest_log_contest_proto_msgTypes[21]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ContestCellSubmitsData) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ContestCellSubmitsData) ProtoMessage() {}
+
+func (x *ContestCellSubmitsData) ProtoReflect() protoreflect.Message {
+	mi := &file_core_v1_contest_log_contest_proto_msgTypes[21]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ContestCellSubmitsData.ProtoReflect.Descriptor instead.
+func (*ContestCellSubmitsData) Descriptor() ([]byte, []int) {
+	return file_core_v1_contest_log_contest_proto_rawDescGZIP(), []int{21}
+}
+
+func (x *ContestCellSubmitsData) GetContest() *ContestBrief {
+	if x != nil {
+		return x.Contest
+	}
+	return nil
+}
+
+func (x *ContestCellSubmitsData) GetPlatform() string {
+	if x != nil {
+		return x.Platform
+	}
+	return ""
+}
+
+func (x *ContestCellSubmitsData) GetContestId() string {
+	if x != nil {
+		return x.ContestId
+	}
+	return ""
+}
+
+func (x *ContestCellSubmitsData) GetUserId() int64 {
+	if x != nil {
+		return x.UserId
+	}
+	return 0
+}
+
+func (x *ContestCellSubmitsData) GetUserName() string {
+	if x != nil {
+		return x.UserName
+	}
+	return ""
+}
+
+func (x *ContestCellSubmitsData) GetLabel() string {
+	if x != nil {
+		return x.Label
+	}
+	return ""
+}
+
+func (x *ContestCellSubmitsData) GetExternalId() string {
+	if x != nil {
+		return x.ExternalId
+	}
+	return ""
+}
+
+func (x *ContestCellSubmitsData) GetList() []*ContestCellSubmitItem {
+	if x != nil {
+		return x.List
+	}
+	return nil
+}
+
+func (x *ContestCellSubmitsData) GetTotal() int32 {
+	if x != nil {
+		return x.Total
+	}
+	return 0
+}
+
+func (x *ContestCellSubmitsData) GetStartTime() int64 {
+	if x != nil && x.StartTime != nil {
+		return *x.StartTime
+	}
+	return 0
+}
+
+func (x *ContestCellSubmitsData) GetEndTime() int64 {
+	if x != nil && x.EndTime != nil {
+		return *x.EndTime
+	}
+	return 0
+}
+
+type ContestCellSubmitItem struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Id            uint64                 `protobuf:"varint,1,opt,name=id,proto3" json:"id,omitempty"`                                             // 提交行 id
+	SubmitId      string                 `protobuf:"bytes,2,opt,name=submit_id,json=submitId,proto3" json:"submit_id,omitempty"`                  // 归一化后的 OJ 提交号
+	Status        string                 `protobuf:"bytes,3,opt,name=status,proto3" json:"status,omitempty"`                                      // 提交状态
+	Lang          string                 `protobuf:"bytes,4,opt,name=lang,proto3" json:"lang,omitempty"`                                          // 语言
+	Time          int64                  `protobuf:"varint,5,opt,name=time,proto3" json:"time,omitempty"`                                         // 提交时间 unix 秒
+	Phase         string                 `protobuf:"bytes,6,opt,name=phase,proto3" json:"phase,omitempty"`                                        // contest | upsolve
+	Problem       string                 `protobuf:"bytes,7,opt,name=problem,proto3" json:"problem,omitempty"`                                    // OJ 题目 id/名
+	Contest       string                 `protobuf:"bytes,8,opt,name=contest,proto3" json:"contest,omitempty"`                                    // 原站代码链接 contest 字段
+	ExternalId    string                 `protobuf:"bytes,9,opt,name=external_id,json=externalId,proto3" json:"external_id,omitempty"`            // 题目 external id
+	Platform      string                 `protobuf:"bytes,10,opt,name=platform,proto3" json:"platform,omitempty"`                                 // 平台
+	RelativeSec   *int32                 `protobuf:"varint,11,opt,name=relative_sec,json=relativeSec,proto3,oneof" json:"relative_sec,omitempty"` // 相对开赛秒（仅赛时）
+	ProblemId     *int64                 `protobuf:"varint,12,opt,name=problem_id,json=problemId,proto3,oneof" json:"problem_id,omitempty"`       // 关联题库 problem 行 id（>0 时输出）
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ContestCellSubmitItem) Reset() {
+	*x = ContestCellSubmitItem{}
+	mi := &file_core_v1_contest_log_contest_proto_msgTypes[22]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ContestCellSubmitItem) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ContestCellSubmitItem) ProtoMessage() {}
+
+func (x *ContestCellSubmitItem) ProtoReflect() protoreflect.Message {
+	mi := &file_core_v1_contest_log_contest_proto_msgTypes[22]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ContestCellSubmitItem.ProtoReflect.Descriptor instead.
+func (*ContestCellSubmitItem) Descriptor() ([]byte, []int) {
+	return file_core_v1_contest_log_contest_proto_rawDescGZIP(), []int{22}
+}
+
+func (x *ContestCellSubmitItem) GetId() uint64 {
+	if x != nil {
+		return x.Id
+	}
+	return 0
+}
+
+func (x *ContestCellSubmitItem) GetSubmitId() string {
+	if x != nil {
+		return x.SubmitId
+	}
+	return ""
+}
+
+func (x *ContestCellSubmitItem) GetStatus() string {
+	if x != nil {
+		return x.Status
+	}
+	return ""
+}
+
+func (x *ContestCellSubmitItem) GetLang() string {
+	if x != nil {
+		return x.Lang
+	}
+	return ""
+}
+
+func (x *ContestCellSubmitItem) GetTime() int64 {
+	if x != nil {
+		return x.Time
+	}
+	return 0
+}
+
+func (x *ContestCellSubmitItem) GetPhase() string {
+	if x != nil {
+		return x.Phase
+	}
+	return ""
+}
+
+func (x *ContestCellSubmitItem) GetProblem() string {
+	if x != nil {
+		return x.Problem
+	}
+	return ""
+}
+
+func (x *ContestCellSubmitItem) GetContest() string {
+	if x != nil {
+		return x.Contest
+	}
+	return ""
+}
+
+func (x *ContestCellSubmitItem) GetExternalId() string {
+	if x != nil {
+		return x.ExternalId
+	}
+	return ""
+}
+
+func (x *ContestCellSubmitItem) GetPlatform() string {
+	if x != nil {
+		return x.Platform
+	}
+	return ""
+}
+
+func (x *ContestCellSubmitItem) GetRelativeSec() int32 {
+	if x != nil && x.RelativeSec != nil {
+		return *x.RelativeSec
+	}
+	return 0
+}
+
+func (x *ContestCellSubmitItem) GetProblemId() int64 {
+	if x != nil && x.ProblemId != nil {
+		return *x.ProblemId
+	}
+	return 0
+}
+
 var File_core_v1_contest_log_contest_proto protoreflect.FileDescriptor
 
 const file_core_v1_contest_log_contest_proto_rawDesc = "" +
@@ -773,11 +2129,166 @@ const file_core_v1_contest_log_contest_proto_rawDesc = "" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12=\n" +
 	"\acontest\x18\x05 \x01(\v2#.api.core.v1.contest_log.ContestLogR\acontest\x128\n" +
 	"\x04data\x18\x03 \x03(\v2$.api.core.v1.contest_log.RankingItemR\x04data\x12\x14\n" +
-	"\x05total\x18\x04 \x01(\x03R\x05total2\xcb\x03\n" +
+	"\x05total\x18\x04 \x01(\x03R\x05total\"\xd4\x02\n" +
+	"\fContestBrief\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\rR\x02id\x12\x1a\n" +
+	"\bplatform\x18\x02 \x01(\tR\bplatform\x12\x17\n" +
+	"\auser_id\x18\x03 \x01(\x03R\x06userId\x12\x1d\n" +
+	"\n" +
+	"contest_id\x18\x04 \x01(\tR\tcontestId\x12!\n" +
+	"\fcontest_name\x18\x05 \x01(\tR\vcontestName\x12\x1f\n" +
+	"\vcontest_url\x18\x06 \x01(\tR\n" +
+	"contestUrl\x12\x12\n" +
+	"\x04rank\x18\a \x01(\x05R\x04rank\x12\x1f\n" +
+	"\vtotal_count\x18\b \x01(\x05R\n" +
+	"totalCount\x12\x19\n" +
+	"\bac_count\x18\t \x01(\x05R\aacCount\x12\x12\n" +
+	"\x04time\x18\n" +
+	" \x01(\x03R\x04time\x12\x1d\n" +
+	"\n" +
+	"start_time\x18\v \x01(\x03R\tstartTime\x12\x19\n" +
+	"\bend_time\x18\f \x01(\x03R\aendTime\"\\\n" +
+	"\x15GetContestProblemsReq\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\x04R\x02id\x12\x1d\n" +
+	"\n" +
+	"contest_id\x18\x02 \x01(\x04R\tcontestId\x12\x14\n" +
+	"\x05force\x18\x03 \x01(\bR\x05force\"\x9e\x02\n" +
+	"\x12ContestProblemItem\x12\x14\n" +
+	"\x05label\x18\x01 \x01(\tR\x05label\x12\x1f\n" +
+	"\vexternal_id\x18\x02 \x01(\tR\n" +
+	"externalId\x12\x14\n" +
+	"\x05title\x18\x03 \x01(\tR\x05title\x12\x10\n" +
+	"\x03url\x18\x04 \x01(\tR\x03url\x12\x1d\n" +
+	"\n" +
+	"problem_id\x18\x05 \x01(\x03R\tproblemId\x12\x1d\n" +
+	"\n" +
+	"sort_order\x18\x06 \x01(\x05R\tsortOrder\x12\x16\n" +
+	"\x06status\x18\a \x01(\tR\x06status\x12\x1f\n" +
+	"\vhas_content\x18\b \x01(\bR\n" +
+	"hasContent\x12\x1e\n" +
+	"\n" +
+	"difficulty\x18\t \x01(\tR\n" +
+	"difficulty\x12\x12\n" +
+	"\x04tags\x18\n" +
+	" \x03(\tR\x04tags\"\x8d\x01\n" +
+	"\x15GetContestProblemsRes\x12\x18\n" +
+	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x18\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\x12@\n" +
+	"\x04data\x18\x03 \x01(\v2,.api.core.v1.contest_log.ContestProblemsDataR\x04data\"\xf5\x01\n" +
+	"\x13ContestProblemsData\x12?\n" +
+	"\acontest\x18\x01 \x01(\v2%.api.core.v1.contest_log.ContestBriefR\acontest\x12#\n" +
+	"\rensure_status\x18\x02 \x01(\tR\fensureStatus\x12!\n" +
+	"\fensure_error\x18\x03 \x01(\tR\vensureError\x12?\n" +
+	"\x04list\x18\x04 \x03(\v2+.api.core.v1.contest_log.ContestProblemItemR\x04list\x12\x14\n" +
+	"\x05force\x18\x05 \x01(\bR\x05force\"\xa0\x01\n" +
+	"\x12GetContestBoardReq\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\x04R\x02id\x12\x1d\n" +
+	"\n" +
+	"contest_id\x18\x02 \x01(\x04R\tcontestId\x12%\n" +
+	"\x0efollowing_only\x18\x03 \x01(\bR\rfollowingOnly\x12\x19\n" +
+	"\bsquad_id\x18\x04 \x01(\x03R\asquadId\x12\x19\n" +
+	"\bgroup_id\x18\x05 \x01(\x03R\agroupId\"\x87\x01\n" +
+	"\x12GetContestBoardRes\x12\x18\n" +
+	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x18\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\x12=\n" +
+	"\x04data\x18\x03 \x01(\v2).api.core.v1.contest_log.ContestBoardDataR\x04data\"\xb6\x02\n" +
+	"\x10ContestBoardData\x12?\n" +
+	"\acontest\x18\x01 \x01(\v2%.api.core.v1.contest_log.ContestBriefR\acontest\x12\x18\n" +
+	"\ascoring\x18\x02 \x01(\tR\ascoring\x12&\n" +
+	"\x0fhas_cell_detail\x18\x03 \x01(\bR\rhasCellDetail\x12K\n" +
+	"\bproblems\x18\x04 \x03(\v2/.api.core.v1.contest_log.ContestBoardProblemColR\bproblems\x12<\n" +
+	"\x04rows\x18\x05 \x03(\v2(.api.core.v1.contest_log.ContestBoardRowR\x04rows\x12\x14\n" +
+	"\x05total\x18\x06 \x01(\x05R\x05total\"e\n" +
+	"\x16ContestBoardProblemCol\x12\x14\n" +
+	"\x05label\x18\x01 \x01(\tR\x05label\x12\x1f\n" +
+	"\vexternal_id\x18\x02 \x01(\tR\n" +
+	"externalId\x12\x14\n" +
+	"\x05title\x18\x03 \x01(\tR\x05title\"\xa5\x03\n" +
+	"\x0fContestBoardRow\x12\x17\n" +
+	"\auser_id\x18\x01 \x01(\x03R\x06userId\x12\x12\n" +
+	"\x04name\x18\x02 \x01(\tR\x04name\x12\x1a\n" +
+	"\busername\x18\x03 \x01(\tR\busername\x12\x16\n" +
+	"\x06avatar\x18\x04 \x01(\tR\x06avatar\x12#\n" +
+	"\rrank_official\x18\x05 \x01(\x05R\frankOfficial\x12\x1d\n" +
+	"\n" +
+	"rank_local\x18\x06 \x01(\x05R\trankLocal\x12\x16\n" +
+	"\x06solved\x18\a \x01(\x05R\x06solved\x12\x1f\n" +
+	"\vpenalty_sec\x18\b \x01(\x05R\n" +
+	"penaltySec\x12\x14\n" +
+	"\x05score\x18\t \x01(\x05R\x05score\x12\x19\n" +
+	"\bac_count\x18\n" +
+	" \x01(\x05R\aacCount\x12\x1d\n" +
+	"\n" +
+	"has_detail\x18\v \x01(\bR\thasDetail\x12#\n" +
+	"\ris_contestant\x18\f \x01(\bR\fisContestant\x12?\n" +
+	"\x05cells\x18\r \x03(\v2).api.core.v1.contest_log.ContestBoardCellR\x05cells\"\x8c\x02\n" +
+	"\x10ContestBoardCell\x12\x14\n" +
+	"\x05label\x18\x01 \x01(\tR\x05label\x12\x1f\n" +
+	"\vexternal_id\x18\x02 \x01(\tR\n" +
+	"externalId\x12\x16\n" +
+	"\x06status\x18\x03 \x01(\tR\x06status\x12\x1a\n" +
+	"\battempts\x18\x04 \x01(\x05R\battempts\x12\x1f\n" +
+	"\vscore_delta\x18\x05 \x01(\x05R\n" +
+	"scoreDelta\x12&\n" +
+	"\frelative_sec\x18\x06 \x01(\x05H\x00R\vrelativeSec\x88\x01\x01\x12#\n" +
+	"\vfirst_ac_at\x18\a \x01(\x03H\x01R\tfirstAcAt\x88\x01\x01B\x0f\n" +
+	"\r_relative_secB\x0e\n" +
+	"\f_first_ac_at\"\x99\x01\n" +
+	"\x18GetContestCellSubmitsReq\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\x04R\x02id\x12\x1d\n" +
+	"\n" +
+	"contest_id\x18\x02 \x01(\x04R\tcontestId\x12\x17\n" +
+	"\auser_id\x18\x03 \x01(\x03R\x06userId\x12\x14\n" +
+	"\x05label\x18\x04 \x01(\tR\x05label\x12\x1f\n" +
+	"\vexternal_id\x18\x05 \x01(\tR\n" +
+	"externalId\"\x93\x01\n" +
+	"\x18GetContestCellSubmitsRes\x12\x18\n" +
+	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x18\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\x12C\n" +
+	"\x04data\x18\x03 \x01(\v2/.api.core.v1.contest_log.ContestCellSubmitsDataR\x04data\"\xbb\x03\n" +
+	"\x16ContestCellSubmitsData\x12?\n" +
+	"\acontest\x18\x01 \x01(\v2%.api.core.v1.contest_log.ContestBriefR\acontest\x12\x1a\n" +
+	"\bplatform\x18\x02 \x01(\tR\bplatform\x12\x1d\n" +
+	"\n" +
+	"contest_id\x18\x03 \x01(\tR\tcontestId\x12\x17\n" +
+	"\auser_id\x18\x04 \x01(\x03R\x06userId\x12\x1b\n" +
+	"\tuser_name\x18\x05 \x01(\tR\buserName\x12\x14\n" +
+	"\x05label\x18\x06 \x01(\tR\x05label\x12\x1f\n" +
+	"\vexternal_id\x18\a \x01(\tR\n" +
+	"externalId\x12B\n" +
+	"\x04list\x18\b \x03(\v2..api.core.v1.contest_log.ContestCellSubmitItemR\x04list\x12\x14\n" +
+	"\x05total\x18\t \x01(\x05R\x05total\x12\"\n" +
+	"\n" +
+	"start_time\x18\n" +
+	" \x01(\x03H\x00R\tstartTime\x88\x01\x01\x12\x1e\n" +
+	"\bend_time\x18\v \x01(\x03H\x01R\aendTime\x88\x01\x01B\r\n" +
+	"\v_start_timeB\v\n" +
+	"\t_end_time\"\xf7\x02\n" +
+	"\x15ContestCellSubmitItem\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\x04R\x02id\x12\x1b\n" +
+	"\tsubmit_id\x18\x02 \x01(\tR\bsubmitId\x12\x16\n" +
+	"\x06status\x18\x03 \x01(\tR\x06status\x12\x12\n" +
+	"\x04lang\x18\x04 \x01(\tR\x04lang\x12\x12\n" +
+	"\x04time\x18\x05 \x01(\x03R\x04time\x12\x14\n" +
+	"\x05phase\x18\x06 \x01(\tR\x05phase\x12\x18\n" +
+	"\aproblem\x18\a \x01(\tR\aproblem\x12\x18\n" +
+	"\acontest\x18\b \x01(\tR\acontest\x12\x1f\n" +
+	"\vexternal_id\x18\t \x01(\tR\n" +
+	"externalId\x12\x1a\n" +
+	"\bplatform\x18\n" +
+	" \x01(\tR\bplatform\x12&\n" +
+	"\frelative_sec\x18\v \x01(\x05H\x00R\vrelativeSec\x88\x01\x01\x12\"\n" +
+	"\n" +
+	"problem_id\x18\f \x01(\x03H\x01R\tproblemId\x88\x01\x01B\x0f\n" +
+	"\r_relative_secB\r\n" +
+	"\v_problem_id2\x9a\a\n" +
 	"\aContest\x12\x87\x01\n" +
 	"\x0eGetContestList\x12*.api.core.v1.contest_log.GetContestListReq\x1a*.api.core.v1.contest_log.GetContestListRes\"\x1d\x82\xd3\xe4\x93\x02\x17\x12\x15/v1/core/contest/list\x12\x9f\x01\n" +
 	"\x15GetUserContestHistory\x121.api.core.v1.contest_log.GetUserContestHistoryReq\x1a1.api.core.v1.contest_log.GetUserContestHistoryRes\" \x82\xd3\xe4\x93\x02\x1a\x12\x18/v1/core/contest/history\x12\x93\x01\n" +
-	"\x11GetContestRanking\x12-.api.core.v1.contest_log.GetContestRankingReq\x1a-.api.core.v1.contest_log.GetContestRankingRes\" \x82\xd3\xe4\x93\x02\x1a\x12\x18/v1/core/contest/rankingBJ\n" +
+	"\x11GetContestRanking\x12-.api.core.v1.contest_log.GetContestRankingReq\x1a-.api.core.v1.contest_log.GetContestRankingRes\" \x82\xd3\xe4\x93\x02\x1a\x12\x18/v1/core/contest/ranking\x12\x97\x01\n" +
+	"\x12GetContestProblems\x12..api.core.v1.contest_log.GetContestProblemsReq\x1a..api.core.v1.contest_log.GetContestProblemsRes\"!\x82\xd3\xe4\x93\x02\x1b\x12\x19/v1/core/contest/problems\x12\x8b\x01\n" +
+	"\x0fGetContestBoard\x12+.api.core.v1.contest_log.GetContestBoardReq\x1a+.api.core.v1.contest_log.GetContestBoardRes\"\x1e\x82\xd3\xe4\x93\x02\x18\x12\x16/v1/core/contest/board\x12\xa4\x01\n" +
+	"\x15GetContestCellSubmits\x121.api.core.v1.contest_log.GetContestCellSubmitsReq\x1a1.api.core.v1.contest_log.GetContestCellSubmitsRes\"%\x82\xd3\xe4\x93\x02\x1f\x12\x1d/v1/core/contest/cell-submitsBJ\n" +
 	"\x17api.core.v1.contest_logP\x01Z-cwxu-algo/api/core/v1/contest_log;contest_logb\x06proto3"
 
 var (
@@ -792,7 +2303,7 @@ func file_core_v1_contest_log_contest_proto_rawDescGZIP() []byte {
 	return file_core_v1_contest_log_contest_proto_rawDescData
 }
 
-var file_core_v1_contest_log_contest_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
+var file_core_v1_contest_log_contest_proto_msgTypes = make([]protoimpl.MessageInfo, 23)
 var file_core_v1_contest_log_contest_proto_goTypes = []any{
 	(*ContestLog)(nil),               // 0: api.core.v1.contest_log.ContestLog
 	(*GetContestListReq)(nil),        // 1: api.core.v1.contest_log.GetContestListReq
@@ -802,23 +2313,55 @@ var file_core_v1_contest_log_contest_proto_goTypes = []any{
 	(*GetContestRankingReq)(nil),     // 5: api.core.v1.contest_log.GetContestRankingReq
 	(*RankingItem)(nil),              // 6: api.core.v1.contest_log.RankingItem
 	(*GetContestRankingRes)(nil),     // 7: api.core.v1.contest_log.GetContestRankingRes
+	(*ContestBrief)(nil),             // 8: api.core.v1.contest_log.ContestBrief
+	(*GetContestProblemsReq)(nil),    // 9: api.core.v1.contest_log.GetContestProblemsReq
+	(*ContestProblemItem)(nil),       // 10: api.core.v1.contest_log.ContestProblemItem
+	(*GetContestProblemsRes)(nil),    // 11: api.core.v1.contest_log.GetContestProblemsRes
+	(*ContestProblemsData)(nil),      // 12: api.core.v1.contest_log.ContestProblemsData
+	(*GetContestBoardReq)(nil),       // 13: api.core.v1.contest_log.GetContestBoardReq
+	(*GetContestBoardRes)(nil),       // 14: api.core.v1.contest_log.GetContestBoardRes
+	(*ContestBoardData)(nil),         // 15: api.core.v1.contest_log.ContestBoardData
+	(*ContestBoardProblemCol)(nil),   // 16: api.core.v1.contest_log.ContestBoardProblemCol
+	(*ContestBoardRow)(nil),          // 17: api.core.v1.contest_log.ContestBoardRow
+	(*ContestBoardCell)(nil),         // 18: api.core.v1.contest_log.ContestBoardCell
+	(*GetContestCellSubmitsReq)(nil), // 19: api.core.v1.contest_log.GetContestCellSubmitsReq
+	(*GetContestCellSubmitsRes)(nil), // 20: api.core.v1.contest_log.GetContestCellSubmitsRes
+	(*ContestCellSubmitsData)(nil),   // 21: api.core.v1.contest_log.ContestCellSubmitsData
+	(*ContestCellSubmitItem)(nil),    // 22: api.core.v1.contest_log.ContestCellSubmitItem
 }
 var file_core_v1_contest_log_contest_proto_depIdxs = []int32{
-	0, // 0: api.core.v1.contest_log.GetContestListRes.data:type_name -> api.core.v1.contest_log.ContestLog
-	0, // 1: api.core.v1.contest_log.GetUserContestHistoryRes.data:type_name -> api.core.v1.contest_log.ContestLog
-	0, // 2: api.core.v1.contest_log.GetContestRankingRes.contest:type_name -> api.core.v1.contest_log.ContestLog
-	6, // 3: api.core.v1.contest_log.GetContestRankingRes.data:type_name -> api.core.v1.contest_log.RankingItem
-	1, // 4: api.core.v1.contest_log.Contest.GetContestList:input_type -> api.core.v1.contest_log.GetContestListReq
-	3, // 5: api.core.v1.contest_log.Contest.GetUserContestHistory:input_type -> api.core.v1.contest_log.GetUserContestHistoryReq
-	5, // 6: api.core.v1.contest_log.Contest.GetContestRanking:input_type -> api.core.v1.contest_log.GetContestRankingReq
-	2, // 7: api.core.v1.contest_log.Contest.GetContestList:output_type -> api.core.v1.contest_log.GetContestListRes
-	4, // 8: api.core.v1.contest_log.Contest.GetUserContestHistory:output_type -> api.core.v1.contest_log.GetUserContestHistoryRes
-	7, // 9: api.core.v1.contest_log.Contest.GetContestRanking:output_type -> api.core.v1.contest_log.GetContestRankingRes
-	7, // [7:10] is the sub-list for method output_type
-	4, // [4:7] is the sub-list for method input_type
-	4, // [4:4] is the sub-list for extension type_name
-	4, // [4:4] is the sub-list for extension extendee
-	0, // [0:4] is the sub-list for field type_name
+	0,  // 0: api.core.v1.contest_log.GetContestListRes.data:type_name -> api.core.v1.contest_log.ContestLog
+	0,  // 1: api.core.v1.contest_log.GetUserContestHistoryRes.data:type_name -> api.core.v1.contest_log.ContestLog
+	0,  // 2: api.core.v1.contest_log.GetContestRankingRes.contest:type_name -> api.core.v1.contest_log.ContestLog
+	6,  // 3: api.core.v1.contest_log.GetContestRankingRes.data:type_name -> api.core.v1.contest_log.RankingItem
+	12, // 4: api.core.v1.contest_log.GetContestProblemsRes.data:type_name -> api.core.v1.contest_log.ContestProblemsData
+	8,  // 5: api.core.v1.contest_log.ContestProblemsData.contest:type_name -> api.core.v1.contest_log.ContestBrief
+	10, // 6: api.core.v1.contest_log.ContestProblemsData.list:type_name -> api.core.v1.contest_log.ContestProblemItem
+	15, // 7: api.core.v1.contest_log.GetContestBoardRes.data:type_name -> api.core.v1.contest_log.ContestBoardData
+	8,  // 8: api.core.v1.contest_log.ContestBoardData.contest:type_name -> api.core.v1.contest_log.ContestBrief
+	16, // 9: api.core.v1.contest_log.ContestBoardData.problems:type_name -> api.core.v1.contest_log.ContestBoardProblemCol
+	17, // 10: api.core.v1.contest_log.ContestBoardData.rows:type_name -> api.core.v1.contest_log.ContestBoardRow
+	18, // 11: api.core.v1.contest_log.ContestBoardRow.cells:type_name -> api.core.v1.contest_log.ContestBoardCell
+	21, // 12: api.core.v1.contest_log.GetContestCellSubmitsRes.data:type_name -> api.core.v1.contest_log.ContestCellSubmitsData
+	8,  // 13: api.core.v1.contest_log.ContestCellSubmitsData.contest:type_name -> api.core.v1.contest_log.ContestBrief
+	22, // 14: api.core.v1.contest_log.ContestCellSubmitsData.list:type_name -> api.core.v1.contest_log.ContestCellSubmitItem
+	1,  // 15: api.core.v1.contest_log.Contest.GetContestList:input_type -> api.core.v1.contest_log.GetContestListReq
+	3,  // 16: api.core.v1.contest_log.Contest.GetUserContestHistory:input_type -> api.core.v1.contest_log.GetUserContestHistoryReq
+	5,  // 17: api.core.v1.contest_log.Contest.GetContestRanking:input_type -> api.core.v1.contest_log.GetContestRankingReq
+	9,  // 18: api.core.v1.contest_log.Contest.GetContestProblems:input_type -> api.core.v1.contest_log.GetContestProblemsReq
+	13, // 19: api.core.v1.contest_log.Contest.GetContestBoard:input_type -> api.core.v1.contest_log.GetContestBoardReq
+	19, // 20: api.core.v1.contest_log.Contest.GetContestCellSubmits:input_type -> api.core.v1.contest_log.GetContestCellSubmitsReq
+	2,  // 21: api.core.v1.contest_log.Contest.GetContestList:output_type -> api.core.v1.contest_log.GetContestListRes
+	4,  // 22: api.core.v1.contest_log.Contest.GetUserContestHistory:output_type -> api.core.v1.contest_log.GetUserContestHistoryRes
+	7,  // 23: api.core.v1.contest_log.Contest.GetContestRanking:output_type -> api.core.v1.contest_log.GetContestRankingRes
+	11, // 24: api.core.v1.contest_log.Contest.GetContestProblems:output_type -> api.core.v1.contest_log.GetContestProblemsRes
+	14, // 25: api.core.v1.contest_log.Contest.GetContestBoard:output_type -> api.core.v1.contest_log.GetContestBoardRes
+	20, // 26: api.core.v1.contest_log.Contest.GetContestCellSubmits:output_type -> api.core.v1.contest_log.GetContestCellSubmitsRes
+	21, // [21:27] is the sub-list for method output_type
+	15, // [15:21] is the sub-list for method input_type
+	15, // [15:15] is the sub-list for extension type_name
+	15, // [15:15] is the sub-list for extension extendee
+	0,  // [0:15] is the sub-list for field type_name
 }
 
 func init() { file_core_v1_contest_log_contest_proto_init() }
@@ -827,13 +2370,16 @@ func file_core_v1_contest_log_contest_proto_init() {
 		return
 	}
 	file_core_v1_contest_log_contest_proto_msgTypes[5].OneofWrappers = []any{}
+	file_core_v1_contest_log_contest_proto_msgTypes[18].OneofWrappers = []any{}
+	file_core_v1_contest_log_contest_proto_msgTypes[21].OneofWrappers = []any{}
+	file_core_v1_contest_log_contest_proto_msgTypes[22].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_core_v1_contest_log_contest_proto_rawDesc), len(file_core_v1_contest_log_contest_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   8,
+			NumMessages:   23,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

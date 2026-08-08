@@ -30,6 +30,27 @@ service Contest {
       get: "/v1/core/contest/ranking"
     };
   }
+
+  // 比赛题目目录（?id=|contestId=；force=1 管理员强制重跑 ensure）
+  rpc GetContestProblems (GetContestProblemsReq) returns (GetContestProblemsRes) {
+    option (google.api.http) = {
+      get: "/v1/core/contest/problems"
+    };
+  }
+
+  // XCPCIO 风格站内榜（?id=|contestId=；组织成员过滤与 ranking 一致）
+  rpc GetContestBoard (GetContestBoardReq) returns (GetContestBoardRes) {
+    option (google.api.http) = {
+      get: "/v1/core/contest/board"
+    };
+  }
+
+  // 站内榜格子：该用户本场该题的提交明细（赛时 + 赛后补题）
+  rpc GetContestCellSubmits (GetContestCellSubmitsReq) returns (GetContestCellSubmitsRes) {
+    option (google.api.http) = {
+      get: "/v1/core/contest/cell-submits"
+    };
+  }
 }
 
 // 竞赛日志消息体
@@ -111,4 +132,158 @@ message GetContestRankingRes {
   ContestLog contest = 5;       // 竞赛历史数据
   repeated RankingItem data = 3; // 排行榜数据
   int64 total = 4;              // 总参赛人数
+}
+
+// 比赛简要信息（/contest/problems、/contest/board、/contest/cell-submits 内嵌 contest）
+message ContestBrief {
+  uint32 id = 1;                // contest_logs 行 id
+  string platform = 2;          // 平台
+  int64 user_id = 3;            // 用户ID
+  string contest_id = 4;        // 比赛ID
+  string contest_name = 5;      // 比赛名称
+  string contest_url = 6;       // 比赛链接
+  int32 rank = 7;               // 官方排名（0=未知/未出分）
+  int32 total_count = 8;        // 总题数
+  int32 ac_count = 9;           // 过题数（力扣为 score）
+  int64 time = 10;              // 开赛/展示 unix 秒
+  int64 start_time = 11;        // 开赛 unix 秒（0=未知）
+  int64 end_time = 12;          // 结束 unix 秒（0=未知）
+}
+
+// 比赛题目目录请求
+message GetContestProblemsReq {
+  uint64 id = 1;                // contest_logs 行 id
+  uint64 contest_id = 2;        // 同上（二选一）
+  bool force = 3;               // 管理员强制重跑 ensure
+}
+
+// 题目目录项
+message ContestProblemItem {
+  string label = 1;             // 展示题号 A/B/C
+  string external_id = 2;       // OJ 题目 id
+  string title = 3;             // 题目名
+  string url = 4;               // 题目链接
+  int64 problem_id = 5;         // 关联题库 problem 行 id（0=未关联）
+  int32 sort_order = 6;         // 排序
+  string status = 7;            // 关联题目状态
+  bool has_content = 8;         // 是否已有题面内容
+  string difficulty = 9;        // 难度（未关联时为空）
+  repeated string tags = 10;    // 题库标签（未关联时为空数组）
+}
+
+// 比赛题目目录响应
+message GetContestProblemsRes {
+  bool success = 1;
+  string message = 2;
+  ContestProblemsData data = 3;
+}
+
+message ContestProblemsData {
+  ContestBrief contest = 1;             // 比赛信息
+  string ensure_status = 2;             // ensure 状态（""|running|done|failed）
+  string ensure_error = 3;              // ensure 失败信息
+  repeated ContestProblemItem list = 4; // 题目目录
+  bool force = 5;                       // 本次是否强制 ensure
+}
+
+// 站内榜请求
+message GetContestBoardReq {
+  uint64 id = 1;                        // contest_logs 行 id
+  uint64 contest_id = 2;                // 同上（二选一）
+  bool following_only = 3;              // 仅关注用户（需登录；与组织/分组求交）
+  int64 squad_id = 4;                   // 分队过滤（可选）
+  int64 group_id = 5;                   // 分组过滤（可选）
+}
+
+// 站内榜响应
+message GetContestBoardRes {
+  bool success = 1;
+  string message = 2;
+  ContestBoardData data = 3;
+}
+
+message ContestBoardData {
+  ContestBrief contest = 1;             // 比赛信息
+  string scoring = 2;                   // icpc | leetcode
+  bool has_cell_detail = 3;             // 全场是否有任意逐题明细
+  repeated ContestBoardProblemCol problems = 4; // 题目列（无明细时为空）
+  repeated ContestBoardRow rows = 5;    // 参赛行
+  int32 total = 6;                      // 行数
+}
+
+message ContestBoardProblemCol {
+  string label = 1;                     // 展示题号
+  string external_id = 2;               // OJ 题目 id
+  string title = 3;                     // 题目名
+}
+
+message ContestBoardRow {
+  int64 user_id = 1;                    // 用户ID
+  string name = 2;                      // 展示名（空则回落 username）
+  string username = 3;                  // 用户名
+  string avatar = 4;                    // 头像
+  int32 rank_official = 5;              // 官方排名（0=未知；纯补题不赋名次）
+  int32 rank_local = 6;                 // 本地名次（官方 rank<=0 时按赛时序 1..n）
+  int32 solved = 7;                     // 过题数
+  int32 penalty_sec = 8;                // ICPC 罚时（秒）
+  int32 score = 9;                      // 力扣分数
+  int32 ac_count = 10;                  // 场级 ac_count（力扣为 score）
+  bool has_detail = 11;                 // 该行是否有逐题明细
+  bool is_contestant = 12;              // 是否赛时参赛（false=纯补题）
+  repeated ContestBoardCell cells = 13; // 逐题格子（无明细时为空）
+}
+
+message ContestBoardCell {
+  string label = 1;                     // 展示题号
+  string external_id = 2;               // OJ 题目 id
+  string status = 3;                    // AC|UPSOLVE|UPSOLVE_TRIED|TRIED|NONE
+  int32 attempts = 4;                   // 尝试次数
+  int32 score_delta = 5;                // 力扣单题增量
+  optional int32 relative_sec = 6;      // 相对开赛秒（可空；补题格应为空）
+  optional int64 first_ac_at = 7;       // 首次 AC 绝对时间 unix 秒（可空）
+}
+
+// 站内榜格子提交明细请求
+message GetContestCellSubmitsReq {
+  uint64 id = 1;                        // contest_logs 行 id
+  uint64 contest_id = 2;                // 同上（二选一）
+  int64 user_id = 3;                    // 用户ID
+  string label = 4;                     // 题目 label（与 external_id 至少一个）
+  string external_id = 5;               // 题目 external id
+}
+
+// 站内榜格子提交明细响应
+message GetContestCellSubmitsRes {
+  bool success = 1;
+  string message = 2;
+  ContestCellSubmitsData data = 3;
+}
+
+message ContestCellSubmitsData {
+  ContestBrief contest = 1;             // 比赛信息
+  string platform = 2;                  // 平台
+  string contest_id = 3;                // 比赛ID
+  int64 user_id = 4;                    // 用户ID
+  string user_name = 5;                 // 用户展示名
+  string label = 6;                     // 反查补全后的题目 label
+  string external_id = 7;               // 反查补全后的题目 external id
+  repeated ContestCellSubmitItem list = 8; // 提交列表（按时间逆序）
+  int32 total = 9;                      // 提交条数
+  optional int64 start_time = 10;       // 开赛 unix 秒（未知时缺省）
+  optional int64 end_time = 11;         // 官方结束 unix 秒（未知时缺省）
+}
+
+message ContestCellSubmitItem {
+  uint64 id = 1;                        // 提交行 id
+  string submit_id = 2;                 // 归一化后的 OJ 提交号
+  string status = 3;                    // 提交状态
+  string lang = 4;                      // 语言
+  int64 time = 5;                       // 提交时间 unix 秒
+  string phase = 6;                     // contest | upsolve
+  string problem = 7;                   // OJ 题目 id/名
+  string contest = 8;                   // 原站代码链接 contest 字段
+  string external_id = 9;               // 题目 external id
+  string platform = 10;                 // 平台
+  optional int32 relative_sec = 11;     // 相对开赛秒（仅赛时）
+  optional int64 problem_id = 12;       // 关联题库 problem 行 id（>0 时输出）
 }

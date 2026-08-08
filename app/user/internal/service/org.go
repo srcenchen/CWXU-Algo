@@ -10,17 +10,16 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
+	orgpb "cwxu-algo/api/user/v1/org"
 	"cwxu-algo/app/common/rbac"
 	"cwxu-algo/app/common/utils/auth"
 	"cwxu-algo/app/user/internal/data"
 	"cwxu-algo/app/user/internal/data/model"
 
 	"github.com/go-kratos/kratos/v2/log"
-	khttp "github.com/go-kratos/kratos/v2/transport/http"
 	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -138,38 +137,33 @@ func seatFullMessage(db *gorm.DB, o *model.Org) string {
 	return ""
 }
 
-func orgToMap(o *model.Org, includeInvite bool) map[string]interface{} {
-	m := map[string]interface{}{
-		"id":                   o.ID,
-		"name":                 o.Name,
-		"slug":                 o.Slug,
-		"plan":                 o.Plan,
-		"seatLimit":            effectiveSeatLimit(o.SeatLimit),
-		"status":               o.Status,
-		"isSystem":             o.IsSystem,
-		"brandTitle":           o.BrandTitle,
-		"brandLogo":            o.BrandLogo,
-		"brandFavicon":         o.BrandFavicon,
-		"joinMode":             o.JoinMode,
-		"enableAiSummary":      o.EnableAISummary,
-		"enableAiEmail":        o.EnableAIEmail,
-		"enableAiWeeklyEmail":  o.EnableAIWeeklyEmail,
-		"enableSpider":         o.EnableSpider,
-		"spiderIntervalMin":    o.SpiderIntervalMin,
-		"aiSummaryIntervalMin": o.AISummaryIntervalMin,
-		"aiEmailSchedule":      o.AIEmailSchedule,
-		"forceSync":            o.ForceSync,
+func (s *OrgService) toOrgInfo(o *model.Org, includeInvite bool) *orgpb.OrgInfo {
+	info := &orgpb.OrgInfo{
+		Id:                   int64(o.ID),
+		Name:                 o.Name,
+		Slug:                 o.Slug,
+		Plan:                 o.Plan,
+		SeatLimit:            int32(effectiveSeatLimit(o.SeatLimit)),
+		Status:               o.Status,
+		IsSystem:             o.IsSystem,
+		BrandTitle:           o.BrandTitle,
+		BrandLogo:            o.BrandLogo,
+		BrandFavicon:         o.BrandFavicon,
+		JoinMode:             o.JoinMode,
+		EnableAiSummary:      o.EnableAISummary,
+		EnableAiEmail:        o.EnableAIEmail,
+		EnableAiWeeklyEmail:  o.EnableAIWeeklyEmail,
+		EnableSpider:         o.EnableSpider,
+		SpiderIntervalMin:    int32(o.SpiderIntervalMin),
+		AiSummaryIntervalMin: int32(o.AISummaryIntervalMin),
+		AiEmailSchedule:      o.AIEmailSchedule,
+		ForceSync:            o.ForceSync,
+		MemberCount:          int32(countOrgSeats(s.db, o)),
 	}
 	if includeInvite {
-		m["inviteCode"] = o.InviteCode
+		info.InviteCode = o.InviteCode
 	}
-	return m
-}
-
-func (s *OrgService) orgToMapWithSeats(o *model.Org, includeInvite bool) map[string]interface{} {
-	m := orgToMap(o, includeInvite)
-	m["memberCount"] = countOrgSeats(s.db, o)
-	return m
+	return info
 }
 
 func (s *OrgService) loadUser(id uint) (*model.User, error) {
@@ -369,59 +363,29 @@ func (s *OrgService) addOrgMemberAtomic(orgID, userID uint, role, displayName st
 	return err
 }
 
-// RegisterOrgRoutes HTTP 路由（与 upload 同模式）
-func RegisterOrgRoutes(srv *khttp.Server, org *OrgService) {
-	r := srv.Route("/")
-	r.GET("/v1/user/org/list", org.handleList)
-	r.GET("/v1/user/org/discover", org.handleDiscover)
-	r.GET("/v1/user/org/get", org.handleGet)
-	r.POST("/v1/user/org/create", org.handleCreate)
-	r.POST("/v1/user/org/update", org.handleUpdate)
-	r.POST("/v1/user/org/delete", org.handleDelete)
-	r.POST("/v1/user/org/switch", org.handleSwitch)
-	r.POST("/v1/user/org/join", org.handleJoin)
-	r.POST("/v1/user/org/leave", org.handleLeave)
-	r.GET("/v1/user/org/members", org.handleMembers)
-	r.POST("/v1/user/org/members/set-role", org.handleSetRole)
-	r.POST("/v1/user/org/members/remove", org.handleRemoveMember)
-	r.POST("/v1/user/org/members/add", org.handleAddMember)
-	r.POST("/v1/user/org/members/set-display-name", org.handleSetDisplayName)
-	r.GET("/v1/user/org/member-ids", org.handleMemberIds)
-	r.GET("/v1/user/org/invite", org.handleInviteGet)
-	r.GET("/v1/user/org/invite/preview", org.handleInvitePreview)
-	r.POST("/v1/user/org/invite/rotate", org.handleInviteRotate)
-	r.GET("/v1/user/org/join-requests", org.handleJoinRequests)
-	r.POST("/v1/user/org/join-requests/review", org.handleJoinReview)
-	r.POST("/v1/user/platform/set-site-admin", org.handleSetSiteAdmin)
-}
-
-// handleInvitePreview 公开：按识别码预览组织欢迎信息（不含敏感配置）
-func (s *OrgService) handleInvitePreview(ctx khttp.Context) error {
-	code := strings.TrimSpace(strings.ToUpper(ctx.Request().URL.Query().Get("code")))
+// InvitePreview 公开：按识别码预览组织欢迎信息（不含敏感配置）
+func (s *OrgService) InvitePreview(ctx context.Context, req *orgpb.InvitePreviewReq) (*orgpb.InvitePreviewRes, error) {
+	code := strings.TrimSpace(strings.ToUpper(req.Code))
 	if code == "" {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "请提供邀请识别码"})
-		return nil
+		return &orgpb.InvitePreviewRes{Code: 1, Message: "请提供邀请识别码"}, nil
 	}
 	var o model.Org
 	if err := s.db.Where("UPPER(invite_code) = ? AND status = ?", code, model.OrgStatusActive).First(&o).Error; err != nil {
-		writeJSON(ctx.Response(), 404, map[string]interface{}{"code": 1, "message": "邀请链接无效或已失效"})
-		return nil
+		return &orgpb.InvitePreviewRes{Code: 1, Message: "邀请链接无效或已失效"}, nil
 	}
 	if o.IsSystem || o.Slug == model.PublicOrgSlug {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "公共域无需邀请加入"})
-		return nil
+		return &orgpb.InvitePreviewRes{Code: 1, Message: "公共域无需邀请加入"}, nil
 	}
 	displayName := strings.TrimSpace(o.BrandTitle)
 	if displayName == "" {
 		displayName = o.Name
 	}
-	writeJSON(ctx.Response(), 200, map[string]interface{}{
-		"code": 0, "message": "success",
-		"orgId": o.ID, "orgName": displayName, "name": o.Name,
-		"brandTitle": o.BrandTitle, "brandLogo": o.BrandLogo,
-		"joinMode": o.JoinMode,
-	})
-	return nil
+	return &orgpb.InvitePreviewRes{
+		Code: 0, Message: "success",
+		OrgId: int64(o.ID), OrgName: displayName, Name: o.Name,
+		BrandTitle: o.BrandTitle, BrandLogo: o.BrandLogo,
+		JoinMode: o.JoinMode,
+	}, nil
 }
 
 // applyInviteOnRegister 注册成功后按识别码加入组织。
@@ -519,19 +483,18 @@ func applyInviteOnRegister(db *gorm.DB, userID uint, inviteCode, displayName str
 	return fmt.Sprintf("注册成功，已加入「%s」", orgLabel)
 }
 
-// handleDiscover 组织广场：仅公开字段（名/logo/人数），无识别码与成员明细
-func (s *OrgService) handleDiscover(ctx khttp.Context) error {
+// Discover 组织广场：仅公开字段（名/logo/人数），无识别码与成员明细
+func (s *OrgService) Discover(ctx context.Context, req *orgpb.DiscoverReq) (*orgpb.DiscoverRes, error) {
 	pd := auth.GetCurrentUser(ctx)
-	q := ctx.Request().URL.Query()
-	page, _ := strconv.Atoi(q.Get("page"))
-	pageSize, _ := strconv.Atoi(q.Get("pageSize"))
+	page := int(req.Page)
+	pageSize := int(req.PageSize)
 	if page < 1 {
 		page = 1
 	}
 	if pageSize < 1 || pageSize > 50 {
 		pageSize = 20
 	}
-	kw := strings.TrimSpace(q.Get("q"))
+	kw := strings.TrimSpace(req.Q)
 
 	dbq := s.db.Model(&model.Org{}).Where("status = ?", model.OrgStatusActive)
 	if like := sqllike.Pattern(kw); like != "" {
@@ -539,15 +502,13 @@ func (s *OrgService) handleDiscover(ctx khttp.Context) error {
 	}
 	var total int64
 	if err := dbq.Count(&total).Error; err != nil {
-		writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "加载失败"})
-		return nil
+		return &orgpb.DiscoverRes{Code: 1, Message: "加载失败"}, nil
 	}
 	var orgs []model.Org
 	if err := dbq.Order("is_system DESC, id ASC").
 		Offset((page - 1) * pageSize).Limit(pageSize).
 		Find(&orgs).Error; err != nil {
-		writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "加载失败"})
-		return nil
+		return &orgpb.DiscoverRes{Code: 1, Message: "加载失败"}, nil
 	}
 
 	memberOf := map[uint]bool{}
@@ -561,40 +522,36 @@ func (s *OrgService) handleDiscover(ctx khttp.Context) error {
 		}
 	}
 
-	list := make([]map[string]interface{}, 0, len(orgs))
+	list := make([]*orgpb.DiscoverOrgInfo, 0, len(orgs))
 	for i := range orgs {
 		o := &orgs[i]
-		logo := o.BrandLogo
-		item := map[string]interface{}{
-			"id":          o.ID,
-			"name":        o.Name,
-			"brandLogo":   logo,
-			"memberCount": countOrgSeats(s.db, o),
-			"isSystem":    o.IsSystem,
+		item := &orgpb.DiscoverOrgInfo{
+			Id:          int64(o.ID),
+			Name:        o.Name,
+			BrandLogo:   o.BrandLogo,
+			MemberCount: int32(countOrgSeats(s.db, o)),
+			IsSystem:    o.IsSystem,
 		}
 		if pd != nil {
-			item["isMember"] = memberOf[o.ID]
-			item["isCurrent"] = o.ID == currentID
+			item.IsMember = memberOf[o.ID]
+			item.IsCurrent = o.ID == currentID
 		}
 		list = append(list, item)
 	}
-	writeJSON(ctx.Response(), 200, map[string]interface{}{
-		"code": 0, "message": "success", "list": list, "total": total,
-	})
-	return nil
+	return &orgpb.DiscoverRes{
+		Code: 0, Message: "success", List: list, Total: int32(total),
+	}, nil
 }
 
-func (s *OrgService) handleList(ctx khttp.Context) error {
+func (s *OrgService) List(ctx context.Context, req *orgpb.ListReq) (*orgpb.ListRes, error) {
 	pd := auth.GetCurrentUser(ctx)
 	if pd == nil {
-		writeJSON(ctx.Response(), 401, map[string]interface{}{"code": 1, "message": "请先登录"})
-		return nil
+		return &orgpb.ListRes{Code: 1, Message: "请先登录"}, nil
 	}
-	q := ctx.Request().URL.Query()
-	mine := q.Get("mine") != "0"
+	mine := req.Mine != "0"
 
 	var orgs []model.Org
-	if q.Get("all") == "1" && auth.HasPerm(ctx, rbac.PermSiteOrgList) {
+	if req.All == "1" && auth.HasPerm(ctx, rbac.PermSiteOrgList) {
 		_ = s.db.Order("is_system DESC, id ASC").Find(&orgs).Error
 	} else if mine {
 		var mems []model.OrgMember
@@ -610,80 +567,60 @@ func (s *OrgService) handleList(ctx khttp.Context) error {
 		if len(ids) > 0 {
 			_ = s.db.Where("id IN ?", ids).Order("is_system DESC, id ASC").Find(&orgs).Error
 		}
-		list := make([]map[string]interface{}, 0, len(orgs))
+		list := make([]*orgpb.OrgInfo, 0, len(orgs))
 		for i := range orgs {
-			item := s.orgToMapWithSeats(&orgs[i], false)
-			item["myRole"] = roleMap[orgs[i].ID]
-			item["orgDisplayName"] = displayMap[orgs[i].ID]
-			item["isCurrent"] = orgs[i].ID == pd.OrgID
+			item := s.toOrgInfo(&orgs[i], false)
+			item.MyRole = roleMap[orgs[i].ID]
+			item.OrgDisplayName = displayMap[orgs[i].ID]
+			item.IsCurrent = orgs[i].ID == pd.OrgID
 			list = append(list, item)
 		}
-		writeJSON(ctx.Response(), 200, map[string]interface{}{"code": 0, "message": "success", "list": list})
-		return nil
+		return &orgpb.ListRes{Code: 0, Message: "success", List: list}, nil
 	}
 
-	list := make([]map[string]interface{}, 0, len(orgs))
+	list := make([]*orgpb.OrgInfo, 0, len(orgs))
 	for i := range orgs {
-		item := s.orgToMapWithSeats(&orgs[i], pd.IsSiteAdmin)
-		item["isCurrent"] = orgs[i].ID == pd.OrgID
+		item := s.toOrgInfo(&orgs[i], pd.IsSiteAdmin)
+		item.IsCurrent = orgs[i].ID == pd.OrgID
 		list = append(list, item)
 	}
-	writeJSON(ctx.Response(), 200, map[string]interface{}{"code": 0, "message": "success", "list": list})
-	return nil
+	return &orgpb.ListRes{Code: 0, Message: "success", List: list}, nil
 }
 
-func (s *OrgService) handleGet(ctx khttp.Context) error {
+func (s *OrgService) Get(ctx context.Context, req *orgpb.GetReq) (*orgpb.GetRes, error) {
 	pd := auth.GetCurrentUser(ctx)
-	idStr := ctx.Request().URL.Query().Get("id")
-	id64, _ := strconv.ParseUint(idStr, 10, 64)
-	orgID := uint(id64)
+	orgID := uint(req.Id)
 	if orgID == 0 && pd != nil {
 		orgID = pd.OrgID
 	}
 	if orgID == 0 {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "缺少组织 id"})
-		return nil
+		return &orgpb.GetRes{Code: 1, Message: "缺少组织 id"}, nil
 	}
 	var o model.Org
 	if err := s.db.First(&o, orgID).Error; err != nil {
-		writeJSON(ctx.Response(), 404, map[string]interface{}{"code": 1, "message": "组织不存在"})
-		return nil
+		return &orgpb.GetRes{Code: 1, Message: "组织不存在"}, nil
 	}
 	showInvite := pd != nil && (pd.IsSiteAdmin || hasPermInOrgDB(s.db, pd.UserID, orgID, rbac.PermOrgInviteView))
-	item := s.orgToMapWithSeats(&o, showInvite)
+	item := s.toOrgInfo(&o, showInvite)
 	if pd != nil {
 		var m model.OrgMember
 		if s.db.Where("org_id = ? AND user_id = ?", orgID, pd.UserID).First(&m).Error == nil {
-			item["myRole"] = m.Role
-			item["orgDisplayName"] = strings.TrimSpace(m.OrgDisplayName)
+			item.MyRole = m.Role
+			item.OrgDisplayName = strings.TrimSpace(m.OrgDisplayName)
 		}
-		item["isCurrent"] = orgID == pd.OrgID
+		item.IsCurrent = orgID == pd.OrgID
 	}
-	writeJSON(ctx.Response(), 200, map[string]interface{}{"code": 0, "message": "success", "data": item})
-	return nil
+	return &orgpb.GetRes{Code: 0, Message: "success", Data: item}, nil
 }
 
-func (s *OrgService) handleCreate(ctx khttp.Context) error {
+func (s *OrgService) Create(ctx context.Context, req *orgpb.CreateReq) (*orgpb.CreateRes, error) {
 	pd := auth.GetCurrentUser(ctx)
 	if pd == nil || !auth.HasPerm(ctx, rbac.PermSiteOrgCreate) {
-		writeJSON(ctx.Response(), 403, map[string]interface{}{"code": 1, "message": "无创建组织权限"})
-		return nil
-	}
-	var req struct {
-		Name        string `json:"name"`
-		Slug        string `json:"slug"`
-		AdminUserID uint   `json:"adminUserId"`
-		JoinMode    string `json:"joinMode"`
-		SeatLimit   *int   `json:"seatLimit"`
-	}
-	if err := readJSON(ctx.Request(), &req); err != nil {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "参数错误"})
-		return nil
+		return &orgpb.CreateRes{Code: 1, Message: "无创建组织权限"}, nil
 	}
 	name := strings.TrimSpace(req.Name)
 	if name == "" {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "组织名称不能为空"})
-		return nil
+		return &orgpb.CreateRes{Code: 1, Message: "组织名称不能为空"}, nil
 	}
 	slug := strings.TrimSpace(req.Slug)
 	if slug == "" {
@@ -691,8 +628,7 @@ func (s *OrgService) handleCreate(ctx khttp.Context) error {
 	}
 	slug = strings.ToLower(slug)
 	if slug == model.PublicOrgSlug {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "slug 保留给公共域"})
-		return nil
+		return &orgpb.CreateRes{Code: 1, Message: "slug 保留给公共域"}, nil
 	}
 	joinMode := req.JoinMode
 	if joinMode != model.OrgJoinReview {
@@ -701,10 +637,9 @@ func (s *OrgService) handleCreate(ctx khttp.Context) error {
 	seatLimit := DefaultSeatLimit
 	if req.SeatLimit != nil {
 		if *req.SeatLimit < 1 {
-			writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "用户数上限至少为 1"})
-			return nil
+			return &orgpb.CreateRes{Code: 1, Message: "用户数上限至少为 1"}, nil
 		}
-		seatLimit = *req.SeatLimit
+		seatLimit = int(*req.SeatLimit)
 	}
 	o := model.Org{
 		Name:                 name,
@@ -723,14 +658,13 @@ func (s *OrgService) handleCreate(ctx khttp.Context) error {
 		AISummaryIntervalMin: 180,
 		AIEmailSchedule:      "30 7 * * *",
 	}
-	adminUID := req.AdminUserID
+	adminUID := uint(req.AdminUserId)
 	if adminUID == 0 {
 		adminUID = pd.UserID
 	}
 	adminUser, err := s.loadUser(adminUID)
 	if err != nil {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "指定的组织管理员不存在"})
-		return nil
+		return &orgpb.CreateRes{Code: 1, Message: "指定的组织管理员不存在"}, nil
 	}
 	displayName := strings.TrimSpace(adminUser.Name)
 	if displayName == "" {
@@ -755,46 +689,37 @@ func (s *OrgService) handleCreate(ctx khttp.Context) error {
 		return tx.Model(&model.User{}).Where("id = ?", adminUID).Update("current_org_id", o.ID).Error
 	}); err != nil {
 		log.Errorf("org create transaction: %v", err)
-		writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "创建失败，请稍后重试"})
-		return nil
+		return &orgpb.CreateRes{Code: 1, Message: "创建失败，请稍后重试"}, nil
 	}
 	s.invalidateOrgMembersCache(o.ID)
 	s.invalidateDisplayCache(o.ID, adminUID)
 	syncOrgMemberSystemRole(s.db, o.ID, adminUID)
-	writeJSON(ctx.Response(), 200, map[string]interface{}{
-		"code": 0, "message": "创建成功", "data": s.orgToMapWithSeats(&o, true),
-	})
-	return nil
+	return &orgpb.CreateRes{
+		Code: 0, Message: "创建成功", Data: s.toOrgInfo(&o, true),
+	}, nil
 }
 
-// handleDelete 站点管理员硬删除组织；公共域不可删
-func (s *OrgService) handleDelete(ctx khttp.Context) error {
+// Delete 站点管理员硬删除组织；公共域不可删
+func (s *OrgService) Delete(ctx context.Context, req *orgpb.DeleteReq) (*orgpb.DeleteRes, error) {
 	pd := auth.GetCurrentUser(ctx)
 	if pd == nil || !auth.HasPerm(ctx, rbac.PermSiteOrgDelete) {
-		writeJSON(ctx.Response(), 403, map[string]interface{}{"code": 1, "message": "无删除组织权限"})
-		return nil
+		return &orgpb.DeleteRes{Code: 1, Message: "无删除组织权限"}, nil
 	}
-	var req struct {
-		ID uint `json:"id"`
-	}
-	if err := readJSON(ctx.Request(), &req); err != nil || req.ID == 0 {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "参数错误"})
-		return nil
+	orgID := uint(req.Id)
+	if orgID == 0 {
+		return &orgpb.DeleteRes{Code: 1, Message: "参数错误"}, nil
 	}
 	var o model.Org
-	if s.db.First(&o, req.ID).Error != nil {
-		writeJSON(ctx.Response(), 404, map[string]interface{}{"code": 1, "message": "组织不存在"})
-		return nil
+	if s.db.First(&o, orgID).Error != nil {
+		return &orgpb.DeleteRes{Code: 1, Message: "组织不存在"}, nil
 	}
 	if o.IsSystem || o.Slug == model.PublicOrgSlug {
-		writeJSON(ctx.Response(), 403, map[string]interface{}{"code": 1, "message": "公共域不可删除"})
-		return nil
+		return &orgpb.DeleteRes{Code: 1, Message: "公共域不可删除"}, nil
 	}
 
 	var pub model.Org
 	if s.db.Where("slug = ?", model.PublicOrgSlug).First(&pub).Error != nil {
-		writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "公共域不存在，无法迁移用户"})
-		return nil
+		return &orgpb.DeleteRes{Code: 1, Message: "公共域不存在，无法迁移用户"}, nil
 	}
 	// 优先非 0 的默认分组（历史数据可能存在 id=0 的「默认分组」）
 	pubDefID := s.ensureDefaultGroupID(pub.ID)
@@ -853,56 +778,33 @@ func (s *OrgService) handleDelete(ctx khttp.Context) error {
 	})
 	if err != nil {
 		log.Errorf("org delete: %v", err)
-		writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "删除失败，请稍后重试"})
-		return nil
+		return &orgpb.DeleteRes{Code: 1, Message: "删除失败，请稍后重试"}, nil
 	}
 	s.invalidateOrgMembersCache(o.ID)
-	writeJSON(ctx.Response(), 200, map[string]interface{}{"code": 0, "message": "已删除组织"})
-	return nil
+	return &orgpb.DeleteRes{Code: 0, Message: "已删除组织"}, nil
 }
 
-func (s *OrgService) handleUpdate(ctx khttp.Context) error {
+func (s *OrgService) Update(ctx context.Context, req *orgpb.UpdateReq) (*orgpb.UpdateRes, error) {
 	pd := auth.GetCurrentUser(ctx)
 	if pd == nil {
-		writeJSON(ctx.Response(), 401, map[string]interface{}{"code": 1, "message": "请先登录"})
-		return nil
+		return &orgpb.UpdateRes{Code: 1, Message: "请先登录"}, nil
 	}
-	var req struct {
-		ID                   uint    `json:"id"`
-		Name                 *string `json:"name"`
-		Status               *string `json:"status"`
-		BrandTitle           *string `json:"brandTitle"`
-		BrandLogo            *string `json:"brandLogo"`
-		BrandFavicon         *string `json:"brandFavicon"`
-		JoinMode             *string `json:"joinMode"`
-		EnableAISummary      *bool   `json:"enableAiSummary"`
-		EnableAIEmail        *bool   `json:"enableAiEmail"`
-		EnableAIWeeklyEmail  *bool   `json:"enableAiWeeklyEmail"`
-		EnableSpider         *bool   `json:"enableSpider"`
-		SpiderIntervalMin    *int    `json:"spiderIntervalMin"`
-		AISummaryIntervalMin *int    `json:"aiSummaryIntervalMin"`
-		AIEmailSchedule      *string `json:"aiEmailSchedule"`
-		SeatLimit            *int    `json:"seatLimit"`
-		ForceSync            *bool   `json:"forceSync"` // 仅站管
-	}
-	if err := readJSON(ctx.Request(), &req); err != nil || req.ID == 0 {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "参数错误"})
-		return nil
+	orgID := uint(req.Id)
+	if orgID == 0 {
+		return &orgpb.UpdateRes{Code: 1, Message: "参数错误"}, nil
 	}
 	var o model.Org
-	if err := s.db.First(&o, req.ID).Error; err != nil {
-		writeJSON(ctx.Response(), 404, map[string]interface{}{"code": 1, "message": "组织不存在"})
-		return nil
+	if err := s.db.First(&o, orgID).Error; err != nil {
+		return &orgpb.UpdateRes{Code: 1, Message: "组织不存在"}, nil
 	}
 	siteAdmin := auth.VerifySiteAdmin(ctx)
 	// 字段级权限：品牌/名称/加入方式=org.info.write；功能开关=org.policy.toggle；
 	// 状态/席位/间隔/强制同步等站点策略=site.org.policy（站点管理员旁路全部）。
-	canInfo := verifyOrgPerm(ctx, s.db, pd.UserID, req.ID, rbac.PermOrgInfoWrite)
-	canToggle := verifyOrgPerm(ctx, s.db, pd.UserID, req.ID, rbac.PermOrgPolicyToggle)
+	canInfo := verifyOrgPerm(ctx, s.db, pd.UserID, orgID, rbac.PermOrgInfoWrite)
+	canToggle := verifyOrgPerm(ctx, s.db, pd.UserID, orgID, rbac.PermOrgPolicyToggle)
 	canSitePolicy := auth.HasPerm(ctx, rbac.PermSiteOrgPolicy)
 	if !canInfo && !canToggle && !canSitePolicy {
-		writeJSON(ctx.Response(), 403, map[string]interface{}{"code": 1, "message": "权限不足"})
-		return nil
+		return &orgpb.UpdateRes{Code: 1, Message: "权限不足"}, nil
 	}
 
 	updates := map[string]interface{}{}
@@ -928,14 +830,14 @@ func (s *OrgService) handleUpdate(ctx khttp.Context) error {
 		}
 	}
 	if canToggle {
-		if req.EnableAISummary != nil {
-			updates["enable_ai_summary"] = *req.EnableAISummary
+		if req.EnableAiSummary != nil {
+			updates["enable_ai_summary"] = *req.EnableAiSummary
 		}
-		if req.EnableAIEmail != nil {
-			updates["enable_ai_email"] = *req.EnableAIEmail
+		if req.EnableAiEmail != nil {
+			updates["enable_ai_email"] = *req.EnableAiEmail
 		}
-		if req.EnableAIWeeklyEmail != nil {
-			updates["enable_ai_weekly_email"] = *req.EnableAIWeeklyEmail
+		if req.EnableAiWeeklyEmail != nil {
+			updates["enable_ai_weekly_email"] = *req.EnableAiWeeklyEmail
 		}
 		if req.EnableSpider != nil {
 			updates["enable_spider"] = *req.EnableSpider
@@ -952,34 +854,31 @@ func (s *OrgService) handleUpdate(ctx khttp.Context) error {
 		// 间隔：5 分钟～7 天（与个人覆盖 / cron claim 一致）
 		const minM, maxM = 5, 7 * 24 * 60
 		if req.SpiderIntervalMin != nil {
-			v := *req.SpiderIntervalMin
+			v := int(*req.SpiderIntervalMin)
 			if v < minM || v > maxM {
-				writeJSON(ctx.Response(), 400, map[string]interface{}{
-					"code": 1, "message": fmt.Sprintf("爬取间隔须为 %d–%d 分钟", minM, maxM),
-				})
-				return nil
+				return &orgpb.UpdateRes{
+					Code: 1, Message: fmt.Sprintf("爬取间隔须为 %d–%d 分钟", minM, maxM),
+				}, nil
 			}
 			updates["spider_interval_min"] = v
 		}
-		if req.AISummaryIntervalMin != nil {
-			v := *req.AISummaryIntervalMin
+		if req.AiSummaryIntervalMin != nil {
+			v := int(*req.AiSummaryIntervalMin)
 			if v < minM || v > maxM {
-				writeJSON(ctx.Response(), 400, map[string]interface{}{
-					"code": 1, "message": fmt.Sprintf("AI 总结间隔须为 %d–%d 分钟", minM, maxM),
-				})
-				return nil
+				return &orgpb.UpdateRes{
+					Code: 1, Message: fmt.Sprintf("AI 总结间隔须为 %d–%d 分钟", minM, maxM),
+				}, nil
 			}
 			updates["ai_summary_interval_min"] = v
 		}
-		if req.AIEmailSchedule != nil && strings.TrimSpace(*req.AIEmailSchedule) != "" {
-			updates["ai_email_schedule"] = strings.TrimSpace(*req.AIEmailSchedule)
+		if req.AiEmailSchedule != nil && strings.TrimSpace(*req.AiEmailSchedule) != "" {
+			updates["ai_email_schedule"] = strings.TrimSpace(*req.AiEmailSchedule)
 		}
 		if req.SeatLimit != nil {
 			if *req.SeatLimit < 1 {
-				writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "用户数上限至少为 1"})
-				return nil
+				return &orgpb.UpdateRes{Code: 1, Message: "用户数上限至少为 1"}, nil
 			}
-			updates["seat_limit"] = *req.SeatLimit
+			updates["seat_limit"] = int(*req.SeatLimit)
 		}
 		if req.ForceSync != nil {
 			updates["force_sync"] = *req.ForceSync
@@ -988,21 +887,19 @@ func (s *OrgService) handleUpdate(ctx khttp.Context) error {
 
 	if err := s.db.Model(&o).Updates(updates).Error; err != nil {
 		log.Errorf("org update: %v", err)
-		writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "保存失败，请稍后重试"})
-		return nil
+		return &orgpb.UpdateRes{Code: 1, Message: "保存失败，请稍后重试"}, nil
 	}
 	// 组织关闭日报授权后：无其它组织授权的用户强制关闭个人日报
-	if req.EnableAIEmail != nil && !*req.EnableAIEmail {
-		s.forceOffDailyEmailWithoutOrgGrant(req.ID)
+	if req.EnableAiEmail != nil && !*req.EnableAiEmail {
+		s.forceOffDailyEmailWithoutOrgGrant(orgID)
 	}
-	if req.EnableAIWeeklyEmail != nil && !*req.EnableAIWeeklyEmail {
-		s.forceOffWeeklyEmailWithoutOrgGrant(req.ID)
+	if req.EnableAiWeeklyEmail != nil && !*req.EnableAiWeeklyEmail {
+		s.forceOffWeeklyEmailWithoutOrgGrant(orgID)
 	}
-	_ = s.db.First(&o, req.ID)
-	writeJSON(ctx.Response(), 200, map[string]interface{}{
-		"code": 0, "message": "success", "data": s.orgToMapWithSeats(&o, siteAdmin || canInfo || canToggle),
-	})
-	return nil
+	_ = s.db.First(&o, orgID)
+	return &orgpb.UpdateRes{
+		Code: 0, Message: "success", Data: s.toOrgInfo(&o, siteAdmin || canInfo || canToggle),
+	}, nil
 }
 
 // forceOffDailyEmailWithoutOrgGrant 关闭日报组织授权后，对仅依赖该组织授权的用户关个人日报。
@@ -1067,83 +964,60 @@ func (s *OrgService) invalidateUserProfileCaches(userIDs []uint) {
 	_ = s.rdb.Del(context.Background(), keys...).Err()
 }
 
-func (s *OrgService) handleSwitch(ctx khttp.Context) error {
+func (s *OrgService) Switch(ctx context.Context, req *orgpb.SwitchReq) (*orgpb.SwitchRes, error) {
 	pd := auth.GetCurrentUser(ctx)
 	if pd == nil {
-		writeJSON(ctx.Response(), 401, map[string]interface{}{"code": 1, "message": "请先登录"})
-		return nil
+		return &orgpb.SwitchRes{Code: 1, Message: "请先登录"}, nil
 	}
-	var req struct {
-		OrgID uint `json:"orgId"`
+	orgID := uint(req.OrgId)
+	if orgID == 0 {
+		return &orgpb.SwitchRes{Code: 1, Message: "参数错误"}, nil
 	}
-	if err := readJSON(ctx.Request(), &req); err != nil || req.OrgID == 0 {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "参数错误"})
-		return nil
-	}
-	if !s.isMemberDB(pd.UserID, req.OrgID) {
-		writeJSON(ctx.Response(), 403, map[string]interface{}{"code": 1, "message": "你不是该组织成员"})
-		return nil
+	if !s.isMemberDB(pd.UserID, orgID) {
+		return &orgpb.SwitchRes{Code: 1, Message: "你不是该组织成员"}, nil
 	}
 	var targetOrg model.Org
-	if err := s.db.Select("id", "status").First(&targetOrg, req.OrgID).Error; err != nil || targetOrg.Status != model.OrgStatusActive {
-		writeJSON(ctx.Response(), 403, map[string]interface{}{"code": 1, "message": "该组织当前已暂停"})
-		return nil
+	if err := s.db.Select("id", "status").First(&targetOrg, orgID).Error; err != nil || targetOrg.Status != model.OrgStatusActive {
+		return &orgpb.SwitchRes{Code: 1, Message: "该组织当前已暂停"}, nil
 	}
 	u, err := s.loadUser(pd.UserID)
 	if err != nil {
-		writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "用户不存在"})
-		return nil
+		return &orgpb.SwitchRes{Code: 1, Message: "用户不存在"}, nil
 	}
-	_ = s.db.Model(u).Update("current_org_id", req.OrgID).Error
-	u.CurrentOrgID = req.OrgID
+	_ = s.db.Model(u).Update("current_org_id", orgID).Error
+	u.CurrentOrgID = orgID
 	token, err := IssueJWT(s.db, u)
 	if err != nil {
-		writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "签发 token 失败"})
-		return nil
+		return &orgpb.SwitchRes{Code: 1, Message: "签发 token 失败"}, nil
 	}
 	setSessionCookie(ctx, token)
-	writeJSON(ctx.Response(), 200, map[string]interface{}{
-		"code": 0, "message": "已切换组织", "jwtToken": token, "orgId": req.OrgID,
-	})
-	return nil
+	return &orgpb.SwitchRes{
+		Code: 0, Message: "已切换组织", JwtToken: token, OrgId: req.OrgId,
+	}, nil
 }
 
-func (s *OrgService) handleJoin(ctx khttp.Context) error {
+func (s *OrgService) Join(ctx context.Context, req *orgpb.JoinReq) (*orgpb.JoinRes, error) {
 	pd := auth.GetCurrentUser(ctx)
 	if pd == nil {
-		writeJSON(ctx.Response(), 401, map[string]interface{}{"code": 1, "message": "请先登录"})
-		return nil
-	}
-	var req struct {
-		InviteCode     string `json:"inviteCode"`
-		OrgDisplayName string `json:"orgDisplayName"`
-	}
-	if err := readJSON(ctx.Request(), &req); err != nil {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "参数错误"})
-		return nil
+		return &orgpb.JoinRes{Code: 1, Message: "请先登录"}, nil
 	}
 	code := strings.TrimSpace(strings.ToUpper(req.InviteCode))
 	if code == "" {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "请输入团队识别码"})
-		return nil
+		return &orgpb.JoinRes{Code: 1, Message: "请输入团队识别码"}, nil
 	}
 	displayName := strings.TrimSpace(req.OrgDisplayName)
 	if displayName == "" {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "请填写组织内名称（在本团队中展示的称呼）"})
-		return nil
+		return &orgpb.JoinRes{Code: 1, Message: "请填写组织内名称（在本团队中展示的称呼）"}, nil
 	}
 	if len([]rune(displayName)) > 32 {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "组织内名称过长（最多 32 字）"})
-		return nil
+		return &orgpb.JoinRes{Code: 1, Message: "组织内名称过长（最多 32 字）"}, nil
 	}
 	var o model.Org
 	if err := s.db.Where("UPPER(invite_code) = ? AND status = ?", code, model.OrgStatusActive).First(&o).Error; err != nil {
-		writeJSON(ctx.Response(), 404, map[string]interface{}{"code": 1, "message": "团队识别码无效"})
-		return nil
+		return &orgpb.JoinRes{Code: 1, Message: "团队识别码无效"}, nil
 	}
 	if s.isMemberDB(pd.UserID, o.ID) {
-		writeJSON(ctx.Response(), 200, map[string]interface{}{"code": 0, "message": "你已在该组织中", "data": s.orgToMapWithSeats(&o, false)})
-		return nil
+		return &orgpb.JoinRes{Code: 0, Message: "你已在该组织中", Data: s.toOrgInfo(&o, false)}, nil
 	}
 	if o.JoinMode == model.OrgJoinReview {
 		var existing model.OrgJoinRequest
@@ -1154,12 +1028,10 @@ func (s *OrgService) handleJoin(ctx khttp.Context) error {
 					"status": model.JoinReqPending, "code_used": code,
 					"org_display_name": displayName, "reviewed_by": nil,
 				}).Error; updateErr != nil {
-					writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "提交申请失败，请稍后重试"})
-					return nil
+					return &orgpb.JoinRes{Code: 1, Message: "提交申请失败，请稍后重试"}, nil
 				}
 			}
-			writeJSON(ctx.Response(), 200, map[string]interface{}{"code": 0, "message": "申请已提交，等待团队管理员审批"})
-			return nil
+			return &orgpb.JoinRes{Code: 0, Message: "申请已提交，等待团队管理员审批"}, nil
 		}
 		if err := s.db.Create(&model.OrgJoinRequest{
 			OrgID:          o.ID,
@@ -1168,110 +1040,91 @@ func (s *OrgService) handleJoin(ctx khttp.Context) error {
 			CodeUsed:       code,
 			OrgDisplayName: displayName,
 		}).Error; err != nil {
-			writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "提交申请失败，请稍后重试"})
-			return nil
+			return &orgpb.JoinRes{Code: 1, Message: "提交申请失败，请稍后重试"}, nil
 		}
-		writeJSON(ctx.Response(), 200, map[string]interface{}{"code": 0, "message": "申请已提交，等待团队管理员审批"})
-		return nil
+		return &orgpb.JoinRes{Code: 0, Message: "申请已提交，等待团队管理员审批"}, nil
 	}
 	if err := s.addOrgMemberAtomic(o.ID, pd.UserID, model.OrgRoleMember, displayName); err != nil {
 		log.Errorf("org join ensure member: %v", err)
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": err.Error()})
-		return nil
+		return &orgpb.JoinRes{Code: 1, Message: err.Error()}, nil
 	}
-	writeJSON(ctx.Response(), 200, map[string]interface{}{"code": 0, "message": "加入成功", "data": s.orgToMapWithSeats(&o, false)})
-	return nil
+	return &orgpb.JoinRes{Code: 0, Message: "加入成功", Data: s.toOrgInfo(&o, false)}, nil
 }
 
-func (s *OrgService) handleLeave(ctx khttp.Context) error {
+func (s *OrgService) Leave(ctx context.Context, req *orgpb.LeaveReq) (*orgpb.LeaveRes, error) {
 	pd := auth.GetCurrentUser(ctx)
 	if pd == nil {
-		writeJSON(ctx.Response(), 401, map[string]interface{}{"code": 1, "message": "请先登录"})
-		return nil
+		return &orgpb.LeaveRes{Code: 1, Message: "请先登录"}, nil
 	}
-	var req struct {
-		OrgID uint `json:"orgId"`
-	}
-	if err := readJSON(ctx.Request(), &req); err != nil || req.OrgID == 0 {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "参数错误"})
-		return nil
+	orgID := uint(req.OrgId)
+	if orgID == 0 {
+		return &orgpb.LeaveRes{Code: 1, Message: "参数错误"}, nil
 	}
 	var o model.Org
-	if err := s.db.First(&o, req.OrgID).Error; err != nil {
-		writeJSON(ctx.Response(), 404, map[string]interface{}{"code": 1, "message": "组织不存在"})
-		return nil
+	if err := s.db.First(&o, orgID).Error; err != nil {
+		return &orgpb.LeaveRes{Code: 1, Message: "组织不存在"}, nil
 	}
 	if o.IsSystem || o.Slug == model.PublicOrgSlug {
-		writeJSON(ctx.Response(), 403, map[string]interface{}{"code": 1, "message": "公共域不可退出"})
-		return nil
+		return &orgpb.LeaveRes{Code: 1, Message: "公共域不可退出"}, nil
 	}
 	var membership model.OrgMember
-	if s.db.Where("org_id = ? AND user_id = ?", req.OrgID, pd.UserID).First(&membership).Error == nil && membership.Role == model.OrgRoleOrgAdmin {
+	if s.db.Where("org_id = ? AND user_id = ?", orgID, pd.UserID).First(&membership).Error == nil && membership.Role == model.OrgRoleOrgAdmin {
 		var admins int64
-		s.db.Model(&model.OrgMember{}).Where("org_id = ? AND role = ?", req.OrgID, model.OrgRoleOrgAdmin).Count(&admins)
+		s.db.Model(&model.OrgMember{}).Where("org_id = ? AND role = ?", orgID, model.OrgRoleOrgAdmin).Count(&admins)
 		if admins <= 1 {
-			writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "请先任命另一位组织管理员再退出"})
-			return nil
+			return &orgpb.LeaveRes{Code: 1, Message: "请先任命另一位组织管理员再退出"}, nil
 		}
 	}
-	if err := s.db.Where("org_id = ? AND user_id = ?", req.OrgID, pd.UserID).Delete(&model.OrgMember{}).Error; err != nil {
+	if err := s.db.Where("org_id = ? AND user_id = ?", orgID, pd.UserID).Delete(&model.OrgMember{}).Error; err != nil {
 		log.Errorf("org leave: %v", err)
-		writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "退出失败，请稍后重试"})
-		return nil
+		return &orgpb.LeaveRes{Code: 1, Message: "退出失败，请稍后重试"}, nil
 	}
-	s.invalidateOrgMembersCache(req.OrgID)
-	s.invalidateDisplayCache(req.OrgID, pd.UserID)
+	s.invalidateOrgMembersCache(orgID)
+	s.invalidateDisplayCache(orgID, pd.UserID)
 	// membership 已删 → 清除该组织全部角色指派（含自定义）
-	syncOrgMemberSystemRole(s.db, req.OrgID, pd.UserID)
+	syncOrgMemberSystemRole(s.db, orgID, pd.UserID)
 	// 若当前组织是离开的组织，切回公共域
 	u, _ := s.loadUser(pd.UserID)
-	token := ""
-	if u != nil && u.CurrentOrgID == req.OrgID {
+	resp := &orgpb.LeaveRes{Code: 0, Message: "已退出组织"}
+	if u != nil && u.CurrentOrgID == orgID {
 		var pub model.Org
 		if s.db.Where("slug = ?", model.PublicOrgSlug).First(&pub).Error == nil {
 			_ = s.db.Model(u).Update("current_org_id", pub.ID).Error
 			u.CurrentOrgID = pub.ID
-			token, _ = IssueJWT(s.db, u)
+			if token, _ := IssueJWT(s.db, u); token != "" {
+				setSessionCookie(ctx, token)
+				resp.JwtToken = token
+			}
 		}
 	}
-	resp := map[string]interface{}{"code": 0, "message": "已退出组织"}
-	if token != "" {
-		setSessionCookie(ctx, token)
-		resp["jwtToken"] = token
-	}
-	writeJSON(ctx.Response(), 200, resp)
-	return nil
+	return resp, nil
 }
 
-func (s *OrgService) handleMembers(ctx khttp.Context) error {
+func (s *OrgService) Members(ctx context.Context, req *orgpb.MembersReq) (*orgpb.MembersRes, error) {
 	avatarBase := avatarPublicBase(s.db)
 	pd := auth.GetCurrentUser(ctx)
 	if pd == nil {
-		writeJSON(ctx.Response(), 401, map[string]interface{}{"code": 1, "message": "请先登录"})
-		return nil
+		return &orgpb.MembersRes{Code: 1, Message: "请先登录"}, nil
 	}
-	q := ctx.Request().URL.Query()
-	id64, _ := strconv.ParseUint(q.Get("orgId"), 10, 64)
-	orgID := uint(id64)
+	orgID := uint(req.OrgId)
 	if orgID == 0 {
 		orgID = pd.OrgID
 	}
 	if !auth.VerifySiteAdmin(ctx) && !s.isMemberDB(pd.UserID, orgID) {
-		writeJSON(ctx.Response(), 403, map[string]interface{}{"code": 1, "message": "权限不足"})
-		return nil
+		return &orgpb.MembersRes{Code: 1, Message: "权限不足"}, nil
 	}
-	page, _ := strconv.Atoi(q.Get("page"))
+	page := int(req.Page)
 	if page < 1 {
 		page = 1
 	}
-	pageSize, _ := strconv.Atoi(q.Get("pageSize"))
+	pageSize := int(req.PageSize)
 	if pageSize < 1 {
 		pageSize = 20
 	}
 	if pageSize > 100 {
 		pageSize = 100
 	}
-	keyword := strings.TrimSpace(q.Get("keyword"))
+	keyword := strings.TrimSpace(req.Keyword)
 
 	type row struct {
 		UserID         uint
@@ -1321,7 +1174,7 @@ func (s *OrgService) handleMembers(ctx khttp.Context) error {
 	for _, r := range rows {
 		uids = append(uids, r.UserID)
 	}
-	scopeByUser := map[uint][]map[string]interface{}{}
+	scopeByUser := map[uint][]*orgpb.ScopeInfo{}
 	if len(uids) > 0 {
 		var grants []model.OrgScopeGrant
 		_ = s.db.Where("org_id = ? AND user_id IN ?", orgID, uids).Find(&grants).Error
@@ -1393,9 +1246,9 @@ func (s *OrgService) handleMembers(ctx khttp.Context) error {
 			}
 		}
 		for _, g := range grants {
-			item := map[string]interface{}{
-				"scopeType": g.ScopeType,
-				"scopeId":   g.ScopeID,
+			item := &orgpb.ScopeInfo{
+				ScopeType: g.ScopeType,
+				ScopeId:   int64(g.ScopeID),
 			}
 			switch g.ScopeType {
 			case model.ScopeTypeGroup:
@@ -1403,8 +1256,8 @@ func (s *OrgService) handleMembers(ctx khttp.Context) error {
 				if name == "" {
 					name = "未知分组"
 				}
-				item["scopeName"] = name
-				item["label"] = "组长 · " + name
+				item.ScopeName = name
+				item.Label = "组长 · " + name
 			case model.ScopeTypeSquad:
 				sq := squadMeta[g.ScopeID]
 				sname := sq.Name
@@ -1412,64 +1265,61 @@ func (s *OrgService) handleMembers(ctx khttp.Context) error {
 					sname = "未知分队"
 				}
 				gname := groupName[sq.GroupID]
-				item["scopeName"] = sname
+				item.ScopeName = sname
 				if gname != "" {
-					item["groupName"] = gname
-					item["label"] = "队长 · " + gname + " / " + sname
+					item.GroupName = gname
+					item.Label = "队长 · " + gname + " / " + sname
 				} else {
-					item["label"] = "队长 · " + sname
+					item.Label = "队长 · " + sname
 				}
 			}
 			scopeByUser[g.UserID] = append(scopeByUser[g.UserID], item)
 		}
 	}
 
-	list := make([]map[string]interface{}, 0, len(rows))
+	list := make([]*orgpb.MemberInfo, 0, len(rows))
 	for _, r := range rows {
 		// 组织内展示仅用 org_display_name；空则回退 username（不再回退全局昵称）
 		display := strings.TrimSpace(r.OrgDisplayName)
 		if display == "" {
 			display = r.Username
 		}
-		item := map[string]interface{}{
-			"userId":         r.UserID,
-			"username":       r.Username,
-			"name":           display,
-			"orgDisplayName": r.OrgDisplayName,
-			"avatar":         expandAvatarBase(avatarBase, r.Avatar),
-			"role":           r.Role,
-			"groupId":        r.GroupID,
-			"joinedAt":       r.JoinedAt.Unix(),
+		item := &orgpb.MemberInfo{
+			UserId:         int64(r.UserID),
+			Username:       r.Username,
+			Name:           display,
+			OrgDisplayName: r.OrgDisplayName,
+			Avatar:         expandAvatarBase(avatarBase, r.Avatar),
+			Role:           r.Role,
+			JoinedAt:       r.JoinedAt.Unix(),
+		}
+		if r.GroupID != nil {
+			item.GroupId = int64(*r.GroupID)
 		}
 		if sc := scopeByUser[r.UserID]; len(sc) > 0 {
-			item["scopes"] = sc
+			item.Scopes = sc
 		}
 		list = append(list, item)
 	}
-	writeJSON(ctx.Response(), 200, map[string]interface{}{
-		"code": 0, "message": "success", "list": list, "total": total, "page": page, "pageSize": pageSize,
-	})
-	return nil
+	return &orgpb.MembersRes{
+		Code: 0, Message: "success", List: list, Total: int32(total), Page: int32(page), PageSize: int32(pageSize),
+	}, nil
 }
 
-func (s *OrgService) handleMemberIds(ctx khttp.Context) error {
-	q := ctx.Request().URL.Query()
-	id64, _ := strconv.ParseUint(q.Get("orgId"), 10, 64)
-	orgID := uint(id64)
+func (s *OrgService) MemberIds(ctx context.Context, req *orgpb.MemberIdsReq) (*orgpb.MemberIdsRes, error) {
+	orgID := uint(req.OrgId)
 	pd := auth.GetCurrentUser(ctx)
 	if orgID == 0 && pd != nil {
 		orgID = pd.OrgID
 	}
 	if orgID == 0 {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "缺少组织 id"})
-		return nil
+		return &orgpb.MemberIdsRes{Code: 1, Message: "缺少组织 id"}, nil
 	}
 	if pd == nil || (!auth.VerifySiteAdmin(ctx) && !s.isMemberDB(pd.UserID, orgID)) {
-		writeJSON(ctx.Response(), 403, map[string]interface{}{"code": 1, "message": "权限不足"})
-		return nil
+		return &orgpb.MemberIdsRes{Code: 1, Message: "权限不足"}, nil
 	}
-	groupID, _ := strconv.ParseInt(q.Get("groupId"), 10, 64)
-	squadID, _ := strconv.ParseInt(q.Get("squadId"), 10, 64)
+	groupID := req.GroupId
+	squadID := req.SquadId
 	var ids []int64
 	switch {
 	case squadID > 0:
@@ -1482,64 +1332,50 @@ func (s *OrgService) handleMemberIds(ctx khttp.Context) error {
 			Where("m.org_id = ?", orgID).
 			Pluck("m.user_id", &ids)
 	}
-	writeJSON(ctx.Response(), 200, map[string]interface{}{
-		"code": 0, "message": "success", "userIds": ids, "orgId": orgID,
-		"groupId": groupID, "squadId": squadID,
-	})
-	return nil
+	return &orgpb.MemberIdsRes{
+		Code: 0, Message: "success", UserIds: ids, OrgId: int64(orgID),
+		GroupId: groupID, SquadId: squadID,
+	}, nil
 }
 
-// handleAddMember 站点管理员搜索加入：按 userId 或 username
-func (s *OrgService) handleAddMember(ctx khttp.Context) error {
+// AddMember 站点管理员搜索加入：按 userId 或 username
+func (s *OrgService) AddMember(ctx context.Context, req *orgpb.AddMemberReq) (*orgpb.AddMemberRes, error) {
 	pd := auth.GetCurrentUser(ctx)
 	if pd == nil {
-		writeJSON(ctx.Response(), 401, map[string]interface{}{"code": 1, "message": "请先登录"})
-		return nil
+		return &orgpb.AddMemberRes{Code: 1, Message: "请先登录"}, nil
 	}
-	var req struct {
-		OrgID          uint   `json:"orgId"`
-		UserID         uint   `json:"userId"`
-		Username       string `json:"username"`
-		Role           string `json:"role"`
-		OrgDisplayName string `json:"orgDisplayName"`
-	}
-	if err := readJSON(ctx.Request(), &req); err != nil || req.OrgID == 0 {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "参数错误"})
-		return nil
+	orgID := uint(req.OrgId)
+	if orgID == 0 {
+		return &orgpb.AddMemberRes{Code: 1, Message: "参数错误"}, nil
 	}
 	// 站点管理员可操作任意 org；组织内需 org.member.add 权限
-	if !verifyOrgPerm(ctx, s.db, pd.UserID, req.OrgID, rbac.PermOrgMemberAdd) {
-		writeJSON(ctx.Response(), 403, map[string]interface{}{"code": 1, "message": "权限不足"})
-		return nil
+	if !verifyOrgPerm(ctx, s.db, pd.UserID, orgID, rbac.PermOrgMemberAdd) {
+		return &orgpb.AddMemberRes{Code: 1, Message: "权限不足"}, nil
 	}
-	uid := req.UserID
+	uid := uint(req.UserId)
 	if uid == 0 && strings.TrimSpace(req.Username) != "" {
 		var u model.User
 		if s.db.Where("username = ?", strings.TrimSpace(req.Username)).First(&u).Error != nil {
 			// 尝试按昵称模糊
 			if s.db.Where("name LIKE ?", "%"+strings.TrimSpace(req.Username)+"%").First(&u).Error != nil {
-				writeJSON(ctx.Response(), 404, map[string]interface{}{"code": 1, "message": "用户不存在"})
-				return nil
+				return &orgpb.AddMemberRes{Code: 1, Message: "用户不存在"}, nil
 			}
 		}
 		uid = u.ID
 	}
 	if uid == 0 {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "请提供 userId 或 username"})
-		return nil
+		return &orgpb.AddMemberRes{Code: 1, Message: "请提供 userId 或 username"}, nil
 	}
 	role := req.Role
 	if !model.ValidOrgRole(role) {
 		role = model.OrgRoleMember
 	}
-	if s.isMemberDB(uid, req.OrgID) {
-		writeJSON(ctx.Response(), 200, map[string]interface{}{"code": 0, "message": "用户已在组织中", "userId": uid})
-		return nil
+	if s.isMemberDB(uid, orgID) {
+		return &orgpb.AddMemberRes{Code: 0, Message: "用户已在组织中", UserId: int64(uid)}, nil
 	}
 	var addOrg model.Org
-	if s.db.First(&addOrg, req.OrgID).Error != nil {
-		writeJSON(ctx.Response(), 404, map[string]interface{}{"code": 1, "message": "组织不存在"})
-		return nil
+	if s.db.First(&addOrg, orgID).Error != nil {
+		return &orgpb.AddMemberRes{Code: 1, Message: "组织不存在"}, nil
 	}
 	displayName := strings.TrimSpace(req.OrgDisplayName)
 	if displayName == "" {
@@ -1552,102 +1388,77 @@ func (s *OrgService) handleAddMember(ctx khttp.Context) error {
 			}
 		}
 	}
-	if err := s.addOrgMemberAtomic(req.OrgID, uid, role, displayName); err != nil {
+	if err := s.addOrgMemberAtomic(orgID, uid, role, displayName); err != nil {
 		log.Errorf("org add member: %v", err)
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": err.Error()})
-		return nil
+		return &orgpb.AddMemberRes{Code: 1, Message: err.Error()}, nil
 	}
 	// 管理员拉入 → 设为默认组织（下次打开自动进入；用户之后 switch 即记忆）
-	s.setDefaultOrg(uid, req.OrgID)
-	writeJSON(ctx.Response(), 200, map[string]interface{}{"code": 0, "message": "已加入组织", "userId": uid})
-	return nil
+	s.setDefaultOrg(uid, orgID)
+	return &orgpb.AddMemberRes{Code: 0, Message: "已加入组织", UserId: int64(uid)}, nil
 }
 
-// handleSetDisplayName 本人或组织/站点管理员修改组织内名称
-func (s *OrgService) handleSetDisplayName(ctx khttp.Context) error {
+// SetDisplayName 本人或组织/站点管理员修改组织内名称
+func (s *OrgService) SetDisplayName(ctx context.Context, req *orgpb.SetDisplayNameReq) (*orgpb.SetDisplayNameRes, error) {
 	pd := auth.GetCurrentUser(ctx)
 	if pd == nil {
-		writeJSON(ctx.Response(), 401, map[string]interface{}{"code": 1, "message": "请先登录"})
-		return nil
+		return &orgpb.SetDisplayNameRes{Code: 1, Message: "请先登录"}, nil
 	}
-	var req struct {
-		OrgID          uint   `json:"orgId"`
-		UserID         uint   `json:"userId"`
-		OrgDisplayName string `json:"orgDisplayName"`
+	orgID := uint(req.OrgId)
+	if orgID == 0 {
+		return &orgpb.SetDisplayNameRes{Code: 1, Message: "参数错误"}, nil
 	}
-	if err := readJSON(ctx.Request(), &req); err != nil || req.OrgID == 0 {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "参数错误"})
-		return nil
-	}
-	uid := req.UserID
+	uid := uint(req.UserId)
 	if uid == 0 {
 		uid = pd.UserID
 	}
 	displayName := strings.TrimSpace(req.OrgDisplayName)
 	if displayName == "" {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "组织内名称不能为空"})
-		return nil
+		return &orgpb.SetDisplayNameRes{Code: 1, Message: "组织内名称不能为空"}, nil
 	}
 	if len([]rune(displayName)) > 32 {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "组织内名称过长（最多 32 字）"})
-		return nil
+		return &orgpb.SetDisplayNameRes{Code: 1, Message: "组织内名称过长（最多 32 字）"}, nil
 	}
-	if uid != pd.UserID && !verifyOrgPerm(ctx, s.db, pd.UserID, req.OrgID, rbac.PermOrgMemberDisplayName) {
-		writeJSON(ctx.Response(), 403, map[string]interface{}{"code": 1, "message": "权限不足"})
-		return nil
+	if uid != pd.UserID && !verifyOrgPerm(ctx, s.db, pd.UserID, orgID, rbac.PermOrgMemberDisplayName) {
+		return &orgpb.SetDisplayNameRes{Code: 1, Message: "权限不足"}, nil
 	}
-	if !s.isMemberDB(uid, req.OrgID) {
-		writeJSON(ctx.Response(), 404, map[string]interface{}{"code": 1, "message": "用户不在该组织中"})
-		return nil
+	if !s.isMemberDB(uid, orgID) {
+		return &orgpb.SetDisplayNameRes{Code: 1, Message: "用户不在该组织中"}, nil
 	}
 	if err := s.db.Model(&model.OrgMember{}).
-		Where("org_id = ? AND user_id = ?", req.OrgID, uid).
+		Where("org_id = ? AND user_id = ?", orgID, uid).
 		Update("org_display_name", displayName).Error; err != nil {
 		log.Errorf("org member display name: %v", err)
-		writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "保存失败，请稍后重试"})
-		return nil
+		return &orgpb.SetDisplayNameRes{Code: 1, Message: "保存失败，请稍后重试"}, nil
 	}
 	// 公共域称呼 ≡ 全局昵称 users.name
 	var o model.Org
-	if s.db.Select("id", "slug", "is_system").First(&o, req.OrgID).Error == nil &&
+	if s.db.Select("id", "slug", "is_system").First(&o, orgID).Error == nil &&
 		(o.IsSystem || o.Slug == model.PublicOrgSlug) {
 		_ = s.db.Model(&model.User{}).Where("id = ?", uid).Update("name", displayName).Error
 	}
 	// 旁路更新 users.name 后清资料缓存，避免编辑页仍显示旧昵称/旧字段
 	s.invalidateUserProfileCache(uid)
-	s.invalidateDisplayCache(req.OrgID, uid)
-	writeJSON(ctx.Response(), 200, map[string]interface{}{"code": 0, "message": "已更新组织内名称"})
-	return nil
+	s.invalidateDisplayCache(orgID, uid)
+	return &orgpb.SetDisplayNameRes{Code: 0, Message: "已更新组织内名称"}, nil
 }
 
-func (s *OrgService) handleSetRole(ctx khttp.Context) error {
+func (s *OrgService) SetRole(ctx context.Context, req *orgpb.SetRoleReq) (*orgpb.SetRoleRes, error) {
 	pd := auth.GetCurrentUser(ctx)
 	if pd == nil {
-		writeJSON(ctx.Response(), 401, map[string]interface{}{"code": 1, "message": "请先登录"})
-		return nil
+		return &orgpb.SetRoleRes{Code: 1, Message: "请先登录"}, nil
 	}
-	var req struct {
-		OrgID     uint   `json:"orgId"`
-		UserID    uint   `json:"userId"`
-		Role      string `json:"role"`
-		ScopeType string `json:"scopeType"` // captain→squad；group_leader→group
-		ScopeID   uint   `json:"scopeId"`
-		// RemoveScope=true：卸任某一范围（须带 scopeType+scopeId），可与 role=member 联用卸全部
-		RemoveScope bool `json:"removeScope"`
-	}
-	if err := readJSON(ctx.Request(), &req); err != nil || req.OrgID == 0 || req.UserID == 0 {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "参数错误"})
-		return nil
+	orgID := uint(req.OrgId)
+	userID := uint(req.UserId)
+	if orgID == 0 || userID == 0 {
+		return &orgpb.SetRoleRes{Code: 1, Message: "参数错误"}, nil
 	}
 	if !model.ValidOrgRole(req.Role) {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "角色无效（member|captain|group_leader|coach|org_admin）"})
-		return nil
+		return &orgpb.SetRoleRes{Code: 1, Message: "角色无效（member|captain|group_leader|coach|org_admin）"}, nil
 	}
 
 	isSite := auth.VerifySiteAdmin(ctx)
-	if !isSite && !verifyOrgPerm(ctx, s.db, pd.UserID, req.OrgID, rbac.PermOrgMemberRole) {
-		writeJSON(ctx.Response(), 403, map[string]interface{}{"code": 1, "message": "权限不足"})
-		return nil
+	if !isSite && !verifyOrgPerm(ctx, s.db, pd.UserID, orgID, rbac.PermOrgMemberRole) {
+		return &orgpb.SetRoleRes{Code: 1, Message: "权限不足"}, nil
 	}
 
 	actorRole := model.OrgRoleMember
@@ -1655,14 +1466,14 @@ func (s *OrgService) handleSetRole(ctx khttp.Context) error {
 		actorRole = model.OrgRoleOrgAdmin
 	} else {
 		var actor model.OrgMember
-		if s.db.Where("org_id = ? AND user_id = ?", req.OrgID, pd.UserID).First(&actor).Error == nil {
+		if s.db.Where("org_id = ? AND user_id = ?", orgID, pd.UserID).First(&actor).Error == nil {
 			actorRole = actor.Role
 		}
 	}
 
 	targetCurrent := model.OrgRoleMember
 	var m model.OrgMember
-	inOrg := s.db.Where("org_id = ? AND user_id = ?", req.OrgID, req.UserID).First(&m).Error == nil
+	inOrg := s.db.Where("org_id = ? AND user_id = ?", orgID, userID).First(&m).Error == nil
 	if inOrg {
 		targetCurrent = m.Role
 	}
@@ -1671,57 +1482,50 @@ func (s *OrgService) handleSetRole(ctx khttp.Context) error {
 		!(req.RemoveScope && model.CanAppointOrgRole(actorRole, model.OrgRoleMember, req.Role)) {
 		// 卸任某一范围时，用 member 作目标档再验一次（允许卸下级领导职务）
 		if !req.RemoveScope {
-			writeJSON(ctx.Response(), 403, map[string]interface{}{
-				"code": 1, "message": "无权任命该角色或修改该成员（组织管理员可任命全部；其余只能任命低于自己的角色）",
-			})
-			return nil
+			return &orgpb.SetRoleRes{
+				Code: 1, Message: "无权任命该角色或修改该成员（组织管理员可任命全部；其余只能任命低于自己的角色）",
+			}, nil
 		}
 		if !model.CanAppointOrgRole(actorRole, targetCurrent, model.OrgRoleCaptain) &&
 			!model.CanAppointOrgRole(actorRole, targetCurrent, model.OrgRoleGroupLeader) {
-			writeJSON(ctx.Response(), 403, map[string]interface{}{
-				"code": 1, "message": "无权任命该角色或修改该成员（组织管理员可任命全部；其余只能任命低于自己的角色）",
-			})
-			return nil
+			return &orgpb.SetRoleRes{
+				Code: 1, Message: "无权任命该角色或修改该成员（组织管理员可任命全部；其余只能任命低于自己的角色）",
+			}, nil
 		}
 	}
 
 	if req.Role != model.OrgRoleOrgAdmin && targetCurrent == model.OrgRoleOrgAdmin {
 		var admins int64
-		s.db.Model(&model.OrgMember{}).Where("org_id = ? AND role = ?", req.OrgID, model.OrgRoleOrgAdmin).Count(&admins)
+		s.db.Model(&model.OrgMember{}).Where("org_id = ? AND role = ?", orgID, model.OrgRoleOrgAdmin).Count(&admins)
 		if admins <= 1 {
-			writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "不能降权最后一位组织管理员"})
-			return nil
+			return &orgpb.SetRoleRes{Code: 1, Message: "不能降权最后一位组织管理员"}, nil
 		}
 	}
 
 	// —— 卸任某一管理范围（多组长/多队长）——
 	if req.RemoveScope {
 		st := strings.TrimSpace(req.ScopeType)
-		if !model.ValidScopeType(st) || req.ScopeID == 0 {
-			writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "请指定要卸任的分组或分队"})
-			return nil
+		if !model.ValidScopeType(st) || req.ScopeId == 0 {
+			return &orgpb.SetRoleRes{Code: 1, Message: "请指定要卸任的分组或分队"}, nil
 		}
 		if !inOrg {
-			writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "对方不在本组织"})
-			return nil
+			return &orgpb.SetRoleRes{Code: 1, Message: "对方不在本组织"}, nil
 		}
 		if st == model.ScopeTypeSquad {
 			var sq model.Squad
-			if s.db.Where("id = ? AND org_id = ?", req.ScopeID, req.OrgID).First(&sq).Error == nil &&
+			if s.db.Where("id = ? AND org_id = ?", req.ScopeId, orgID).First(&sq).Error == nil &&
 				!isSite && actorRole == model.OrgRoleGroupLeader &&
-				!s.actorControlsGroup(req.OrgID, pd.UserID, sq.GroupID) {
-				writeJSON(ctx.Response(), 403, map[string]interface{}{"code": 1, "message": "只能管理自己分组内的队长"})
-				return nil
+				!s.actorControlsGroup(orgID, pd.UserID, sq.GroupID) {
+				return &orgpb.SetRoleRes{Code: 1, Message: "只能管理自己分组内的队长"}, nil
 			}
 		}
 		_ = s.db.Where("org_id = ? AND user_id = ? AND scope_type = ? AND scope_id = ?",
-			req.OrgID, req.UserID, st, req.ScopeID).Delete(&model.OrgScopeGrant{}).Error
-		finalRole := s.syncRoleFromGrants(req.OrgID, req.UserID, targetCurrent)
-		writeJSON(ctx.Response(), 200, map[string]interface{}{
-			"code": 0, "message": "已卸任该范围", "role": finalRole,
-			"scopes": s.listScopeMaps(req.OrgID, req.UserID),
-		})
-		return nil
+			orgID, userID, st, req.ScopeId).Delete(&model.OrgScopeGrant{}).Error
+		finalRole := s.syncRoleFromGrants(orgID, userID, targetCurrent)
+		return &orgpb.SetRoleRes{
+			Code: 0, Message: "已卸任该范围", Role: finalRole,
+			Scopes: s.listScopeRefs(orgID, userID),
+		}, nil
 	}
 
 	needType, needsScope := model.RoleNeedsScope(req.Role)
@@ -1730,71 +1534,64 @@ func (s *OrgService) handleSetRole(ctx khttp.Context) error {
 		if st == "" {
 			st = needType
 		}
-		if st != needType || req.ScopeID == 0 {
+		if st != needType || req.ScopeId == 0 {
 			msg := "任命队长须指定分队"
 			if req.Role == model.OrgRoleGroupLeader {
 				msg = "任命组长须指定分组"
 			}
-			writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": msg})
-			return nil
+			return &orgpb.SetRoleRes{Code: 1, Message: msg}, nil
 		}
 		if st == model.ScopeTypeGroup {
 			var n int64
-			_ = s.db.Model(&model.Group{}).Where("id = ? AND org_id = ?", req.ScopeID, req.OrgID).Count(&n).Error
+			_ = s.db.Model(&model.Group{}).Where("id = ? AND org_id = ?", req.ScopeId, orgID).Count(&n).Error
 			if n == 0 {
-				writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "分组不存在或不属于本组织"})
-				return nil
+				return &orgpb.SetRoleRes{Code: 1, Message: "分组不存在或不属于本组织"}, nil
 			}
 		} else {
 			var sq model.Squad
-			if s.db.Where("id = ? AND org_id = ?", req.ScopeID, req.OrgID).First(&sq).Error != nil {
-				writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "分队不存在或不属于本组织"})
-				return nil
+			if s.db.Where("id = ? AND org_id = ?", req.ScopeId, orgID).First(&sq).Error != nil {
+				return &orgpb.SetRoleRes{Code: 1, Message: "分队不存在或不属于本组织"}, nil
 			}
 			if !isSite && actorRole == model.OrgRoleGroupLeader {
-				if !s.actorControlsGroup(req.OrgID, pd.UserID, sq.GroupID) {
-					writeJSON(ctx.Response(), 403, map[string]interface{}{"code": 1, "message": "只能任命自己管理分组内的队长"})
-					return nil
+				if !s.actorControlsGroup(orgID, pd.UserID, sq.GroupID) {
+					return &orgpb.SetRoleRes{Code: 1, Message: "只能任命自己管理分组内的队长"}, nil
 				}
 			}
 		}
 		if !isSite && actorRole == model.OrgRoleGroupLeader && req.Role == model.OrgRoleGroupLeader {
-			writeJSON(ctx.Response(), 403, map[string]interface{}{"code": 1, "message": "组长不能任命其他组长"})
-			return nil
+			return &orgpb.SetRoleRes{Code: 1, Message: "组长不能任命其他组长"}, nil
 		}
 
 		if !inOrg {
 			displayName := ""
 			var u model.User
-			if s.db.Select("name", "username").First(&u, req.UserID).Error == nil {
+			if s.db.Select("name", "username").First(&u, userID).Error == nil {
 				displayName = strings.TrimSpace(u.Name)
 				if displayName == "" {
 					displayName = u.Username
 				}
 			}
 			// 先以 member 入组，再叠加领导职务
-			if err := s.addOrgMemberAtomic(req.OrgID, req.UserID, model.OrgRoleMember, displayName); err != nil {
+			if err := s.addOrgMemberAtomic(orgID, userID, model.OrgRoleMember, displayName); err != nil {
 				log.Errorf("org set role ensure member: %v", err)
-				writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": err.Error()})
-				return nil
+				return &orgpb.SetRoleRes{Code: 1, Message: err.Error()}, nil
 			}
-			s.setDefaultOrg(req.UserID, req.OrgID)
+			s.setDefaultOrg(userID, orgID)
 			inOrg = true
 		}
 
 		// 叠加写入（一人可多组组长 / 多队队长 / 同时组长+队长）
-		if err := s.addUserScopeGrant(req.OrgID, req.UserID, st, req.ScopeID); err != nil {
+		if err := s.addUserScopeGrant(orgID, userID, st, uint(req.ScopeId)); err != nil {
 			log.Errorf("org add scope: %v", err)
-			writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "更新管理范围失败"})
-			return nil
+			return &orgpb.SetRoleRes{Code: 1, Message: "更新管理范围失败"}, nil
 		}
 
 		// 任命队长时加入该分队（不踢出其他分队，支持多队）
 		if req.Role == model.OrgRoleCaptain {
 			var sq model.Squad
-			if s.db.First(&sq, req.ScopeID).Error == nil {
-				sm := model.SquadMember{SquadID: sq.ID, UserID: req.UserID}
-				_ = s.db.Where("squad_id = ? AND user_id = ?", sq.ID, req.UserID).FirstOrCreate(&sm).Error
+			if s.db.First(&sq, req.ScopeId).Error == nil {
+				sm := model.SquadMember{SquadID: sq.ID, UserID: userID}
+				_ = s.db.Where("squad_id = ? AND user_id = ?", sq.ID, userID).FirstOrCreate(&sm).Error
 			}
 		}
 
@@ -1802,44 +1599,40 @@ func (s *OrgService) handleSetRole(ctx khttp.Context) error {
 		if base == model.OrgRoleMember || base == model.OrgRoleCaptain || base == model.OrgRoleGroupLeader {
 			base = req.Role
 		}
-		finalRole := s.syncRoleFromGrants(req.OrgID, req.UserID, base)
-		writeJSON(ctx.Response(), 200, map[string]interface{}{
-			"code": 0, "message": "已更新角色",
-			"role": finalRole, "scopes": s.listScopeMaps(req.OrgID, req.UserID),
-		})
-		return nil
+		finalRole := s.syncRoleFromGrants(orgID, userID, base)
+		return &orgpb.SetRoleRes{
+			Code: 0, Message: "已更新角色",
+			Role: finalRole, Scopes: s.listScopeRefs(orgID, userID),
+		}, nil
 	}
 
 	// 教练 / 组织管理员 / 成员：清空领导范围
 	if !inOrg {
 		displayName := ""
 		var u model.User
-		if s.db.Select("name", "username").First(&u, req.UserID).Error == nil {
+		if s.db.Select("name", "username").First(&u, userID).Error == nil {
 			displayName = strings.TrimSpace(u.Name)
 			if displayName == "" {
 				displayName = u.Username
 			}
 		}
-		if err := s.addOrgMemberAtomic(req.OrgID, req.UserID, req.Role, displayName); err != nil {
+		if err := s.addOrgMemberAtomic(orgID, userID, req.Role, displayName); err != nil {
 			log.Errorf("org set role ensure member: %v", err)
-			writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": err.Error()})
-			return nil
+			return &orgpb.SetRoleRes{Code: 1, Message: err.Error()}, nil
 		}
-		s.setDefaultOrg(req.UserID, req.OrgID)
+		s.setDefaultOrg(userID, orgID)
 	} else {
 		if err := s.db.Model(&m).Update("role", req.Role).Error; err != nil {
-			writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "更新角色失败"})
-			return nil
+			return &orgpb.SetRoleRes{Code: 1, Message: "更新角色失败"}, nil
 		}
-		syncOrgMemberSystemRole(s.db, req.OrgID, req.UserID)
+		syncOrgMemberSystemRole(s.db, orgID, userID)
 	}
-	_ = s.replaceUserScopeGrants(req.OrgID, req.UserID, nil)
+	_ = s.replaceUserScopeGrants(orgID, userID, nil)
 
-	writeJSON(ctx.Response(), 200, map[string]interface{}{
-		"code": 0, "message": "已更新角色",
-		"role": req.Role, "scopes": []map[string]interface{}{},
-	})
-	return nil
+	return &orgpb.SetRoleRes{
+		Code: 0, Message: "已更新角色",
+		Role: req.Role, Scopes: []*orgpb.ScopeRef{},
+	}, nil
 }
 
 // addUserScopeGrant 追加一条管理范围（已存在则忽略）
@@ -1887,13 +1680,13 @@ func (s *OrgService) syncRoleFromGrants(orgID, userID uint, currentHint string) 
 	return final
 }
 
-func (s *OrgService) listScopeMaps(orgID, userID uint) []map[string]interface{} {
+func (s *OrgService) listScopeRefs(orgID, userID uint) []*orgpb.ScopeRef {
 	var grants []model.OrgScopeGrant
 	_ = s.db.Where("org_id = ? AND user_id = ?", orgID, userID).Find(&grants).Error
-	out := make([]map[string]interface{}, 0, len(grants))
+	out := make([]*orgpb.ScopeRef, 0, len(grants))
 	for _, g := range grants {
-		out = append(out, map[string]interface{}{
-			"scopeType": g.ScopeType, "scopeId": g.ScopeID,
+		out = append(out, &orgpb.ScopeRef{
+			ScopeType: g.ScopeType, ScopeId: int64(g.ScopeID),
 		})
 	}
 	return out
@@ -1935,126 +1728,100 @@ func (s *OrgService) replaceUserScopeGrants(orgID, userID uint, grants []model.O
 	})
 }
 
-func (s *OrgService) handleRemoveMember(ctx khttp.Context) error {
+func (s *OrgService) RemoveMember(ctx context.Context, req *orgpb.RemoveMemberReq) (*orgpb.RemoveMemberRes, error) {
 	pd := auth.GetCurrentUser(ctx)
 	if pd == nil {
-		writeJSON(ctx.Response(), 401, map[string]interface{}{"code": 1, "message": "请先登录"})
-		return nil
+		return &orgpb.RemoveMemberRes{Code: 1, Message: "请先登录"}, nil
 	}
-	var req struct {
-		OrgID  uint `json:"orgId"`
-		UserID uint `json:"userId"`
-	}
-	if err := readJSON(ctx.Request(), &req); err != nil || req.OrgID == 0 || req.UserID == 0 {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "参数错误"})
-		return nil
+	orgID := uint(req.OrgId)
+	userID := uint(req.UserId)
+	if orgID == 0 || userID == 0 {
+		return &orgpb.RemoveMemberRes{Code: 1, Message: "参数错误"}, nil
 	}
 	var o model.Org
-	if s.db.First(&o, req.OrgID).Error != nil {
-		writeJSON(ctx.Response(), 404, map[string]interface{}{"code": 1, "message": "组织不存在"})
-		return nil
+	if s.db.First(&o, orgID).Error != nil {
+		return &orgpb.RemoveMemberRes{Code: 1, Message: "组织不存在"}, nil
 	}
 	if o.IsSystem {
-		writeJSON(ctx.Response(), 403, map[string]interface{}{"code": 1, "message": "不能将成员移出公共域"})
-		return nil
+		return &orgpb.RemoveMemberRes{Code: 1, Message: "不能将成员移出公共域"}, nil
 	}
-	if !verifyOrgPerm(ctx, s.db, pd.UserID, req.OrgID, rbac.PermOrgMemberRemove) {
-		writeJSON(ctx.Response(), 403, map[string]interface{}{"code": 1, "message": "权限不足"})
-		return nil
+	if !verifyOrgPerm(ctx, s.db, pd.UserID, orgID, rbac.PermOrgMemberRemove) {
+		return &orgpb.RemoveMemberRes{Code: 1, Message: "权限不足"}, nil
 	}
 	var target model.OrgMember
-	if s.db.Where("org_id = ? AND user_id = ?", req.OrgID, req.UserID).First(&target).Error == nil && target.Role == model.OrgRoleOrgAdmin {
+	if s.db.Where("org_id = ? AND user_id = ?", orgID, userID).First(&target).Error == nil && target.Role == model.OrgRoleOrgAdmin {
 		var admins int64
-		s.db.Model(&model.OrgMember{}).Where("org_id = ? AND role = ?", req.OrgID, model.OrgRoleOrgAdmin).Count(&admins)
+		s.db.Model(&model.OrgMember{}).Where("org_id = ? AND role = ?", orgID, model.OrgRoleOrgAdmin).Count(&admins)
 		if admins <= 1 {
-			writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "不能移除最后一位组织管理员"})
-			return nil
+			return &orgpb.RemoveMemberRes{Code: 1, Message: "不能移除最后一位组织管理员"}, nil
 		}
 	}
-	if err := s.db.Where("org_id = ? AND user_id = ?", req.OrgID, req.UserID).Delete(&model.OrgMember{}).Error; err != nil {
+	if err := s.db.Where("org_id = ? AND user_id = ?", orgID, userID).Delete(&model.OrgMember{}).Error; err != nil {
 		log.Errorf("org remove member: %v", err)
-		writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "移除失败，请稍后重试"})
-		return nil
+		return &orgpb.RemoveMemberRes{Code: 1, Message: "移除失败，请稍后重试"}, nil
 	}
-	s.invalidateOrgMembersCache(req.OrgID)
-	s.invalidateDisplayCache(req.OrgID, req.UserID)
+	s.invalidateOrgMembersCache(orgID)
+	s.invalidateDisplayCache(orgID, userID)
 	// membership 已删 → 清除该组织全部角色指派（含自定义）
-	syncOrgMemberSystemRole(s.db, req.OrgID, req.UserID)
+	syncOrgMemberSystemRole(s.db, orgID, userID)
 	// 若被移出的是其默认组织，回落公共域
-	s.fallbackDefaultOrgIf(req.UserID, req.OrgID)
-	writeJSON(ctx.Response(), 200, map[string]interface{}{"code": 0, "message": "已移除成员"})
-	return nil
+	s.fallbackDefaultOrgIf(userID, orgID)
+	return &orgpb.RemoveMemberRes{Code: 0, Message: "已移除成员"}, nil
 }
 
-func (s *OrgService) handleInviteGet(ctx khttp.Context) error {
+func (s *OrgService) Invite(ctx context.Context, req *orgpb.InviteReq) (*orgpb.InviteRes, error) {
 	pd := auth.GetCurrentUser(ctx)
 	if pd == nil {
-		writeJSON(ctx.Response(), 401, map[string]interface{}{"code": 1, "message": "请先登录"})
-		return nil
+		return &orgpb.InviteRes{Code: 1, Message: "请先登录"}, nil
 	}
-	id64, _ := strconv.ParseUint(ctx.Request().URL.Query().Get("orgId"), 10, 64)
-	orgID := uint(id64)
+	orgID := uint(req.OrgId)
 	if orgID == 0 {
 		orgID = pd.OrgID
 	}
 	if !verifyOrgPerm(ctx, s.db, pd.UserID, orgID, rbac.PermOrgInviteView) {
-		writeJSON(ctx.Response(), 403, map[string]interface{}{"code": 1, "message": "权限不足"})
-		return nil
+		return &orgpb.InviteRes{Code: 1, Message: "权限不足"}, nil
 	}
 	var o model.Org
 	if s.db.First(&o, orgID).Error != nil {
-		writeJSON(ctx.Response(), 404, map[string]interface{}{"code": 1, "message": "组织不存在"})
-		return nil
+		return &orgpb.InviteRes{Code: 1, Message: "组织不存在"}, nil
 	}
-	writeJSON(ctx.Response(), 200, map[string]interface{}{
-		"code": 0, "message": "success",
-		"inviteCode": o.InviteCode, "joinMode": o.JoinMode, "orgId": o.ID,
-	})
-	return nil
+	return &orgpb.InviteRes{
+		Code: 0, Message: "success",
+		InviteCode: o.InviteCode, JoinMode: o.JoinMode, OrgId: int64(o.ID),
+	}, nil
 }
 
-func (s *OrgService) handleInviteRotate(ctx khttp.Context) error {
+func (s *OrgService) InviteRotate(ctx context.Context, req *orgpb.InviteRotateReq) (*orgpb.InviteRotateRes, error) {
 	pd := auth.GetCurrentUser(ctx)
 	if pd == nil {
-		writeJSON(ctx.Response(), 401, map[string]interface{}{"code": 1, "message": "请先登录"})
-		return nil
+		return &orgpb.InviteRotateRes{Code: 1, Message: "请先登录"}, nil
 	}
-	var req struct {
-		OrgID uint `json:"orgId"`
-	}
-	_ = readJSON(ctx.Request(), &req)
-	orgID := req.OrgID
+	orgID := uint(req.OrgId)
 	if orgID == 0 {
 		orgID = pd.OrgID
 	}
 	if !verifyOrgPerm(ctx, s.db, pd.UserID, orgID, rbac.PermOrgInviteRotate) {
-		writeJSON(ctx.Response(), 403, map[string]interface{}{"code": 1, "message": "权限不足"})
-		return nil
+		return &orgpb.InviteRotateRes{Code: 1, Message: "权限不足"}, nil
 	}
 	code := newInviteCode()
 	if err := s.db.Model(&model.Org{}).Where("id = ?", orgID).Update("invite_code", code).Error; err != nil {
 		log.Errorf("org rotate invite: %v", err)
-		writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "更新失败，请稍后重试"})
-		return nil
+		return &orgpb.InviteRotateRes{Code: 1, Message: "更新失败，请稍后重试"}, nil
 	}
-	writeJSON(ctx.Response(), 200, map[string]interface{}{"code": 0, "message": "已更换团队识别码", "inviteCode": code})
-	return nil
+	return &orgpb.InviteRotateRes{Code: 0, Message: "已更换团队识别码", InviteCode: code}, nil
 }
 
-func (s *OrgService) handleJoinRequests(ctx khttp.Context) error {
+func (s *OrgService) JoinRequests(ctx context.Context, req *orgpb.JoinRequestsReq) (*orgpb.JoinRequestsRes, error) {
 	pd := auth.GetCurrentUser(ctx)
 	if pd == nil {
-		writeJSON(ctx.Response(), 401, map[string]interface{}{"code": 1, "message": "请先登录"})
-		return nil
+		return &orgpb.JoinRequestsRes{Code: 1, Message: "请先登录"}, nil
 	}
-	id64, _ := strconv.ParseUint(ctx.Request().URL.Query().Get("orgId"), 10, 64)
-	orgID := uint(id64)
+	orgID := uint(req.OrgId)
 	if orgID == 0 {
 		orgID = pd.OrgID
 	}
 	if !verifyOrgPerm(ctx, s.db, pd.UserID, orgID, rbac.PermOrgJoinReview) {
-		writeJSON(ctx.Response(), 403, map[string]interface{}{"code": 1, "message": "权限不足"})
-		return nil
+		return &orgpb.JoinRequestsRes{Code: 1, Message: "权限不足"}, nil
 	}
 	// 最多取最近 200 条待审申请；用户信息批量 IN 查询，消除逐条 First
 	const maxJoinRequests = 200
@@ -2075,54 +1842,45 @@ func (s *OrgService) handleJoinRequests(ctx khttp.Context) error {
 			userByID[u.ID] = u
 		}
 	}
-	list := make([]map[string]interface{}, 0, len(reqs))
+	list := make([]*orgpb.JoinRequestInfo, 0, len(reqs))
 	for _, r := range reqs {
 		u := userByID[r.UserID]
 		display := strings.TrimSpace(r.OrgDisplayName)
 		if display == "" {
 			display = u.Username
 		}
-		list = append(list, map[string]interface{}{
-			"id": r.ID, "userId": r.UserID, "username": u.Username,
-			"name":           display,
-			"orgDisplayName": r.OrgDisplayName,
-			"status":         r.Status, "createdAt": r.CreatedAt.Unix(),
+		list = append(list, &orgpb.JoinRequestInfo{
+			Id: int64(r.ID), UserId: int64(r.UserID), Username: u.Username,
+			Name: display,
+			OrgDisplayName: r.OrgDisplayName,
+			Status:         r.Status, CreatedAt: r.CreatedAt.Unix(),
 		})
 	}
-	writeJSON(ctx.Response(), 200, map[string]interface{}{"code": 0, "message": "success", "list": list})
-	return nil
+	return &orgpb.JoinRequestsRes{Code: 0, Message: "success", List: list}, nil
 }
 
-func (s *OrgService) handleJoinReview(ctx khttp.Context) error {
+func (s *OrgService) JoinReview(ctx context.Context, req *orgpb.JoinReviewReq) (*orgpb.JoinReviewRes, error) {
 	pd := auth.GetCurrentUser(ctx)
 	if pd == nil {
-		writeJSON(ctx.Response(), 401, map[string]interface{}{"code": 1, "message": "请先登录"})
-		return nil
+		return &orgpb.JoinReviewRes{Code: 1, Message: "请先登录"}, nil
 	}
-	var req struct {
-		ID      uint `json:"id"`
-		Approve bool `json:"approve"`
-	}
-	if err := readJSON(ctx.Request(), &req); err != nil || req.ID == 0 {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "参数错误"})
-		return nil
+	reqID := uint(req.Id)
+	if reqID == 0 {
+		return &orgpb.JoinReviewRes{Code: 1, Message: "参数错误"}, nil
 	}
 	var jr model.OrgJoinRequest
-	if s.db.First(&jr, req.ID).Error != nil {
-		writeJSON(ctx.Response(), 404, map[string]interface{}{"code": 1, "message": "申请不存在"})
-		return nil
+	if s.db.First(&jr, reqID).Error != nil {
+		return &orgpb.JoinReviewRes{Code: 1, Message: "申请不存在"}, nil
 	}
 	if !verifyOrgPerm(ctx, s.db, pd.UserID, jr.OrgID, rbac.PermOrgJoinReview) {
-		writeJSON(ctx.Response(), 403, map[string]interface{}{"code": 1, "message": "权限不足"})
-		return nil
+		return &orgpb.JoinReviewRes{Code: 1, Message: "权限不足"}, nil
 	}
 	uid := pd.UserID
 	if req.Approve {
 		if !s.isMemberDB(jr.UserID, jr.OrgID) {
 			var reviewOrg model.Org
 			if s.db.First(&reviewOrg, jr.OrgID).Error != nil {
-				writeJSON(ctx.Response(), 404, map[string]interface{}{"code": 1, "message": "组织不存在"})
-				return nil
+				return &orgpb.JoinReviewRes{Code: 1, Message: "组织不存在"}, nil
 			}
 			displayName := strings.TrimSpace(jr.OrgDisplayName)
 			if displayName == "" {
@@ -2137,8 +1895,7 @@ func (s *OrgService) handleJoinReview(ctx khttp.Context) error {
 			// 先写入/恢复成员，成功后再标记申请通过，避免“已通过却未入组”
 			if err := s.addOrgMemberAtomic(jr.OrgID, jr.UserID, model.OrgRoleMember, displayName); err != nil {
 				log.Errorf("org join review ensure member: %v", err)
-				writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": err.Error()})
-				return nil
+				return &orgpb.JoinReviewRes{Code: 1, Message: err.Error()}, nil
 			}
 			s.setDefaultOrg(jr.UserID, jr.OrgID)
 		}
@@ -2155,8 +1912,7 @@ func (s *OrgService) handleJoinReview(ctx khttp.Context) error {
 			RefType: "org_join",
 			RefID:   jr.ID,
 		})
-		writeJSON(ctx.Response(), 200, map[string]interface{}{"code": 0, "message": "已通过"})
-		return nil
+		return &orgpb.JoinReviewRes{Code: 0, Message: "已通过"}, nil
 	}
 	_ = s.db.Model(&jr).Updates(map[string]interface{}{
 		"status": model.JoinReqRejected, "reviewed_by": uid,
@@ -2171,8 +1927,7 @@ func (s *OrgService) handleJoinReview(ctx khttp.Context) error {
 		RefType: "org_join",
 		RefID:   jr.ID,
 	})
-	writeJSON(ctx.Response(), 200, map[string]interface{}{"code": 0, "message": "已拒绝"})
-	return nil
+	return &orgpb.JoinReviewRes{Code: 0, Message: "已拒绝"}, nil
 }
 
 func (s *OrgService) orgName(orgID uint) string {
@@ -2183,45 +1938,37 @@ func (s *OrgService) orgName(orgID uint) string {
 	return "组织"
 }
 
-func (s *OrgService) handleSetSiteAdmin(ctx khttp.Context) error {
+func (s *OrgService) SetSiteAdmin(ctx context.Context, req *orgpb.SetSiteAdminReq) (*orgpb.SetSiteAdminRes, error) {
 	if !auth.HasPerm(ctx, rbac.PermSiteAppointAdmin) {
-		writeJSON(ctx.Response(), 403, map[string]interface{}{"code": 1, "message": "无任命站点管理员权限"})
-		return nil
+		return &orgpb.SetSiteAdminRes{Code: 1, Message: "无任命站点管理员权限"}, nil
 	}
-	var req struct {
-		UserID      uint `json:"userId"`
-		IsSiteAdmin bool `json:"isSiteAdmin"`
-	}
-	if err := readJSON(ctx.Request(), &req); err != nil || req.UserID == 0 {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "参数错误"})
-		return nil
+	userID := uint(req.UserId)
+	if userID == 0 {
+		return &orgpb.SetSiteAdminRes{Code: 1, Message: "参数错误"}, nil
 	}
 	// 防止撤销最后一个站点管理员
 	if !req.IsSiteAdmin {
 		var n int64
 		s.db.Model(&model.User{}).Where("is_site_admin = ?", true).Count(&n)
 		var target model.User
-		if s.db.First(&target, req.UserID).Error == nil && target.IsSiteAdmin && n <= 1 {
-			writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "不能撤销最后一位站点管理员"})
-			return nil
+		if s.db.First(&target, userID).Error == nil && target.IsSiteAdmin && n <= 1 {
+			return &orgpb.SetSiteAdminRes{Code: 1, Message: "不能撤销最后一位站点管理员"}, nil
 		}
 	}
 	roleID := 0
 	if req.IsSiteAdmin {
 		roleID = 1
 	}
-	if err := s.db.Model(&model.User{}).Where("id = ?", req.UserID).Updates(map[string]interface{}{
+	if err := s.db.Model(&model.User{}).Where("id = ?", userID).Updates(map[string]interface{}{
 		"is_site_admin": req.IsSiteAdmin,
 		"role_id":       roleID,
 	}).Error; err != nil {
 		log.Errorf("set site admin: %v", err)
-		writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "更新失败，请稍后重试"})
-		return nil
+		return &orgpb.SetSiteAdminRes{Code: 1, Message: "更新失败，请稍后重试"}, nil
 	}
-	syncSiteSystemRole(s.db, req.UserID, rbac.RoleSiteAdmin, req.IsSiteAdmin)
-	log.Infof("set site admin user=%d is=%v", req.UserID, req.IsSiteAdmin)
-	writeJSON(ctx.Response(), 200, map[string]interface{}{"code": 0, "message": "已更新"})
-	return nil
+	syncSiteSystemRole(s.db, userID, rbac.RoleSiteAdmin, req.IsSiteAdmin)
+	log.Infof("set site admin user=%d is=%v", userID, req.IsSiteAdmin)
+	return &orgpb.SetSiteAdminRes{Code: 0, Message: "已更新"}, nil
 }
 
 func htmlEscapeName(name, username string) string {

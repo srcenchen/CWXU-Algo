@@ -2,9 +2,7 @@ package service
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
 	"sort"
 	"strings"
 
@@ -20,7 +18,6 @@ import (
 	"github.com/go-kratos/kratos/v2/errors"
 	"github.com/go-kratos/kratos/v2/log"
 	"github.com/go-kratos/kratos/v2/registry"
-	khttp "github.com/go-kratos/kratos/v2/transport/http"
 )
 
 type ProblemService struct {
@@ -703,42 +700,26 @@ func (s *ProblemService) ClearRecentFailed(ctx context.Context, req *problem.Cle
 	}, nil
 }
 
-// RegisterProblemExtraRoutes 题库运维手写路由（不经 proto）。
-func RegisterProblemExtraRoutes(srv *khttp.Server, s *ProblemService) {
-	if srv == nil || s == nil {
-		return
-	}
-	r := srv.Route("/")
-	// 全量修复 QOJ 标题被识别为「QOJ.ac」的脏数据
-	r.POST("/v1/core/problem/repair-qoj-titles", s.handleRepairQOJTitles)
-}
-
-// handleRepairQOJTitles body: { "limit"?: number, "refetch"?: bool }
+// RepairQOJTitles 全量修复 QOJ 题目标题被识别为「QOJ.ac」的脏数据。
+// body: { "limit"?: number, "refetch"?: bool }
 // 默认 limit=0（全量）、refetch=false（优先 content_md 一级标题，不打 QOJ）。
 // refetch=true 时对仍无好标题的题访问 qoj.ac 拉官方题头（较慢）。
-func (s *ProblemService) handleRepairQOJTitles(ctx khttp.Context) error {
-	write := func(code int, body map[string]interface{}) {
-		ctx.Response().Header().Set("Content-Type", "application/json; charset=utf-8")
-		ctx.Response().WriteHeader(code)
-		_ = json.NewEncoder(ctx.Response()).Encode(body)
-	}
+func (s *ProblemService) RepairQOJTitles(ctx context.Context, req *problem.RepairQOJTitlesReq) (*problem.RepairQOJTitlesRes, error) {
 	if !auth.HasPerm(ctx, rbac.PermSiteProblemOps) {
-		write(403, map[string]interface{}{"code": 1, "message": "仅管理员可操作"})
-		return nil
+		return &problem.RepairQOJTitlesRes{Code: 1, Message: "仅管理员可操作"}, nil
 	}
 	if ok, running := s.uc.TryStartAdminOp("repair-qoj-titles"); !ok {
-		write(409, map[string]interface{}{"code": 1, "message": "已有任务在执行：" + running + "，请稍后再试"})
-		return nil
+		return &problem.RepairQOJTitlesRes{Code: 1, Message: "已有任务在执行：" + running + "，请稍后再试"}, nil
 	}
-	var req struct {
-		Limit   int  `json:"limit"`
-		Refetch bool `json:"refetch"`
+	limit := 0
+	refetch := false
+	if req != nil {
+		limit = int(req.Limit)
+		refetch = req.Refetch
 	}
-	body, _ := io.ReadAll(ctx.Request().Body)
-	_ = json.Unmarshal(body, &req)
 	go func() {
 		defer s.uc.FinishAdminOp()
-		scanned, fixed, failed, skipped, err := s.uc.RepairQOJBrandTitles(req.Limit, req.Refetch)
+		scanned, fixed, failed, skipped, err := s.uc.RepairQOJBrandTitles(limit, refetch)
 		if err != nil {
 			log.Errorf("RepairQOJBrandTitles failed: %v", err)
 			return
@@ -746,11 +727,10 @@ func (s *ProblemService) handleRepairQOJTitles(ctx khttp.Context) error {
 		log.Infof("RepairQOJBrandTitles done scanned=%d fixed=%d failed=%d skipped=%d", scanned, fixed, failed, skipped)
 	}()
 	msg := "已开始后台修复 QOJ 题目标题（优先用已有题面一级标题）"
-	if req.Refetch {
+	if refetch {
 		msg = "已开始后台修复 QOJ 题目标题（含访问 qoj.ac 补全）"
 	}
-	write(200, map[string]interface{}{"code": 0, "message": msg})
-	return nil
+	return &problem.RepairQOJTitlesRes{Code: 0, Message: msg}, nil
 }
 
 func (s *ProblemService) ClearNowCoderContent(ctx context.Context, req *problem.ClearNowCoderContentReq) (*problem.ClearNowCoderContentRes, error) {

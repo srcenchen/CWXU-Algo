@@ -35,6 +35,7 @@ const OperationProblemMyPendingEdit = "/api.core.v1.problem.Problem/MyPendingEdi
 const OperationProblemProgress = "/api.core.v1.problem.Problem/Progress"
 const OperationProblemProposeEdit = "/api.core.v1.problem.Problem/ProposeEdit"
 const OperationProblemRelatedContests = "/api.core.v1.problem.Problem/RelatedContests"
+const OperationProblemRepairQOJTitles = "/api.core.v1.problem.Problem/RepairQOJTitles"
 const OperationProblemResetAll = "/api.core.v1.problem.Problem/ResetAll"
 const OperationProblemResetQueues = "/api.core.v1.problem.Problem/ResetQueues"
 const OperationProblemResume = "/api.core.v1.problem.Problem/Resume"
@@ -72,6 +73,8 @@ type ProblemHTTPServer interface {
 	ProposeEdit(context.Context, *ProposeProblemEditReq) (*ProposeProblemEditRes, error)
 	// RelatedContests 本题出现过的比赛（contest_problems 反查，全平台）
 	RelatedContests(context.Context, *RelatedContestsReq) (*RelatedContestsRes, error)
+	// RepairQOJTitles 全量修复 QOJ 题目标题被识别为「QOJ.ac」的脏数据（后台任务）
+	RepairQOJTitles(context.Context, *RepairQOJTitlesReq) (*RepairQOJTitlesRes, error)
 	// ResetAll 全部重置：清空 AI 标签，保留题面，可选重新入队分析
 	ResetAll(context.Context, *ResetAllReq) (*ResetAllRes, error)
 	// ResetQueues 重置 MQ 队列：purge 爬取/分析队列，再按 DB 待爬取/待分析重灌（低优先级）
@@ -115,6 +118,7 @@ func RegisterProblemHTTPServer(s *http.Server, srv ProblemHTTPServer) {
 	r.GET("/v1/core/problem/edit-requests", _Problem_ListEditRequests0_HTTP_Handler(srv))
 	r.POST("/v1/core/problem/review-edit", _Problem_ReviewEdit0_HTTP_Handler(srv))
 	r.GET("/v1/core/problem/my-pending-edit", _Problem_MyPendingEdit0_HTTP_Handler(srv))
+	r.POST("/v1/core/problem/repair-qoj-titles", _Problem_RepairQOJTitles0_HTTP_Handler(srv))
 }
 
 func _Problem_List0_HTTP_Handler(srv ProblemHTTPServer) func(ctx http.Context) error {
@@ -612,6 +616,28 @@ func _Problem_MyPendingEdit0_HTTP_Handler(srv ProblemHTTPServer) func(ctx http.C
 	}
 }
 
+func _Problem_RepairQOJTitles0_HTTP_Handler(srv ProblemHTTPServer) func(ctx http.Context) error {
+	return func(ctx http.Context) error {
+		var in RepairQOJTitlesReq
+		if err := ctx.Bind(&in); err != nil {
+			return err
+		}
+		if err := ctx.BindQuery(&in); err != nil {
+			return err
+		}
+		http.SetOperation(ctx, OperationProblemRepairQOJTitles)
+		h := ctx.Middleware(func(ctx context.Context, req interface{}) (interface{}, error) {
+			return srv.RepairQOJTitles(ctx, req.(*RepairQOJTitlesReq))
+		})
+		out, err := h(ctx, &in)
+		if err != nil {
+			return err
+		}
+		reply := out.(*RepairQOJTitlesRes)
+		return ctx.Result(200, reply)
+	}
+}
+
 type ProblemHTTPClient interface {
 	// AdminUpdate 站点管理员：直接修改标签/题面（无需审核）
 	AdminUpdate(ctx context.Context, req *AdminUpdateProblemReq, opts ...http.CallOption) (rsp *AdminUpdateProblemRes, err error)
@@ -640,6 +666,8 @@ type ProblemHTTPClient interface {
 	ProposeEdit(ctx context.Context, req *ProposeProblemEditReq, opts ...http.CallOption) (rsp *ProposeProblemEditRes, err error)
 	// RelatedContests 本题出现过的比赛（contest_problems 反查，全平台）
 	RelatedContests(ctx context.Context, req *RelatedContestsReq, opts ...http.CallOption) (rsp *RelatedContestsRes, err error)
+	// RepairQOJTitles 全量修复 QOJ 题目标题被识别为「QOJ.ac」的脏数据（后台任务）
+	RepairQOJTitles(ctx context.Context, req *RepairQOJTitlesReq, opts ...http.CallOption) (rsp *RepairQOJTitlesRes, err error)
 	// ResetAll 全部重置：清空 AI 标签，保留题面，可选重新入队分析
 	ResetAll(ctx context.Context, req *ResetAllReq, opts ...http.CallOption) (rsp *ResetAllRes, err error)
 	// ResetQueues 重置 MQ 队列：purge 爬取/分析队列，再按 DB 待爬取/待分析重灌（低优先级）
@@ -878,6 +906,20 @@ func (c *ProblemHTTPClientImpl) RelatedContests(ctx context.Context, in *Related
 	opts = append(opts, http.Operation(OperationProblemRelatedContests))
 	opts = append(opts, http.PathTemplate(pattern))
 	err := c.cc.Invoke(ctx, "GET", path, nil, &out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// RepairQOJTitles 全量修复 QOJ 题目标题被识别为「QOJ.ac」的脏数据（后台任务）
+func (c *ProblemHTTPClientImpl) RepairQOJTitles(ctx context.Context, in *RepairQOJTitlesReq, opts ...http.CallOption) (*RepairQOJTitlesRes, error) {
+	var out RepairQOJTitlesRes
+	pattern := "/v1/core/problem/repair-qoj-titles"
+	path := binding.EncodeURL(pattern, in, false)
+	opts = append(opts, http.Operation(OperationProblemRepairQOJTitles))
+	opts = append(opts, http.PathTemplate(pattern))
+	err := c.cc.Invoke(ctx, "POST", path, in, &out, opts...)
 	if err != nil {
 		return nil, err
 	}

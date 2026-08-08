@@ -47,6 +47,18 @@ service Problemset {
   rpc Like (LikeReq) returns (LikeRes) {
     option (google.api.http) = { post: "/v1/core/problemset/like" body: "*" };
   }
+  rpc AddManual (AddManualReq) returns (AddManualRes) {
+    option (google.api.http) = { post: "/v1/core/problemset/add-manual" body: "*" };
+  }
+  rpc Reorder (ReorderReq) returns (ReorderRes) {
+    option (google.api.http) = { post: "/v1/core/problemset/reorder" body: "*" };
+  }
+  rpc Favorite (FavoriteReq) returns (FavoriteRes) {
+    option (google.api.http) = { post: "/v1/core/problemset/favorite" body: "*" };
+  }
+  rpc Favorites (FavoritesReq) returns (FavoritesRes) {
+    option (google.api.http) = { get: "/v1/core/problemset/favorites" };
+  }
 }
 
 message ProblemsetItem {
@@ -82,9 +94,14 @@ message ProblemsetInfo {
   int64 updatedAt = 14;
   repeated ProblemsetItem items = 15;
   bool locked = 16;
+  bool favorited = 17;
+  // 仅 mine 接口带 problemId 时输出：本题是否已在该题单
+  bool containsProblem = 18;
 }
 
-message MineReq {}
+message MineReq {
+  int64 problemId = 1; // 可选：标注本题是否已在该题单
+}
 message MineRes {
   bool success = 1;
   string message = 2;
@@ -159,11 +176,14 @@ message UnlockReq {
   int64 id = 1;
   string password = 2;
 }
+message UnlockData {
+  string unlockToken = 1;
+  int64 expiresIn = 2;
+}
 message UnlockRes {
   bool success = 1;
   string message = 2;
-  string unlockToken = 3;
-  int64 expiresIn = 4;
+  UnlockData data = 3;
 }
 
 message AddReq {
@@ -171,11 +191,18 @@ message AddReq {
   int64 problemId = 2;
   string url = 3;
 }
+message AddData {
+  int64 problemId = 1;
+  bool fetchTriggered = 2;
+  string platform = 3;
+  string title = 4;
+  string externalId = 5;
+}
 message AddRes {
   bool success = 1;
   string message = 2;
-  int64 problemId = 3;
-  bool fetchTriggered = 4;
+  string code = 3; // URL_PARSE_FAILED
+  AddData data = 4;
 }
 
 message RemoveReq {
@@ -188,9 +215,61 @@ message RemoveRes {
 }
 
 message LikeReq { int64 id = 1; }
+message LikeData {
+  bool liked = 1;
+  int32 likeCount = 2;
+}
 message LikeRes {
   bool success = 1;
   string message = 2;
-  bool liked = 3;
-  int32 likeCount = 4;
+  LikeData data = 3;
+}
+
+message AddManualReq {
+  int64 problemsetId = 1;
+  string title = 2;
+  string contentMd = 3;
+  repeated string tags = 4;
+  string sourceUrl = 5;
+}
+message AddManualData {
+  int64 problemId = 1;
+  bool fetchTriggered = 2;
+}
+message AddManualRes {
+  bool success = 1;
+  string message = 2;
+  AddManualData data = 3;
+}
+
+message ReorderReq {
+  int64 problemsetId = 1;
+  repeated int64 ids = 2;
+}
+message ReorderRes {
+  bool success = 1;
+  string message = 2;
+}
+
+message FavoriteReq { int64 id = 1; }
+message FavoriteData {
+  bool favorited = 1;
+}
+message FavoriteRes {
+  bool success = 1;
+  string message = 2;
+  FavoriteData data = 3;
+}
+
+message FavoritesReq {
+  int64 page = 1;
+  int64 pageSize = 2;
+}
+message FavoritesRes {
+  bool success = 1;
+  string message = 2;
+  repeated ProblemsetInfo data = 3;
+  int64 total = 4;
+  int64 page = 5;
+  int64 pageSize = 6;
 }

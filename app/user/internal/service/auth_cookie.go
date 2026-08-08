@@ -5,10 +5,10 @@ import (
 	"net/http"
 	"time"
 
+	pb "cwxu-algo/api/user/v1/auth"
 	commonauth "cwxu-algo/app/common/utils/auth"
 
 	"github.com/go-kratos/kratos/v2/transport"
-	khttp "github.com/go-kratos/kratos/v2/transport/http"
 )
 
 func setSessionCookie(ctx context.Context, token string) {
@@ -37,11 +37,8 @@ func clearSessionCookie(ctx context.Context) {
 	tr.ReplyHeader().Add("Set-Cookie", cookie)
 }
 
-func RegisterAuthSessionRoutes(srv *khttp.Server) {
-	srv.Route("/").POST("/v1/user/auth/logout", func(ctx khttp.Context) error {
-		clearSessionCookie(ctx)
-		return ctx.JSON(http.StatusOK, map[string]interface{}{
-			"code": 0, "success": true, "message": "已退出登录",
-		})
-	})
+// Logout 退出登录：清理 session cookie（业务错误/成功均 HTTP 200）
+func (s *AuthService) Logout(ctx context.Context, _ *pb.LogoutReq) (*pb.LogoutRes, error) {
+	clearSessionCookie(ctx)
+	return &pb.LogoutRes{Code: 0, Success: true, Message: "已退出登录"}, nil
 }

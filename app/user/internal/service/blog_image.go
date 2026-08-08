@@ -1,14 +1,16 @@
 package service
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strconv"
+	"net/http"
 	"strings"
 	"time"
 	"unicode/utf8"
 
+	pb "cwxu-algo/api/user/v1/blog"
 	"cwxu-algo/app/common/blogimg"
 	"cwxu-algo/app/common/notify"
 	"cwxu-algo/app/common/rbac"
@@ -16,7 +18,6 @@ import (
 	"cwxu-algo/app/common/utils/auth"
 	"cwxu-algo/app/user/internal/data/model"
 
-	khttp "github.com/go-kratos/kratos/v2/transport/http"
 	"gorm.io/gorm"
 )
 
@@ -170,26 +171,20 @@ func putAndRegisterBlogImage(
 // body: { urls?: [...], hashes?: [sha256 hex,…] }
 // → { existing, missing, existingHashes, missingHashes } 一次查询，无 N+1。
 // 插件/编辑器可同时按 URL 与 content hash 校验缓存，避免 GC 后误复用。
-func (s *BlogService) handleBlogImagesCheck(ctx khttp.Context) error {
+// BlogImagesCheck POST /v1/user/blog/images/check
+// body: { urls?: [...], hashes?: [sha256 hex,…] }
+// → { existing, missing, existingHashes, missingHashes } 一次查询，无 N+1。
+// 插件/编辑器可同时按 URL 与 content hash 校验缓存，避免 GC 后误复用。
+func (s *BlogService) BlogImagesCheck(ctx context.Context, req *pb.BlogImagesCheckReq) (*pb.BlogImagesCheckRes, error) {
 	pd := auth.GetCurrentUser(ctx)
 	if pd == nil || pd.UserID == 0 {
-		writeJSON(ctx.Response(), 401, map[string]interface{}{"code": 1, "message": "请先登录"})
-		return nil
+		return nil, blogErr(http.StatusUnauthorized, "请先登录")
 	}
-	var body struct {
-		URLs   []string `json:"urls"`
-		Hashes []string `json:"hashes"`
-	}
-	if err := json.NewDecoder(ctx.Request().Body).Decode(&body); err != nil {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "参数错误"})
-		return nil
-	}
-	if len(body.URLs)+len(body.Hashes) > 200 {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "一次最多检查 200 项"})
-		return nil
+	if len(req.Urls)+len(req.Hashes) > 200 {
+		return nil, blogErr(http.StatusBadRequest, "一次最多检查 200 项")
 	}
 	existing, missing, exHash, missHash := blogimg.ExistingURLsAndHashesForUser(
-		s.db, pd.UserID, body.URLs, body.Hashes,
+		s.db, pd.UserID, req.Urls, req.Hashes,
 	)
 	if existing == nil {
 		existing = []string{}
@@ -203,16 +198,15 @@ func (s *BlogService) handleBlogImagesCheck(ctx khttp.Context) error {
 	if missHash == nil {
 		missHash = []string{}
 	}
-	writeJSON(ctx.Response(), 200, map[string]interface{}{
-		"code": 0, "message": "success",
-		"data": map[string]interface{}{
-			"existing":       existing,
-			"missing":        missing,
-			"existingHashes": exHash,
-			"missingHashes":  missHash,
+	return &pb.BlogImagesCheckRes{
+		Code: 0, Message: "success",
+		Data: &pb.BlogImagesCheckData{
+			Existing:       existing,
+			Missing:        missing,
+			ExistingHashes: exHash,
+			MissingHashes:  missHash,
 		},
-	})
-	return nil
+	}, nil
 }
 
 // pendingImageUploadRequest returns the latest pending request for user, if any.
@@ -363,100 +357,72 @@ func reviewImageUploadRequest(db *gorm.DB, requestID, reviewerID uint, action, n
 }
 
 // handleImageUploadStatus GET /v1/user/blog/image-upload/status
-func (s *BlogService) handleImageUploadStatus(ctx khttp.Context) error {
+// ImageUploadStatus GET /v1/user/blog/image-upload/status
+func (s *BlogService) ImageUploadStatus(ctx context.Context, req *pb.ImageUploadStatusReq) (*pb.ImageUploadStatusRes, error) {
 	pd := auth.GetCurrentUser(ctx)
 	if pd == nil || pd.UserID == 0 {
-		writeJSON(ctx.Response(), 401, map[string]interface{}{"code": 1, "message": "请先登录"})
-		return nil
+		return nil, blogErr(http.StatusUnauthorized, "请先登录")
 	}
 	client := s.loadUpyunClient()
 	configured := client.Configured() && client.PublicBaseURL() != ""
 	authorized := s.userImageUploadEnabled(pd.UserID)
 	pending := s.pendingImageUploadRequest(pd.UserID)
-	data := map[string]interface{}{
-		"configured":     configured,
-		"authorized":     authorized,
-		"enabled":        blogimg.CanUpload(configured, authorized),
-		"pendingRequest": pending != nil,
+	data := &pb.ImageUploadStatusData{
+		Configured:     configured,
+		Authorized:     authorized,
+		Enabled:        blogimg.CanUpload(configured, authorized),
+		PendingRequest: pending != nil,
 	}
 	if pending != nil {
-		data["pendingRequestId"] = pending.ID
+		data.PendingRequestId = int64(pending.ID)
 	}
-	writeJSON(ctx.Response(), 200, map[string]interface{}{
-		"code": 0, "message": "success",
-		"data": data,
-	})
-	return nil
+	return &pb.ImageUploadStatusRes{Code: 0, Message: "success", Data: data}, nil
 }
 
 // handleImageUploadApply POST /v1/user/blog/image-upload/apply
 // body: { reason } — 作者申请图片上传权限，须填理由；通知站管审核。
-func (s *BlogService) handleImageUploadApply(ctx khttp.Context) error {
+// ImageUploadApply POST /v1/user/blog/image-upload/apply
+// body: { reason } — 作者申请图片上传权限，须填理由；通知站管审核。
+func (s *BlogService) ImageUploadApply(ctx context.Context, req *pb.ImageUploadApplyReq) (*pb.ImageUploadApplyRes, error) {
 	pd := auth.GetCurrentUser(ctx)
 	if pd == nil || pd.UserID == 0 {
-		writeJSON(ctx.Response(), 401, map[string]interface{}{"code": 1, "message": "请先登录"})
-		return nil
+		return nil, blogErr(http.StatusUnauthorized, "请先登录")
 	}
-	var body struct {
-		Reason string `json:"reason"`
-	}
-	if err := json.NewDecoder(ctx.Request().Body).Decode(&body); err != nil {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "参数错误"})
-		return nil
-	}
-	reason := strings.TrimSpace(body.Reason)
+	reason := strings.TrimSpace(req.Reason)
 	if utf8.RuneCountInString(reason) < minImageUploadReasonLen {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{
-			"code": 1, "message": fmt.Sprintf("请填写至少 %d 字的申请理由", minImageUploadReasonLen),
-		})
-		return nil
+		return nil, blogErr(http.StatusBadRequest, fmt.Sprintf("请填写至少 %d 字的申请理由", minImageUploadReasonLen))
 	}
 	if utf8.RuneCountInString(reason) > maxImageUploadReasonLen {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{
-			"code": 1, "message": fmt.Sprintf("申请理由最多 %d 字", maxImageUploadReasonLen),
-		})
-		return nil
+		return nil, blogErr(http.StatusBadRequest, fmt.Sprintf("申请理由最多 %d 字", maxImageUploadReasonLen))
 	}
 	if s.userImageUploadEnabled(pd.UserID) {
-		writeJSON(ctx.Response(), 200, map[string]interface{}{
-			"code": 0, "message": "你已开通图片上传",
-			"data": map[string]interface{}{
-				"pendingRequest": false,
-				"authorized":     true,
-			},
-		})
-		return nil
+		return &pb.ImageUploadApplyRes{
+			Code: 0, Message: "你已开通图片上传",
+			Data: &pb.ImageUploadApplyData{PendingRequest: false, Authorized: true},
+		}, nil
 	}
 	if existing := s.pendingImageUploadRequest(pd.UserID); existing != nil {
-		writeJSON(ctx.Response(), 200, map[string]interface{}{
-			"code": 0, "message": "申请已提交，请等待站点管理员审批",
-			"data": map[string]interface{}{
-				"id":             existing.ID,
-				"pendingRequest": true,
-				"status":         existing.Status,
-			},
-		})
-		return nil
+		return &pb.ImageUploadApplyRes{
+			Code: 0, Message: "申请已提交，请等待站点管理员审批",
+			Data: &pb.ImageUploadApplyData{Id: int64(existing.ID), PendingRequest: true, Status: existing.Status},
+		}, nil
 	}
 
 	row, created, err := createPendingImageUploadRequest(s.db, pd.UserID, reason)
 	if errors.Is(err, ErrImageUploadAlreadyEnabled) {
-		writeJSON(ctx.Response(), 200, map[string]interface{}{
-			"code": 0, "message": "你已开通图片上传",
-			"data": map[string]interface{}{"pendingRequest": false, "authorized": true},
-		})
-		return nil
+		return &pb.ImageUploadApplyRes{
+			Code: 0, Message: "你已开通图片上传",
+			Data: &pb.ImageUploadApplyData{PendingRequest: false, Authorized: true},
+		}, nil
 	}
 	if err != nil {
-		writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "提交失败，请稍后重试"})
-		return nil
+		return nil, blogErr(http.StatusInternalServerError, "提交失败，请稍后重试")
 	}
 	if !created {
-		writeJSON(ctx.Response(), 200, map[string]interface{}{
-			"code": 0, "message": "申请已提交，请等待站点管理员审批",
-			"data": map[string]interface{}{"id": row.ID, "pendingRequest": true, "status": row.Status},
-		})
-		return nil
+		return &pb.ImageUploadApplyRes{
+			Code: 0, Message: "申请已提交，请等待站点管理员审批",
+			Data: &pb.ImageUploadApplyData{Id: int64(row.ID), PendingRequest: true, Status: row.Status},
+		}, nil
 	}
 
 	var u model.User
@@ -491,73 +457,55 @@ func (s *BlogService) handleImageUploadApply(ctx khttp.Context) error {
 		SkipUserID: pd.UserID,
 	})
 
-	writeJSON(ctx.Response(), 200, map[string]interface{}{
-		"code": 0, "message": "已提交申请，请等待站点管理员审批",
-		"data": map[string]interface{}{
-			"id":             row.ID,
-			"pendingRequest": true,
-			"status":         row.Status,
-		},
-	})
-	return nil
+	return &pb.ImageUploadApplyRes{
+		Code: 0, Message: "已提交申请，请等待站点管理员审批",
+		Data: &pb.ImageUploadApplyData{Id: int64(row.ID), PendingRequest: true, Status: row.Status},
+	}, nil
 }
 
 // handleAdminImageUpload POST /v1/user/blog/admin/image-upload
 // body: { userId, enabled }
-func (s *BlogService) handleAdminImageUpload(ctx khttp.Context) error {
+// AdminImageUpload POST /v1/user/blog/admin/image-upload
+// body: { userId, enabled }
+func (s *BlogService) AdminImageUpload(ctx context.Context, req *pb.AdminImageUploadReq) (*pb.AdminImageUploadRes, error) {
 	pd := auth.GetCurrentUser(ctx)
 	if !auth.PayloadHasPerm(pd, rbac.PermSiteBlogBoard) && !auth.PayloadHasPerm(pd, rbac.PermContentBlogModerate) {
-		writeJSON(ctx.Response(), 403, map[string]interface{}{"code": 1, "message": "需要博客管理权限"})
-		return nil
+		return nil, blogErr(http.StatusForbidden, "需要博客管理权限")
 	}
-	var body struct {
-		UserID  uint `json:"userId"`
-		Enabled bool `json:"enabled"`
-	}
-	if err := json.NewDecoder(ctx.Request().Body).Decode(&body); err != nil || body.UserID == 0 {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "参数错误"})
-		return nil
+	if req.UserId == 0 {
+		return nil, blogErr(http.StatusBadRequest, "参数错误")
 	}
 	var u model.User
-	if err := s.db.Select("id").First(&u, body.UserID).Error; errors.Is(err, gorm.ErrRecordNotFound) {
-		writeJSON(ctx.Response(), 404, map[string]interface{}{"code": 1, "message": "用户不存在"})
-		return nil
+	if err := s.db.Select("id").First(&u, req.UserId).Error; errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, blogErr(http.StatusNotFound, "用户不存在")
 	} else if err != nil {
-		writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "加载用户失败"})
-		return nil
+		return nil, blogErr(http.StatusInternalServerError, "加载用户失败")
 	}
-	if _, err := setAdminImageUploadEnabled(s.db, body.UserID, pd.UserID, body.Enabled); err != nil {
-		writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "保存失败"})
-		return nil
+	if _, err := setAdminImageUploadEnabled(s.db, uint(req.UserId), pd.UserID, req.Enabled); err != nil {
+		return nil, blogErr(http.StatusInternalServerError, "保存失败")
 	}
-	writeJSON(ctx.Response(), 200, map[string]interface{}{
-		"code": 0, "message": "success",
-		"data": map[string]interface{}{
-			"userId":             body.UserID,
-			"imageUploadEnabled": body.Enabled,
-		},
-	})
-	return nil
+	return &pb.AdminImageUploadRes{
+		Code: 0, Message: "success",
+		Data: &pb.AdminImageUploadToggleData{UserId: req.UserId, ImageUploadEnabled: req.Enabled},
+	}, nil
 }
 
 // handleAdminImageUploadRequests GET /v1/user/blog/admin/image-upload/requests
-func (s *BlogService) handleAdminImageUploadRequests(ctx khttp.Context) error {
+// AdminImageUploadRequests GET /v1/user/blog/admin/image-upload/requests
+func (s *BlogService) AdminImageUploadRequests(ctx context.Context, req *pb.AdminImageUploadRequestsReq) (*pb.AdminImageUploadRequestsRes, error) {
 	imgBase := s.publicImageBase()
 	pd := auth.GetCurrentUser(ctx)
 	if !auth.PayloadHasPerm(pd, rbac.PermSiteBlogBoard) && !auth.PayloadHasPerm(pd, rbac.PermContentBlogModerate) {
-		writeJSON(ctx.Response(), 403, map[string]interface{}{"code": 1, "message": "需要博客管理权限"})
-		return nil
+		return nil, blogErr(http.StatusForbidden, "需要博客管理权限")
 	}
-	q := ctx.Request().URL.Query()
-	page, _ := strconv.Atoi(q.Get("page"))
-	pageSize, _ := strconv.Atoi(q.Get("pageSize"))
+	page, pageSize := int(req.Page), int(req.PageSize)
 	if page < 1 {
 		page = 1
 	}
 	if pageSize < 1 || pageSize > 50 {
 		pageSize = 20
 	}
-	status := strings.TrimSpace(q.Get("status"))
+	status := strings.TrimSpace(req.Status)
 	if status == "" {
 		status = model.BlogImageUploadPending
 	}
@@ -600,84 +548,67 @@ func (s *BlogService) handleAdminImageUploadRequests(ctx khttp.Context) error {
 		Offset((page - 1) * pageSize).Limit(pageSize).
 		Scan(&rows).Error
 	if err != nil {
-		writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "加载失败"})
-		return nil
+		return nil, blogErr(http.StatusInternalServerError, "加载失败")
 	}
-	list := make([]map[string]interface{}, 0, len(rows))
+	list := make([]*pb.ImageUploadRequestItem, 0, len(rows))
 	for _, r := range rows {
-		item := map[string]interface{}{
-			"id":        r.ID,
-			"userId":    r.UserID,
-			"username":  r.Username,
-			"name":      r.Name,
-			"avatar":    expandAvatarBase(imgBase, r.Avatar),
-			"reason":    r.Reason,
-			"status":    r.Status,
-			"createdAt": r.CreatedAt.Unix(),
+		item := &pb.ImageUploadRequestItem{
+			Id:        int64(r.ID),
+			UserId:    int64(r.UserID),
+			Username:  r.Username,
+			Name:      r.Name,
+			Avatar:    expandAvatarBase(imgBase, r.Avatar),
+			Reason:    r.Reason,
+			Status:    r.Status,
+			CreatedAt: r.CreatedAt.Unix(),
 		}
 		if r.ReviewNote != "" {
-			item["reviewNote"] = r.ReviewNote
+			item.ReviewNote = r.ReviewNote
 		}
 		if r.ReviewerID > 0 {
-			item["reviewerId"] = r.ReviewerID
+			item.ReviewerId = int64(r.ReviewerID)
 		}
 		if r.ReviewedAt != nil {
-			item["reviewedAt"] = r.ReviewedAt.Unix()
+			item.ReviewedAt = r.ReviewedAt.Unix()
 		}
 		list = append(list, item)
 	}
-	writeJSON(ctx.Response(), 200, map[string]interface{}{
-		"code": 0, "message": "success",
-		"data": map[string]interface{}{
-			"list":     list,
-			"total":    total,
-			"page":     page,
-			"pageSize": pageSize,
-		},
-	})
-	return nil
+	return &pb.AdminImageUploadRequestsRes{
+		Code: 0, Message: "success",
+		Data: &pb.ImageUploadRequestListData{List: list, Total: total, Page: int64(page), PageSize: int64(pageSize)},
+	}, nil
 }
 
 // handleAdminImageUploadReview POST /v1/user/blog/admin/image-upload/review
 // body: { id, action: "approve"|"reject", note? }
-func (s *BlogService) handleAdminImageUploadReview(ctx khttp.Context) error {
+// AdminImageUploadReview POST /v1/user/blog/admin/image-upload/review
+// body: { id, action: "approve"|"reject", note? }
+func (s *BlogService) AdminImageUploadReview(ctx context.Context, req *pb.AdminImageUploadReviewReq) (*pb.AdminImageUploadReviewRes, error) {
 	pd := auth.GetCurrentUser(ctx)
 	if !auth.PayloadHasPerm(pd, rbac.PermSiteBlogBoard) && !auth.PayloadHasPerm(pd, rbac.PermContentBlogModerate) {
-		writeJSON(ctx.Response(), 403, map[string]interface{}{"code": 1, "message": "需要博客管理权限"})
-		return nil
+		return nil, blogErr(http.StatusForbidden, "需要博客管理权限")
 	}
-	var body struct {
-		ID     uint   `json:"id"`
-		Action string `json:"action"`
-		Note   string `json:"note"`
+	if req.Id == 0 {
+		return nil, blogErr(http.StatusBadRequest, "参数错误")
 	}
-	if err := json.NewDecoder(ctx.Request().Body).Decode(&body); err != nil || body.ID == 0 {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "参数错误"})
-		return nil
-	}
-	action := strings.TrimSpace(strings.ToLower(body.Action))
+	action := strings.TrimSpace(strings.ToLower(req.Action))
 	if action != "approve" && action != "reject" {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "action 须为 approve 或 reject"})
-		return nil
+		return nil, blogErr(http.StatusBadRequest, "action 须为 approve 或 reject")
 	}
-	note := strings.TrimSpace(body.Note)
+	note := strings.TrimSpace(req.Note)
 	if utf8.RuneCountInString(note) > 500 {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "备注最多 500 字"})
-		return nil
+		return nil, blogErr(http.StatusBadRequest, "备注最多 500 字")
 	}
 
-	row, newStatus, err := reviewImageUploadRequest(s.db, body.ID, pd.UserID, action, note)
+	row, newStatus, err := reviewImageUploadRequest(s.db, uint(req.Id), pd.UserID, action, note)
 	if errors.Is(err, ErrImageUploadRequestNotFound) {
-		writeJSON(ctx.Response(), 404, map[string]interface{}{"code": 1, "message": "申请不存在"})
-		return nil
+		return nil, blogErr(http.StatusNotFound, "申请不存在")
 	}
 	if errors.Is(err, ErrImageUploadAlreadyReviewed) {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "该申请已处理"})
-		return nil
+		return nil, blogErr(http.StatusBadRequest, "该申请已处理")
 	}
 	if err != nil {
-		writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "保存失败"})
-		return nil
+		return nil, blogErr(http.StatusInternalServerError, "保存失败")
 	}
 
 	if action == "approve" {
@@ -710,13 +641,9 @@ func (s *BlogService) handleAdminImageUploadReview(ctx khttp.Context) error {
 	if action == "reject" {
 		msg = "已驳回"
 	}
-	writeJSON(ctx.Response(), 200, map[string]interface{}{
-		"code": 0, "message": msg,
-		"data": map[string]interface{}{
-			"id":     row.ID,
-			"status": newStatus,
-			"userId": row.UserID,
-		},
-	})
-	return nil
+	return &pb.AdminImageUploadReviewRes{
+		Code: 0, Message: msg,
+		Data: &pb.AdminImageUploadReviewData{Id: int64(row.ID), Status: newStatus, UserId: int64(row.UserID)},
+	}, nil
 }
+

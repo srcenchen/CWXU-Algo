@@ -25,6 +25,7 @@ const (
 	Auth_SendCode_FullMethodName       = "/api.user.v1.Auth/SendCode"
 	Auth_ResetPassword_FullMethodName  = "/api.user.v1.Auth/ResetPassword"
 	Auth_ChangePassword_FullMethodName = "/api.user.v1.Auth/ChangePassword"
+	Auth_Logout_FullMethodName         = "/api.user.v1.Auth/Logout"
 )
 
 // AuthClient is the client API for Auth service.
@@ -43,6 +44,8 @@ type AuthClient interface {
 	ResetPassword(ctx context.Context, in *ResetPasswordReq, opts ...grpc.CallOption) (*ResetPasswordRes, error)
 	// 登录态修改密码（旧密码校验）
 	ChangePassword(ctx context.Context, in *ChangePasswordReq, opts ...grpc.CallOption) (*ChangePasswordRes, error)
+	// 退出登录（清理 session cookie；白名单免 JWT）
+	Logout(ctx context.Context, in *LogoutReq, opts ...grpc.CallOption) (*LogoutRes, error)
 }
 
 type authClient struct {
@@ -113,6 +116,16 @@ func (c *authClient) ChangePassword(ctx context.Context, in *ChangePasswordReq, 
 	return out, nil
 }
 
+func (c *authClient) Logout(ctx context.Context, in *LogoutReq, opts ...grpc.CallOption) (*LogoutRes, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(LogoutRes)
+	err := c.cc.Invoke(ctx, Auth_Logout_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // AuthServer is the server API for Auth service.
 // All implementations must embed UnimplementedAuthServer
 // for forward compatibility.
@@ -129,6 +142,8 @@ type AuthServer interface {
 	ResetPassword(context.Context, *ResetPasswordReq) (*ResetPasswordRes, error)
 	// 登录态修改密码（旧密码校验）
 	ChangePassword(context.Context, *ChangePasswordReq) (*ChangePasswordRes, error)
+	// 退出登录（清理 session cookie；白名单免 JWT）
+	Logout(context.Context, *LogoutReq) (*LogoutRes, error)
 	mustEmbedUnimplementedAuthServer()
 }
 
@@ -156,6 +171,9 @@ func (UnimplementedAuthServer) ResetPassword(context.Context, *ResetPasswordReq)
 }
 func (UnimplementedAuthServer) ChangePassword(context.Context, *ChangePasswordReq) (*ChangePasswordRes, error) {
 	return nil, status.Error(codes.Unimplemented, "method ChangePassword not implemented")
+}
+func (UnimplementedAuthServer) Logout(context.Context, *LogoutReq) (*LogoutRes, error) {
+	return nil, status.Error(codes.Unimplemented, "method Logout not implemented")
 }
 func (UnimplementedAuthServer) mustEmbedUnimplementedAuthServer() {}
 func (UnimplementedAuthServer) testEmbeddedByValue()              {}
@@ -286,6 +304,24 @@ func _Auth_ChangePassword_Handler(srv interface{}, ctx context.Context, dec func
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Auth_Logout_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(LogoutReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AuthServer).Logout(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Auth_Logout_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AuthServer).Logout(ctx, req.(*LogoutReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Auth_ServiceDesc is the grpc.ServiceDesc for Auth service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -316,6 +352,10 @@ var Auth_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ChangePassword",
 			Handler:    _Auth_ChangePassword_Handler,
+		},
+		{
+			MethodName: "Logout",
+			Handler:    _Auth_Logout_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

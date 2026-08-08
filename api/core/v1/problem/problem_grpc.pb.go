@@ -43,6 +43,7 @@ const (
 	Problem_ListEditRequests_FullMethodName     = "/api.core.v1.problem.Problem/ListEditRequests"
 	Problem_ReviewEdit_FullMethodName           = "/api.core.v1.problem.Problem/ReviewEdit"
 	Problem_MyPendingEdit_FullMethodName        = "/api.core.v1.problem.Problem/MyPendingEdit"
+	Problem_RepairQOJTitles_FullMethodName      = "/api.core.v1.problem.Problem/RepairQOJTitles"
 )
 
 // ProblemClient is the client API for Problem service.
@@ -91,6 +92,8 @@ type ProblemClient interface {
 	ReviewEdit(ctx context.Context, in *ReviewProblemEditReq, opts ...grpc.CallOption) (*ReviewProblemEditRes, error)
 	// 当前用户对该题的待审申请（详情页提示）
 	MyPendingEdit(ctx context.Context, in *MyPendingEditReq, opts ...grpc.CallOption) (*MyPendingEditRes, error)
+	// 全量修复 QOJ 题目标题被识别为「QOJ.ac」的脏数据（后台任务）
+	RepairQOJTitles(ctx context.Context, in *RepairQOJTitlesReq, opts ...grpc.CallOption) (*RepairQOJTitlesRes, error)
 }
 
 type problemClient struct {
@@ -341,6 +344,16 @@ func (c *problemClient) MyPendingEdit(ctx context.Context, in *MyPendingEditReq,
 	return out, nil
 }
 
+func (c *problemClient) RepairQOJTitles(ctx context.Context, in *RepairQOJTitlesReq, opts ...grpc.CallOption) (*RepairQOJTitlesRes, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RepairQOJTitlesRes)
+	err := c.cc.Invoke(ctx, Problem_RepairQOJTitles_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ProblemServer is the server API for Problem service.
 // All implementations must embed UnimplementedProblemServer
 // for forward compatibility.
@@ -387,6 +400,8 @@ type ProblemServer interface {
 	ReviewEdit(context.Context, *ReviewProblemEditReq) (*ReviewProblemEditRes, error)
 	// 当前用户对该题的待审申请（详情页提示）
 	MyPendingEdit(context.Context, *MyPendingEditReq) (*MyPendingEditRes, error)
+	// 全量修复 QOJ 题目标题被识别为「QOJ.ac」的脏数据（后台任务）
+	RepairQOJTitles(context.Context, *RepairQOJTitlesReq) (*RepairQOJTitlesRes, error)
 	mustEmbedUnimplementedProblemServer()
 }
 
@@ -468,6 +483,9 @@ func (UnimplementedProblemServer) ReviewEdit(context.Context, *ReviewProblemEdit
 }
 func (UnimplementedProblemServer) MyPendingEdit(context.Context, *MyPendingEditReq) (*MyPendingEditRes, error) {
 	return nil, status.Error(codes.Unimplemented, "method MyPendingEdit not implemented")
+}
+func (UnimplementedProblemServer) RepairQOJTitles(context.Context, *RepairQOJTitlesReq) (*RepairQOJTitlesRes, error) {
+	return nil, status.Error(codes.Unimplemented, "method RepairQOJTitles not implemented")
 }
 func (UnimplementedProblemServer) mustEmbedUnimplementedProblemServer() {}
 func (UnimplementedProblemServer) testEmbeddedByValue()                 {}
@@ -922,6 +940,24 @@ func _Problem_MyPendingEdit_Handler(srv interface{}, ctx context.Context, dec fu
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Problem_RepairQOJTitles_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RepairQOJTitlesReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ProblemServer).RepairQOJTitles(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Problem_RepairQOJTitles_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ProblemServer).RepairQOJTitles(ctx, req.(*RepairQOJTitlesReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Problem_ServiceDesc is the grpc.ServiceDesc for Problem service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -1024,6 +1060,10 @@ var Problem_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "MyPendingEdit",
 			Handler:    _Problem_MyPendingEdit_Handler,
+		},
+		{
+			MethodName: "RepairQOJTitles",
+			Handler:    _Problem_RepairQOJTitles_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

@@ -1,0 +1,108 @@
+syntax = "proto3";
+
+package api.user.v1.paste;
+
+import "google/api/annotations.proto";
+import "google/protobuf/wrappers.proto";
+option go_package = "cwxu-algo/api/user/v1/paste;paste";
+option java_multiple_files = true;
+option java_package = "api.user.v1.paste";
+
+// Paste 文本/代码粘贴板
+// 实现位于 user/internal/service/paste.go（由手写 HTTP 路由迁移而来）。
+// 路径前缀：/v1/user/paste/*
+service Paste {
+  rpc Create (CreateReq) returns (CreateRes) {
+    option (google.api.http) = { post: "/v1/user/paste/create" body: "*" };
+  }
+  // 公开查看（JWT 白名单）
+  rpc Get (GetReq) returns (GetRes) {
+    option (google.api.http) = { get: "/v1/user/paste/get" };
+  }
+  rpc Mine (MineReq) returns (MineRes) {
+    option (google.api.http) = { get: "/v1/user/paste/mine" };
+  }
+  rpc Delete (DeleteReq) returns (DeleteRes) {
+    option (google.api.http) = { post: "/v1/user/paste/delete" body: "*" };
+  }
+  // 站管 / 内容治理：查看当前全部未过期粘贴内容（事后审查）
+  rpc AdminList (AdminListReq) returns (AdminListRes) {
+    option (google.api.http) = { get: "/v1/user/paste/admin-list" };
+  }
+}
+
+message PasteInfo {
+  int64 id = 1;
+  string slug = 2;
+  string title = 3;
+  string language = 4;
+  int64 userId = 5;
+  int64 createdAt = 6;
+  // 可空：null 表示永不过期；否则 unix 秒
+  google.protobuf.Int64Value expireAt = 7;
+  // 仅 create/get/admin-list 返回正文；mine 不含
+  string content = 8;
+}
+
+message CreateReq {
+  string title = 1;
+  string content = 2;
+  string language = 3;
+  // expire: never | 1h | 1d | 1w | 1m | 1y
+  string expire = 4;
+}
+message CreateRes {
+  int32 code = 1; // 0 成功
+  string message = 2;
+  PasteInfo data = 3;
+}
+
+message GetReq {
+  string slug = 1;
+}
+message GetRes {
+  int32 code = 1;
+  string message = 2;
+  PasteInfo data = 3;
+}
+
+message MineReq {}
+message MineRes {
+  int32 code = 1;
+  string message = 2;
+  repeated PasteInfo list = 3;
+}
+
+message DeleteReq {
+  string slug = 1;
+}
+message DeleteRes {
+  int32 code = 1;
+  string message = 2;
+}
+
+message AdminListReq {
+  int64 page = 1;
+  int64 pageSize = 2;
+}
+message AdminPasteInfo {
+  int64 id = 1;
+  string slug = 2;
+  string title = 3;
+  string language = 4;
+  int64 userId = 5;
+  int64 createdAt = 6;
+  google.protobuf.Int64Value expireAt = 7;
+  string content = 8;
+  // 创建者昵称/用户名（LEFT JOIN users）
+  string username = 9;
+  string name = 10;
+}
+message AdminListRes {
+  int32 code = 1;
+  string message = 2;
+  repeated AdminPasteInfo list = 3;
+  int32 total = 4;
+  int32 page = 5;
+  int32 pageSize = 6;
+}

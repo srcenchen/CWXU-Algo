@@ -13,6 +13,7 @@ import (
 	"cwxu-algo/app/common/utils/auth"
 	"cwxu-algo/app/user/internal/data/model"
 
+	blogpb "cwxu-algo/api/user/v1/blog"
 	khttp "github.com/go-kratos/kratos/v2/transport/http"
 	"github.com/golang-jwt/jwt/v5"
 	"gorm.io/driver/sqlite"
@@ -79,7 +80,7 @@ func adminBlogImageRequest(server *khttp.Server, method, path, token string, bod
 func TestAdminBlogImagesRequiresSiteAdmin(t *testing.T) {
 	db := adminBlogImageServiceDB(t)
 	server := khttp.NewServer()
-	RegisterBlogRoutes(server, &BlogService{db: db})
+	blogpb.RegisterBlogHTTPServer(server, &BlogService{db: db})
 
 	unauthenticated := adminBlogImageRequest(server, http.MethodGet, "/v1/user/blog/admin/images?mode=all", "", "")
 	if unauthenticated.Code != http.StatusUnauthorized {
@@ -106,7 +107,7 @@ func TestAdminBlogImagesRequiresSiteAdmin(t *testing.T) {
 
 func TestAdminBlogImageRoutesReplaceAuthorCleanupRoutes(t *testing.T) {
 	server := khttp.NewServer()
-	RegisterBlogRoutes(server, &BlogService{})
+	blogpb.RegisterBlogHTTPServer(server, &BlogService{})
 	routes := map[string]bool{}
 	if err := server.WalkHandle(func(method, path string, _ http.HandlerFunc) {
 		routes[method+" "+path] = true
@@ -148,7 +149,7 @@ func TestAdminBlogImageDeleteAuthAndConflictMapping(t *testing.T) {
 		t.Fatal(err)
 	}
 	server := khttp.NewServer()
-	RegisterBlogRoutes(server, &BlogService{db: db})
+	blogpb.RegisterBlogHTTPServer(server, &BlogService{db: db})
 
 	for _, path := range []string{
 		"/v1/user/blog/admin/images/delete",

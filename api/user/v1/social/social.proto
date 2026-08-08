@@ -1,0 +1,225 @@
+syntax = "proto3";
+
+package api.user.v1.social;
+
+import "google/api/annotations.proto";
+option go_package = "cwxu-algo/api/user/v1/social;social";
+option java_multiple_files = true;
+option java_package = "api.user.v1.social";
+
+// Social 社交与隐私服务（关注 / 粉丝 / 搜索 / 隐私设置）
+// 实现位于 user/internal/service/social.go。
+// 路径前缀：/v1/user/social/* 与 /v1/user/privacy/*
+//
+// 公开读（JWT 可选）：following / followers / counts / relation / search / identity / privacy/status
+// 需登录：follow / unfollow / privacy/get / privacy/update
+service Social {
+  // 关注用户（需登录）
+  rpc Follow (FollowReq) returns (FollowRes) {
+    option (google.api.http) = {
+      post: "/v1/user/social/follow",
+      body: "*"
+    };
+  }
+  // 取消关注（需登录）
+  rpc Unfollow (UnfollowReq) returns (UnfollowRes) {
+    option (google.api.http) = {
+      post: "/v1/user/social/unfollow",
+      body: "*"
+    };
+  }
+  // 关注列表（公开读；userId 缺省为当前登录用户）
+  rpc Following (FollowingReq) returns (FollowingRes) {
+    option (google.api.http) = {
+      get: "/v1/user/social/following"
+    };
+  }
+  // 粉丝列表（公开读；userId 缺省为当前登录用户）
+  rpc Followers (FollowersReq) returns (FollowersRes) {
+    option (google.api.http) = {
+      get: "/v1/user/social/followers"
+    };
+  }
+  // 关注 / 粉丝计数（公开读）
+  rpc Counts (CountsReq) returns (CountsRes) {
+    option (google.api.http) = {
+      get: "/v1/user/social/counts"
+    };
+  }
+  // 与目标用户的关系（公开读；JWT 可选）
+  rpc Relation (RelationReq) returns (RelationRes) {
+    option (google.api.http) = {
+      get: "/v1/user/social/relation"
+    };
+  }
+  // 用户搜索（公共域；公开读，JWT 可选）
+  rpc Search (SearchReq) returns (SearchRes) {
+    option (google.api.http) = {
+      get: "/v1/user/social/search"
+    };
+  }
+  // 单用户域感知展示（资料页等复用；公开读，JWT 可选）
+  rpc Identity (IdentityReq) returns (IdentityRes) {
+    option (google.api.http) = {
+      get: "/v1/user/social/identity"
+    };
+  }
+  // 读取隐私配置（需登录）
+  rpc PrivacyGet (PrivacyGetReq) returns (PrivacyGetRes) {
+    option (google.api.http) = {
+      get: "/v1/user/privacy/get"
+    };
+  }
+  // 更新隐私配置（需登录；未传字段保持默认开启）
+  rpc PrivacyUpdate (PrivacyUpdateReq) returns (PrivacyUpdateRes) {
+    option (google.api.http) = {
+      post: "/v1/user/privacy/update",
+      body: "*"
+    };
+  }
+  // 隐私是否已配置（公开读；未登录视为已配置不弹窗）
+  rpc PrivacyStatus (PrivacyStatusReq) returns (PrivacyStatusRes) {
+    option (google.api.http) = {
+      get: "/v1/user/privacy/status"
+    };
+  }
+}
+
+// 关注
+message FollowReq {
+  int64 userId = 1;
+}
+message FollowRes {
+  bool success = 1;
+  string message = 2;
+}
+
+// 取消关注
+message UnfollowReq {
+  int64 userId = 1;
+}
+message UnfollowRes {
+  bool success = 1;
+  string message = 2;
+}
+
+// 关注列表
+message FollowingReq {
+  int64 userId = 1; // 缺省为当前登录用户
+  int32 page = 2;
+  int32 pageSize = 3;
+}
+message FollowingRes {
+  bool success = 1;
+  string message = 2;
+  repeated SocialUser list = 3;
+  int64 total = 4;
+}
+
+// 粉丝列表
+message FollowersReq {
+  int64 userId = 1; // 缺省为当前登录用户
+  int32 page = 2;
+  int32 pageSize = 3;
+}
+message FollowersRes {
+  bool success = 1;
+  string message = 2;
+  repeated SocialUser list = 3;
+  int64 total = 4;
+}
+
+// 关注 / 粉丝计数
+message CountsReq {
+  int64 userId = 1; // 缺省为当前登录用户
+}
+message CountsRes {
+  bool success = 1;
+  string message = 2;
+  int64 followingCount = 3;
+  int64 followerCount = 4;
+}
+
+// 与目标用户的关系
+message RelationReq {
+  int64 userId = 1; // 缺省为当前登录用户
+}
+message RelationRes {
+  bool success = 1;
+  string message = 2;
+  bool isFollowing = 3;
+  bool isFollower = 4;
+}
+
+// 用户搜索
+message SearchReq {
+  string q = 1;
+  int32 page = 2;
+  int32 pageSize = 3;
+}
+message SearchRes {
+  bool success = 1;
+  string message = 2;
+  repeated SocialUser list = 3;
+  int64 total = 4;
+}
+
+// 单用户域感知展示
+message IdentityReq {
+  int64 userId = 1; // 缺省为当前登录用户
+}
+message IdentityRes {
+  bool success = 1;
+  string message = 2;
+  SocialUser data = 3;
+}
+
+// 读取隐私配置
+message PrivacyGetReq {}
+message PrivacyGetRes {
+  bool success = 1;
+  string message = 2;
+  bool privacyConfigured = 3;
+  bool allowPublicProfile = 4;
+  bool allowPublicFeed = 5;
+}
+
+// 更新隐私配置（未传字段保持默认开启）
+message PrivacyUpdateReq {
+  optional bool allowPublicProfile = 1;
+  optional bool allowPublicFeed = 2;
+}
+message PrivacyUpdateRes {
+  bool success = 1;
+  string message = 2;
+  bool privacyConfigured = 3;
+  bool allowPublicProfile = 4;
+  bool allowPublicFeed = 5;
+}
+
+// 隐私状态（未登录视为已配置，不弹窗）
+message PrivacyStatusReq {}
+message PrivacyStatusRes {
+  bool success = 1;
+  string message = 2;
+  bool privacyConfigured = 3;
+}
+
+// 社交用户项（域感知展示）
+message SocialUser {
+  int64 userId = 1;
+  string username = 2;
+  string name = 3;
+  string avatar = 4;
+  bool inCurrentOrg = 5;
+  repeated SharedOrg sharedOrgs = 6;
+  bool isSiteAdmin = 7;
+  repeated string siteRoles = 8;
+}
+
+// 双方共属的其他组织内称呼（隐私边界：观众必须同属该组织）
+message SharedOrg {
+  int64 orgId = 1;
+  string orgName = 2;
+  string displayName = 3;
+}

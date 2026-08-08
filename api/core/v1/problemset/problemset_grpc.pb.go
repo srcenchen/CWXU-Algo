@@ -30,6 +30,10 @@ const (
 	Problemset_Add_FullMethodName       = "/api.core.v1.problemset.Problemset/Add"
 	Problemset_Remove_FullMethodName    = "/api.core.v1.problemset.Problemset/Remove"
 	Problemset_Like_FullMethodName      = "/api.core.v1.problemset.Problemset/Like"
+	Problemset_AddManual_FullMethodName = "/api.core.v1.problemset.Problemset/AddManual"
+	Problemset_Reorder_FullMethodName   = "/api.core.v1.problemset.Problemset/Reorder"
+	Problemset_Favorite_FullMethodName  = "/api.core.v1.problemset.Problemset/Favorite"
+	Problemset_Favorites_FullMethodName = "/api.core.v1.problemset.Problemset/Favorites"
 )
 
 // ProblemsetClient is the client API for Problemset service.
@@ -54,6 +58,10 @@ type ProblemsetClient interface {
 	Add(ctx context.Context, in *AddReq, opts ...grpc.CallOption) (*AddRes, error)
 	Remove(ctx context.Context, in *RemoveReq, opts ...grpc.CallOption) (*RemoveRes, error)
 	Like(ctx context.Context, in *LikeReq, opts ...grpc.CallOption) (*LikeRes, error)
+	AddManual(ctx context.Context, in *AddManualReq, opts ...grpc.CallOption) (*AddManualRes, error)
+	Reorder(ctx context.Context, in *ReorderReq, opts ...grpc.CallOption) (*ReorderRes, error)
+	Favorite(ctx context.Context, in *FavoriteReq, opts ...grpc.CallOption) (*FavoriteRes, error)
+	Favorites(ctx context.Context, in *FavoritesReq, opts ...grpc.CallOption) (*FavoritesRes, error)
 }
 
 type problemsetClient struct {
@@ -174,6 +182,46 @@ func (c *problemsetClient) Like(ctx context.Context, in *LikeReq, opts ...grpc.C
 	return out, nil
 }
 
+func (c *problemsetClient) AddManual(ctx context.Context, in *AddManualReq, opts ...grpc.CallOption) (*AddManualRes, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AddManualRes)
+	err := c.cc.Invoke(ctx, Problemset_AddManual_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *problemsetClient) Reorder(ctx context.Context, in *ReorderReq, opts ...grpc.CallOption) (*ReorderRes, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ReorderRes)
+	err := c.cc.Invoke(ctx, Problemset_Reorder_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *problemsetClient) Favorite(ctx context.Context, in *FavoriteReq, opts ...grpc.CallOption) (*FavoriteRes, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(FavoriteRes)
+	err := c.cc.Invoke(ctx, Problemset_Favorite_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *problemsetClient) Favorites(ctx context.Context, in *FavoritesReq, opts ...grpc.CallOption) (*FavoritesRes, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(FavoritesRes)
+	err := c.cc.Invoke(ctx, Problemset_Favorites_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ProblemsetServer is the server API for Problemset service.
 // All implementations must embed UnimplementedProblemsetServer
 // for forward compatibility.
@@ -196,6 +244,10 @@ type ProblemsetServer interface {
 	Add(context.Context, *AddReq) (*AddRes, error)
 	Remove(context.Context, *RemoveReq) (*RemoveRes, error)
 	Like(context.Context, *LikeReq) (*LikeRes, error)
+	AddManual(context.Context, *AddManualReq) (*AddManualRes, error)
+	Reorder(context.Context, *ReorderReq) (*ReorderRes, error)
+	Favorite(context.Context, *FavoriteReq) (*FavoriteRes, error)
+	Favorites(context.Context, *FavoritesReq) (*FavoritesRes, error)
 	mustEmbedUnimplementedProblemsetServer()
 }
 
@@ -238,6 +290,18 @@ func (UnimplementedProblemsetServer) Remove(context.Context, *RemoveReq) (*Remov
 }
 func (UnimplementedProblemsetServer) Like(context.Context, *LikeReq) (*LikeRes, error) {
 	return nil, status.Error(codes.Unimplemented, "method Like not implemented")
+}
+func (UnimplementedProblemsetServer) AddManual(context.Context, *AddManualReq) (*AddManualRes, error) {
+	return nil, status.Error(codes.Unimplemented, "method AddManual not implemented")
+}
+func (UnimplementedProblemsetServer) Reorder(context.Context, *ReorderReq) (*ReorderRes, error) {
+	return nil, status.Error(codes.Unimplemented, "method Reorder not implemented")
+}
+func (UnimplementedProblemsetServer) Favorite(context.Context, *FavoriteReq) (*FavoriteRes, error) {
+	return nil, status.Error(codes.Unimplemented, "method Favorite not implemented")
+}
+func (UnimplementedProblemsetServer) Favorites(context.Context, *FavoritesReq) (*FavoritesRes, error) {
+	return nil, status.Error(codes.Unimplemented, "method Favorites not implemented")
 }
 func (UnimplementedProblemsetServer) mustEmbedUnimplementedProblemsetServer() {}
 func (UnimplementedProblemsetServer) testEmbeddedByValue()                    {}
@@ -458,6 +522,78 @@ func _Problemset_Like_Handler(srv interface{}, ctx context.Context, dec func(int
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Problemset_AddManual_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AddManualReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ProblemsetServer).AddManual(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Problemset_AddManual_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ProblemsetServer).AddManual(ctx, req.(*AddManualReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Problemset_Reorder_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ReorderReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ProblemsetServer).Reorder(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Problemset_Reorder_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ProblemsetServer).Reorder(ctx, req.(*ReorderReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Problemset_Favorite_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(FavoriteReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ProblemsetServer).Favorite(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Problemset_Favorite_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ProblemsetServer).Favorite(ctx, req.(*FavoriteReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Problemset_Favorites_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(FavoritesReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ProblemsetServer).Favorites(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Problemset_Favorites_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ProblemsetServer).Favorites(ctx, req.(*FavoritesReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Problemset_ServiceDesc is the grpc.ServiceDesc for Problemset service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -508,6 +644,22 @@ var Problemset_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Like",
 			Handler:    _Problemset_Like_Handler,
+		},
+		{
+			MethodName: "AddManual",
+			Handler:    _Problemset_AddManual_Handler,
+		},
+		{
+			MethodName: "Reorder",
+			Handler:    _Problemset_Reorder_Handler,
+		},
+		{
+			MethodName: "Favorite",
+			Handler:    _Problemset_Favorite_Handler,
+		},
+		{
+			MethodName: "Favorites",
+			Handler:    _Problemset_Favorites_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

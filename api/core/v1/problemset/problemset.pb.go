@@ -156,25 +156,28 @@ func (x *ProblemsetItem) GetTags() []string {
 }
 
 type ProblemsetInfo struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            int64                  `protobuf:"varint,1,opt,name=id,proto3" json:"id,omitempty"`
-	OwnerId       int64                  `protobuf:"varint,2,opt,name=ownerId,proto3" json:"ownerId,omitempty"`
-	OwnerName     string                 `protobuf:"bytes,3,opt,name=ownerName,proto3" json:"ownerName,omitempty"`
-	Title         string                 `protobuf:"bytes,4,opt,name=title,proto3" json:"title,omitempty"`
-	Description   string                 `protobuf:"bytes,5,opt,name=description,proto3" json:"description,omitempty"`
-	Kind          string                 `protobuf:"bytes,6,opt,name=kind,proto3" json:"kind,omitempty"`             // favorites|todo|custom
-	Visibility    string                 `protobuf:"bytes,7,opt,name=visibility,proto3" json:"visibility,omitempty"` // private|password|public
-	LikeCount     int32                  `protobuf:"varint,8,opt,name=likeCount,proto3" json:"likeCount,omitempty"`
-	ItemCount     int32                  `protobuf:"varint,9,opt,name=itemCount,proto3" json:"itemCount,omitempty"`
-	Liked         bool                   `protobuf:"varint,10,opt,name=liked,proto3" json:"liked,omitempty"`
-	IsOwner       bool                   `protobuf:"varint,11,opt,name=isOwner,proto3" json:"isOwner,omitempty"`
-	IsSystem      bool                   `protobuf:"varint,12,opt,name=isSystem,proto3" json:"isSystem,omitempty"`
-	CreatedAt     int64                  `protobuf:"varint,13,opt,name=createdAt,proto3" json:"createdAt,omitempty"`
-	UpdatedAt     int64                  `protobuf:"varint,14,opt,name=updatedAt,proto3" json:"updatedAt,omitempty"`
-	Items         []*ProblemsetItem      `protobuf:"bytes,15,rep,name=items,proto3" json:"items,omitempty"`
-	Locked        bool                   `protobuf:"varint,16,opt,name=locked,proto3" json:"locked,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state       protoimpl.MessageState `protogen:"open.v1"`
+	Id          int64                  `protobuf:"varint,1,opt,name=id,proto3" json:"id,omitempty"`
+	OwnerId     int64                  `protobuf:"varint,2,opt,name=ownerId,proto3" json:"ownerId,omitempty"`
+	OwnerName   string                 `protobuf:"bytes,3,opt,name=ownerName,proto3" json:"ownerName,omitempty"`
+	Title       string                 `protobuf:"bytes,4,opt,name=title,proto3" json:"title,omitempty"`
+	Description string                 `protobuf:"bytes,5,opt,name=description,proto3" json:"description,omitempty"`
+	Kind        string                 `protobuf:"bytes,6,opt,name=kind,proto3" json:"kind,omitempty"`             // favorites|todo|custom
+	Visibility  string                 `protobuf:"bytes,7,opt,name=visibility,proto3" json:"visibility,omitempty"` // private|password|public
+	LikeCount   int32                  `protobuf:"varint,8,opt,name=likeCount,proto3" json:"likeCount,omitempty"`
+	ItemCount   int32                  `protobuf:"varint,9,opt,name=itemCount,proto3" json:"itemCount,omitempty"`
+	Liked       bool                   `protobuf:"varint,10,opt,name=liked,proto3" json:"liked,omitempty"`
+	IsOwner     bool                   `protobuf:"varint,11,opt,name=isOwner,proto3" json:"isOwner,omitempty"`
+	IsSystem    bool                   `protobuf:"varint,12,opt,name=isSystem,proto3" json:"isSystem,omitempty"`
+	CreatedAt   int64                  `protobuf:"varint,13,opt,name=createdAt,proto3" json:"createdAt,omitempty"`
+	UpdatedAt   int64                  `protobuf:"varint,14,opt,name=updatedAt,proto3" json:"updatedAt,omitempty"`
+	Items       []*ProblemsetItem      `protobuf:"bytes,15,rep,name=items,proto3" json:"items,omitempty"`
+	Locked      bool                   `protobuf:"varint,16,opt,name=locked,proto3" json:"locked,omitempty"`
+	Favorited   bool                   `protobuf:"varint,17,opt,name=favorited,proto3" json:"favorited,omitempty"`
+	// 仅 mine 接口带 problemId 时输出：本题是否已在该题单
+	ContainsProblem bool `protobuf:"varint,18,opt,name=containsProblem,proto3" json:"containsProblem,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *ProblemsetInfo) Reset() {
@@ -319,8 +322,23 @@ func (x *ProblemsetInfo) GetLocked() bool {
 	return false
 }
 
+func (x *ProblemsetInfo) GetFavorited() bool {
+	if x != nil {
+		return x.Favorited
+	}
+	return false
+}
+
+func (x *ProblemsetInfo) GetContainsProblem() bool {
+	if x != nil {
+		return x.ContainsProblem
+	}
+	return false
+}
+
 type MineReq struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
+	ProblemId     int64                  `protobuf:"varint,1,opt,name=problemId,proto3" json:"problemId,omitempty"` // 可选：标注本题是否已在该题单
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -353,6 +371,13 @@ func (x *MineReq) ProtoReflect() protoreflect.Message {
 // Deprecated: Use MineReq.ProtoReflect.Descriptor instead.
 func (*MineReq) Descriptor() ([]byte, []int) {
 	return file_core_v1_problemset_problemset_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *MineReq) GetProblemId() int64 {
+	if x != nil {
+		return x.ProblemId
+	}
+	return 0
 }
 
 type MineRes struct {
@@ -1203,19 +1228,70 @@ func (x *UnlockReq) GetPassword() string {
 	return ""
 }
 
+type UnlockData struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	UnlockToken   string                 `protobuf:"bytes,1,opt,name=unlockToken,proto3" json:"unlockToken,omitempty"`
+	ExpiresIn     int64                  `protobuf:"varint,2,opt,name=expiresIn,proto3" json:"expiresIn,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UnlockData) Reset() {
+	*x = UnlockData{}
+	mi := &file_core_v1_problemset_problemset_proto_msgTypes[17]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UnlockData) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UnlockData) ProtoMessage() {}
+
+func (x *UnlockData) ProtoReflect() protoreflect.Message {
+	mi := &file_core_v1_problemset_problemset_proto_msgTypes[17]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UnlockData.ProtoReflect.Descriptor instead.
+func (*UnlockData) Descriptor() ([]byte, []int) {
+	return file_core_v1_problemset_problemset_proto_rawDescGZIP(), []int{17}
+}
+
+func (x *UnlockData) GetUnlockToken() string {
+	if x != nil {
+		return x.UnlockToken
+	}
+	return ""
+}
+
+func (x *UnlockData) GetExpiresIn() int64 {
+	if x != nil {
+		return x.ExpiresIn
+	}
+	return 0
+}
+
 type UnlockRes struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
 	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
-	UnlockToken   string                 `protobuf:"bytes,3,opt,name=unlockToken,proto3" json:"unlockToken,omitempty"`
-	ExpiresIn     int64                  `protobuf:"varint,4,opt,name=expiresIn,proto3" json:"expiresIn,omitempty"`
+	Data          *UnlockData            `protobuf:"bytes,3,opt,name=data,proto3" json:"data,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *UnlockRes) Reset() {
 	*x = UnlockRes{}
-	mi := &file_core_v1_problemset_problemset_proto_msgTypes[17]
+	mi := &file_core_v1_problemset_problemset_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1227,7 +1303,7 @@ func (x *UnlockRes) String() string {
 func (*UnlockRes) ProtoMessage() {}
 
 func (x *UnlockRes) ProtoReflect() protoreflect.Message {
-	mi := &file_core_v1_problemset_problemset_proto_msgTypes[17]
+	mi := &file_core_v1_problemset_problemset_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1240,7 +1316,7 @@ func (x *UnlockRes) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UnlockRes.ProtoReflect.Descriptor instead.
 func (*UnlockRes) Descriptor() ([]byte, []int) {
-	return file_core_v1_problemset_problemset_proto_rawDescGZIP(), []int{17}
+	return file_core_v1_problemset_problemset_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *UnlockRes) GetSuccess() bool {
@@ -1257,18 +1333,11 @@ func (x *UnlockRes) GetMessage() string {
 	return ""
 }
 
-func (x *UnlockRes) GetUnlockToken() string {
+func (x *UnlockRes) GetData() *UnlockData {
 	if x != nil {
-		return x.UnlockToken
+		return x.Data
 	}
-	return ""
-}
-
-func (x *UnlockRes) GetExpiresIn() int64 {
-	if x != nil {
-		return x.ExpiresIn
-	}
-	return 0
+	return nil
 }
 
 type AddReq struct {
@@ -1282,7 +1351,7 @@ type AddReq struct {
 
 func (x *AddReq) Reset() {
 	*x = AddReq{}
-	mi := &file_core_v1_problemset_problemset_proto_msgTypes[18]
+	mi := &file_core_v1_problemset_problemset_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1294,7 +1363,7 @@ func (x *AddReq) String() string {
 func (*AddReq) ProtoMessage() {}
 
 func (x *AddReq) ProtoReflect() protoreflect.Message {
-	mi := &file_core_v1_problemset_problemset_proto_msgTypes[18]
+	mi := &file_core_v1_problemset_problemset_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1307,7 +1376,7 @@ func (x *AddReq) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AddReq.ProtoReflect.Descriptor instead.
 func (*AddReq) Descriptor() ([]byte, []int) {
-	return file_core_v1_problemset_problemset_proto_rawDescGZIP(), []int{18}
+	return file_core_v1_problemset_problemset_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *AddReq) GetProblemsetId() int64 {
@@ -1331,19 +1400,95 @@ func (x *AddReq) GetUrl() string {
 	return ""
 }
 
-type AddRes struct {
+type AddData struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
-	Success        bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
-	Message        string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
-	ProblemId      int64                  `protobuf:"varint,3,opt,name=problemId,proto3" json:"problemId,omitempty"`
-	FetchTriggered bool                   `protobuf:"varint,4,opt,name=fetchTriggered,proto3" json:"fetchTriggered,omitempty"`
+	ProblemId      int64                  `protobuf:"varint,1,opt,name=problemId,proto3" json:"problemId,omitempty"`
+	FetchTriggered bool                   `protobuf:"varint,2,opt,name=fetchTriggered,proto3" json:"fetchTriggered,omitempty"`
+	Platform       string                 `protobuf:"bytes,3,opt,name=platform,proto3" json:"platform,omitempty"`
+	Title          string                 `protobuf:"bytes,4,opt,name=title,proto3" json:"title,omitempty"`
+	ExternalId     string                 `protobuf:"bytes,5,opt,name=externalId,proto3" json:"externalId,omitempty"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }
 
+func (x *AddData) Reset() {
+	*x = AddData{}
+	mi := &file_core_v1_problemset_problemset_proto_msgTypes[20]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AddData) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AddData) ProtoMessage() {}
+
+func (x *AddData) ProtoReflect() protoreflect.Message {
+	mi := &file_core_v1_problemset_problemset_proto_msgTypes[20]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AddData.ProtoReflect.Descriptor instead.
+func (*AddData) Descriptor() ([]byte, []int) {
+	return file_core_v1_problemset_problemset_proto_rawDescGZIP(), []int{20}
+}
+
+func (x *AddData) GetProblemId() int64 {
+	if x != nil {
+		return x.ProblemId
+	}
+	return 0
+}
+
+func (x *AddData) GetFetchTriggered() bool {
+	if x != nil {
+		return x.FetchTriggered
+	}
+	return false
+}
+
+func (x *AddData) GetPlatform() string {
+	if x != nil {
+		return x.Platform
+	}
+	return ""
+}
+
+func (x *AddData) GetTitle() string {
+	if x != nil {
+		return x.Title
+	}
+	return ""
+}
+
+func (x *AddData) GetExternalId() string {
+	if x != nil {
+		return x.ExternalId
+	}
+	return ""
+}
+
+type AddRes struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
+	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	Code          string                 `protobuf:"bytes,3,opt,name=code,proto3" json:"code,omitempty"` // URL_PARSE_FAILED
+	Data          *AddData               `protobuf:"bytes,4,opt,name=data,proto3" json:"data,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
 func (x *AddRes) Reset() {
 	*x = AddRes{}
-	mi := &file_core_v1_problemset_problemset_proto_msgTypes[19]
+	mi := &file_core_v1_problemset_problemset_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1355,7 +1500,7 @@ func (x *AddRes) String() string {
 func (*AddRes) ProtoMessage() {}
 
 func (x *AddRes) ProtoReflect() protoreflect.Message {
-	mi := &file_core_v1_problemset_problemset_proto_msgTypes[19]
+	mi := &file_core_v1_problemset_problemset_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1368,7 +1513,7 @@ func (x *AddRes) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AddRes.ProtoReflect.Descriptor instead.
 func (*AddRes) Descriptor() ([]byte, []int) {
-	return file_core_v1_problemset_problemset_proto_rawDescGZIP(), []int{19}
+	return file_core_v1_problemset_problemset_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *AddRes) GetSuccess() bool {
@@ -1385,18 +1530,18 @@ func (x *AddRes) GetMessage() string {
 	return ""
 }
 
-func (x *AddRes) GetProblemId() int64 {
+func (x *AddRes) GetCode() string {
 	if x != nil {
-		return x.ProblemId
+		return x.Code
 	}
-	return 0
+	return ""
 }
 
-func (x *AddRes) GetFetchTriggered() bool {
+func (x *AddRes) GetData() *AddData {
 	if x != nil {
-		return x.FetchTriggered
+		return x.Data
 	}
-	return false
+	return nil
 }
 
 type RemoveReq struct {
@@ -1409,7 +1554,7 @@ type RemoveReq struct {
 
 func (x *RemoveReq) Reset() {
 	*x = RemoveReq{}
-	mi := &file_core_v1_problemset_problemset_proto_msgTypes[20]
+	mi := &file_core_v1_problemset_problemset_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1421,7 +1566,7 @@ func (x *RemoveReq) String() string {
 func (*RemoveReq) ProtoMessage() {}
 
 func (x *RemoveReq) ProtoReflect() protoreflect.Message {
-	mi := &file_core_v1_problemset_problemset_proto_msgTypes[20]
+	mi := &file_core_v1_problemset_problemset_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1434,7 +1579,7 @@ func (x *RemoveReq) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RemoveReq.ProtoReflect.Descriptor instead.
 func (*RemoveReq) Descriptor() ([]byte, []int) {
-	return file_core_v1_problemset_problemset_proto_rawDescGZIP(), []int{20}
+	return file_core_v1_problemset_problemset_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *RemoveReq) GetProblemsetId() int64 {
@@ -1461,7 +1606,7 @@ type RemoveRes struct {
 
 func (x *RemoveRes) Reset() {
 	*x = RemoveRes{}
-	mi := &file_core_v1_problemset_problemset_proto_msgTypes[21]
+	mi := &file_core_v1_problemset_problemset_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1473,7 +1618,7 @@ func (x *RemoveRes) String() string {
 func (*RemoveRes) ProtoMessage() {}
 
 func (x *RemoveRes) ProtoReflect() protoreflect.Message {
-	mi := &file_core_v1_problemset_problemset_proto_msgTypes[21]
+	mi := &file_core_v1_problemset_problemset_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1486,7 +1631,7 @@ func (x *RemoveRes) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RemoveRes.ProtoReflect.Descriptor instead.
 func (*RemoveRes) Descriptor() ([]byte, []int) {
-	return file_core_v1_problemset_problemset_proto_rawDescGZIP(), []int{21}
+	return file_core_v1_problemset_problemset_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *RemoveRes) GetSuccess() bool {
@@ -1512,7 +1657,7 @@ type LikeReq struct {
 
 func (x *LikeReq) Reset() {
 	*x = LikeReq{}
-	mi := &file_core_v1_problemset_problemset_proto_msgTypes[22]
+	mi := &file_core_v1_problemset_problemset_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1524,7 +1669,7 @@ func (x *LikeReq) String() string {
 func (*LikeReq) ProtoMessage() {}
 
 func (x *LikeReq) ProtoReflect() protoreflect.Message {
-	mi := &file_core_v1_problemset_problemset_proto_msgTypes[22]
+	mi := &file_core_v1_problemset_problemset_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1537,7 +1682,7 @@ func (x *LikeReq) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LikeReq.ProtoReflect.Descriptor instead.
 func (*LikeReq) Descriptor() ([]byte, []int) {
-	return file_core_v1_problemset_problemset_proto_rawDescGZIP(), []int{22}
+	return file_core_v1_problemset_problemset_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *LikeReq) GetId() int64 {
@@ -1547,19 +1692,70 @@ func (x *LikeReq) GetId() int64 {
 	return 0
 }
 
+type LikeData struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Liked         bool                   `protobuf:"varint,1,opt,name=liked,proto3" json:"liked,omitempty"`
+	LikeCount     int32                  `protobuf:"varint,2,opt,name=likeCount,proto3" json:"likeCount,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *LikeData) Reset() {
+	*x = LikeData{}
+	mi := &file_core_v1_problemset_problemset_proto_msgTypes[25]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *LikeData) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*LikeData) ProtoMessage() {}
+
+func (x *LikeData) ProtoReflect() protoreflect.Message {
+	mi := &file_core_v1_problemset_problemset_proto_msgTypes[25]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use LikeData.ProtoReflect.Descriptor instead.
+func (*LikeData) Descriptor() ([]byte, []int) {
+	return file_core_v1_problemset_problemset_proto_rawDescGZIP(), []int{25}
+}
+
+func (x *LikeData) GetLiked() bool {
+	if x != nil {
+		return x.Liked
+	}
+	return false
+}
+
+func (x *LikeData) GetLikeCount() int32 {
+	if x != nil {
+		return x.LikeCount
+	}
+	return 0
+}
+
 type LikeRes struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
 	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
-	Liked         bool                   `protobuf:"varint,3,opt,name=liked,proto3" json:"liked,omitempty"`
-	LikeCount     int32                  `protobuf:"varint,4,opt,name=likeCount,proto3" json:"likeCount,omitempty"`
+	Data          *LikeData              `protobuf:"bytes,3,opt,name=data,proto3" json:"data,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *LikeRes) Reset() {
 	*x = LikeRes{}
-	mi := &file_core_v1_problemset_problemset_proto_msgTypes[23]
+	mi := &file_core_v1_problemset_problemset_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1571,7 +1767,7 @@ func (x *LikeRes) String() string {
 func (*LikeRes) ProtoMessage() {}
 
 func (x *LikeRes) ProtoReflect() protoreflect.Message {
-	mi := &file_core_v1_problemset_problemset_proto_msgTypes[23]
+	mi := &file_core_v1_problemset_problemset_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1584,7 +1780,7 @@ func (x *LikeRes) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LikeRes.ProtoReflect.Descriptor instead.
 func (*LikeRes) Descriptor() ([]byte, []int) {
-	return file_core_v1_problemset_problemset_proto_rawDescGZIP(), []int{23}
+	return file_core_v1_problemset_problemset_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *LikeRes) GetSuccess() bool {
@@ -1601,16 +1797,585 @@ func (x *LikeRes) GetMessage() string {
 	return ""
 }
 
-func (x *LikeRes) GetLiked() bool {
+func (x *LikeRes) GetData() *LikeData {
 	if x != nil {
-		return x.Liked
+		return x.Data
+	}
+	return nil
+}
+
+type AddManualReq struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ProblemsetId  int64                  `protobuf:"varint,1,opt,name=problemsetId,proto3" json:"problemsetId,omitempty"`
+	Title         string                 `protobuf:"bytes,2,opt,name=title,proto3" json:"title,omitempty"`
+	ContentMd     string                 `protobuf:"bytes,3,opt,name=contentMd,proto3" json:"contentMd,omitempty"`
+	Tags          []string               `protobuf:"bytes,4,rep,name=tags,proto3" json:"tags,omitempty"`
+	SourceUrl     string                 `protobuf:"bytes,5,opt,name=sourceUrl,proto3" json:"sourceUrl,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AddManualReq) Reset() {
+	*x = AddManualReq{}
+	mi := &file_core_v1_problemset_problemset_proto_msgTypes[27]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AddManualReq) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AddManualReq) ProtoMessage() {}
+
+func (x *AddManualReq) ProtoReflect() protoreflect.Message {
+	mi := &file_core_v1_problemset_problemset_proto_msgTypes[27]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AddManualReq.ProtoReflect.Descriptor instead.
+func (*AddManualReq) Descriptor() ([]byte, []int) {
+	return file_core_v1_problemset_problemset_proto_rawDescGZIP(), []int{27}
+}
+
+func (x *AddManualReq) GetProblemsetId() int64 {
+	if x != nil {
+		return x.ProblemsetId
+	}
+	return 0
+}
+
+func (x *AddManualReq) GetTitle() string {
+	if x != nil {
+		return x.Title
+	}
+	return ""
+}
+
+func (x *AddManualReq) GetContentMd() string {
+	if x != nil {
+		return x.ContentMd
+	}
+	return ""
+}
+
+func (x *AddManualReq) GetTags() []string {
+	if x != nil {
+		return x.Tags
+	}
+	return nil
+}
+
+func (x *AddManualReq) GetSourceUrl() string {
+	if x != nil {
+		return x.SourceUrl
+	}
+	return ""
+}
+
+type AddManualData struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	ProblemId      int64                  `protobuf:"varint,1,opt,name=problemId,proto3" json:"problemId,omitempty"`
+	FetchTriggered bool                   `protobuf:"varint,2,opt,name=fetchTriggered,proto3" json:"fetchTriggered,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *AddManualData) Reset() {
+	*x = AddManualData{}
+	mi := &file_core_v1_problemset_problemset_proto_msgTypes[28]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AddManualData) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AddManualData) ProtoMessage() {}
+
+func (x *AddManualData) ProtoReflect() protoreflect.Message {
+	mi := &file_core_v1_problemset_problemset_proto_msgTypes[28]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AddManualData.ProtoReflect.Descriptor instead.
+func (*AddManualData) Descriptor() ([]byte, []int) {
+	return file_core_v1_problemset_problemset_proto_rawDescGZIP(), []int{28}
+}
+
+func (x *AddManualData) GetProblemId() int64 {
+	if x != nil {
+		return x.ProblemId
+	}
+	return 0
+}
+
+func (x *AddManualData) GetFetchTriggered() bool {
+	if x != nil {
+		return x.FetchTriggered
 	}
 	return false
 }
 
-func (x *LikeRes) GetLikeCount() int32 {
+type AddManualRes struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
+	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	Data          *AddManualData         `protobuf:"bytes,3,opt,name=data,proto3" json:"data,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AddManualRes) Reset() {
+	*x = AddManualRes{}
+	mi := &file_core_v1_problemset_problemset_proto_msgTypes[29]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AddManualRes) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AddManualRes) ProtoMessage() {}
+
+func (x *AddManualRes) ProtoReflect() protoreflect.Message {
+	mi := &file_core_v1_problemset_problemset_proto_msgTypes[29]
 	if x != nil {
-		return x.LikeCount
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AddManualRes.ProtoReflect.Descriptor instead.
+func (*AddManualRes) Descriptor() ([]byte, []int) {
+	return file_core_v1_problemset_problemset_proto_rawDescGZIP(), []int{29}
+}
+
+func (x *AddManualRes) GetSuccess() bool {
+	if x != nil {
+		return x.Success
+	}
+	return false
+}
+
+func (x *AddManualRes) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
+func (x *AddManualRes) GetData() *AddManualData {
+	if x != nil {
+		return x.Data
+	}
+	return nil
+}
+
+type ReorderReq struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ProblemsetId  int64                  `protobuf:"varint,1,opt,name=problemsetId,proto3" json:"problemsetId,omitempty"`
+	Ids           []int64                `protobuf:"varint,2,rep,packed,name=ids,proto3" json:"ids,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ReorderReq) Reset() {
+	*x = ReorderReq{}
+	mi := &file_core_v1_problemset_problemset_proto_msgTypes[30]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReorderReq) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReorderReq) ProtoMessage() {}
+
+func (x *ReorderReq) ProtoReflect() protoreflect.Message {
+	mi := &file_core_v1_problemset_problemset_proto_msgTypes[30]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReorderReq.ProtoReflect.Descriptor instead.
+func (*ReorderReq) Descriptor() ([]byte, []int) {
+	return file_core_v1_problemset_problemset_proto_rawDescGZIP(), []int{30}
+}
+
+func (x *ReorderReq) GetProblemsetId() int64 {
+	if x != nil {
+		return x.ProblemsetId
+	}
+	return 0
+}
+
+func (x *ReorderReq) GetIds() []int64 {
+	if x != nil {
+		return x.Ids
+	}
+	return nil
+}
+
+type ReorderRes struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
+	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ReorderRes) Reset() {
+	*x = ReorderRes{}
+	mi := &file_core_v1_problemset_problemset_proto_msgTypes[31]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReorderRes) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReorderRes) ProtoMessage() {}
+
+func (x *ReorderRes) ProtoReflect() protoreflect.Message {
+	mi := &file_core_v1_problemset_problemset_proto_msgTypes[31]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReorderRes.ProtoReflect.Descriptor instead.
+func (*ReorderRes) Descriptor() ([]byte, []int) {
+	return file_core_v1_problemset_problemset_proto_rawDescGZIP(), []int{31}
+}
+
+func (x *ReorderRes) GetSuccess() bool {
+	if x != nil {
+		return x.Success
+	}
+	return false
+}
+
+func (x *ReorderRes) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
+type FavoriteReq struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Id            int64                  `protobuf:"varint,1,opt,name=id,proto3" json:"id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *FavoriteReq) Reset() {
+	*x = FavoriteReq{}
+	mi := &file_core_v1_problemset_problemset_proto_msgTypes[32]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FavoriteReq) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FavoriteReq) ProtoMessage() {}
+
+func (x *FavoriteReq) ProtoReflect() protoreflect.Message {
+	mi := &file_core_v1_problemset_problemset_proto_msgTypes[32]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FavoriteReq.ProtoReflect.Descriptor instead.
+func (*FavoriteReq) Descriptor() ([]byte, []int) {
+	return file_core_v1_problemset_problemset_proto_rawDescGZIP(), []int{32}
+}
+
+func (x *FavoriteReq) GetId() int64 {
+	if x != nil {
+		return x.Id
+	}
+	return 0
+}
+
+type FavoriteData struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Favorited     bool                   `protobuf:"varint,1,opt,name=favorited,proto3" json:"favorited,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *FavoriteData) Reset() {
+	*x = FavoriteData{}
+	mi := &file_core_v1_problemset_problemset_proto_msgTypes[33]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FavoriteData) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FavoriteData) ProtoMessage() {}
+
+func (x *FavoriteData) ProtoReflect() protoreflect.Message {
+	mi := &file_core_v1_problemset_problemset_proto_msgTypes[33]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FavoriteData.ProtoReflect.Descriptor instead.
+func (*FavoriteData) Descriptor() ([]byte, []int) {
+	return file_core_v1_problemset_problemset_proto_rawDescGZIP(), []int{33}
+}
+
+func (x *FavoriteData) GetFavorited() bool {
+	if x != nil {
+		return x.Favorited
+	}
+	return false
+}
+
+type FavoriteRes struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
+	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	Data          *FavoriteData          `protobuf:"bytes,3,opt,name=data,proto3" json:"data,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *FavoriteRes) Reset() {
+	*x = FavoriteRes{}
+	mi := &file_core_v1_problemset_problemset_proto_msgTypes[34]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FavoriteRes) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FavoriteRes) ProtoMessage() {}
+
+func (x *FavoriteRes) ProtoReflect() protoreflect.Message {
+	mi := &file_core_v1_problemset_problemset_proto_msgTypes[34]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FavoriteRes.ProtoReflect.Descriptor instead.
+func (*FavoriteRes) Descriptor() ([]byte, []int) {
+	return file_core_v1_problemset_problemset_proto_rawDescGZIP(), []int{34}
+}
+
+func (x *FavoriteRes) GetSuccess() bool {
+	if x != nil {
+		return x.Success
+	}
+	return false
+}
+
+func (x *FavoriteRes) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
+func (x *FavoriteRes) GetData() *FavoriteData {
+	if x != nil {
+		return x.Data
+	}
+	return nil
+}
+
+type FavoritesReq struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Page          int64                  `protobuf:"varint,1,opt,name=page,proto3" json:"page,omitempty"`
+	PageSize      int64                  `protobuf:"varint,2,opt,name=pageSize,proto3" json:"pageSize,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *FavoritesReq) Reset() {
+	*x = FavoritesReq{}
+	mi := &file_core_v1_problemset_problemset_proto_msgTypes[35]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FavoritesReq) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FavoritesReq) ProtoMessage() {}
+
+func (x *FavoritesReq) ProtoReflect() protoreflect.Message {
+	mi := &file_core_v1_problemset_problemset_proto_msgTypes[35]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FavoritesReq.ProtoReflect.Descriptor instead.
+func (*FavoritesReq) Descriptor() ([]byte, []int) {
+	return file_core_v1_problemset_problemset_proto_rawDescGZIP(), []int{35}
+}
+
+func (x *FavoritesReq) GetPage() int64 {
+	if x != nil {
+		return x.Page
+	}
+	return 0
+}
+
+func (x *FavoritesReq) GetPageSize() int64 {
+	if x != nil {
+		return x.PageSize
+	}
+	return 0
+}
+
+type FavoritesRes struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
+	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	Data          []*ProblemsetInfo      `protobuf:"bytes,3,rep,name=data,proto3" json:"data,omitempty"`
+	Total         int64                  `protobuf:"varint,4,opt,name=total,proto3" json:"total,omitempty"`
+	Page          int64                  `protobuf:"varint,5,opt,name=page,proto3" json:"page,omitempty"`
+	PageSize      int64                  `protobuf:"varint,6,opt,name=pageSize,proto3" json:"pageSize,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *FavoritesRes) Reset() {
+	*x = FavoritesRes{}
+	mi := &file_core_v1_problemset_problemset_proto_msgTypes[36]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FavoritesRes) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FavoritesRes) ProtoMessage() {}
+
+func (x *FavoritesRes) ProtoReflect() protoreflect.Message {
+	mi := &file_core_v1_problemset_problemset_proto_msgTypes[36]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FavoritesRes.ProtoReflect.Descriptor instead.
+func (*FavoritesRes) Descriptor() ([]byte, []int) {
+	return file_core_v1_problemset_problemset_proto_rawDescGZIP(), []int{36}
+}
+
+func (x *FavoritesRes) GetSuccess() bool {
+	if x != nil {
+		return x.Success
+	}
+	return false
+}
+
+func (x *FavoritesRes) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
+func (x *FavoritesRes) GetData() []*ProblemsetInfo {
+	if x != nil {
+		return x.Data
+	}
+	return nil
+}
+
+func (x *FavoritesRes) GetTotal() int64 {
+	if x != nil {
+		return x.Total
+	}
+	return 0
+}
+
+func (x *FavoritesRes) GetPage() int64 {
+	if x != nil {
+		return x.Page
+	}
+	return 0
+}
+
+func (x *FavoritesRes) GetPageSize() int64 {
+	if x != nil {
+		return x.PageSize
 	}
 	return 0
 }
@@ -1639,7 +2404,7 @@ const file_core_v1_problemset_problemset_proto_rawDesc = "" +
 	"\n" +
 	"userStatus\x18\v \x01(\tR\n" +
 	"userStatus\x12\x12\n" +
-	"\x04tags\x18\f \x03(\tR\x04tags\"\xde\x03\n" +
+	"\x04tags\x18\f \x03(\tR\x04tags\"\xa6\x04\n" +
 	"\x0eProblemsetInfo\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\x03R\x02id\x12\x18\n" +
 	"\aownerId\x18\x02 \x01(\x03R\aownerId\x12\x1c\n" +
@@ -1659,8 +2424,11 @@ const file_core_v1_problemset_problemset_proto_rawDesc = "" +
 	"\tcreatedAt\x18\r \x01(\x03R\tcreatedAt\x12\x1c\n" +
 	"\tupdatedAt\x18\x0e \x01(\x03R\tupdatedAt\x12<\n" +
 	"\x05items\x18\x0f \x03(\v2&.api.core.v1.problemset.ProblemsetItemR\x05items\x12\x16\n" +
-	"\x06locked\x18\x10 \x01(\bR\x06locked\"\t\n" +
-	"\aMineReq\"y\n" +
+	"\x06locked\x18\x10 \x01(\bR\x06locked\x12\x1c\n" +
+	"\tfavorited\x18\x11 \x01(\bR\tfavorited\x12(\n" +
+	"\x0fcontainsProblem\x18\x12 \x01(\bR\x0fcontainsProblem\"'\n" +
+	"\aMineReq\x12\x1c\n" +
+	"\tproblemId\x18\x01 \x01(\x03R\tproblemId\"y\n" +
 	"\aMineRes\x12\x18\n" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12:\n" +
@@ -1721,21 +2489,32 @@ const file_core_v1_problemset_problemset_proto_rawDesc = "" +
 	"\amessage\x18\x02 \x01(\tR\amessage\"7\n" +
 	"\tUnlockReq\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\x03R\x02id\x12\x1a\n" +
-	"\bpassword\x18\x02 \x01(\tR\bpassword\"\x7f\n" +
+	"\bpassword\x18\x02 \x01(\tR\bpassword\"L\n" +
+	"\n" +
+	"UnlockData\x12 \n" +
+	"\vunlockToken\x18\x01 \x01(\tR\vunlockToken\x12\x1c\n" +
+	"\texpiresIn\x18\x02 \x01(\x03R\texpiresIn\"w\n" +
 	"\tUnlockRes\x12\x18\n" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x18\n" +
-	"\amessage\x18\x02 \x01(\tR\amessage\x12 \n" +
-	"\vunlockToken\x18\x03 \x01(\tR\vunlockToken\x12\x1c\n" +
-	"\texpiresIn\x18\x04 \x01(\x03R\texpiresIn\"\\\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\x126\n" +
+	"\x04data\x18\x03 \x01(\v2\".api.core.v1.problemset.UnlockDataR\x04data\"\\\n" +
 	"\x06AddReq\x12\"\n" +
 	"\fproblemsetId\x18\x01 \x01(\x03R\fproblemsetId\x12\x1c\n" +
 	"\tproblemId\x18\x02 \x01(\x03R\tproblemId\x12\x10\n" +
-	"\x03url\x18\x03 \x01(\tR\x03url\"\x82\x01\n" +
+	"\x03url\x18\x03 \x01(\tR\x03url\"\xa1\x01\n" +
+	"\aAddData\x12\x1c\n" +
+	"\tproblemId\x18\x01 \x01(\x03R\tproblemId\x12&\n" +
+	"\x0efetchTriggered\x18\x02 \x01(\bR\x0efetchTriggered\x12\x1a\n" +
+	"\bplatform\x18\x03 \x01(\tR\bplatform\x12\x14\n" +
+	"\x05title\x18\x04 \x01(\tR\x05title\x12\x1e\n" +
+	"\n" +
+	"externalId\x18\x05 \x01(\tR\n" +
+	"externalId\"\x85\x01\n" +
 	"\x06AddRes\x12\x18\n" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x18\n" +
-	"\amessage\x18\x02 \x01(\tR\amessage\x12\x1c\n" +
-	"\tproblemId\x18\x03 \x01(\x03R\tproblemId\x12&\n" +
-	"\x0efetchTriggered\x18\x04 \x01(\bR\x0efetchTriggered\"M\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\x12\x12\n" +
+	"\x04code\x18\x03 \x01(\tR\x04code\x123\n" +
+	"\x04data\x18\x04 \x01(\v2\x1f.api.core.v1.problemset.AddDataR\x04data\"M\n" +
 	"\tRemoveReq\x12\"\n" +
 	"\fproblemsetId\x18\x01 \x01(\x03R\fproblemsetId\x12\x1c\n" +
 	"\tproblemId\x18\x02 \x01(\x03R\tproblemId\"?\n" +
@@ -1743,13 +2522,53 @@ const file_core_v1_problemset_problemset_proto_rawDesc = "" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\"\x19\n" +
 	"\aLikeReq\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\x03R\x02id\"q\n" +
+	"\x02id\x18\x01 \x01(\x03R\x02id\">\n" +
+	"\bLikeData\x12\x14\n" +
+	"\x05liked\x18\x01 \x01(\bR\x05liked\x12\x1c\n" +
+	"\tlikeCount\x18\x02 \x01(\x05R\tlikeCount\"s\n" +
 	"\aLikeRes\x12\x18\n" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x18\n" +
-	"\amessage\x18\x02 \x01(\tR\amessage\x12\x14\n" +
-	"\x05liked\x18\x03 \x01(\bR\x05liked\x12\x1c\n" +
-	"\tlikeCount\x18\x04 \x01(\x05R\tlikeCount2\x82\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\x124\n" +
+	"\x04data\x18\x03 \x01(\v2 .api.core.v1.problemset.LikeDataR\x04data\"\x98\x01\n" +
+	"\fAddManualReq\x12\"\n" +
+	"\fproblemsetId\x18\x01 \x01(\x03R\fproblemsetId\x12\x14\n" +
+	"\x05title\x18\x02 \x01(\tR\x05title\x12\x1c\n" +
+	"\tcontentMd\x18\x03 \x01(\tR\tcontentMd\x12\x12\n" +
+	"\x04tags\x18\x04 \x03(\tR\x04tags\x12\x1c\n" +
+	"\tsourceUrl\x18\x05 \x01(\tR\tsourceUrl\"U\n" +
+	"\rAddManualData\x12\x1c\n" +
+	"\tproblemId\x18\x01 \x01(\x03R\tproblemId\x12&\n" +
+	"\x0efetchTriggered\x18\x02 \x01(\bR\x0efetchTriggered\"}\n" +
+	"\fAddManualRes\x12\x18\n" +
+	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x18\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\x129\n" +
+	"\x04data\x18\x03 \x01(\v2%.api.core.v1.problemset.AddManualDataR\x04data\"B\n" +
 	"\n" +
+	"ReorderReq\x12\"\n" +
+	"\fproblemsetId\x18\x01 \x01(\x03R\fproblemsetId\x12\x10\n" +
+	"\x03ids\x18\x02 \x03(\x03R\x03ids\"@\n" +
+	"\n" +
+	"ReorderRes\x12\x18\n" +
+	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x18\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\"\x1d\n" +
+	"\vFavoriteReq\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\x03R\x02id\",\n" +
+	"\fFavoriteData\x12\x1c\n" +
+	"\tfavorited\x18\x01 \x01(\bR\tfavorited\"{\n" +
+	"\vFavoriteRes\x12\x18\n" +
+	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x18\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\x128\n" +
+	"\x04data\x18\x03 \x01(\v2$.api.core.v1.problemset.FavoriteDataR\x04data\">\n" +
+	"\fFavoritesReq\x12\x12\n" +
+	"\x04page\x18\x01 \x01(\x03R\x04page\x12\x1a\n" +
+	"\bpageSize\x18\x02 \x01(\x03R\bpageSize\"\xc4\x01\n" +
+	"\fFavoritesRes\x12\x18\n" +
+	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x18\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\x12:\n" +
+	"\x04data\x18\x03 \x03(\v2&.api.core.v1.problemset.ProblemsetInfoR\x04data\x12\x14\n" +
+	"\x05total\x18\x04 \x01(\x03R\x05total\x12\x12\n" +
+	"\x04page\x18\x05 \x01(\x03R\x04page\x12\x1a\n" +
+	"\bpageSize\x18\x06 \x01(\x03R\bpageSize2\x81\x0e\n" +
 	"\n" +
 	"Problemset\x12j\n" +
 	"\x04Mine\x12\x1f.api.core.v1.problemset.MineReq\x1a\x1f.api.core.v1.problemset.MineRes\" \x82\xd3\xe4\x93\x02\x1a\x12\x18/v1/core/problemset/mine\x12r\n" +
@@ -1762,7 +2581,11 @@ const file_core_v1_problemset_problemset_proto_rawDesc = "" +
 	"\x06Unlock\x12!.api.core.v1.problemset.UnlockReq\x1a!.api.core.v1.problemset.UnlockRes\"%\x82\xd3\xe4\x93\x02\x1f:\x01*\"\x1a/v1/core/problemset/unlock\x12i\n" +
 	"\x03Add\x12\x1e.api.core.v1.problemset.AddReq\x1a\x1e.api.core.v1.problemset.AddRes\"\"\x82\xd3\xe4\x93\x02\x1c:\x01*\"\x17/v1/core/problemset/add\x12u\n" +
 	"\x06Remove\x12!.api.core.v1.problemset.RemoveReq\x1a!.api.core.v1.problemset.RemoveRes\"%\x82\xd3\xe4\x93\x02\x1f:\x01*\"\x1a/v1/core/problemset/remove\x12m\n" +
-	"\x04Like\x12\x1f.api.core.v1.problemset.LikeReq\x1a\x1f.api.core.v1.problemset.LikeRes\"#\x82\xd3\xe4\x93\x02\x1d:\x01*\"\x18/v1/core/problemset/likeBG\n" +
+	"\x04Like\x12\x1f.api.core.v1.problemset.LikeReq\x1a\x1f.api.core.v1.problemset.LikeRes\"#\x82\xd3\xe4\x93\x02\x1d:\x01*\"\x18/v1/core/problemset/like\x12\x82\x01\n" +
+	"\tAddManual\x12$.api.core.v1.problemset.AddManualReq\x1a$.api.core.v1.problemset.AddManualRes\")\x82\xd3\xe4\x93\x02#:\x01*\"\x1e/v1/core/problemset/add-manual\x12y\n" +
+	"\aReorder\x12\".api.core.v1.problemset.ReorderReq\x1a\".api.core.v1.problemset.ReorderRes\"&\x82\xd3\xe4\x93\x02 :\x01*\"\x1b/v1/core/problemset/reorder\x12}\n" +
+	"\bFavorite\x12#.api.core.v1.problemset.FavoriteReq\x1a#.api.core.v1.problemset.FavoriteRes\"'\x82\xd3\xe4\x93\x02!:\x01*\"\x1c/v1/core/problemset/favorite\x12~\n" +
+	"\tFavorites\x12$.api.core.v1.problemset.FavoritesReq\x1a$.api.core.v1.problemset.FavoritesRes\"%\x82\xd3\xe4\x93\x02\x1f\x12\x1d/v1/core/problemset/favoritesBG\n" +
 	"\x16api.core.v1.problemsetP\x01Z+cwxu-algo/api/core/v1/problemset;problemsetb\x06proto3"
 
 var (
@@ -1777,7 +2600,7 @@ func file_core_v1_problemset_problemset_proto_rawDescGZIP() []byte {
 	return file_core_v1_problemset_problemset_proto_rawDescData
 }
 
-var file_core_v1_problemset_problemset_proto_msgTypes = make([]protoimpl.MessageInfo, 24)
+var file_core_v1_problemset_problemset_proto_msgTypes = make([]protoimpl.MessageInfo, 37)
 var file_core_v1_problemset_problemset_proto_goTypes = []any{
 	(*ProblemsetItem)(nil), // 0: api.core.v1.problemset.ProblemsetItem
 	(*ProblemsetInfo)(nil), // 1: api.core.v1.problemset.ProblemsetInfo
@@ -1796,13 +2619,26 @@ var file_core_v1_problemset_problemset_proto_goTypes = []any{
 	(*DeleteReq)(nil),      // 14: api.core.v1.problemset.DeleteReq
 	(*DeleteRes)(nil),      // 15: api.core.v1.problemset.DeleteRes
 	(*UnlockReq)(nil),      // 16: api.core.v1.problemset.UnlockReq
-	(*UnlockRes)(nil),      // 17: api.core.v1.problemset.UnlockRes
-	(*AddReq)(nil),         // 18: api.core.v1.problemset.AddReq
-	(*AddRes)(nil),         // 19: api.core.v1.problemset.AddRes
-	(*RemoveReq)(nil),      // 20: api.core.v1.problemset.RemoveReq
-	(*RemoveRes)(nil),      // 21: api.core.v1.problemset.RemoveRes
-	(*LikeReq)(nil),        // 22: api.core.v1.problemset.LikeReq
-	(*LikeRes)(nil),        // 23: api.core.v1.problemset.LikeRes
+	(*UnlockData)(nil),     // 17: api.core.v1.problemset.UnlockData
+	(*UnlockRes)(nil),      // 18: api.core.v1.problemset.UnlockRes
+	(*AddReq)(nil),         // 19: api.core.v1.problemset.AddReq
+	(*AddData)(nil),        // 20: api.core.v1.problemset.AddData
+	(*AddRes)(nil),         // 21: api.core.v1.problemset.AddRes
+	(*RemoveReq)(nil),      // 22: api.core.v1.problemset.RemoveReq
+	(*RemoveRes)(nil),      // 23: api.core.v1.problemset.RemoveRes
+	(*LikeReq)(nil),        // 24: api.core.v1.problemset.LikeReq
+	(*LikeData)(nil),       // 25: api.core.v1.problemset.LikeData
+	(*LikeRes)(nil),        // 26: api.core.v1.problemset.LikeRes
+	(*AddManualReq)(nil),   // 27: api.core.v1.problemset.AddManualReq
+	(*AddManualData)(nil),  // 28: api.core.v1.problemset.AddManualData
+	(*AddManualRes)(nil),   // 29: api.core.v1.problemset.AddManualRes
+	(*ReorderReq)(nil),     // 30: api.core.v1.problemset.ReorderReq
+	(*ReorderRes)(nil),     // 31: api.core.v1.problemset.ReorderRes
+	(*FavoriteReq)(nil),    // 32: api.core.v1.problemset.FavoriteReq
+	(*FavoriteData)(nil),   // 33: api.core.v1.problemset.FavoriteData
+	(*FavoriteRes)(nil),    // 34: api.core.v1.problemset.FavoriteRes
+	(*FavoritesReq)(nil),   // 35: api.core.v1.problemset.FavoritesReq
+	(*FavoritesRes)(nil),   // 36: api.core.v1.problemset.FavoritesRes
 }
 var file_core_v1_problemset_problemset_proto_depIdxs = []int32{
 	0,  // 0: api.core.v1.problemset.ProblemsetInfo.items:type_name -> api.core.v1.problemset.ProblemsetItem
@@ -1812,33 +2648,47 @@ var file_core_v1_problemset_problemset_proto_depIdxs = []int32{
 	1,  // 4: api.core.v1.problemset.ByProblemRes.data:type_name -> api.core.v1.problemset.ProblemsetInfo
 	1,  // 5: api.core.v1.problemset.CreateRes.data:type_name -> api.core.v1.problemset.ProblemsetInfo
 	1,  // 6: api.core.v1.problemset.UpdateRes.data:type_name -> api.core.v1.problemset.ProblemsetInfo
-	2,  // 7: api.core.v1.problemset.Problemset.Mine:input_type -> api.core.v1.problemset.MineReq
-	4,  // 8: api.core.v1.problemset.Problemset.Square:input_type -> api.core.v1.problemset.SquareReq
-	6,  // 9: api.core.v1.problemset.Problemset.Get:input_type -> api.core.v1.problemset.GetReq
-	8,  // 10: api.core.v1.problemset.Problemset.ByProblem:input_type -> api.core.v1.problemset.ByProblemReq
-	10, // 11: api.core.v1.problemset.Problemset.Create:input_type -> api.core.v1.problemset.CreateReq
-	12, // 12: api.core.v1.problemset.Problemset.Update:input_type -> api.core.v1.problemset.UpdateReq
-	14, // 13: api.core.v1.problemset.Problemset.Delete:input_type -> api.core.v1.problemset.DeleteReq
-	16, // 14: api.core.v1.problemset.Problemset.Unlock:input_type -> api.core.v1.problemset.UnlockReq
-	18, // 15: api.core.v1.problemset.Problemset.Add:input_type -> api.core.v1.problemset.AddReq
-	20, // 16: api.core.v1.problemset.Problemset.Remove:input_type -> api.core.v1.problemset.RemoveReq
-	22, // 17: api.core.v1.problemset.Problemset.Like:input_type -> api.core.v1.problemset.LikeReq
-	3,  // 18: api.core.v1.problemset.Problemset.Mine:output_type -> api.core.v1.problemset.MineRes
-	5,  // 19: api.core.v1.problemset.Problemset.Square:output_type -> api.core.v1.problemset.SquareRes
-	7,  // 20: api.core.v1.problemset.Problemset.Get:output_type -> api.core.v1.problemset.GetRes
-	9,  // 21: api.core.v1.problemset.Problemset.ByProblem:output_type -> api.core.v1.problemset.ByProblemRes
-	11, // 22: api.core.v1.problemset.Problemset.Create:output_type -> api.core.v1.problemset.CreateRes
-	13, // 23: api.core.v1.problemset.Problemset.Update:output_type -> api.core.v1.problemset.UpdateRes
-	15, // 24: api.core.v1.problemset.Problemset.Delete:output_type -> api.core.v1.problemset.DeleteRes
-	17, // 25: api.core.v1.problemset.Problemset.Unlock:output_type -> api.core.v1.problemset.UnlockRes
-	19, // 26: api.core.v1.problemset.Problemset.Add:output_type -> api.core.v1.problemset.AddRes
-	21, // 27: api.core.v1.problemset.Problemset.Remove:output_type -> api.core.v1.problemset.RemoveRes
-	23, // 28: api.core.v1.problemset.Problemset.Like:output_type -> api.core.v1.problemset.LikeRes
-	18, // [18:29] is the sub-list for method output_type
-	7,  // [7:18] is the sub-list for method input_type
-	7,  // [7:7] is the sub-list for extension type_name
-	7,  // [7:7] is the sub-list for extension extendee
-	0,  // [0:7] is the sub-list for field type_name
+	17, // 7: api.core.v1.problemset.UnlockRes.data:type_name -> api.core.v1.problemset.UnlockData
+	20, // 8: api.core.v1.problemset.AddRes.data:type_name -> api.core.v1.problemset.AddData
+	25, // 9: api.core.v1.problemset.LikeRes.data:type_name -> api.core.v1.problemset.LikeData
+	28, // 10: api.core.v1.problemset.AddManualRes.data:type_name -> api.core.v1.problemset.AddManualData
+	33, // 11: api.core.v1.problemset.FavoriteRes.data:type_name -> api.core.v1.problemset.FavoriteData
+	1,  // 12: api.core.v1.problemset.FavoritesRes.data:type_name -> api.core.v1.problemset.ProblemsetInfo
+	2,  // 13: api.core.v1.problemset.Problemset.Mine:input_type -> api.core.v1.problemset.MineReq
+	4,  // 14: api.core.v1.problemset.Problemset.Square:input_type -> api.core.v1.problemset.SquareReq
+	6,  // 15: api.core.v1.problemset.Problemset.Get:input_type -> api.core.v1.problemset.GetReq
+	8,  // 16: api.core.v1.problemset.Problemset.ByProblem:input_type -> api.core.v1.problemset.ByProblemReq
+	10, // 17: api.core.v1.problemset.Problemset.Create:input_type -> api.core.v1.problemset.CreateReq
+	12, // 18: api.core.v1.problemset.Problemset.Update:input_type -> api.core.v1.problemset.UpdateReq
+	14, // 19: api.core.v1.problemset.Problemset.Delete:input_type -> api.core.v1.problemset.DeleteReq
+	16, // 20: api.core.v1.problemset.Problemset.Unlock:input_type -> api.core.v1.problemset.UnlockReq
+	19, // 21: api.core.v1.problemset.Problemset.Add:input_type -> api.core.v1.problemset.AddReq
+	22, // 22: api.core.v1.problemset.Problemset.Remove:input_type -> api.core.v1.problemset.RemoveReq
+	24, // 23: api.core.v1.problemset.Problemset.Like:input_type -> api.core.v1.problemset.LikeReq
+	27, // 24: api.core.v1.problemset.Problemset.AddManual:input_type -> api.core.v1.problemset.AddManualReq
+	30, // 25: api.core.v1.problemset.Problemset.Reorder:input_type -> api.core.v1.problemset.ReorderReq
+	32, // 26: api.core.v1.problemset.Problemset.Favorite:input_type -> api.core.v1.problemset.FavoriteReq
+	35, // 27: api.core.v1.problemset.Problemset.Favorites:input_type -> api.core.v1.problemset.FavoritesReq
+	3,  // 28: api.core.v1.problemset.Problemset.Mine:output_type -> api.core.v1.problemset.MineRes
+	5,  // 29: api.core.v1.problemset.Problemset.Square:output_type -> api.core.v1.problemset.SquareRes
+	7,  // 30: api.core.v1.problemset.Problemset.Get:output_type -> api.core.v1.problemset.GetRes
+	9,  // 31: api.core.v1.problemset.Problemset.ByProblem:output_type -> api.core.v1.problemset.ByProblemRes
+	11, // 32: api.core.v1.problemset.Problemset.Create:output_type -> api.core.v1.problemset.CreateRes
+	13, // 33: api.core.v1.problemset.Problemset.Update:output_type -> api.core.v1.problemset.UpdateRes
+	15, // 34: api.core.v1.problemset.Problemset.Delete:output_type -> api.core.v1.problemset.DeleteRes
+	18, // 35: api.core.v1.problemset.Problemset.Unlock:output_type -> api.core.v1.problemset.UnlockRes
+	21, // 36: api.core.v1.problemset.Problemset.Add:output_type -> api.core.v1.problemset.AddRes
+	23, // 37: api.core.v1.problemset.Problemset.Remove:output_type -> api.core.v1.problemset.RemoveRes
+	26, // 38: api.core.v1.problemset.Problemset.Like:output_type -> api.core.v1.problemset.LikeRes
+	29, // 39: api.core.v1.problemset.Problemset.AddManual:output_type -> api.core.v1.problemset.AddManualRes
+	31, // 40: api.core.v1.problemset.Problemset.Reorder:output_type -> api.core.v1.problemset.ReorderRes
+	34, // 41: api.core.v1.problemset.Problemset.Favorite:output_type -> api.core.v1.problemset.FavoriteRes
+	36, // 42: api.core.v1.problemset.Problemset.Favorites:output_type -> api.core.v1.problemset.FavoritesRes
+	28, // [28:43] is the sub-list for method output_type
+	13, // [13:28] is the sub-list for method input_type
+	13, // [13:13] is the sub-list for extension type_name
+	13, // [13:13] is the sub-list for extension extendee
+	0,  // [0:13] is the sub-list for field type_name
 }
 
 func init() { file_core_v1_problemset_problemset_proto_init() }
@@ -1852,7 +2702,7 @@ func file_core_v1_problemset_problemset_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_core_v1_problemset_problemset_proto_rawDesc), len(file_core_v1_problemset_problemset_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   24,
+			NumMessages:   37,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

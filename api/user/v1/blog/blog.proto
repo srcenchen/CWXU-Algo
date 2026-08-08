@@ -1,0 +1,1245 @@
+syntax = "proto3";
+
+package api.user.v1.blog;
+
+import "google/api/annotations.proto";
+import "google/protobuf/wrappers.proto";
+option go_package = "cwxu-algo/api/user/v1/blog;blog";
+option java_multiple_files = true;
+option java_package = "api.user.v1.blog";
+
+// 个人博客服务（文章/评论/点赞/分类/标签/主题/页面/协议开通/插件版本/图片上传/站管管理/举报）
+// 实现位于 user/internal/service/blog*.go（由手写 HTTP 路由迁移而来）。
+// 路径前缀：/v1/user/blog/*
+service Blog {
+  // 公开：按用户名列出文章（含作者与博客壳配置；JWT 可选，有则识别作者）
+  rpc ListByUsername (ListByUsernameReq) returns (ListByUsernameRes) {
+    option (google.api.http) = { get: "/v1/user/blog/by-username" };
+  }
+  // 公开：文章详情（id 或 username+slug；password/unlockToken 解锁）
+  rpc GetArticle (GetArticleReq) returns (GetArticleRes) {
+    option (google.api.http) = { get: "/v1/user/blog/article/get" };
+  }
+  // 公开：密码文解锁，返回 unlockToken
+  rpc Unlock (UnlockReq) returns (UnlockRes) {
+    option (google.api.http) = { post: "/v1/user/blog/article/unlock" body: "*" };
+  }
+  // 公开：精选文章（推荐）
+  rpc Recommend (RecommendReq) returns (RecommendRes) {
+    option (google.api.http) = { get: "/v1/user/blog/recommend" };
+  }
+  // 公开：主站博客广场文章流
+  rpc Plaza (PlazaReq) returns (PlazaRes) {
+    option (google.api.http) = { get: "/v1/user/blog/plaza" };
+  }
+  // 公开：最近有公开文的作者（广场侧栏）
+  rpc Authors (AuthorsReq) returns (AuthorsRes) {
+    option (google.api.http) = { get: "/v1/user/blog/authors" };
+  }
+  // 公开：作者公开分类列表（仅含 >0 篇公开文章的分类）
+  rpc ListCategoriesPublic (ListCategoriesPublicReq) returns (ListCategoriesPublicRes) {
+    option (google.api.http) = { get: "/v1/user/blog/categories" };
+  }
+  // 公开：作者公开文标签聚合
+  rpc ListTagsPublic (ListTagsPublicReq) returns (ListTagsPublicRes) {
+    option (google.api.http) = { get: "/v1/user/blog/tags" };
+  }
+  // 公开：已发布且显示在导航的页面列表
+  rpc PageListPublic (PageListPublicReq) returns (PageListPublicRes) {
+    option (google.api.http) = { get: "/v1/user/blog/page/list" };
+  }
+  // 公开：已发布页面详情
+  rpc PageGetPublic (PageGetPublicReq) returns (PageGetPublicRes) {
+    option (google.api.http) = { get: "/v1/user/blog/page/get" };
+  }
+  // 公开（登录可带 liked）：文章评论列表（顶层分页 + 嵌套 replies）
+  rpc ListComments (ListCommentsReq) returns (ListCommentsRes) {
+    option (google.api.http) = { get: "/v1/user/blog/comment/list" };
+  }
+  // 公开：博客主题状态（enabled/themeId/colorScheme/subtitle/socialLinks/槽位）
+  rpc ThemeStatus (ThemeStatusReq) returns (ThemeStatusRes) {
+    option (google.api.http) = { get: "/v1/user/blog/theme/status" };
+  }
+  // 登录：创建文章
+  rpc Create (CreateReq) returns (CreateRes) {
+    option (google.api.http) = { post: "/v1/user/blog/article/create" body: "*" };
+  }
+  // 登录：更新文章（作者/站管/审核员）
+  rpc Update (UpdateReq) returns (UpdateRes) {
+    option (google.api.http) = { post: "/v1/user/blog/article/update" body: "*" };
+  }
+  // 登录：删除文章（级联清理评论/点赞/标签/UV）
+  rpc Delete (DeleteReq) returns (DeleteRes) {
+    option (google.api.http) = { post: "/v1/user/blog/article/delete" body: "*" };
+  }
+  // 登录：我的文章列表
+  rpc Mine (MineReq) returns (MineRes) {
+    option (google.api.http) = { get: "/v1/user/blog/article/mine" };
+  }
+  // 登录：作者统计（汇总 + top 文章）
+  rpc Analytics (AnalyticsReq) returns (AnalyticsRes) {
+    option (google.api.http) = { get: "/v1/user/blog/analytics" };
+  }
+  // 登录：我的页面列表
+  rpc PageMine (PageMineReq) returns (PageMineRes) {
+    option (google.api.http) = { get: "/v1/user/blog/page/mine" };
+  }
+  // 登录：创建页面
+  rpc PageCreate (PageCreateReq) returns (PageCreateRes) {
+    option (google.api.http) = { post: "/v1/user/blog/page/create" body: "*" };
+  }
+  // 登录：更新页面
+  rpc PageUpdate (PageUpdateReq) returns (PageUpdateRes) {
+    option (google.api.http) = { post: "/v1/user/blog/page/update" body: "*" };
+  }
+  // 登录：删除页面
+  rpc PageDelete (PageDeleteReq) returns (PageDeleteRes) {
+    option (google.api.http) = { post: "/v1/user/blog/page/delete" body: "*" };
+  }
+  // 登录：页面排序
+  rpc PageReorder (PageReorderReq) returns (PageReorderRes) {
+    option (google.api.http) = { post: "/v1/user/blog/page/reorder" body: "*" };
+  }
+  // 登录：创建分类
+  rpc CategoryCreate (CategoryCreateReq) returns (CategoryCreateRes) {
+    option (google.api.http) = { post: "/v1/user/blog/category/create" body: "*" };
+  }
+  // 登录：更新分类（name/sortOrder 省略保留原值）
+  rpc CategoryUpdate (CategoryUpdateReq) returns (CategoryUpdateRes) {
+    option (google.api.http) = { post: "/v1/user/blog/category/update" body: "*" };
+  }
+  // 登录：删除分类（默认分类不可删；文章改挂默认分类）
+  rpc CategoryDelete (CategoryDeleteReq) returns (CategoryDeleteRes) {
+    option (google.api.http) = { post: "/v1/user/blog/category/delete" body: "*" };
+  }
+  // 登录：我的分类列表（自动确保默认分类存在）
+  rpc CategoryMine (CategoryMineReq) returns (CategoryMineRes) {
+    option (google.api.http) = { get: "/v1/user/blog/category/mine" };
+  }
+  // 登录：发表评论
+  rpc CommentCreate (CommentCreateReq) returns (CommentCreateRes) {
+    option (google.api.http) = { post: "/v1/user/blog/comment/create" body: "*" };
+  }
+  // 登录：删除评论（作者/文章作者/站管；级联删除子树）
+  rpc CommentDelete (CommentDeleteReq) returns (CommentDeleteRes) {
+    option (google.api.http) = { post: "/v1/user/blog/comment/delete" body: "*" };
+  }
+  // 登录：评论点赞 toggle
+  rpc CommentLikeToggle (CommentLikeToggleReq) returns (CommentLikeToggleRes) {
+    option (google.api.http) = { post: "/v1/user/blog/comment/like" body: "*" };
+  }
+  // 登录：文章点赞 toggle
+  rpc LikeToggle (LikeToggleReq) returns (LikeToggleRes) {
+    option (google.api.http) = { post: "/v1/user/blog/like" body: "*" };
+  }
+  // 登录：保存主题配置（themeId + social links + MD 槽位）
+  rpc ThemeConfigSave (ThemeConfigSaveReq) returns (ThemeConfigSaveRes) {
+    option (google.api.http) = { post: "/v1/user/blog/theme/config" body: "*" };
+  }
+  // 站管：主题开关（user|batch|all，遗留能力）
+  rpc ThemeEnable (ThemeEnableReq) returns (ThemeEnableRes) {
+    option (google.api.http) = { post: "/v1/user/blog/theme/enable" body: "*" };
+  }
+  // 公开：开通协议正文 + 当前用户开通状态（可匿名看正文）
+  rpc AgreementGet (AgreementGetReq) returns (AgreementGetRes) {
+    option (google.api.http) = { get: "/v1/user/blog/agreement" };
+  }
+  // 登录：当前用户开通状态
+  rpc ActivationStatus (ActivationStatusReq) returns (ActivationStatusRes) {
+    option (google.api.http) = { get: "/v1/user/blog/activation/status" };
+  }
+  // 登录：签署协议并开通博客
+  rpc Activate (ActivateReq) returns (ActivateRes) {
+    option (google.api.http) = { post: "/v1/user/blog/activate" body: "*" };
+  }
+  // 登录：更新互动邮件通知偏好
+  rpc NotifyPref (NotifyPrefReq) returns (NotifyPrefRes) {
+    option (google.api.http) = { post: "/v1/user/blog/notify-pref" body: "*" };
+  }
+  // 公开：Obsidian 插件当前版本元信息（插件检查更新）
+  rpc ObsidianPluginLatest (ObsidianPluginLatestReq) returns (ObsidianPluginLatestRes) {
+    option (google.api.http) = { get: "/v1/user/blog/obsidian-plugin/latest" };
+  }
+  // 发布脚本/站管：登记插件当前版本（X-Plugin-Publish-Token 或站管 JWT）
+  rpc ObsidianPluginPublish (ObsidianPluginPublishReq) returns (ObsidianPluginPublishRes) {
+    option (google.api.http) = { post: "/v1/user/blog/obsidian-plugin/publish" body: "*" };
+  }
+  // 登录：当前用户图片上传能力状态
+  rpc ImageUploadStatus (ImageUploadStatusReq) returns (ImageUploadStatusRes) {
+    option (google.api.http) = { get: "/v1/user/blog/image-upload/status" };
+  }
+  // 登录：申请图片上传权限
+  rpc ImageUploadApply (ImageUploadApplyReq) returns (ImageUploadApplyRes) {
+    option (google.api.http) = { post: "/v1/user/blog/image-upload/apply" body: "*" };
+  }
+  // 登录：批量确认图床 URL/object key/content hash 是否仍在资产表
+  rpc BlogImagesCheck (BlogImagesCheckReq) returns (BlogImagesCheckRes) {
+    option (google.api.http) = { post: "/v1/user/blog/images/check" body: "*" };
+  }
+  // 站管/博客管理：开关作者图片上传
+  rpc AdminImageUpload (AdminImageUploadReq) returns (AdminImageUploadRes) {
+    option (google.api.http) = { post: "/v1/user/blog/admin/image-upload" body: "*" };
+  }
+  // 站管/博客管理：图片上传申请列表
+  rpc AdminImageUploadRequests (AdminImageUploadRequestsReq) returns (AdminImageUploadRequestsRes) {
+    option (google.api.http) = { get: "/v1/user/blog/admin/image-upload/requests" };
+  }
+  // 站管/博客管理：审核图片上传申请
+  rpc AdminImageUploadReview (AdminImageUploadReviewReq) returns (AdminImageUploadReviewRes) {
+    option (google.api.http) = { post: "/v1/user/blog/admin/image-upload/review" body: "*" };
+  }
+  // 站管：博客数据看板概览
+  rpc AdminOverview (AdminOverviewReq) returns (AdminOverviewRes) {
+    option (google.api.http) = { get: "/v1/user/blog/admin/overview" };
+  }
+  // 站管：已开通作者列表
+  rpc AdminAuthors (AdminAuthorsReq) returns (AdminAuthorsRes) {
+    option (google.api.http) = { get: "/v1/user/blog/admin/authors" };
+  }
+  // 站管：文章审查列表（含 private/password）
+  rpc AdminArticles (AdminArticlesReq) returns (AdminArticlesRes) {
+    option (google.api.http) = { get: "/v1/user/blog/admin/articles" };
+  }
+  // 站管/博客审核：文章审核（approve|reject|pending|feature|unfeature）
+  rpc AdminModerate (AdminModerateReq) returns (AdminModerateRes) {
+    option (google.api.http) = { post: "/v1/user/blog/admin/moderate" body: "*" };
+  }
+  // 仅站点管理员：全站图片资产（mode=all|cleanup）
+  rpc AdminBlogImages (AdminBlogImagesReq) returns (AdminBlogImagesRes) {
+    option (google.api.http) = { get: "/v1/user/blog/admin/images" };
+  }
+  // 仅站点管理员：删除单张图片（状态已变化返回 409）
+  rpc AdminBlogImageDelete (AdminBlogImageDeleteReq) returns (AdminBlogImageDeleteRes) {
+    option (google.api.http) = { post: "/v1/user/blog/admin/images/delete" body: "*" };
+  }
+  // 仅站点管理员：按快照批量删除候选图片（快照不一致返回 409）
+  rpc AdminBlogImagesDeleteBatch (AdminBlogImagesDeleteBatchReq) returns (AdminBlogImagesDeleteBatchRes) {
+    option (google.api.http) = { post: "/v1/user/blog/admin/images/delete-batch" body: "*" };
+  }
+  // 登录：举报博客文章
+  rpc Report (ReportReq) returns (ReportRes) {
+    option (google.api.http) = { post: "/v1/user/blog/report" body: "*" };
+  }
+  // 举报处理台（content.report.handle）：举报列表
+  rpc ReportList (ReportListReq) returns (ReportListRes) {
+    option (google.api.http) = { get: "/v1/user/blog/report/list" };
+  }
+  // 举报处理台（content.report.handle）：处理举报
+  rpc ReportHandle (ReportHandleReq) returns (ReportHandleRes) {
+    option (google.api.http) = { post: "/v1/user/blog/report/handle" body: "*" };
+  }
+}
+
+// ---------- 通用结构 ----------
+
+message Author {
+  int64 id = 1;
+  string username = 2;
+  string name = 3;
+  string avatar = 4;
+}
+
+message SocialLink {
+  string type = 1;
+  string url = 2;
+  string label = 3;
+}
+
+// 文章序列化（与手写 articleToMap 形状一致；零值字段也输出）
+message ArticleInfo {
+  int64 id = 1;
+  string slug = 2;
+  string title = 3;
+  string summary = 4;
+  string coverUrl = 5;
+  string visibility = 6;   // public|password|private
+  bool recommend = 7;
+  bool syncToMainProfile = 8;
+  int64 categoryId = 9;    // 无分类为 0
+  repeated string tags = 10;
+  int64 viewCount = 11;
+  int64 likeCount = 12;
+  int64 commentCount = 13;
+  bool liked = 14;
+  bool requiresPassword = 15;
+  bool canSeeBody = 16;
+  string moderationStatus = 17; // approved|pending|rejected
+  int64 createdAt = 18;
+  int64 updatedAt = 19;
+  repeated int64 orgIds = 20;
+  string moderationNote = 21;   // 作者可见审核备注
+  int64 sourceSolutionId = 22;  // 题解镜像文关联
+  int64 sourceProblemId = 23;
+  bool summaryIsDefault = 24;
+  int64 publishedAt = 25;
+  Author author = 26;
+  int64 userId = 27;
+  string username = 28;
+  string content = 29;      // 有权限看正文时才有内容
+  string message = 30;      // get 需密码提示
+  string unlockToken = 31;  // 仅 unlock 返回
+}
+
+message BlogPageInfo {
+  int64 id = 1;
+  string title = 2;
+  string slug = 3;
+  string contentMd = 4;
+  string status = 5;      // draft|published
+  bool showInNav = 6;
+  string navLabel = 7;
+  int32 navOrder = 8;
+  int64 createdAt = 9;
+  int64 updatedAt = 10;
+}
+
+message CategoryInfo {
+  int64 id = 1;
+  string name = 2;
+  int32 sortOrder = 3;
+  int64 articleCount = 4;
+  bool isDefault = 5;
+}
+
+message TagCount {
+  string name = 1;
+  int64 count = 2;
+}
+
+// 评论节点（replies 递归嵌套；深度上限 3）
+message CommentInfo {
+  int64 id = 1;
+  int64 articleId = 2;
+  int64 parentId = 3;
+  string content = 4;
+  int64 createdAt = 5;
+  int64 userId = 6;
+  int32 likeCount = 7;
+  bool liked = 8;
+  Author author = 9;
+  int64 replyToUserId = 10;
+  string replyToUsername = 11;
+  string replyToName = 12;
+  repeated CommentInfo replies = 13;
+}
+
+message PlazaAuthorInfo {
+  int64 id = 1;
+  string username = 2;
+  string name = 3;
+  string avatar = 4;
+  int64 articleCount = 5;
+  int64 lastPublishedAt = 6;
+  string latestTitle = 7;
+}
+
+message AnalyticsTopArticle {
+  int64 id = 1;
+  string slug = 2;
+  string title = 3;
+  int64 viewCount = 4;
+  int64 likeCount = 5;
+  int64 commentCount = 6;
+  string visibility = 7;
+}
+
+message AdminAuthorInfo {
+  int64 userId = 1;
+  string username = 2;
+  string name = 3;
+  string avatar = 4;
+  string agreementVersion = 5;
+  bool emailNotifyEnabled = 6;
+  string emailNotifyStrategy = 7;
+  string themeId = 8;
+  bool imageUploadEnabled = 9;
+  int64 articleCount = 10;
+  int64 viewCount = 11;
+  int64 likeCount = 12;
+  int64 commentCount = 13;
+  bool activated = 14;
+  int64 activatedAt = 15;
+  int64 agreementAcceptedAt = 16;
+}
+
+message AdminArticleInfo {
+  int64 id = 1;
+  string slug = 2;
+  string title = 3;
+  string summary = 4;
+  string visibility = 5;
+  bool recommend = 6;
+  int64 viewCount = 7;
+  int64 likeCount = 8;
+  int64 commentCount = 9;
+  string moderationStatus = 10;
+  string moderationNote = 11;
+  int64 userId = 12;
+  string username = 13;
+  string authorName = 14;
+  int64 createdAt = 15;
+  int64 publishedAt = 16;
+  int64 moderatedAt = 17;
+}
+
+message ReportReporterInfo {
+  int64 userId = 1;
+  string username = 2;
+}
+
+message ReportTargetInfo {
+  bool exists = 1;
+  string slug = 2;
+  string title = 3;
+  int64 authorUserId = 4;
+  string authorUsername = 5;
+}
+
+message ReportItem {
+  int64 id = 1;
+  int64 createdAt = 2;
+  string status = 3; // pending|resolved|dismissed
+  string reason = 4;
+  int64 articleId = 5;
+  ReportReporterInfo reporter = 6;
+  ReportTargetInfo target = 7;
+}
+
+message AdminImageAssetInfo {
+  int64 id = 1;
+  int64 userId = 2;
+  string username = 3;
+  string name = 4;
+  string objectKey = 5;
+  string url = 6;
+  string contentHash = 7;
+  string purpose = 8;
+  // RFC3339Nano 字符串（与手写 time.Time JSON 输出一致）
+  string createdAt = 9;
+  bool referenced = 10;
+}
+
+message AdminImageListData {
+  repeated AdminImageAssetInfo list = 1;
+  int64 total = 2;
+  int64 page = 3;
+  int64 pageSize = 4;
+  string mode = 5;          // all|cleanup
+  repeated int64 candidateIds = 6;
+  string snapshot = 7;
+}
+
+message ImageUploadRequestItem {
+  int64 id = 1;
+  int64 userId = 2;
+  string username = 3;
+  string name = 4;
+  string avatar = 5;
+  string reason = 6;
+  string status = 7; // pending|approved|rejected
+  int64 createdAt = 8;
+  string reviewNote = 9;
+  int64 reviewerId = 10;
+  int64 reviewedAt = 11;
+}
+
+message ActivationData {
+  bool activated = 1;
+  string agreementVersion = 2;
+  bool needAgreement = 3;
+  bool emailNotifyEnabled = 4;
+  string emailNotifyStrategy = 5; // off|immediate|digest_daily|random
+  string signedAgreementVersion = 6;
+  int64 agreementAcceptedAt = 7;
+  int64 activatedAt = 8;
+  string themeId = 9;
+  string subtitle = 10;
+  bool imageUploadEnabled = 11;
+  string username = 12;
+  string title = 13;   // 仅 agreement 返回
+  string content = 14; // 仅 agreement 返回（协议正文）
+}
+
+message ThemeConfigData {
+  string themeId = 1;
+  string colorScheme = 2; // light|dark|system
+  string subtitle = 3;
+  repeated SocialLink socialLinks = 4;
+  string aboutMd = 5;
+  string homeIntroMd = 6;
+  string friendsMd = 7;
+}
+
+message ThemeStatusData {
+  bool enabled = 1;
+  string themeId = 2;
+  string colorScheme = 3;
+  string subtitle = 4;
+  repeated SocialLink socialLinks = 5;
+  string aboutMd = 6;
+  string homeIntroMd = 7;
+  string friendsMd = 8;
+}
+
+message ObsidianPluginView {
+  string id = 1;
+  string name = 2;
+  string version = 3;
+  string minAppVersion = 4;
+  string notes = 5;
+  // JSON number（插件端按 typeof number 判断）
+  double releasedAt = 6;
+  string downloadBase = 7;
+}
+
+message ImageUploadStatusData {
+  bool configured = 1;
+  bool authorized = 2;
+  bool enabled = 3;
+  bool pendingRequest = 4;
+  int64 pendingRequestId = 5;
+}
+
+message ImageUploadApplyData {
+  int64 id = 1;
+  bool pendingRequest = 2;
+  string status = 3;
+  bool authorized = 4;
+}
+
+message BlogImagesCheckData {
+  repeated string existing = 1;
+  repeated string missing = 2;
+  repeated string existingHashes = 3;
+  repeated string missingHashes = 4;
+}
+
+message LikeData {
+  bool liked = 1;
+  int32 likeCount = 2;
+}
+
+message CommentLikeData {
+  bool liked = 1;
+  int32 likeCount = 2;
+  int64 commentId = 3;
+}
+
+message CommentCreateData {
+  int64 id = 1;
+  int64 articleId = 2;
+  int64 parentId = 3;
+  string content = 4;
+  int64 createdAt = 5;
+  int64 userId = 6;
+}
+
+message ReportData {
+  int64 id = 1;
+  bool alreadyReported = 2;
+}
+
+message AdminModerateData {
+  int64 id = 1;
+  bool recommend = 2;
+  string moderationStatus = 3;
+  string moderationNote = 4;
+}
+
+message AdminImageUploadReviewData {
+  int64 id = 1;
+  string status = 2;
+  int64 userId = 3;
+}
+
+message AdminImageDeleteData {
+  int32 deleted = 1;
+}
+
+message AdminImageUploadToggleData {
+  int64 userId = 1;
+  bool imageUploadEnabled = 2;
+}
+
+message ReportHandleData {
+  int64 id = 1;
+  string status = 2;
+}
+
+message CategoryCreateData {
+  int64 id = 1;
+  string name = 2;
+  int32 sortOrder = 3;
+  bool isDefault = 4;
+}
+
+message ArticleListData {
+  repeated ArticleInfo list = 1;
+  int64 total = 2;
+  int64 page = 3;
+  int64 pageSize = 4;
+}
+
+message CommentListData {
+  repeated CommentInfo list = 1;
+  int64 total = 2;
+  int64 page = 3;
+  int64 pageSize = 4;
+}
+
+message PlazaAuthorListData {
+  repeated PlazaAuthorInfo list = 1;
+  int64 total = 2;
+  int64 page = 3;
+  int64 pageSize = 4;
+}
+
+message AdminAuthorListData {
+  repeated AdminAuthorInfo list = 1;
+  int64 total = 2;
+  int64 page = 3;
+  int64 pageSize = 4;
+}
+
+message AdminArticleListData {
+  repeated AdminArticleInfo list = 1;
+  int64 total = 2;
+  int64 page = 3;
+  int64 pageSize = 4;
+}
+
+message ImageUploadRequestListData {
+  repeated ImageUploadRequestItem list = 1;
+  int64 total = 2;
+  int64 page = 3;
+  int64 pageSize = 4;
+}
+
+message ReportListData {
+  repeated ReportItem list = 1;
+  int64 total = 2;
+  int64 page = 3;
+  int64 pageSize = 4;
+}
+
+message AnalyticsData {
+  int64 totalArticles = 1;
+  int64 totalViews = 2;
+  int64 totalLikes = 3;
+  int64 totalComments = 4;
+  repeated AnalyticsTopArticle topArticles = 5;
+}
+
+message AdminOverviewData {
+  int64 activatedUsers = 1;
+  int64 totalArticles = 2;
+  int64 totalViews = 3;
+  int64 totalLikes = 4;
+  int64 totalComments = 5;
+  int64 pendingReview = 6;
+  int64 rejected = 7;
+}
+
+// ---------- Req/Res ----------
+
+message ListByUsernameReq {
+  string username = 1;
+  int64 page = 2;
+  int64 pageSize = 3;
+  int64 categoryId = 4;
+  string keyword = 5;
+  string tag = 6;
+}
+message ByUsernameAuthorData {
+  Author author = 1;
+  repeated ArticleInfo list = 2;
+  int64 total = 3;
+  int64 page = 4;
+  int64 pageSize = 5;
+  bool themeEnabled = 6;
+  string themeId = 7;
+  string colorScheme = 8;
+  string subtitle = 9;
+  repeated SocialLink socialLinks = 10;
+  string aboutMd = 11;
+  string homeIntroMd = 12;
+  string friendsMd = 13;
+  bool isOwner = 14;
+  bool activated = 15;
+}
+message ListByUsernameRes {
+  int32 code = 1;
+  string message = 2;
+  ByUsernameAuthorData data = 3;
+}
+
+message GetArticleReq {
+  int64 id = 1;
+  string username = 2;
+  string slug = 3;
+  string password = 4;
+  string unlockToken = 5;
+}
+message GetArticleRes {
+  int32 code = 1;
+  string message = 2;
+  ArticleInfo data = 3;
+}
+
+message UnlockReq {
+  int64 id = 1;
+  string password = 2;
+}
+message UnlockRes {
+  int32 code = 1;
+  string message = 2;
+  ArticleInfo data = 3;
+}
+
+message RecommendReq {
+  int64 page = 1;
+  int64 pageSize = 2;
+  int64 orgId = 3;
+  int64 excludeSolutions = 4; // 1=排除题解镜像文
+}
+message RecommendRes {
+  int32 code = 1;
+  string message = 2;
+  ArticleListData data = 3;
+}
+
+message PlazaReq {
+  int64 page = 1;
+  int64 pageSize = 2;
+  string keyword = 3;
+  string sort = 4; // latest|hot|recommend
+  int64 orgId = 5;
+  int64 excludeSolutions = 6;
+}
+message PlazaRes {
+  int32 code = 1;
+  string message = 2;
+  ArticleListData data = 3;
+}
+
+message AuthorsReq {
+  int64 page = 1;
+  int64 pageSize = 2;
+  string keyword = 3;
+}
+message AuthorsRes {
+  int32 code = 1;
+  string message = 2;
+  PlazaAuthorListData data = 3;
+}
+
+message ListCategoriesPublicReq {
+  string username = 1;
+}
+message ListCategoriesPublicRes {
+  int32 code = 1;
+  string message = 2;
+  repeated CategoryInfo list = 3;
+}
+
+message ListTagsPublicReq {
+  string username = 1;
+  int64 limit = 2;
+  string keyword = 3;
+}
+message ListTagsPublicRes {
+  int32 code = 1;
+  string message = 2;
+  repeated TagCount data = 3;
+}
+
+message PageListPublicReq {
+  string username = 1;
+}
+message PageListPublicRes {
+  int32 code = 1;
+  string message = 2;
+  repeated BlogPageInfo data = 3;
+}
+
+message PageGetPublicReq {
+  string username = 1;
+  string slug = 2;
+}
+message PageGetPublicRes {
+  int32 code = 1;
+  string message = 2;
+  BlogPageInfo data = 3;
+}
+
+message ListCommentsReq {
+  int64 articleId = 1;
+  int64 page = 2;
+  int64 pageSize = 3;
+}
+message ListCommentsRes {
+  int32 code = 1;
+  string message = 2;
+  CommentListData data = 3;
+}
+
+message ThemeStatusReq {
+  string username = 1; // 省略=当前登录用户
+}
+message ThemeStatusRes {
+  int32 code = 1;
+  string message = 2;
+  ThemeStatusData data = 3;
+}
+
+message CreateReq {
+  int64 id = 1;
+  string title = 2;
+  string slug = 3;
+  string summary = 4; // 服务端忽略客户端摘要，一律自动生成
+  string content = 5;
+  string coverUrl = 6;
+  string visibility = 7;
+  string password = 8;
+  bool recommend = 9; // 作者端不可写，仅站管/审核员经 moderate 设
+  // 省略=公开默认同步主站；显式 false=仅个人站公开
+  google.protobuf.BoolValue syncToMainProfile = 10;
+  int64 categoryId = 11;
+  repeated int64 orgIds = 12;
+  repeated string tags = 13;
+  bool clearPassword = 14;
+  bool useFirstImageAsCover = 15;
+}
+message CreateRes {
+  int32 code = 1;
+  string message = 2;
+  ArticleInfo data = 3;
+}
+
+message UpdateReq {
+  int64 id = 1;
+  string title = 2;
+  string slug = 3;
+  string summary = 4;
+  string content = 5;
+  string coverUrl = 6;
+  string visibility = 7;
+  string password = 8;
+  bool recommend = 9;
+  google.protobuf.BoolValue syncToMainProfile = 10;
+  int64 categoryId = 11;
+  repeated int64 orgIds = 12;
+  repeated string tags = 13;
+  bool clearPassword = 14;
+  bool useFirstImageAsCover = 15;
+}
+message UpdateRes {
+  int32 code = 1;
+  string message = 2;
+  ArticleInfo data = 3;
+}
+
+message DeleteReq {
+  int64 id = 1;
+}
+message DeleteRes {
+  int32 code = 1;
+  string message = 2;
+}
+
+message MineReq {
+  int64 page = 1;
+  int64 pageSize = 2;
+  string keyword = 3;
+}
+message MineRes {
+  int32 code = 1;
+  string message = 2;
+  ArticleListData data = 3;
+}
+
+message AnalyticsReq {}
+message AnalyticsRes {
+  int32 code = 1;
+  string message = 2;
+  AnalyticsData data = 3;
+}
+
+message PageMineReq {}
+message PageMineRes {
+  int32 code = 1;
+  string message = 2;
+  repeated BlogPageInfo data = 3;
+}
+
+message PageCreateReq {
+  int64 id = 1;
+  string title = 2;
+  string slug = 3;
+  string contentMd = 4;
+  string status = 5;
+  bool showInNav = 6;
+  string navLabel = 7;
+  int32 navOrder = 8;
+}
+message PageCreateRes {
+  int32 code = 1;
+  string message = 2;
+  BlogPageInfo data = 3;
+}
+
+message PageUpdateReq {
+  int64 id = 1;
+  string title = 2;
+  string slug = 3;
+  string contentMd = 4;
+  string status = 5;
+  bool showInNav = 6;
+  string navLabel = 7;
+  int32 navOrder = 8;
+}
+message PageUpdateRes {
+  int32 code = 1;
+  string message = 2;
+  BlogPageInfo data = 3;
+}
+
+message PageDeleteReq {
+  int64 id = 1;
+}
+message PageDeleteRes {
+  int32 code = 1;
+  string message = 2;
+}
+
+message PageOrderItem {
+  int64 id = 1;
+  int32 navOrder = 2;
+}
+message PageReorderReq {
+  repeated PageOrderItem items = 1;
+}
+message PageReorderRes {
+  int32 code = 1;
+  string message = 2;
+}
+
+message CategoryCreateReq {
+  string name = 1;
+  int32 sortOrder = 2;
+}
+message CategoryCreateRes {
+  int32 code = 1;
+  string message = 2;
+  CategoryCreateData data = 3;
+}
+
+message CategoryUpdateReq {
+  int64 id = 1;
+  string name = 2; // 非空才更新
+  // 省略保留原值（null/缺省不变）
+  google.protobuf.Int32Value sortOrder = 3;
+}
+message CategoryUpdateRes {
+  int32 code = 1;
+  string message = 2;
+  CategoryCreateData data = 3;
+}
+
+message CategoryDeleteReq {
+  int64 id = 1;
+}
+message CategoryDeleteRes {
+  int32 code = 1;
+  string message = 2;
+}
+
+message CategoryMineReq {}
+message CategoryMineRes {
+  int32 code = 1;
+  string message = 2;
+  repeated CategoryInfo list = 3;
+}
+
+message CommentCreateReq {
+  int64 articleId = 1;
+  int64 parentId = 2;
+  string content = 3;
+}
+message CommentCreateRes {
+  int32 code = 1;
+  string message = 2;
+  CommentCreateData data = 3;
+}
+
+message CommentDeleteReq {
+  int64 id = 1;
+}
+message CommentDeleteRes {
+  int32 code = 1;
+  string message = 2;
+}
+
+message CommentLikeToggleReq {
+  int64 commentId = 1;
+}
+message CommentLikeToggleRes {
+  int32 code = 1;
+  string message = 2;
+  CommentLikeData data = 3;
+}
+
+message LikeToggleReq {
+  int64 articleId = 1;
+}
+message LikeToggleRes {
+  int32 code = 1;
+  string message = 2;
+  LikeData data = 3;
+}
+
+message ThemeConfigSaveReq {
+  string themeId = 1;
+  string colorScheme = 2;
+  string subtitle = 3;
+  repeated SocialLink socialLinks = 4;
+  google.protobuf.StringValue aboutMd = 5;
+  google.protobuf.StringValue homeIntroMd = 6;
+  google.protobuf.StringValue friendsMd = 7;
+}
+message ThemeConfigSaveRes {
+  int32 code = 1;
+  string message = 2;
+  ThemeConfigData data = 3;
+}
+
+message ThemeEnableReq {
+  string mode = 1; // user|batch|all
+  int64 userId = 2;
+  repeated int64 userIds = 3;
+  bool enabled = 4;
+}
+message ThemeEnableRes {
+  int32 code = 1;
+  string message = 2;
+}
+
+message AgreementGetReq {}
+message AgreementGetRes {
+  int32 code = 1;
+  string message = 2;
+  ActivationData data = 3;
+}
+
+message ActivationStatusReq {}
+message ActivationStatusRes {
+  int32 code = 1;
+  string message = 2;
+  ActivationData data = 3;
+}
+
+message ActivateReq {
+  bool accept = 1;
+  string agreementVersion = 2;
+  google.protobuf.BoolValue emailNotifyEnabled = 3;
+  string emailNotifyStrategy = 4;
+}
+message ActivateRes {
+  int32 code = 1;
+  string message = 2;
+  ActivationData data = 3;
+}
+
+message NotifyPrefReq {
+  google.protobuf.BoolValue emailNotifyEnabled = 1;
+  string emailNotifyStrategy = 2;
+}
+message NotifyPrefRes {
+  int32 code = 1;
+  string message = 2;
+  NotifyPrefData data = 3;
+}
+message NotifyPrefData {
+  bool emailNotifyEnabled = 1;
+  string emailNotifyStrategy = 2;
+}
+
+message ObsidianPluginLatestReq {}
+message ObsidianPluginLatestRes {
+  int32 code = 1;
+  ObsidianPluginView data = 2;
+}
+
+message ObsidianPluginPublishReq {
+  string version = 1;
+  string minAppVersion = 2;
+  string notes = 3;
+  int64 releasedAt = 4;
+  string downloadBase = 5;
+}
+message ObsidianPluginPublishRes {
+  int32 code = 1;
+  string message = 2;
+  ObsidianPluginView data = 3;
+}
+
+message ImageUploadStatusReq {}
+message ImageUploadStatusRes {
+  int32 code = 1;
+  string message = 2;
+  ImageUploadStatusData data = 3;
+}
+
+message ImageUploadApplyReq {
+  string reason = 1;
+}
+message ImageUploadApplyRes {
+  int32 code = 1;
+  string message = 2;
+  ImageUploadApplyData data = 3;
+}
+
+message BlogImagesCheckReq {
+  repeated string urls = 1;
+  repeated string hashes = 2;
+}
+message BlogImagesCheckRes {
+  int32 code = 1;
+  string message = 2;
+  BlogImagesCheckData data = 3;
+}
+
+message AdminImageUploadReq {
+  int64 userId = 1;
+  bool enabled = 2;
+}
+message AdminImageUploadRes {
+  int32 code = 1;
+  string message = 2;
+  AdminImageUploadToggleData data = 3;
+}
+
+message AdminImageUploadRequestsReq {
+  int64 page = 1;
+  int64 pageSize = 2;
+  string status = 3; // pending|approved|rejected|all
+}
+message AdminImageUploadRequestsRes {
+  int32 code = 1;
+  string message = 2;
+  ImageUploadRequestListData data = 3;
+}
+
+message AdminImageUploadReviewReq {
+  int64 id = 1;
+  string action = 2; // approve|reject
+  string note = 3;
+}
+message AdminImageUploadReviewRes {
+  int32 code = 1;
+  string message = 2;
+  AdminImageUploadReviewData data = 3;
+}
+
+message AdminOverviewReq {}
+message AdminOverviewRes {
+  int32 code = 1;
+  string message = 2;
+  AdminOverviewData data = 3;
+}
+
+message AdminAuthorsReq {
+  int64 page = 1;
+  int64 pageSize = 2;
+  string keyword = 3;
+}
+message AdminAuthorsRes {
+  int32 code = 1;
+  string message = 2;
+  AdminAuthorListData data = 3;
+}
+
+message AdminArticlesReq {
+  int64 page = 1;
+  int64 pageSize = 2;
+  string keyword = 3;
+  string status = 4;     // moderation_status 筛选
+  string visibility = 5;
+}
+message AdminArticlesRes {
+  int32 code = 1;
+  string message = 2;
+  AdminArticleListData data = 3;
+}
+
+message AdminModerateReq {
+  int64 id = 1;
+  string action = 2; // approve|reject|pending|feature|unfeature
+  string note = 3;
+}
+message AdminModerateRes {
+  int32 code = 1;
+  string message = 2;
+  AdminModerateData data = 3;
+}
+
+message AdminBlogImagesReq {
+  int64 page = 1;
+  int64 pageSize = 2;
+  string mode = 3; // all|cleanup
+}
+message AdminBlogImagesRes {
+  int32 code = 1;
+  string message = 2;
+  AdminImageListData data = 3;
+}
+
+message AdminBlogImageDeleteReq {
+  int64 id = 1;
+}
+message AdminBlogImageDeleteRes {
+  int32 code = 1;
+  string message = 2;
+  AdminImageDeleteData data = 3;
+}
+
+message AdminBlogImagesDeleteBatchReq {
+  repeated int64 ids = 1;
+  string snapshot = 2;
+}
+message AdminBlogImagesDeleteBatchRes {
+  int32 code = 1;
+  string message = 2;
+  AdminImageDeleteData data = 3;
+}
+
+message ReportReq {
+  int64 articleId = 1;
+  string reason = 2;
+}
+message ReportRes {
+  int32 code = 1;
+  string message = 2;
+  ReportData data = 3;
+}
+
+message ReportListReq {
+  string status = 1; // pending|resolved|dismissed|all
+  int64 page = 2;
+  int64 pageSize = 3;
+}
+message ReportListRes {
+  int32 code = 1;
+  string message = 2;
+  ReportListData data = 3;
+}
+
+message ReportHandleReq {
+  int64 id = 1;
+  string action = 2; // resolve|dismiss
+}
+message ReportHandleRes {
+  int32 code = 1;
+  string message = 2;
+  ReportHandleData data = 3;
+}

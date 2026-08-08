@@ -47,6 +47,13 @@ service Auth {
       body: "*"
     };
   }
+  // 退出登录（清理 session cookie；白名单免 JWT）
+  rpc Logout (LogoutReq) returns (LogoutRes) {
+    option (google.api.http) = {
+      post: "/v1/user/auth/logout",
+      body: "*"
+    };
+  }
 }
 
 message LoginReq {
@@ -117,4 +124,12 @@ message ChangePasswordReq {
 message ChangePasswordRes {
   bool success = 1;
   string message = 2;
+}
+
+message LogoutReq {}
+
+message LogoutRes {
+  int32 code = 1;
+  bool success = 2;
+  string message = 3;
 }

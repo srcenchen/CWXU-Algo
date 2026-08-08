@@ -2,14 +2,15 @@ package server
 
 import (
 	"context"
-	"strings"
 
 	"cwxu-algo/api/core/v1/bulletin"
+	"cwxu-algo/api/core/v1/community"
 	"cwxu-algo/api/core/v1/contest_calendar"
 	"cwxu-algo/api/core/v1/contest_log"
 	"cwxu-algo/api/core/v1/emergency"
 	healthpb "cwxu-algo/api/core/v1/health"
 	"cwxu-algo/api/core/v1/problem"
+	"cwxu-algo/api/core/v1/problemset"
 	"cwxu-algo/api/core/v1/spider"
 	statistic2 "cwxu-algo/api/core/v1/statistic"
 	"cwxu-algo/api/core/v1/submit_log"
@@ -36,6 +37,11 @@ func NewWhiteListMatcher() selector.MatchFunc {
 		"/api.core.v1.contest_log.Contest/GetContestList":         "",
 		"/api.core.v1.contest_log.Contest/GetUserContestHistory": "",
 		"/api.core.v1.contest_log.Contest/GetContestRanking": "",
+		// 比赛题目目录 / 站内榜 / 格子提交明细 公开读（proto 化后 operation 全名；
+		// 网关侧对应 /v1/core/contest/{problems,board,cell-submits} 路径白名单不变）
+		"/api.core.v1.contest_log.Contest/GetContestProblems":   "",
+		"/api.core.v1.contest_log.Contest/GetContestBoard":      "",
+		"/api.core.v1.contest_log.Contest/GetContestCellSubmits": "",
 		"/api.core.v1.spider.Spider/GetSpider":               "",
 		"/api.core.v1.statistic.Statistic/Heatmap":           "",
 		"/api.core.v1.statistic.Statistic/PeriodCount":       "",
@@ -51,28 +57,22 @@ func NewWhiteListMatcher() selector.MatchFunc {
 		"/api.core.v1.problem.Problem/UserProfile":           "",
 		"/api.core.v1.contest_calendar.ContestCalendar/ListCalendar":  "",
 		"/api.core.v1.contest_calendar.ContestCalendar/ListPlatforms": "",
+		// 题单公开读（proto 化后 operation 全名）
+		"/api.core.v1.problemset.Problemset/Square":   "",
+		"/api.core.v1.problemset.Problemset/Get":      "",
+		"/api.core.v1.problemset.Problemset/ByProblem": "",
+		"/api.core.v1.problemset.Problemset/Unlock":   "",
+		// 社区公开读（评论/题解列表与详情、发现流、资料近期）；写操作仍需登录
+		"/api.core.v1.community.Community/CommentList":          "",
+		"/api.core.v1.community.Community/SolutionList":         "",
+		"/api.core.v1.community.Community/SolutionGet":          "",
+		"/api.core.v1.community.Community/ActivityFeed":         "",
+		"/api.core.v1.community.Community/UserRecentComments":   "",
+		"/api.core.v1.community.Community/UserRecentSolutions":  "",
 	}
 	return func(ctx context.Context, operation string) bool {
 		//log.Info(operation)
-		// 评论/题解列表与资料近期、发现流公开读；写操作仍需登录
-		// 题单：广场 / 公有详情 / 按题关联 可匿名；其余需登录
-		if strings.Contains(operation, "problemset/square") ||
-			strings.Contains(operation, "problemset/get") ||
-			strings.Contains(operation, "problemset/by-problem") ||
-			strings.Contains(operation, "problemset/unlock") {
-			return false
-		}
-		if strings.Contains(operation, "problem/comment/list") ||
-			strings.Contains(operation, "problem/solution/list") ||
-			strings.Contains(operation, "problem/solution/get") ||
-			strings.Contains(operation, "activity/feed") ||
-			strings.Contains(operation, "user/recent-comments") ||
-			strings.Contains(operation, "user/recent-solutions") ||
-			strings.Contains(operation, "contest/problems") ||
-			strings.Contains(operation, "contest/board") ||
-			strings.Contains(operation, "contest/cell-submits") {
-			return false
-		}
+		// 题单：广场 / 公有详情 / 按题关联 / 解锁 可匿名；其余需登录
 		if _, ok := whiteList[operation]; ok {
 			return false
 		}
@@ -115,11 +115,8 @@ func NewHTTPServer(c *conf.Server, logger log.Logger, d *data.Data, submitServic
 	problem.RegisterProblemHTTPServer(srv, problemService)
 	emergency.RegisterEmergencyHTTPServer(srv, emergencyService)
 	contest_calendar.RegisterContestCalendarHTTPServer(srv, contestCalendarService)
-	service.RegisterCommunityRoutes(srv, communityService)
-	service.RegisterProblemsetRoutes(srv, problemsetService)
-	service.RegisterContestExtraRoutes(srv, contestLogService)
-	service.RegisterSpiderExtraRoutes(srv, spiderService)
-	service.RegisterProblemExtraRoutes(srv, problemService)
+	community.RegisterCommunityHTTPServer(srv, communityService)
+	problemset.RegisterProblemsetHTTPServer(srv, problemsetService)
 	healthpb.RegisterHealthHTTPServer(srv, healthService)
 	return srv
 }

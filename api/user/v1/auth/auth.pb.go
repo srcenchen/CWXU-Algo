@@ -667,6 +667,102 @@ func (x *ChangePasswordRes) GetMessage() string {
 	return ""
 }
 
+type LogoutReq struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *LogoutReq) Reset() {
+	*x = LogoutReq{}
+	mi := &file_user_v1_auth_auth_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *LogoutReq) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*LogoutReq) ProtoMessage() {}
+
+func (x *LogoutReq) ProtoReflect() protoreflect.Message {
+	mi := &file_user_v1_auth_auth_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use LogoutReq.ProtoReflect.Descriptor instead.
+func (*LogoutReq) Descriptor() ([]byte, []int) {
+	return file_user_v1_auth_auth_proto_rawDescGZIP(), []int{11}
+}
+
+type LogoutRes struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Code          int32                  `protobuf:"varint,1,opt,name=code,proto3" json:"code,omitempty"`
+	Success       bool                   `protobuf:"varint,2,opt,name=success,proto3" json:"success,omitempty"`
+	Message       string                 `protobuf:"bytes,3,opt,name=message,proto3" json:"message,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *LogoutRes) Reset() {
+	*x = LogoutRes{}
+	mi := &file_user_v1_auth_auth_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *LogoutRes) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*LogoutRes) ProtoMessage() {}
+
+func (x *LogoutRes) ProtoReflect() protoreflect.Message {
+	mi := &file_user_v1_auth_auth_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use LogoutRes.ProtoReflect.Descriptor instead.
+func (*LogoutRes) Descriptor() ([]byte, []int) {
+	return file_user_v1_auth_auth_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *LogoutRes) GetCode() int32 {
+	if x != nil {
+		return x.Code
+	}
+	return 0
+}
+
+func (x *LogoutRes) GetSuccess() bool {
+	if x != nil {
+		return x.Success
+	}
+	return false
+}
+
+func (x *LogoutRes) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
 var File_user_v1_auth_auth_proto protoreflect.FileDescriptor
 
 const file_user_v1_auth_auth_proto_rawDesc = "" +
@@ -716,14 +812,20 @@ const file_user_v1_auth_auth_proto_rawDesc = "" +
 	"\vnewPassword\x18\x02 \x01(\tR\vnewPassword\"G\n" +
 	"\x11ChangePasswordRes\x12\x18\n" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x18\n" +
-	"\amessage\x18\x02 \x01(\tR\amessage2\xf5\x04\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\"\v\n" +
+	"\tLogoutReq\"S\n" +
+	"\tLogoutRes\x12\x12\n" +
+	"\x04code\x18\x01 \x01(\x05R\x04code\x12\x18\n" +
+	"\asuccess\x18\x02 \x01(\bR\asuccess\x12\x18\n" +
+	"\amessage\x18\x03 \x01(\tR\amessage2\xd0\x05\n" +
 	"\x04Auth\x12U\n" +
 	"\x05Login\x12\x15.api.user.v1.LoginReq\x1a\x15.api.user.v1.LoginRes\"\x1e\x82\xd3\xe4\x93\x02\x18:\x01*\"\x13/v1/user/auth/login\x12a\n" +
 	"\bRegister\x12\x18.api.user.v1.RegisterReq\x1a\x18.api.user.v1.RegisterRes\"!\x82\xd3\xe4\x93\x02\x1b:\x01*\"\x16/v1/user/auth/register\x12[\n" +
 	"\aRefresh\x12\x17.api.user.v1.RefreshReq\x1a\x15.api.user.v1.LoginRes\" \x82\xd3\xe4\x93\x02\x1a:\x01*\"\x15/v1/user/auth/refresh\x12b\n" +
 	"\bSendCode\x12\x18.api.user.v1.SendCodeReq\x1a\x18.api.user.v1.SendCodeRes\"\"\x82\xd3\xe4\x93\x02\x1c:\x01*\"\x17/v1/user/auth/send-code\x12v\n" +
 	"\rResetPassword\x12\x1d.api.user.v1.ResetPasswordReq\x1a\x1d.api.user.v1.ResetPasswordRes\"'\x82\xd3\xe4\x93\x02!:\x01*\"\x1c/v1/user/auth/reset-password\x12z\n" +
-	"\x0eChangePassword\x12\x1e.api.user.v1.ChangePasswordReq\x1a\x1e.api.user.v1.ChangePasswordRes\"(\x82\xd3\xe4\x93\x02\":\x01*\"\x1d/v1/user/auth/change-passwordB0\n" +
+	"\x0eChangePassword\x12\x1e.api.user.v1.ChangePasswordReq\x1a\x1e.api.user.v1.ChangePasswordRes\"(\x82\xd3\xe4\x93\x02\":\x01*\"\x1d/v1/user/auth/change-password\x12Y\n" +
+	"\x06Logout\x12\x16.api.user.v1.LogoutReq\x1a\x16.api.user.v1.LogoutRes\"\x1f\x82\xd3\xe4\x93\x02\x19:\x01*\"\x14/v1/user/auth/logoutB0\n" +
 	"\vapi.user.v1P\x01Z\x1fcwxu-algo/api/user/v1/auth;authb\x06proto3"
 
 var (
@@ -738,7 +840,7 @@ func file_user_v1_auth_auth_proto_rawDescGZIP() []byte {
 	return file_user_v1_auth_auth_proto_rawDescData
 }
 
-var file_user_v1_auth_auth_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
+var file_user_v1_auth_auth_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
 var file_user_v1_auth_auth_proto_goTypes = []any{
 	(*LoginReq)(nil),          // 0: api.user.v1.LoginReq
 	(*LoginRes)(nil),          // 1: api.user.v1.LoginRes
@@ -751,6 +853,8 @@ var file_user_v1_auth_auth_proto_goTypes = []any{
 	(*ResetPasswordRes)(nil),  // 8: api.user.v1.ResetPasswordRes
 	(*ChangePasswordReq)(nil), // 9: api.user.v1.ChangePasswordReq
 	(*ChangePasswordRes)(nil), // 10: api.user.v1.ChangePasswordRes
+	(*LogoutReq)(nil),         // 11: api.user.v1.LogoutReq
+	(*LogoutRes)(nil),         // 12: api.user.v1.LogoutRes
 }
 var file_user_v1_auth_auth_proto_depIdxs = []int32{
 	0,  // 0: api.user.v1.Auth.Login:input_type -> api.user.v1.LoginReq
@@ -759,14 +863,16 @@ var file_user_v1_auth_auth_proto_depIdxs = []int32{
 	5,  // 3: api.user.v1.Auth.SendCode:input_type -> api.user.v1.SendCodeReq
 	7,  // 4: api.user.v1.Auth.ResetPassword:input_type -> api.user.v1.ResetPasswordReq
 	9,  // 5: api.user.v1.Auth.ChangePassword:input_type -> api.user.v1.ChangePasswordReq
-	1,  // 6: api.user.v1.Auth.Login:output_type -> api.user.v1.LoginRes
-	3,  // 7: api.user.v1.Auth.Register:output_type -> api.user.v1.RegisterRes
-	1,  // 8: api.user.v1.Auth.Refresh:output_type -> api.user.v1.LoginRes
-	6,  // 9: api.user.v1.Auth.SendCode:output_type -> api.user.v1.SendCodeRes
-	8,  // 10: api.user.v1.Auth.ResetPassword:output_type -> api.user.v1.ResetPasswordRes
-	10, // 11: api.user.v1.Auth.ChangePassword:output_type -> api.user.v1.ChangePasswordRes
-	6,  // [6:12] is the sub-list for method output_type
-	0,  // [0:6] is the sub-list for method input_type
+	11, // 6: api.user.v1.Auth.Logout:input_type -> api.user.v1.LogoutReq
+	1,  // 7: api.user.v1.Auth.Login:output_type -> api.user.v1.LoginRes
+	3,  // 8: api.user.v1.Auth.Register:output_type -> api.user.v1.RegisterRes
+	1,  // 9: api.user.v1.Auth.Refresh:output_type -> api.user.v1.LoginRes
+	6,  // 10: api.user.v1.Auth.SendCode:output_type -> api.user.v1.SendCodeRes
+	8,  // 11: api.user.v1.Auth.ResetPassword:output_type -> api.user.v1.ResetPasswordRes
+	10, // 12: api.user.v1.Auth.ChangePassword:output_type -> api.user.v1.ChangePasswordRes
+	12, // 13: api.user.v1.Auth.Logout:output_type -> api.user.v1.LogoutRes
+	7,  // [7:14] is the sub-list for method output_type
+	0,  // [0:7] is the sub-list for method input_type
 	0,  // [0:0] is the sub-list for extension type_name
 	0,  // [0:0] is the sub-list for extension extendee
 	0,  // [0:0] is the sub-list for field type_name
@@ -783,7 +889,7 @@ func file_user_v1_auth_auth_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_user_v1_auth_auth_proto_rawDesc), len(file_user_v1_auth_auth_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   11,
+			NumMessages:   13,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

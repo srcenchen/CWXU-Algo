@@ -19,13 +19,22 @@ var _ = binding.EncodeURL
 
 const _ = http.SupportPackageIsVersion1
 
+const OperationContestGetContestBoard = "/api.core.v1.contest_log.Contest/GetContestBoard"
+const OperationContestGetContestCellSubmits = "/api.core.v1.contest_log.Contest/GetContestCellSubmits"
 const OperationContestGetContestList = "/api.core.v1.contest_log.Contest/GetContestList"
+const OperationContestGetContestProblems = "/api.core.v1.contest_log.Contest/GetContestProblems"
 const OperationContestGetContestRanking = "/api.core.v1.contest_log.Contest/GetContestRanking"
 const OperationContestGetUserContestHistory = "/api.core.v1.contest_log.Contest/GetUserContestHistory"
 
 type ContestHTTPServer interface {
+	// GetContestBoard XCPCIO 风格站内榜（?id=|contestId=；组织成员过滤与 ranking 一致）
+	GetContestBoard(context.Context, *GetContestBoardReq) (*GetContestBoardRes, error)
+	// GetContestCellSubmits 站内榜格子：该用户本场该题的提交明细（赛时 + 赛后补题）
+	GetContestCellSubmits(context.Context, *GetContestCellSubmitsReq) (*GetContestCellSubmitsRes, error)
 	// GetContestList 获取竞赛列表
 	GetContestList(context.Context, *GetContestListReq) (*GetContestListRes, error)
+	// GetContestProblems 比赛题目目录（?id=|contestId=；force=1 管理员强制重跑 ensure）
+	GetContestProblems(context.Context, *GetContestProblemsReq) (*GetContestProblemsRes, error)
 	// GetContestRanking 获取竞赛排行榜
 	GetContestRanking(context.Context, *GetContestRankingReq) (*GetContestRankingRes, error)
 	// GetUserContestHistory 获取用户竞赛历史
@@ -37,6 +46,9 @@ func RegisterContestHTTPServer(s *http.Server, srv ContestHTTPServer) {
 	r.GET("/v1/core/contest/list", _Contest_GetContestList0_HTTP_Handler(srv))
 	r.GET("/v1/core/contest/history", _Contest_GetUserContestHistory0_HTTP_Handler(srv))
 	r.GET("/v1/core/contest/ranking", _Contest_GetContestRanking0_HTTP_Handler(srv))
+	r.GET("/v1/core/contest/problems", _Contest_GetContestProblems0_HTTP_Handler(srv))
+	r.GET("/v1/core/contest/board", _Contest_GetContestBoard0_HTTP_Handler(srv))
+	r.GET("/v1/core/contest/cell-submits", _Contest_GetContestCellSubmits0_HTTP_Handler(srv))
 }
 
 func _Contest_GetContestList0_HTTP_Handler(srv ContestHTTPServer) func(ctx http.Context) error {
@@ -96,9 +108,72 @@ func _Contest_GetContestRanking0_HTTP_Handler(srv ContestHTTPServer) func(ctx ht
 	}
 }
 
+func _Contest_GetContestProblems0_HTTP_Handler(srv ContestHTTPServer) func(ctx http.Context) error {
+	return func(ctx http.Context) error {
+		var in GetContestProblemsReq
+		if err := ctx.BindQuery(&in); err != nil {
+			return err
+		}
+		http.SetOperation(ctx, OperationContestGetContestProblems)
+		h := ctx.Middleware(func(ctx context.Context, req interface{}) (interface{}, error) {
+			return srv.GetContestProblems(ctx, req.(*GetContestProblemsReq))
+		})
+		out, err := h(ctx, &in)
+		if err != nil {
+			return err
+		}
+		reply := out.(*GetContestProblemsRes)
+		return ctx.Result(200, reply)
+	}
+}
+
+func _Contest_GetContestBoard0_HTTP_Handler(srv ContestHTTPServer) func(ctx http.Context) error {
+	return func(ctx http.Context) error {
+		var in GetContestBoardReq
+		if err := ctx.BindQuery(&in); err != nil {
+			return err
+		}
+		http.SetOperation(ctx, OperationContestGetContestBoard)
+		h := ctx.Middleware(func(ctx context.Context, req interface{}) (interface{}, error) {
+			return srv.GetContestBoard(ctx, req.(*GetContestBoardReq))
+		})
+		out, err := h(ctx, &in)
+		if err != nil {
+			return err
+		}
+		reply := out.(*GetContestBoardRes)
+		return ctx.Result(200, reply)
+	}
+}
+
+func _Contest_GetContestCellSubmits0_HTTP_Handler(srv ContestHTTPServer) func(ctx http.Context) error {
+	return func(ctx http.Context) error {
+		var in GetContestCellSubmitsReq
+		if err := ctx.BindQuery(&in); err != nil {
+			return err
+		}
+		http.SetOperation(ctx, OperationContestGetContestCellSubmits)
+		h := ctx.Middleware(func(ctx context.Context, req interface{}) (interface{}, error) {
+			return srv.GetContestCellSubmits(ctx, req.(*GetContestCellSubmitsReq))
+		})
+		out, err := h(ctx, &in)
+		if err != nil {
+			return err
+		}
+		reply := out.(*GetContestCellSubmitsRes)
+		return ctx.Result(200, reply)
+	}
+}
+
 type ContestHTTPClient interface {
+	// GetContestBoard XCPCIO 风格站内榜（?id=|contestId=；组织成员过滤与 ranking 一致）
+	GetContestBoard(ctx context.Context, req *GetContestBoardReq, opts ...http.CallOption) (rsp *GetContestBoardRes, err error)
+	// GetContestCellSubmits 站内榜格子：该用户本场该题的提交明细（赛时 + 赛后补题）
+	GetContestCellSubmits(ctx context.Context, req *GetContestCellSubmitsReq, opts ...http.CallOption) (rsp *GetContestCellSubmitsRes, err error)
 	// GetContestList 获取竞赛列表
 	GetContestList(ctx context.Context, req *GetContestListReq, opts ...http.CallOption) (rsp *GetContestListRes, err error)
+	// GetContestProblems 比赛题目目录（?id=|contestId=；force=1 管理员强制重跑 ensure）
+	GetContestProblems(ctx context.Context, req *GetContestProblemsReq, opts ...http.CallOption) (rsp *GetContestProblemsRes, err error)
 	// GetContestRanking 获取竞赛排行榜
 	GetContestRanking(ctx context.Context, req *GetContestRankingReq, opts ...http.CallOption) (rsp *GetContestRankingRes, err error)
 	// GetUserContestHistory 获取用户竞赛历史
@@ -113,12 +188,54 @@ func NewContestHTTPClient(client *http.Client) ContestHTTPClient {
 	return &ContestHTTPClientImpl{client}
 }
 
+// GetContestBoard XCPCIO 风格站内榜（?id=|contestId=；组织成员过滤与 ranking 一致）
+func (c *ContestHTTPClientImpl) GetContestBoard(ctx context.Context, in *GetContestBoardReq, opts ...http.CallOption) (*GetContestBoardRes, error) {
+	var out GetContestBoardRes
+	pattern := "/v1/core/contest/board"
+	path := binding.EncodeURL(pattern, in, true)
+	opts = append(opts, http.Operation(OperationContestGetContestBoard))
+	opts = append(opts, http.PathTemplate(pattern))
+	err := c.cc.Invoke(ctx, "GET", path, nil, &out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// GetContestCellSubmits 站内榜格子：该用户本场该题的提交明细（赛时 + 赛后补题）
+func (c *ContestHTTPClientImpl) GetContestCellSubmits(ctx context.Context, in *GetContestCellSubmitsReq, opts ...http.CallOption) (*GetContestCellSubmitsRes, error) {
+	var out GetContestCellSubmitsRes
+	pattern := "/v1/core/contest/cell-submits"
+	path := binding.EncodeURL(pattern, in, true)
+	opts = append(opts, http.Operation(OperationContestGetContestCellSubmits))
+	opts = append(opts, http.PathTemplate(pattern))
+	err := c.cc.Invoke(ctx, "GET", path, nil, &out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
 // GetContestList 获取竞赛列表
 func (c *ContestHTTPClientImpl) GetContestList(ctx context.Context, in *GetContestListReq, opts ...http.CallOption) (*GetContestListRes, error) {
 	var out GetContestListRes
 	pattern := "/v1/core/contest/list"
 	path := binding.EncodeURL(pattern, in, true)
 	opts = append(opts, http.Operation(OperationContestGetContestList))
+	opts = append(opts, http.PathTemplate(pattern))
+	err := c.cc.Invoke(ctx, "GET", path, nil, &out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// GetContestProblems 比赛题目目录（?id=|contestId=；force=1 管理员强制重跑 ensure）
+func (c *ContestHTTPClientImpl) GetContestProblems(ctx context.Context, in *GetContestProblemsReq, opts ...http.CallOption) (*GetContestProblemsRes, error) {
+	var out GetContestProblemsRes
+	pattern := "/v1/core/contest/problems"
+	path := binding.EncodeURL(pattern, in, true)
+	opts = append(opts, http.Operation(OperationContestGetContestProblems))
 	opts = append(opts, http.PathTemplate(pattern))
 	err := c.cc.Invoke(ctx, "GET", path, nil, &out, opts...)
 	if err != nil {

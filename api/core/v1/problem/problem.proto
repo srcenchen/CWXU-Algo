@@ -159,6 +159,13 @@ service Problem {
       get: "/v1/core/problem/my-pending-edit"
     };
   }
+  // 全量修复 QOJ 题目标题被识别为「QOJ.ac」的脏数据（后台任务）
+  rpc RepairQOJTitles (RepairQOJTitlesReq) returns (RepairQOJTitlesRes) {
+    option (google.api.http) = {
+      post: "/v1/core/problem/repair-qoj-titles"
+      body: "*"
+    };
+  }
 }
 
 message SolutionMeta {
@@ -651,4 +658,16 @@ message MyPendingEditRes {
   string message = 2;
   bool has_pending = 3;
   ProblemEditInfo data = 4;
+}
+
+message RepairQOJTitlesReq {
+  // 最大处理条数，0 表示全量
+  int64 limit = 1;
+  // true：对仍无好标题的题访问 qoj.ac 拉官方题头（较慢）
+  bool refetch = 2;
+}
+
+message RepairQOJTitlesRes {
+  int64 code = 1;
+  string message = 2;
 }

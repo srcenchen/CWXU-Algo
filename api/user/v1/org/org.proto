@@ -1,0 +1,555 @@
+syntax = "proto3";
+
+package api.user.v1.org;
+
+import "google/api/annotations.proto";
+option go_package = "cwxu-algo/api/user/v1/org;org";
+option java_multiple_files = true;
+option java_package = "api.user.v1.org";
+
+// Org 组织 / 分队 / 管理范围服务
+// 实现位于 app/user/internal/service/org.go + squad.go（迁移自手写 HTTP 路由）。
+// 路径前缀：/v1/user/org/*（set-site-admin 例外，位于 /v1/user/platform/set-site-admin）。
+// 响应统一 { code: 0|1, message, ... }：code=0 成功，code=1 业务错误（HTTP 200）。
+service Org {
+  // 我的组织列表（mine=0 时返回我加入的组织；all=1 且具站点权限时返回全部）
+  rpc List (ListReq) returns (ListRes) {
+    option (google.api.http) = { get: "/v1/user/org/list" };
+  }
+  // 组织广场（公开：仅名/logo/人数）
+  rpc Discover (DiscoverReq) returns (DiscoverRes) {
+    option (google.api.http) = { get: "/v1/user/org/discover" };
+  }
+  rpc Get (GetReq) returns (GetRes) {
+    option (google.api.http) = { get: "/v1/user/org/get" };
+  }
+  rpc Create (CreateReq) returns (CreateRes) {
+    option (google.api.http) = { post: "/v1/user/org/create", body: "*" };
+  }
+  rpc Update (UpdateReq) returns (UpdateRes) {
+    option (google.api.http) = { post: "/v1/user/org/update", body: "*" };
+  }
+  rpc Delete (DeleteReq) returns (DeleteRes) {
+    option (google.api.http) = { post: "/v1/user/org/delete", body: "*" };
+  }
+  // 切换当前组织（重签 JWT + 写会话 cookie）
+  rpc Switch (SwitchReq) returns (SwitchRes) {
+    option (google.api.http) = { post: "/v1/user/org/switch", body: "*" };
+  }
+  // 按团队识别码加入
+  rpc Join (JoinReq) returns (JoinRes) {
+    option (google.api.http) = { post: "/v1/user/org/join", body: "*" };
+  }
+  rpc Leave (LeaveReq) returns (LeaveRes) {
+    option (google.api.http) = { post: "/v1/user/org/leave", body: "*" };
+  }
+  rpc Members (MembersReq) returns (MembersRes) {
+    option (google.api.http) = { get: "/v1/user/org/members" };
+  }
+  rpc SetRole (SetRoleReq) returns (SetRoleRes) {
+    option (google.api.http) = { post: "/v1/user/org/members/set-role", body: "*" };
+  }
+  rpc RemoveMember (RemoveMemberReq) returns (RemoveMemberRes) {
+    option (google.api.http) = { post: "/v1/user/org/members/remove", body: "*" };
+  }
+  rpc AddMember (AddMemberReq) returns (AddMemberRes) {
+    option (google.api.http) = { post: "/v1/user/org/members/add", body: "*" };
+  }
+  rpc SetDisplayName (SetDisplayNameReq) returns (SetDisplayNameRes) {
+    option (google.api.http) = { post: "/v1/user/org/members/set-display-name", body: "*" };
+  }
+  // 组织成员 id 列表（可选按 groupId / squadId 过滤）
+  rpc MemberIds (MemberIdsReq) returns (MemberIdsRes) {
+    option (google.api.http) = { get: "/v1/user/org/member-ids" };
+  }
+  rpc Invite (InviteReq) returns (InviteRes) {
+    option (google.api.http) = { get: "/v1/user/org/invite" };
+  }
+  // 公开：按识别码预览组织欢迎信息（不含敏感配置）
+  rpc InvitePreview (InvitePreviewReq) returns (InvitePreviewRes) {
+    option (google.api.http) = { get: "/v1/user/org/invite/preview" };
+  }
+  rpc InviteRotate (InviteRotateReq) returns (InviteRotateRes) {
+    option (google.api.http) = { post: "/v1/user/org/invite/rotate", body: "*" };
+  }
+  rpc JoinRequests (JoinRequestsReq) returns (JoinRequestsRes) {
+    option (google.api.http) = { get: "/v1/user/org/join-requests" };
+  }
+  rpc JoinReview (JoinReviewReq) returns (JoinReviewRes) {
+    option (google.api.http) = { post: "/v1/user/org/join-requests/review", body: "*" };
+  }
+  // 站点管理员任命/撤销（站点级）
+  rpc SetSiteAdmin (SetSiteAdminReq) returns (SetSiteAdminRes) {
+    option (google.api.http) = { post: "/v1/user/platform/set-site-admin", body: "*" };
+  }
+
+  rpc SquadList (SquadListReq) returns (SquadListRes) {
+    option (google.api.http) = { get: "/v1/user/org/squads" };
+  }
+  rpc SquadCreate (SquadCreateReq) returns (SquadCreateRes) {
+    option (google.api.http) = { post: "/v1/user/org/squads/create", body: "*" };
+  }
+  rpc SquadUpdate (SquadUpdateReq) returns (SquadUpdateRes) {
+    option (google.api.http) = { post: "/v1/user/org/squads/update", body: "*" };
+  }
+  rpc SquadDelete (SquadDeleteReq) returns (SquadDeleteRes) {
+    option (google.api.http) = { post: "/v1/user/org/squads/delete", body: "*" };
+  }
+  rpc SquadMembers (SquadMembersReq) returns (SquadMembersRes) {
+    option (google.api.http) = { get: "/v1/user/org/squads/members" };
+  }
+  // in=true 加入分队 / false 移出
+  rpc SquadMemberSet (SquadMemberSetReq) returns (SquadMemberSetRes) {
+    option (google.api.http) = { post: "/v1/user/org/squads/members/set", body: "*" };
+  }
+  // 用户的管理范围（组长→分组 / 队长→分队）
+  rpc ScopeList (ScopeListReq) returns (ScopeListRes) {
+    option (google.api.http) = { get: "/v1/user/org/scopes" };
+  }
+  // 仅组织管理员/站管手动覆盖范围（组长/队长范围由任命决定）
+  rpc ScopeSet (ScopeSetReq) returns (ScopeSetRes) {
+    option (google.api.http) = { post: "/v1/user/org/scopes/set", body: "*" };
+  }
+}
+
+// ---------- 通用 ----------
+
+// 组织详情（orgToMapWithSeats 的输出）
+message OrgInfo {
+  int64 id = 1;
+  string name = 2;
+  string slug = 3;
+  string plan = 4;
+  int32 seatLimit = 5;
+  string status = 6;
+  bool isSystem = 7;
+  string brandTitle = 8;
+  string brandLogo = 9;
+  string brandFavicon = 10;
+  string joinMode = 11;
+  bool enableAiSummary = 12;
+  bool enableAiEmail = 13;
+  bool enableAiWeeklyEmail = 14;
+  bool enableSpider = 15;
+  int32 spiderIntervalMin = 16;
+  int32 aiSummaryIntervalMin = 17;
+  string aiEmailSchedule = 18;
+  bool forceSync = 19;
+  int32 memberCount = 20;
+  // 仅具邀请查看权限时输出
+  string inviteCode = 21;
+  string myRole = 22;
+  string orgDisplayName = 23;
+  bool isCurrent = 24;
+}
+
+// 管理范围引用
+message ScopeRef {
+  string scopeType = 1;
+  int64 scopeId = 2;
+}
+
+// 管理范围详情（含可读名称）
+message ScopeInfo {
+  string scopeType = 1;
+  int64 scopeId = 2;
+  string scopeName = 3;
+  string groupName = 4;
+  string label = 5;
+}
+
+// ---------- org ----------
+
+message ListReq {
+  // mine=0 返回我加入的组织；缺省视为 mine
+  string mine = 1;
+  // all=1 且具站点权限时返回全部
+  string all = 2;
+}
+message ListRes {
+  int32 code = 1;
+  string message = 2;
+  repeated OrgInfo list = 3;
+}
+
+message DiscoverReq {
+  int32 page = 1;
+  int32 pageSize = 2;
+  string q = 3;
+}
+message DiscoverOrgInfo {
+  int64 id = 1;
+  string name = 2;
+  string brandLogo = 3;
+  int32 memberCount = 4;
+  bool isSystem = 5;
+  bool isMember = 6;
+  bool isCurrent = 7;
+}
+message DiscoverRes {
+  int32 code = 1;
+  string message = 2;
+  repeated DiscoverOrgInfo list = 3;
+  int32 total = 4;
+}
+
+message GetReq {
+  // 缺省使用当前登录用户的组织
+  int64 id = 1;
+}
+message GetRes {
+  int32 code = 1;
+  string message = 2;
+  OrgInfo data = 3;
+}
+
+message CreateReq {
+  string name = 1;
+  // 缺省自动生成 org-<随机码>
+  string slug = 2;
+  // 缺省为当前用户
+  int64 adminUserId = 3;
+  // auto | review；非法值回落 auto
+  string joinMode = 4;
+  // 缺省 50；<1 报错
+  optional int32 seatLimit = 5;
+}
+message CreateRes {
+  int32 code = 1;
+  string message = 2;
+  OrgInfo data = 3;
+}
+
+message UpdateReq {
+  int64 id = 1;
+  optional string name = 2;
+  optional string status = 3;
+  optional string brandTitle = 4;
+  optional string brandLogo = 5;
+  optional string brandFavicon = 6;
+  optional string joinMode = 7;
+  optional bool enableAiSummary = 8;
+  optional bool enableAiEmail = 9;
+  optional bool enableAiWeeklyEmail = 10;
+  optional bool enableSpider = 11;
+  optional int32 spiderIntervalMin = 12;
+  optional int32 aiSummaryIntervalMin = 13;
+  optional string aiEmailSchedule = 14;
+  optional int32 seatLimit = 15;
+  optional bool forceSync = 16;
+}
+message UpdateRes {
+  int32 code = 1;
+  string message = 2;
+  OrgInfo data = 3;
+}
+
+message DeleteReq {
+  int64 id = 1;
+}
+message DeleteRes {
+  int32 code = 1;
+  string message = 2;
+}
+
+message SwitchReq {
+  int64 orgId = 1;
+}
+message SwitchRes {
+  int32 code = 1;
+  string message = 2;
+  string jwtToken = 3;
+  int64 orgId = 4;
+}
+
+message JoinReq {
+  string inviteCode = 1;
+  string orgDisplayName = 2;
+}
+message JoinRes {
+  int32 code = 1;
+  string message = 2;
+  OrgInfo data = 3;
+}
+
+message LeaveReq {
+  int64 orgId = 1;
+}
+message LeaveRes {
+  int32 code = 1;
+  string message = 2;
+  // 若当前组织被退出，重签的 token
+  string jwtToken = 3;
+}
+
+message MembersReq {
+  int64 orgId = 1;
+  int32 page = 2;
+  int32 pageSize = 3;
+  string keyword = 4;
+}
+message MemberInfo {
+  int64 userId = 1;
+  string username = 2;
+  string name = 3;
+  string orgDisplayName = 4;
+  string avatar = 5;
+  string role = 6;
+  int64 groupId = 7;
+  int64 joinedAt = 8;
+  repeated ScopeInfo scopes = 9;
+}
+message MembersRes {
+  int32 code = 1;
+  string message = 2;
+  repeated MemberInfo list = 3;
+  int32 total = 4;
+  int32 page = 5;
+  int32 pageSize = 6;
+}
+
+message SetRoleReq {
+  int64 orgId = 1;
+  int64 userId = 2;
+  // member | captain | group_leader | coach | org_admin
+  string role = 3;
+  // captain→squad；group_leader→group
+  string scopeType = 4;
+  int64 scopeId = 5;
+  // true：卸任该范围（须带 scopeType+scopeId），可与 role=member 联用卸全部
+  bool removeScope = 6;
+}
+message SetRoleRes {
+  int32 code = 1;
+  string message = 2;
+  string role = 3;
+  repeated ScopeRef scopes = 4;
+}
+
+message RemoveMemberReq {
+  int64 orgId = 1;
+  int64 userId = 2;
+}
+message RemoveMemberRes {
+  int32 code = 1;
+  string message = 2;
+}
+
+message AddMemberReq {
+  int64 orgId = 1;
+  // 按 userId 或 username 搜索加入
+  int64 userId = 2;
+  string username = 3;
+  string role = 4;
+  string orgDisplayName = 5;
+}
+message AddMemberRes {
+  int32 code = 1;
+  string message = 2;
+  int64 userId = 3;
+}
+
+message SetDisplayNameReq {
+  int64 orgId = 1;
+  // 缺省为本人
+  int64 userId = 2;
+  string orgDisplayName = 3;
+}
+message SetDisplayNameRes {
+  int32 code = 1;
+  string message = 2;
+}
+
+message MemberIdsReq {
+  int64 orgId = 1;
+  int64 groupId = 2;
+  int64 squadId = 3;
+}
+message MemberIdsRes {
+  int32 code = 1;
+  string message = 2;
+  repeated int64 userIds = 3;
+  int64 orgId = 4;
+  int64 groupId = 5;
+  int64 squadId = 6;
+}
+
+message InviteReq {
+  int64 orgId = 1;
+}
+message InviteRes {
+  int32 code = 1;
+  string message = 2;
+  string inviteCode = 3;
+  string joinMode = 4;
+  int64 orgId = 5;
+}
+
+message InvitePreviewReq {
+  string code = 1;
+}
+message InvitePreviewRes {
+  int32 code = 1;
+  string message = 2;
+  int64 orgId = 3;
+  string orgName = 4;
+  string name = 5;
+  string brandTitle = 6;
+  string brandLogo = 7;
+  string joinMode = 8;
+}
+
+message InviteRotateReq {
+  int64 orgId = 1;
+}
+message InviteRotateRes {
+  int32 code = 1;
+  string message = 2;
+  string inviteCode = 3;
+}
+
+message JoinRequestsReq {
+  int64 orgId = 1;
+}
+message JoinRequestInfo {
+  int64 id = 1;
+  int64 userId = 2;
+  string username = 3;
+  string name = 4;
+  string orgDisplayName = 5;
+  string status = 6;
+  int64 createdAt = 7;
+}
+message JoinRequestsRes {
+  int32 code = 1;
+  string message = 2;
+  repeated JoinRequestInfo list = 3;
+}
+
+message JoinReviewReq {
+  int64 id = 1;
+  bool approve = 2;
+}
+message JoinReviewRes {
+  int32 code = 1;
+  string message = 2;
+}
+
+message SetSiteAdminReq {
+  int64 userId = 1;
+  bool isSiteAdmin = 2;
+}
+message SetSiteAdminRes {
+  int32 code = 1;
+  string message = 2;
+}
+
+// ---------- squad / scopes ----------
+
+message SquadListReq {
+  int64 orgId = 1;
+  int64 groupId = 2;
+}
+message SquadInfo {
+  int64 id = 1;
+  int64 orgId = 2;
+  int64 groupId = 3;
+  string name = 4;
+  string describe = 5;
+  int32 memberCount = 6;
+}
+message SquadListRes {
+  int32 code = 1;
+  string message = 2;
+  repeated SquadInfo list = 3;
+}
+
+message SquadCreateReq {
+  int64 orgId = 1;
+  int64 groupId = 2;
+  string name = 3;
+  string describe = 4;
+}
+message SquadData {
+  int64 id = 1;
+  int64 orgId = 2;
+  int64 groupId = 3;
+  string name = 4;
+  string describe = 5;
+}
+message SquadCreateRes {
+  int32 code = 1;
+  string message = 2;
+  SquadData data = 3;
+}
+
+message SquadUpdateReq {
+  int64 id = 1;
+  string name = 2;
+  string describe = 3;
+  int64 groupId = 4;
+}
+message SquadUpdateRes {
+  int32 code = 1;
+  string message = 2;
+}
+
+message SquadDeleteReq {
+  int64 id = 1;
+}
+message SquadDeleteRes {
+  int32 code = 1;
+  string message = 2;
+}
+
+message SquadMembersReq {
+  int64 squadId = 1;
+}
+message SquadMemberInfo {
+  int64 userId = 1;
+  string username = 2;
+  string name = 3;
+  string avatar = 4;
+}
+message SquadMembersRes {
+  int32 code = 1;
+  string message = 2;
+  repeated SquadMemberInfo list = 3;
+  int32 total = 4;
+}
+
+message SquadMemberSetReq {
+  int64 squadId = 1;
+  int64 userId = 2;
+  // true=加入 false=移出
+  bool in = 3;
+}
+message SquadMemberSetRes {
+  int32 code = 1;
+  string message = 2;
+}
+
+message ScopeListReq {
+  int64 orgId = 1;
+  int64 userId = 2;
+}
+message ScopeListRes {
+  int32 code = 1;
+  string message = 2;
+  repeated ScopeRef list = 3;
+}
+
+message ScopeGrant {
+  string scopeType = 1;
+  int64 scopeId = 2;
+}
+message ScopeSetReq {
+  int64 orgId = 1;
+  int64 userId = 2;
+  repeated ScopeGrant grants = 3;
+}
+message ScopeSetRes {
+  int32 code = 1;
+  string message = 2;
+  int32 count = 3;
+}

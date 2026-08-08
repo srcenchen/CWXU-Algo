@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
@@ -15,6 +16,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	pb "cwxu-algo/api/user/v1/blog"
 	"cwxu-algo/app/common/blogimg"
 	"cwxu-algo/app/common/blogsync"
 	_const "cwxu-algo/app/common/const"
@@ -26,6 +28,7 @@ import (
 	"cwxu-algo/app/user/internal/data"
 	"cwxu-algo/app/user/internal/data/model"
 
+	kerrors "github.com/go-kratos/kratos/v2/errors"
 	khttp "github.com/go-kratos/kratos/v2/transport/http"
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
@@ -55,88 +58,11 @@ func NewBlogService(d *data.Data) *BlogService {
 	return &BlogService{db: d.DB, coreDB: d.CoreDB}
 }
 
-// RegisterBlogRoutes registers blog HTTP routes.
-func RegisterBlogRoutes(srv *khttp.Server, bs *BlogService) {
-	r := srv.Route("/")
-	// Public / optional-JWT reads
-	r.GET("/v1/user/blog/by-username", bs.handleListByUsername)
-	r.GET("/v1/user/blog/article/get", bs.handleGetArticle)
-	r.POST("/v1/user/blog/article/unlock", bs.handleUnlock)
-	r.GET("/v1/user/blog/recommend", bs.handleRecommend)
-	r.GET("/v1/user/blog/plaza", bs.handlePlaza)
-	r.GET("/v1/user/blog/authors", bs.handleAuthors)
-	r.GET("/v1/user/blog/categories", bs.handleListCategoriesPublic)
-	r.GET("/v1/user/blog/tags", bs.handleListTagsPublic)
-	r.GET("/v1/user/blog/page/list", bs.handlePageListPublic)
-	r.GET("/v1/user/blog/page/get", bs.handlePageGetPublic)
-	r.GET("/v1/user/blog/comment/list", bs.handleListComments)
-	r.GET("/v1/user/blog/theme/status", bs.handleThemeStatus)
 
-	// Owner / authenticated writes
-	r.POST("/v1/user/blog/article/create", bs.handleCreate)
-	r.POST("/v1/user/blog/article/update", bs.handleUpdate)
-	r.POST("/v1/user/blog/article/delete", bs.handleDelete)
-	r.GET("/v1/user/blog/article/mine", bs.handleMine)
-	r.GET("/v1/user/blog/analytics", bs.handleAnalytics)
-	r.GET("/v1/user/blog/page/mine", bs.handlePageMine)
-	r.POST("/v1/user/blog/page/create", bs.handlePageCreate)
-	r.POST("/v1/user/blog/page/update", bs.handlePageUpdate)
-	r.POST("/v1/user/blog/page/delete", bs.handlePageDelete)
-	r.POST("/v1/user/blog/page/reorder", bs.handlePageReorder)
-
-	r.POST("/v1/user/blog/category/create", bs.handleCategoryCreate)
-	r.POST("/v1/user/blog/category/update", bs.handleCategoryUpdate)
-	r.POST("/v1/user/blog/category/delete", bs.handleCategoryDelete)
-	r.GET("/v1/user/blog/category/mine", bs.handleCategoryMine)
-
-	r.POST("/v1/user/blog/comment/create", bs.handleCommentCreate)
-	r.POST("/v1/user/blog/comment/delete", bs.handleCommentDelete)
-	r.POST("/v1/user/blog/comment/like", bs.handleCommentLikeToggle)
-	r.POST("/v1/user/blog/like", bs.handleLikeToggle)
-
-	// Owner theme config (themeId + social links)
-	r.POST("/v1/user/blog/theme/config", bs.handleThemeConfigSave)
-	// Site-admin theme enable (legacy custom-theme capability)
-	r.POST("/v1/user/blog/theme/enable", bs.handleThemeEnable)
-
-	// 开通协议 / 激活 / 邮件通知偏好
-	r.GET("/v1/user/blog/agreement", bs.handleAgreementGet)
-	r.GET("/v1/user/blog/activation/status", bs.handleActivationStatus)
-	r.POST("/v1/user/blog/activate", bs.handleActivate)
-	r.POST("/v1/user/blog/notify-pref", bs.handleNotifyPref)
-
-	// Obsidian 插件：公开读版本；发布脚本/站管登记（下载走云存储具体版本目录）
-	r.GET("/v1/user/blog/obsidian-plugin/latest", bs.handleObsidianPluginLatest)
-	r.POST("/v1/user/blog/obsidian-plugin/publish", bs.handleObsidianPluginPublish)
-
-	// 图片上传能力（又拍云；需站管授权 + 站点配置）
-	r.GET("/v1/user/blog/image-upload/status", bs.handleImageUploadStatus)
-	r.POST("/v1/user/blog/image-upload/apply", bs.handleImageUploadApply)
-	// 批量确认图床 URL/object key 是否仍在资产表（插件缓存复用，避免 N+1）
-	r.POST("/v1/user/blog/images/check", bs.handleBlogImagesCheck)
-	r.POST("/v1/user/blog/admin/image-upload", bs.handleAdminImageUpload)
-	r.GET("/v1/user/blog/admin/image-upload/requests", bs.handleAdminImageUploadRequests)
-	r.POST("/v1/user/blog/admin/image-upload/review", bs.handleAdminImageUploadReview)
-
-	// 站管：博客管理
-	r.GET("/v1/user/blog/admin/overview", bs.handleAdminOverview)
-	r.GET("/v1/user/blog/admin/authors", bs.handleAdminAuthors)
-	r.GET("/v1/user/blog/admin/articles", bs.handleAdminArticles)
-	r.POST("/v1/user/blog/admin/moderate", bs.handleAdminModerate)
-	r.GET("/v1/user/blog/admin/images", bs.handleAdminBlogImages)
-	r.POST("/v1/user/blog/admin/images/delete", bs.handleAdminBlogImageDelete)
-	r.POST("/v1/user/blog/admin/images/delete-batch", bs.handleAdminBlogImagesDeleteBatch)
-
-	// 举报
-	r.POST("/v1/user/blog/report", bs.handleReport)
-	// 举报处理台（content.report.handle）
-	r.GET("/v1/user/blog/report/list", bs.handleReportList)
-	r.POST("/v1/user/blog/report/handle", bs.handleReportHandle)
-}
 
 // ---------- helpers ----------
 
-func blogViewerID(ctx khttp.Context) uint {
+func blogViewerID(ctx context.Context) uint {
 	pd := auth.GetCurrentUser(ctx)
 	if pd == nil {
 		return 0
@@ -144,14 +70,9 @@ func blogViewerID(ctx khttp.Context) uint {
 	return pd.UserID
 }
 
-func blogIsSiteAdmin(ctx khttp.Context) bool {
+func blogIsSiteAdmin(ctx context.Context) bool {
 	pd := auth.GetCurrentUser(ctx)
 	return pd != nil && pd.IsSiteAdmin
-}
-
-// blogIsContentModerator 具备博客审核权限（博客审核/举报处理）
-func blogIsContentModerator(ctx khttp.Context) bool {
-	return auth.HasPerm(ctx, rbac.PermContentBlogModerate)
 }
 
 func (s *BlogService) publicOrgID() uint {
@@ -350,9 +271,9 @@ func (s *BlogService) prefetchArticleExtras(list []model.BlogArticle, viewerID u
 	return pre
 }
 
-// articleToMap 序列化文章；pre 非空时使用预取好的 liked/orgIds/tags（列表页），
+// articleToProto 序列化文章；pre 非空时使用预取好的 liked/orgIds/tags（列表页），
 // 为 nil 时回落单篇查询（详情等单文章场景）。
-func (s *BlogService) articleToMap(a *model.BlogArticle, author *model.User, d blogaccess.Decision, viewerID uint, includeBody bool, pre *blogListPrefetch) map[string]interface{} {
+func (s *BlogService) articleToProto(a *model.BlogArticle, author *model.User, d blogaccess.Decision, viewerID uint, includeBody bool, pre *blogListPrefetch) *pb.ArticleInfo {
 	liked := false
 	var orgIDs []uint
 	var tags []string
@@ -376,65 +297,63 @@ func (s *BlogService) articleToMap(a *model.BlogArticle, author *model.User, d b
 		imgBase = s.publicImageBase()
 	}
 	coverOut := blogimg.ExpandCoverURL(a.CoverURL, imgBase)
-	m := map[string]interface{}{
-		"id":                a.ID,
-		"slug":              a.Slug,
-		"title":             a.Title,
-		"summary":           a.Summary,
-		"coverUrl":          coverOut,
-		"visibility":        a.Visibility,
-		"recommend":         a.Recommend,
-		"syncToMainProfile": a.SyncToMainProfile,
-		"categoryId":        a.CategoryID,
-		"tags":              tags,
-		"viewCount":         a.ViewCount,
-		"likeCount":         a.LikeCount,
-		"commentCount":      a.CommentCount,
-		"liked":             liked,
-		"requiresPassword":  d.RequiresPassword,
-		"canSeeBody":        d.CanSeeBody,
-		"moderationStatus":  normalizeModeration(a.ModerationStatus),
-		"createdAt":         a.CreatedAt.Unix(),
-		"updatedAt":         a.UpdatedAt.Unix(),
-		"orgIds":            orgIDs,
+	m := &pb.ArticleInfo{
+		Id:                int64(a.ID),
+		Slug:              a.Slug,
+		Title:             a.Title,
+		Summary:           a.Summary,
+		CoverUrl:          coverOut,
+		Visibility:        a.Visibility,
+		Recommend:         a.Recommend,
+		SyncToMainProfile: a.SyncToMainProfile,
+		Tags:              tags,
+		ViewCount:         int64(a.ViewCount),
+		LikeCount:         int64(a.LikeCount),
+		CommentCount:      int64(a.CommentCount),
+		Liked:             liked,
+		RequiresPassword:  d.RequiresPassword,
+		CanSeeBody:        d.CanSeeBody,
+		ModerationStatus:  normalizeModeration(a.ModerationStatus),
+		CreatedAt:         a.CreatedAt.Unix(),
+		UpdatedAt:         a.UpdatedAt.Unix(),
+		OrgIds:            toInt64s(orgIDs),
 	}
-	if a.ModerationNote != "" && (viewerID == a.UserID || viewerID > 0) {
-		// 作者可见备注；列表对非作者不强制
-		if viewerID == a.UserID {
-			m["moderationNote"] = a.ModerationNote
-		}
+	if a.CategoryID != nil {
+		m.CategoryId = int64(*a.CategoryID)
+	}
+	if a.ModerationNote != "" && viewerID == a.UserID {
+		// 作者可见备注
+		m.ModerationNote = a.ModerationNote
 	}
 	if a.SourceSolutionID != nil && *a.SourceSolutionID > 0 {
-		m["sourceSolutionId"] = *a.SourceSolutionID
+		m.SourceSolutionId = int64(*a.SourceSolutionID)
 	}
 	if a.SourceProblemID != nil && *a.SourceProblemID > 0 {
-		m["sourceProblemId"] = *a.SourceProblemID
+		m.SourceProblemId = int64(*a.SourceProblemID)
 	}
 	// 摘要一律自动生成；字段保留兼容旧前端
 	if includeBody {
-		m["summaryIsDefault"] = true
+		m.SummaryIsDefault = true
 	}
 	if a.PublishedAt != nil {
-		m["publishedAt"] = a.PublishedAt.Unix()
+		m.PublishedAt = a.PublishedAt.Unix()
 	} else {
-		m["publishedAt"] = a.CreatedAt.Unix()
+		m.PublishedAt = a.CreatedAt.Unix()
 	}
 	if author != nil {
-		m["author"] = map[string]interface{}{
-			"id":       author.ID,
-			"username": author.Username,
-			"name":     author.Name,
-			"avatar":   expandAvatarBase(imgBase, author.Avatar),
+		m.Author = &pb.Author{
+			Id:       int64(author.ID),
+			Username: author.Username,
+			Name:     author.Name,
+			Avatar:   expandAvatarBase(imgBase, author.Avatar),
 		}
-		m["userId"] = author.ID
-		m["username"] = author.Username
+		m.UserId = int64(author.ID)
+		m.Username = author.Username
 	} else {
-		m["userId"] = a.UserID
+		m.UserId = int64(a.UserID)
 	}
 	if includeBody && d.CanSeeBody {
-		m["content"] = blogimg.ExpandStoredImageRefs(a.Content, imgBase)
-	} else {
-		m["content"] = ""
+		m.Content = blogimg.ExpandStoredImageRefs(a.Content, imgBase)
 	}
 	// never leak password hash
 	return m
@@ -448,40 +367,150 @@ func (s *BlogService) publicImageBase() string {
 	return s.loadUpyunClient().PublicBaseURL()
 }
 
-func parsePage(q *http.Request) (page, pageSize int) {
-	page, _ = strconv.Atoi(q.URL.Query().Get("page"))
-	pageSize, _ = strconv.Atoi(q.URL.Query().Get("pageSize"))
+// blogErr 构造 Kratos 错误：HTTP 状态码 = code（等价手写 writeJSON(status, {code:1, message})）。
+func blogErr(code int, msg string) error {
+	reason := "ERROR"
+	switch code {
+	case http.StatusBadRequest:
+		reason = "BAD_REQUEST"
+	case http.StatusUnauthorized:
+		reason = "UNAUTHORIZED"
+	case http.StatusForbidden:
+		reason = "FORBIDDEN"
+	case http.StatusNotFound:
+		reason = "NOT_FOUND"
+	case http.StatusConflict:
+		reason = "CONFLICT"
+	case http.StatusInternalServerError:
+		reason = "INTERNAL"
+	case http.StatusBadGateway:
+		reason = "BAD_GATEWAY"
+	}
+	return kerrors.New(code, reason, msg)
+}
+
+// toInt64s uint 切片 → int64 切片（repeated int64 输出字符串数组）。
+func toInt64s(in []uint) []int64 {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]int64, len(in))
+	for i, v := range in {
+		out[i] = int64(v)
+	}
+	return out
+}
+
+// toUints int64 切片 → uint 切片。
+func toUints(in []int64) []uint {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]uint, len(in))
+	for i, v := range in {
+		out[i] = uint(v)
+	}
+	return out
+}
+
+// socialLinksToProto 社交链接 → proto。
+func socialLinksToProto(in []blogSocialLink) []*pb.SocialLink {
+	out := make([]*pb.SocialLink, 0, len(in))
+	for _, l := range in {
+		out = append(out, &pb.SocialLink{Type: l.Type, Url: l.URL, Label: l.Label})
+	}
+	return out
+}
+
+// articleWriteReqFromCreate proto 写请求 → 手写 blogArticleWriteReq（保留指针语义）。
+func articleWriteReqFromCreate(req *pb.CreateReq) blogArticleWriteReq {
+	var sync *bool
+	if req.SyncToMainProfile != nil {
+		v := req.SyncToMainProfile.Value
+		sync = &v
+	}
+	var catID *uint
+	if req.CategoryId > 0 {
+		v := uint(req.CategoryId)
+		catID = &v
+	}
+	return blogArticleWriteReq{
+		ID:                   uint(req.Id),
+		Title:                req.Title,
+		Slug:                 req.Slug,
+		Summary:              req.Summary,
+		Content:              req.Content,
+		CoverURL:             req.CoverUrl,
+		Visibility:           req.Visibility,
+		Password:             req.Password,
+		Recommend:            req.Recommend,
+		SyncToMainProfile:    sync,
+		CategoryID:           catID,
+		OrgIDs:               toUints(req.OrgIds),
+		Tags:                 req.Tags,
+		ClearPassword:        req.ClearPassword,
+		UseFirstImageAsCover: req.UseFirstImageAsCover,
+	}
+}
+
+// articleWriteReqFromUpdate proto 写请求 → 手写 blogArticleWriteReq。
+func articleWriteReqFromUpdate(req *pb.UpdateReq) blogArticleWriteReq {
+	var sync *bool
+	if req.SyncToMainProfile != nil {
+		v := req.SyncToMainProfile.Value
+		sync = &v
+	}
+	var catID *uint
+	if req.CategoryId > 0 {
+		v := uint(req.CategoryId)
+		catID = &v
+	}
+	return blogArticleWriteReq{
+		ID:                   uint(req.Id),
+		Title:                req.Title,
+		Slug:                 req.Slug,
+		Summary:              req.Summary,
+		Content:              req.Content,
+		CoverURL:             req.CoverUrl,
+		Visibility:           req.Visibility,
+		Password:             req.Password,
+		Recommend:            req.Recommend,
+		SyncToMainProfile:    sync,
+		CategoryID:           catID,
+		OrgIDs:               toUints(req.OrgIds),
+		Tags:                 req.Tags,
+		ClearPassword:        req.ClearPassword,
+		UseFirstImageAsCover: req.UseFirstImageAsCover,
+	}
+}
+
+// ---------- list by username ----------
+
+// ListByUsername 公开：按用户名列出文章（含作者与博客壳配置；JWT 可选）
+func (s *BlogService) ListByUsername(ctx context.Context, req *pb.ListByUsernameReq) (*pb.ListByUsernameRes, error) {
+	imgBase := s.publicImageBase()
+	username := strings.TrimSpace(req.Username)
+	if username == "" {
+		return nil, blogErr(http.StatusBadRequest, "缺少用户名")
+	}
+	u, err := s.findUserByUsername(username)
+	if err != nil {
+		return nil, blogErr(http.StatusNotFound, "用户不存在")
+	}
+	viewer := blogViewerID(ctx)
+	page, pageSize := int(req.Page), int(req.PageSize)
 	if page < 1 {
 		page = 1
 	}
 	if pageSize < 1 || pageSize > 50 {
 		pageSize = 20
 	}
-	return page, pageSize
-}
-
-// ---------- list by username ----------
-
-func (s *BlogService) handleListByUsername(ctx khttp.Context) error {
-	imgBase := s.publicImageBase()
-	username := strings.TrimSpace(ctx.Request().URL.Query().Get("username"))
-	if username == "" {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "缺少用户名"})
-		return nil
-	}
-	u, err := s.findUserByUsername(username)
-	if err != nil {
-		writeJSON(ctx.Response(), 404, map[string]interface{}{"code": 1, "message": "用户不存在"})
-		return nil
-	}
-	viewer := blogViewerID(ctx)
-	page, pageSize := parsePage(ctx.Request())
-	categoryID, _ := strconv.ParseUint(ctx.Request().URL.Query().Get("categoryId"), 10, 64)
-	keyword := strings.TrimSpace(ctx.Request().URL.Query().Get("keyword"))
-	tagFilter := strings.TrimSpace(ctx.Request().URL.Query().Get("tag"))
+	categoryID := uint(req.CategoryId)
+	keyword := strings.TrimSpace(req.Keyword)
+	tagFilter := strings.TrimSpace(req.Tag)
 
 	q := s.db.Model(&model.BlogArticle{}).Where("user_id = ?", u.ID)
-	// non-owner: only public + password (meta); never private；且须审核通过
+	// non-owner: only public + password (meta)；never private；且须审核通过
 	if viewer != u.ID {
 		q = q.Where("visibility IN ?", []string{blogaccess.VisibilityPublic, blogaccess.VisibilityPassword}).
 			Where("(moderation_status = ? OR moderation_status = '' OR moderation_status IS NULL)", model.BlogModerationApproved)
@@ -508,18 +537,16 @@ func (s *BlogService) handleListByUsername(ctx khttp.Context) error {
 
 	var total int64
 	if err := q.Count(&total).Error; err != nil {
-		writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "加载失败"})
-		return nil
+		return nil, blogErr(http.StatusInternalServerError, "加载失败")
 	}
 	var list []model.BlogArticle
 	if err := q.Order("COALESCE(published_at, created_at) DESC").
 		Offset((page - 1) * pageSize).Limit(pageSize).
 		Find(&list).Error; err != nil {
-		writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "加载失败"})
-		return nil
+		return nil, blogErr(http.StatusInternalServerError, "加载失败")
 	}
 	pre := s.prefetchArticleExtras(list, viewer)
-	out := make([]map[string]interface{}, 0, len(list))
+	out := make([]*pb.ArticleInfo, 0, len(list))
 	for i := range list {
 		d := blogaccess.Evaluate(blogaccess.ArticleAccess{
 			Visibility:  list[i].Visibility,
@@ -529,7 +556,7 @@ func (s *BlogService) handleListByUsername(ctx khttp.Context) error {
 		if !d.CanSeeMeta {
 			continue
 		}
-		out = append(out, s.articleToMap(&list[i], u, d, viewer, false, pre))
+		out = append(out, s.articleToProto(&list[i], u, d, viewer, false, pre))
 	}
 
 	// theme status for blog shell
@@ -540,47 +567,47 @@ func (s *BlogService) handleListByUsername(ctx khttp.Context) error {
 
 	// 未开通：对访客不暴露文章列表（壳层前端据此提示「此用户未开通博客」）
 	if !activated && !isOwner {
-		out = []map[string]interface{}{}
+		out = []*pb.ArticleInfo{}
 		total = 0
 	}
 
-	writeJSON(ctx.Response(), 200, map[string]interface{}{
-		"code":    0,
-		"message": "success",
-		"data": map[string]interface{}{
-			"author": map[string]interface{}{
-				"id":       u.ID,
-				"username": u.Username,
-				"name":     u.Name,
-				"avatar":   expandAvatarBase(imgBase, u.Avatar),
+	return &pb.ListByUsernameRes{
+		Code:    0,
+		Message: "success",
+		Data: &pb.ByUsernameAuthorData{
+			Author: &pb.Author{
+				Id:       int64(u.ID),
+				Username: u.Username,
+				Name:     u.Name,
+				Avatar:   expandAvatarBase(imgBase, u.Avatar),
 			},
-			"list":         out,
-			"total":        total,
-			"page":         page,
-			"pageSize":     pageSize,
-			"themeEnabled": themeOn,
-			"themeId":      siteCfg.ThemeID,
-			"colorScheme":  siteCfg.ColorScheme,
-			"subtitle":     siteCfg.Subtitle,
-			"socialLinks":  siteCfg.SocialLinks,
-			"aboutMd":      siteCfg.AboutMD,
-			"homeIntroMd":  siteCfg.HomeIntroMD,
-			"friendsMd":    siteCfg.FriendsMD,
-			"isOwner":      isOwner,
-			"activated":    activated,
+			List:         out,
+			Total:        total,
+			Page:         int64(page),
+			PageSize:     int64(pageSize),
+			ThemeEnabled: themeOn,
+			ThemeId:      siteCfg.ThemeID,
+			ColorScheme:  siteCfg.ColorScheme,
+			Subtitle:     siteCfg.Subtitle,
+			SocialLinks:  socialLinksToProto(siteCfg.SocialLinks),
+			AboutMd:      siteCfg.AboutMD,
+			HomeIntroMd:  siteCfg.HomeIntroMD,
+			FriendsMd:    siteCfg.FriendsMD,
+			IsOwner:      isOwner,
+			Activated:    activated,
 		},
-	})
-	return nil
+	}, nil
 }
 
 // ---------- get article ----------
 
-func (s *BlogService) handleGetArticle(ctx khttp.Context) error {
-	id, _ := strconv.ParseUint(ctx.Request().URL.Query().Get("id"), 10, 64)
-	username := strings.TrimSpace(ctx.Request().URL.Query().Get("username"))
-	slug := strings.TrimSpace(ctx.Request().URL.Query().Get("slug"))
-	password := ctx.Request().URL.Query().Get("password")
-	unlock := ctx.Request().URL.Query().Get("unlockToken")
+// GetArticle 公开：文章详情（id 或 username+slug；password/unlockToken 解锁）
+func (s *BlogService) GetArticle(ctx context.Context, req *pb.GetArticleReq) (*pb.GetArticleRes, error) {
+	id := uint(req.Id)
+	username := strings.TrimSpace(req.Username)
+	slug := strings.TrimSpace(req.Slug)
+	password := req.Password
+	unlock := req.UnlockToken
 
 	var a model.BlogArticle
 	var err error
@@ -589,17 +616,14 @@ func (s *BlogService) handleGetArticle(ctx khttp.Context) error {
 	} else if username != "" && slug != "" {
 		u, e := s.findUserByUsername(username)
 		if e != nil {
-			writeJSON(ctx.Response(), 404, map[string]interface{}{"code": 1, "message": "文章不存在"})
-			return nil
+			return nil, blogErr(http.StatusNotFound, "文章不存在")
 		}
 		err = s.db.Where("user_id = ? AND slug = ?", u.ID, slug).First(&a).Error
 	} else {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "缺少 id 或 username+slug"})
-		return nil
+		return nil, blogErr(http.StatusBadRequest, "缺少 id 或 username+slug")
 	}
 	if err != nil {
-		writeJSON(ctx.Response(), 404, map[string]interface{}{"code": 1, "message": "文章不存在"})
-		return nil
+		return nil, blogErr(http.StatusNotFound, "文章不存在")
 	}
 
 	viewer := blogViewerID(ctx)
@@ -616,18 +640,20 @@ func (s *BlogService) handleGetArticle(ctx khttp.Context) error {
 	}, viewer, passwordOK)
 
 	if !d.CanSeeMeta {
-		writeJSON(ctx.Response(), 404, map[string]interface{}{"code": 1, "message": "文章不存在或无权查看"})
-		return nil
+		return nil, blogErr(http.StatusNotFound, "文章不存在或无权查看")
 	}
 	// 未通过审核：仅作者/站管可见
 	if !moderationVisibleToPublic(a.ModerationStatus) && viewer != a.UserID && !blogIsSiteAdmin(ctx) {
-		writeJSON(ctx.Response(), 404, map[string]interface{}{"code": 1, "message": "文章不存在或无权查看"})
-		return nil
+		return nil, blogErr(http.StatusNotFound, "文章不存在或无权查看")
 	}
 
 	// UV view when body is visible (solution-linked shares UV with 题解)
 	if d.CanSeeBody {
-		visitorKey := blogVisitorKey(ctx, viewer)
+		httpReq, _ := khttp.RequestFromServerContext(ctx)
+		var visitorKey string
+		if httpReq != nil {
+			visitorKey = blogVisitorKey(httpReq, viewer)
+		}
 		if a.SourceSolutionID != nil && *a.SourceSolutionID > 0 {
 			s.recordLinkedSolutionUV(*a.SourceSolutionID, a.ID, visitorKey)
 			_ = s.db.Select("view_count", "like_count", "comment_count").First(&a, a.ID).Error
@@ -641,39 +667,27 @@ func (s *BlogService) handleGetArticle(ctx khttp.Context) error {
 	var author model.User
 	_ = s.db.Select("id", "username", "name", "avatar").First(&author, a.UserID).Error
 
-	m := s.articleToMap(&a, &author, d, viewer, true, nil)
+	m := s.articleToProto(&a, &author, d, viewer, true, nil)
 	if d.RequiresPassword {
-		m["message"] = "需要密码才能阅读全文"
+		m.Message = "需要密码才能阅读全文"
 	}
-	writeJSON(ctx.Response(), 200, map[string]interface{}{
-		"code":    0,
-		"message": "success",
-		"data":    m,
-	})
-	return nil
+	return &pb.GetArticleRes{Code: 0, Message: "success", Data: m}, nil
 }
 
-func (s *BlogService) handleUnlock(ctx khttp.Context) error {
-	var body struct {
-		ID       uint   `json:"id"`
-		Password string `json:"password"`
-	}
-	if err := json.NewDecoder(ctx.Request().Body).Decode(&body); err != nil || body.ID == 0 {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "参数错误"})
-		return nil
+// Unlock 公开：密码文解锁，返回 unlockToken
+func (s *BlogService) Unlock(ctx context.Context, req *pb.UnlockReq) (*pb.UnlockRes, error) {
+	if req.Id == 0 {
+		return nil, blogErr(http.StatusBadRequest, "参数错误")
 	}
 	var a model.BlogArticle
-	if err := s.db.First(&a, body.ID).Error; err != nil {
-		writeJSON(ctx.Response(), 404, map[string]interface{}{"code": 1, "message": "文章不存在"})
-		return nil
+	if err := s.db.First(&a, req.Id).Error; err != nil {
+		return nil, blogErr(http.StatusNotFound, "文章不存在")
 	}
 	if blogaccess.NormalizeVisibility(a.Visibility) != blogaccess.VisibilityPassword {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "该文章无需密码"})
-		return nil
+		return nil, blogErr(http.StatusBadRequest, "该文章无需密码")
 	}
-	if !checkBlogPassword(a.PasswordHash, body.Password) {
-		writeJSON(ctx.Response(), 403, map[string]interface{}{"code": 1, "message": "密码不正确"})
-		return nil
+	if !checkBlogPassword(a.PasswordHash, req.Password) {
+		return nil, blogErr(http.StatusForbidden, "密码不正确")
 	}
 	token := s.makeUnlockToken(a.ID)
 	viewer := blogViewerID(ctx)
@@ -684,20 +698,19 @@ func (s *BlogService) handleUnlock(ctx khttp.Context) error {
 	}, viewer, true)
 	var author model.User
 	_ = s.db.Select("id", "username", "name", "avatar").First(&author, a.UserID).Error
-	visitorKey := blogVisitorKey(ctx, viewer)
+	httpReq, _ := khttp.RequestFromServerContext(ctx)
+	var visitorKey string
+	if httpReq != nil {
+		visitorKey = blogVisitorKey(httpReq, viewer)
+	}
 	if s.recordBlogArticleUV(a.ID, visitorKey) {
 		a.ViewCount++
 	} else {
 		_ = s.db.Select("view_count").First(&a, a.ID).Error
 	}
-	m := s.articleToMap(&a, &author, d, viewer, true, nil)
-	m["unlockToken"] = token
-	writeJSON(ctx.Response(), 200, map[string]interface{}{
-		"code":    0,
-		"message": "success",
-		"data":    m,
-	})
-	return nil
+	m := s.articleToProto(&a, &author, d, viewer, true, nil)
+	m.UnlockToken = token
+	return &pb.UnlockRes{Code: 0, Message: "success", Data: m}, nil
 }
 
 // ---------- CRUD ----------
@@ -725,26 +738,22 @@ type blogArticleWriteReq struct {
 	UseFirstImageAsCover bool `json:"useFirstImageAsCover"`
 }
 
-func (s *BlogService) handleCreate(ctx khttp.Context) error {
+// Create 登录：创建文章
+func (s *BlogService) Create(ctx context.Context, req *pb.CreateReq) (*pb.CreateRes, error) {
 	pd := auth.GetCurrentUser(ctx)
 	if pd == nil || pd.UserID == 0 {
-		writeJSON(ctx.Response(), 401, map[string]interface{}{"code": 1, "message": "请先登录"})
-		return nil
+		return nil, blogErr(http.StatusUnauthorized, "请先登录")
 	}
-	if !s.requireActivated(ctx, pd.UserID) {
-		return nil
+	if err := s.requireActivated(ctx, pd.UserID); err != nil {
+		return nil, err
 	}
-	var req blogArticleWriteReq
-	if err := json.NewDecoder(ctx.Request().Body).Decode(&req); err != nil {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "参数错误"})
-		return nil
-	}
+	writeReq := articleWriteReqFromCreate(req)
 	var a *model.BlogArticle
 	var validationMsg string
 	err := blogimg.WithUserImageReferenceTx(s.db, pd.UserID, func(tx *gorm.DB) error {
 		txService := *s
 		txService.db = tx
-		a, validationMsg = txService.buildArticleFromReq(pd.UserID, 0, &req, true)
+		a, validationMsg = txService.buildArticleFromReq(pd.UserID, 0, &writeReq, true)
 		if validationMsg != "" {
 			return gorm.ErrInvalidData
 		}
@@ -754,22 +763,19 @@ func (s *BlogService) handleCreate(ctx khttp.Context) error {
 		if err := tx.Create(a).Error; err != nil {
 			return err
 		}
-		if validationMsg = txService.replaceArticleTags(a.ID, a.UserID, req.Tags); validationMsg != "" {
+		if validationMsg = txService.replaceArticleTags(a.ID, a.UserID, writeReq.Tags); validationMsg != "" {
 			return gorm.ErrInvalidData
 		}
 		return txService.applyAutoOrgSurface(a.ID, a.UserID, a.Visibility, a.SyncToMainProfile)
 	})
 	if validationMsg != "" {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": validationMsg})
-		return nil
+		return nil, blogErr(http.StatusBadRequest, validationMsg)
 	}
 	if err != nil {
 		if strings.Contains(err.Error(), "duplicate") || strings.Contains(err.Error(), "unique") {
-			writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "短链已被占用，请换一个"})
-			return nil
+			return nil, blogErr(http.StatusBadRequest, "短链已被占用，请换一个")
 		}
-		writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "保存失败"})
-		return nil
+		return nil, blogErr(http.StatusInternalServerError, "保存失败")
 	}
 	d := blogaccess.Evaluate(blogaccess.ArticleAccess{
 		Visibility:  a.Visibility,
@@ -778,46 +784,43 @@ func (s *BlogService) handleCreate(ctx khttp.Context) error {
 	}, pd.UserID, true)
 	var author model.User
 	_ = s.db.Select("id", "username", "name", "avatar").First(&author, a.UserID).Error
-	writeJSON(ctx.Response(), 200, map[string]interface{}{
-		"code":    0,
-		"message": "success",
-		"data":    s.articleToMap(a, &author, d, pd.UserID, true, nil),
-	})
-	return nil
+	return &pb.CreateRes{
+		Code: 0, Message: "success",
+		Data: s.articleToProto(a, &author, d, pd.UserID, true, nil),
+	}, nil
 }
 
-func (s *BlogService) handleUpdate(ctx khttp.Context) error {
+// Update 登录：更新文章（作者/站管/审核员）
+func (s *BlogService) Update(ctx context.Context, req *pb.UpdateReq) (*pb.UpdateRes, error) {
 	pd := auth.GetCurrentUser(ctx)
 	if pd == nil || pd.UserID == 0 {
-		writeJSON(ctx.Response(), 401, map[string]interface{}{"code": 1, "message": "请先登录"})
-		return nil
+		return nil, blogErr(http.StatusUnauthorized, "请先登录")
 	}
-	var req blogArticleWriteReq
-	if err := json.NewDecoder(ctx.Request().Body).Decode(&req); err != nil || req.ID == 0 {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "参数错误"})
-		return nil
+	if req.Id == 0 {
+		return nil, blogErr(http.StatusBadRequest, "参数错误")
 	}
 	var existing model.BlogArticle
-	if err := s.db.First(&existing, req.ID).Error; err != nil {
-		writeJSON(ctx.Response(), 404, map[string]interface{}{"code": 1, "message": "文章不存在"})
-		return nil
+	if err := s.db.First(&existing, req.Id).Error; err != nil {
+		return nil, blogErr(http.StatusNotFound, "文章不存在")
 	}
 	if !blogaccess.CanManage(existing.UserID, pd.UserID, auth.PayloadHasPerm(pd, rbac.PermContentBlogModerate)) {
-		writeJSON(ctx.Response(), 403, map[string]interface{}{"code": 1, "message": "只能管理自己的文章"})
-		return nil
+		return nil, blogErr(http.StatusForbidden, "只能管理自己的文章")
 	}
-	if existing.UserID == pd.UserID && !pd.IsSiteAdmin && !s.requireActivated(ctx, pd.UserID) {
-		return nil
+	if existing.UserID == pd.UserID && !pd.IsSiteAdmin {
+		if err := s.requireActivated(ctx, pd.UserID); err != nil {
+			return nil, err
+		}
 	}
+	writeReq := articleWriteReqFromUpdate(req)
 	var a *model.BlogArticle
 	var validationMsg string
 	err := blogimg.WithUserImageReferenceTx(s.db, existing.UserID, func(tx *gorm.DB) error {
-		if err := tx.First(&existing, req.ID).Error; err != nil {
+		if err := tx.First(&existing, req.Id).Error; err != nil {
 			return err
 		}
 		txService := *s
 		txService.db = tx
-		a, validationMsg = txService.buildArticleFromReq(existing.UserID, existing.ID, &req, false)
+		a, validationMsg = txService.buildArticleFromReq(existing.UserID, existing.ID, &writeReq, false)
 		if validationMsg != "" {
 			return gorm.ErrInvalidData
 		}
@@ -832,9 +835,9 @@ func (s *BlogService) handleUpdate(ctx khttp.Context) error {
 		a.ModerationNote = existing.ModerationNote
 		a.ModeratedAt = existing.ModeratedAt
 		a.ModeratedBy = existing.ModeratedBy
-		if a.PasswordHash == "" && !req.ClearPassword && existing.PasswordHash != "" &&
+		if a.PasswordHash == "" && !writeReq.ClearPassword && existing.PasswordHash != "" &&
 			blogaccess.NormalizeVisibility(a.Visibility) == blogaccess.VisibilityPassword &&
-			strings.TrimSpace(req.Password) == "" {
+			strings.TrimSpace(writeReq.Password) == "" {
 			a.PasswordHash = existing.PasswordHash
 		}
 		a.SourceSolutionID = existing.SourceSolutionID
@@ -842,30 +845,27 @@ func (s *BlogService) handleUpdate(ctx khttp.Context) error {
 		if blogaccess.AutoSurface(a.Visibility) {
 			a.Recommend = existing.Recommend
 		}
-		if req.SyncToMainProfile == nil && blogaccess.AutoSurface(a.Visibility) {
+		if writeReq.SyncToMainProfile == nil && blogaccess.AutoSurface(a.Visibility) {
 			a.SyncToMainProfile = existing.SyncToMainProfile
 		}
 		if err := tx.Save(a).Error; err != nil {
 			return err
 		}
-		if req.Tags != nil {
-			if validationMsg = txService.replaceArticleTags(a.ID, a.UserID, req.Tags); validationMsg != "" {
+		if writeReq.Tags != nil {
+			if validationMsg = txService.replaceArticleTags(a.ID, a.UserID, writeReq.Tags); validationMsg != "" {
 				return gorm.ErrInvalidData
 			}
 		}
 		return txService.applyAutoOrgSurface(a.ID, a.UserID, a.Visibility, a.SyncToMainProfile)
 	})
 	if validationMsg != "" {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": validationMsg})
-		return nil
+		return nil, blogErr(http.StatusBadRequest, validationMsg)
 	}
 	if err != nil {
 		if strings.Contains(err.Error(), "duplicate") || strings.Contains(err.Error(), "unique") {
-			writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "短链已被占用，请换一个"})
-			return nil
+			return nil, blogErr(http.StatusBadRequest, "短链已被占用，请换一个")
 		}
-		writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "保存失败"})
-		return nil
+		return nil, blogErr(http.StatusInternalServerError, "保存失败")
 	}
 	d := blogaccess.Evaluate(blogaccess.ArticleAccess{
 		Visibility:  a.Visibility,
@@ -874,12 +874,10 @@ func (s *BlogService) handleUpdate(ctx khttp.Context) error {
 	}, pd.UserID, true)
 	var author model.User
 	_ = s.db.Select("id", "username", "name", "avatar").First(&author, a.UserID).Error
-	writeJSON(ctx.Response(), 200, map[string]interface{}{
-		"code":    0,
-		"message": "success",
-		"data":    s.articleToMap(a, &author, d, pd.UserID, true, nil),
-	})
-	return nil
+	return &pb.UpdateRes{
+		Code: 0, Message: "success",
+		Data: s.articleToProto(a, &author, d, pd.UserID, true, nil),
+	}, nil
 }
 
 func (s *BlogService) buildArticleFromReq(userID, existingID uint, req *blogArticleWriteReq, isCreate bool) (*model.BlogArticle, string) {
@@ -1055,26 +1053,26 @@ func (s *BlogService) applyAutoOrgSurface(articleID, userID uint, visibility str
 	return s.replaceOrgSync(articleID, orgIDs)
 }
 
-func blogVisitorKey(ctx khttp.Context, viewerID uint) string {
+func blogVisitorKey(req *http.Request, viewerID uint) string {
 	if viewerID > 0 {
 		return fmt.Sprintf("u:%d", viewerID)
 	}
 	// cookie / header visitor id
-	if c, err := ctx.Request().Cookie("goalgo_vid"); err == nil && c != nil {
+	if c, err := req.Cookie("goalgo_vid"); err == nil && c != nil {
 		v := strings.TrimSpace(c.Value)
 		if v != "" && len(v) <= 64 {
 			return "v:" + v
 		}
 	}
-	if h := strings.TrimSpace(ctx.Request().Header.Get("X-Visitor-Id")); h != "" && len(h) <= 64 {
+	if h := strings.TrimSpace(req.Header.Get("X-Visitor-Id")); h != "" && len(h) <= 64 {
 		return "v:" + h
 	}
 	// fallback: IP + UA hash (best-effort anonymous UV)
-	ip := ctx.Request().Header.Get("X-Forwarded-For")
+	ip := req.Header.Get("X-Forwarded-For")
 	if ip == "" {
-		ip = ctx.Request().RemoteAddr
+		ip = req.RemoteAddr
 	}
-	ua := ctx.Request().UserAgent()
+	ua := req.UserAgent()
 	sum := sha256.Sum256([]byte(ip + "|" + ua))
 	return "a:" + hex.EncodeToString(sum[:8])
 }
@@ -1142,27 +1140,21 @@ func (s *BlogService) recordLinkedSolutionUV(solutionID, articleID uint, visitor
 	_ = s.recordBlogArticleUV(articleID, visitorKey)
 }
 
-func (s *BlogService) handleDelete(ctx khttp.Context) error {
+// Delete 登录：删除文章（级联清理评论/点赞/标签/UV）
+func (s *BlogService) Delete(ctx context.Context, req *pb.DeleteReq) (*pb.DeleteRes, error) {
 	pd := auth.GetCurrentUser(ctx)
 	if pd == nil || pd.UserID == 0 {
-		writeJSON(ctx.Response(), 401, map[string]interface{}{"code": 1, "message": "请先登录"})
-		return nil
+		return nil, blogErr(http.StatusUnauthorized, "请先登录")
 	}
-	var body struct {
-		ID uint `json:"id"`
-	}
-	if err := json.NewDecoder(ctx.Request().Body).Decode(&body); err != nil || body.ID == 0 {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "参数错误"})
-		return nil
+	if req.Id == 0 {
+		return nil, blogErr(http.StatusBadRequest, "参数错误")
 	}
 	var a model.BlogArticle
-	if err := s.db.First(&a, body.ID).Error; err != nil {
-		writeJSON(ctx.Response(), 404, map[string]interface{}{"code": 1, "message": "文章不存在"})
-		return nil
+	if err := s.db.First(&a, req.Id).Error; err != nil {
+		return nil, blogErr(http.StatusNotFound, "文章不存在")
 	}
 	if !blogaccess.CanManage(a.UserID, pd.UserID, auth.PayloadHasPerm(pd, rbac.PermContentBlogModerate)) {
-		writeJSON(ctx.Response(), 403, map[string]interface{}{"code": 1, "message": "只能删除自己的文章"})
-		return nil
+		return nil, blogErr(http.StatusForbidden, "只能删除自己的文章")
 	}
 	err := blogimg.WithUserImageReferenceTx(s.db, a.UserID, func(tx *gorm.DB) error {
 		if err := tx.Where("article_id = ?", a.ID).Delete(&model.BlogArticleOrg{}).Error; err != nil {
@@ -1193,21 +1185,25 @@ func (s *BlogService) handleDelete(ctx khttp.Context) error {
 		return tx.Delete(&a).Error
 	})
 	if err != nil {
-		writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "删除失败"})
-		return nil
+		return nil, blogErr(http.StatusInternalServerError, "删除失败")
 	}
-	writeJSON(ctx.Response(), 200, map[string]interface{}{"code": 0, "message": "已删除"})
-	return nil
+	return &pb.DeleteRes{Code: 0, Message: "已删除"}, nil
 }
 
-func (s *BlogService) handleMine(ctx khttp.Context) error {
+// Mine 登录：我的文章列表
+func (s *BlogService) Mine(ctx context.Context, req *pb.MineReq) (*pb.MineRes, error) {
 	pd := auth.GetCurrentUser(ctx)
 	if pd == nil || pd.UserID == 0 {
-		writeJSON(ctx.Response(), 401, map[string]interface{}{"code": 1, "message": "请先登录"})
-		return nil
+		return nil, blogErr(http.StatusUnauthorized, "请先登录")
 	}
-	page, pageSize := parsePage(ctx.Request())
-	keyword := strings.TrimSpace(ctx.Request().URL.Query().Get("keyword"))
+	page, pageSize := int(req.Page), int(req.PageSize)
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 || pageSize > 50 {
+		pageSize = 20
+	}
+	keyword := strings.TrimSpace(req.Keyword)
 	q := s.db.Model(&model.BlogArticle{}).Where("user_id = ?", pd.UserID)
 	if keyword != "" {
 		like := sqllike.Pattern(keyword)
@@ -1217,38 +1213,37 @@ func (s *BlogService) handleMine(ctx khttp.Context) error {
 	_ = q.Count(&total).Error
 	var list []model.BlogArticle
 	if err := q.Order("id DESC").Offset((page - 1) * pageSize).Limit(pageSize).Find(&list).Error; err != nil {
-		writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "加载失败"})
-		return nil
+		return nil, blogErr(http.StatusInternalServerError, "加载失败")
 	}
 	var author model.User
 	_ = s.db.Select("id", "username", "name", "avatar").First(&author, pd.UserID).Error
 	pre := s.prefetchArticleExtras(list, pd.UserID)
-	out := make([]map[string]interface{}, 0, len(list))
+	out := make([]*pb.ArticleInfo, 0, len(list))
 	for i := range list {
 		d := blogaccess.Evaluate(blogaccess.ArticleAccess{
 			Visibility:  list[i].Visibility,
 			OwnerID:     list[i].UserID,
 			HasPassword: list[i].PasswordHash != "",
 		}, pd.UserID, true)
-		out = append(out, s.articleToMap(&list[i], &author, d, pd.UserID, false, pre))
+		out = append(out, s.articleToProto(&list[i], &author, d, pd.UserID, false, pre))
 	}
-	writeJSON(ctx.Response(), 200, map[string]interface{}{
-		"code":    0,
-		"message": "success",
-		"data": map[string]interface{}{
-			"list":     out,
-			"total":    total,
-			"page":     page,
-			"pageSize": pageSize,
-		},
-	})
-	return nil
+	return &pb.MineRes{
+		Code: 0, Message: "success",
+		Data: &pb.ArticleListData{List: out, Total: total, Page: int64(page), PageSize: int64(pageSize)},
+	}, nil
 }
 
 // ---------- recommend ----------
 
-func (s *BlogService) handleRecommend(ctx khttp.Context) error {
-	page, pageSize := parsePage(ctx.Request())
+// Recommend 公开：精选文章（推荐）
+func (s *BlogService) Recommend(ctx context.Context, req *pb.RecommendReq) (*pb.RecommendRes, error) {
+	page, pageSize := int(req.Page), int(req.PageSize)
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 || pageSize > 50 {
+		pageSize = 20
+	}
 	viewer := blogViewerID(ctx)
 	// 仅站管/审核员标记精选(recommend=true) 的公开已审且同步主站文章
 	q := s.db.Model(&model.BlogArticle{}).
@@ -1259,18 +1254,18 @@ func (s *BlogService) handleRecommend(ctx khttp.Context) error {
 
 	// optional org filter: 公共域/缺省 → 全站公开文；私有域 → 仅该组织成员的文章
 	// （作者所属各域均可见自己的公开文；私有域看不到非成员的公共域内容）
-	orgID, _ := strconv.ParseUint(strings.TrimSpace(ctx.Request().URL.Query().Get("orgId")), 10, 64)
+	orgID := uint(req.OrgId)
 	if orgID > 0 {
 		var o model.Org
-		if s.db.Select("id", "is_system").First(&o, uint(orgID)).Error == nil && !o.IsSystem {
+		if s.db.Select("id", "is_system").First(&o, orgID).Error == nil && !o.IsSystem {
 			q = q.Where(
 				"user_id IN (SELECT user_id FROM org_members WHERE org_id = ?)",
-				uint(orgID),
+				orgID,
 			)
 		}
 	}
 	// exclude solution-mirrored articles when excludeSolutions=1 (discover dedupe)
-	if strings.TrimSpace(ctx.Request().URL.Query().Get("excludeSolutions")) == "1" {
+	if req.ExcludeSolutions == 1 {
 		q = q.Where("source_solution_id IS NULL OR source_solution_id = 0")
 	}
 
@@ -1280,34 +1275,33 @@ func (s *BlogService) handleRecommend(ctx khttp.Context) error {
 	if err := q.Order("COALESCE(published_at, created_at) DESC").
 		Offset((page - 1) * pageSize).Limit(pageSize).
 		Find(&list).Error; err != nil {
-		writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "加载失败"})
-		return nil
+		return nil, blogErr(http.StatusInternalServerError, "加载失败")
 	}
-	out := s.batchMapArticles(list, viewer)
-	writeJSON(ctx.Response(), 200, map[string]interface{}{
-		"code":    0,
-		"message": "success",
-		"data": map[string]interface{}{
-			"list":     out,
-			"total":    total,
-			"page":     page,
-			"pageSize": pageSize,
-		},
-	})
-	return nil
+	out := s.batchMapArticlesProto(list, viewer)
+	return &pb.RecommendRes{
+		Code: 0, Message: "success",
+		Data: &pb.ArticleListData{List: out, Total: total, Page: int64(page), PageSize: int64(pageSize)},
+	}, nil
 }
 
 // ---------- plaza (main-site public feed) ----------
 
-func (s *BlogService) handlePlaza(ctx khttp.Context) error {
-	page, pageSize := parsePage(ctx.Request())
+// Plaza 公开：主站博客广场文章流
+func (s *BlogService) Plaza(ctx context.Context, req *pb.PlazaReq) (*pb.PlazaRes, error) {
+	page, pageSize := int(req.Page), int(req.PageSize)
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 || pageSize > 50 {
+		pageSize = 20
+	}
 	// Prefer denser default for plaza cards
-	if ctx.Request().URL.Query().Get("pageSize") == "" {
+	if req.PageSize == 0 {
 		pageSize = 12
 	}
 	viewer := blogViewerID(ctx)
-	keyword := strings.TrimSpace(ctx.Request().URL.Query().Get("keyword"))
-	sort := strings.ToLower(strings.TrimSpace(ctx.Request().URL.Query().Get("sort")))
+	keyword := strings.TrimSpace(req.Keyword)
+	sort := strings.ToLower(strings.TrimSpace(req.Sort))
 	if sort == "" {
 		sort = "latest"
 	}
@@ -1323,18 +1317,18 @@ func (s *BlogService) handlePlaza(ctx khttp.Context) error {
 	}
 
 	// optional org filter: 与 recommend 一致——公共域/缺省=全站；私有域=仅该组织成员作者
-	orgID, _ := strconv.ParseUint(strings.TrimSpace(ctx.Request().URL.Query().Get("orgId")), 10, 64)
+	orgID := uint(req.OrgId)
 	if orgID > 0 {
 		var o model.Org
-		if s.db.Select("id", "is_system").First(&o, uint(orgID)).Error == nil && !o.IsSystem {
+		if s.db.Select("id", "is_system").First(&o, orgID).Error == nil && !o.IsSystem {
 			q = q.Where(
 				"user_id IN (SELECT user_id FROM org_members WHERE org_id = ?)",
-				uint(orgID),
+				orgID,
 			)
 		}
 	}
 	// 发现页去重：排除题解镜像文（题解走 activity/feed）
-	if strings.TrimSpace(ctx.Request().URL.Query().Get("excludeSolutions")) == "1" {
+	if req.ExcludeSolutions == 1 {
 		q = q.Where("source_solution_id IS NULL OR source_solution_id = 0")
 	}
 
@@ -1347,50 +1341,44 @@ func (s *BlogService) handlePlaza(ctx khttp.Context) error {
 	case "latest":
 		q = q.Order("COALESCE(published_at, created_at) DESC")
 	default:
-		writeJSON(ctx.Response(), 400, map[string]interface{}{
-			"code":    1,
-			"message": "sort 须为 latest|hot|recommend",
-		})
-		return nil
+		return nil, blogErr(http.StatusBadRequest, "sort 须为 latest|hot|recommend")
 	}
 
 	var total int64
 	if err := q.Count(&total).Error; err != nil {
-		writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "加载失败"})
-		return nil
+		return nil, blogErr(http.StatusInternalServerError, "加载失败")
 	}
 
 	var list []model.BlogArticle
 	if err := q.Offset((page - 1) * pageSize).Limit(pageSize).Find(&list).Error; err != nil {
-		writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "加载失败"})
-		return nil
+		return nil, blogErr(http.StatusInternalServerError, "加载失败")
 	}
-	out := s.batchMapArticles(list, viewer)
-	writeJSON(ctx.Response(), 200, map[string]interface{}{
-		"code":    0,
-		"message": "success",
-		"data": map[string]interface{}{
-			"list":     out,
-			"total":    total,
-			"page":     page,
-			"pageSize": pageSize,
-		},
-	})
-	return nil
+	out := s.batchMapArticlesProto(list, viewer)
+	return &pb.PlazaRes{
+		Code: 0, Message: "success",
+		Data: &pb.ArticleListData{List: out, Total: total, Page: int64(page), PageSize: int64(pageSize)},
+	}, nil
 }
 
 // ---------- active authors (plaza side rail) ----------
 
-func (s *BlogService) handleAuthors(ctx khttp.Context) error {
+// Authors 公开：最近有公开文的作者（广场侧栏）
+func (s *BlogService) Authors(ctx context.Context, req *pb.AuthorsReq) (*pb.AuthorsRes, error) {
 	imgBase := s.publicImageBase()
-	page, pageSize := parsePage(ctx.Request())
+	page, pageSize := int(req.Page), int(req.PageSize)
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 || pageSize > 50 {
+		pageSize = 20
+	}
 	if pageSize > 30 {
 		pageSize = 30
 	}
-	if ctx.Request().URL.Query().Get("pageSize") == "" {
+	if req.PageSize == 0 {
 		pageSize = 12
 	}
-	keyword := strings.TrimSpace(ctx.Request().URL.Query().Get("keyword"))
+	keyword := strings.TrimSpace(req.Keyword)
 
 	// Aggregate public articles per author, ordered by last publish time.
 	type aggRow struct {
@@ -1414,8 +1402,7 @@ func (s *BlogService) handleAuthors(ctx khttp.Context) error {
 			Where("users.username ILIKE ? OR users.name ILIKE ?", like, like)
 	}
 	if err := countQ.Count(&total).Error; err != nil {
-		writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "加载失败"})
-		return nil
+		return nil, blogErr(http.StatusInternalServerError, "加载失败")
 	}
 
 	var aggs []aggRow
@@ -1429,8 +1416,7 @@ func (s *BlogService) handleAuthors(ctx khttp.Context) error {
 	if err := listQ.Order("author_agg.last_published_at DESC NULLS LAST").
 		Offset((page - 1) * pageSize).Limit(pageSize).
 		Scan(&aggs).Error; err != nil {
-		writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "加载失败"})
-		return nil
+		return nil, blogErr(http.StatusInternalServerError, "加载失败")
 	}
 
 	ids := make([]uint, 0, len(aggs))
@@ -1466,38 +1452,31 @@ func (s *BlogService) handleAuthors(ctx khttp.Context) error {
 		}
 	}
 
-	out := make([]map[string]interface{}, 0, len(aggs))
+	out := make([]*pb.PlazaAuthorInfo, 0, len(aggs))
 	for _, a := range aggs {
 		u := authors[a.UserID]
-		item := map[string]interface{}{
-			"id":           a.UserID,
-			"username":     u.Username,
-			"name":         u.Name,
-			"avatar":       expandAvatarBase(imgBase, u.Avatar),
-			"articleCount": a.ArticleCount,
-			"latestTitle":  latestTitle[a.UserID],
+		item := &pb.PlazaAuthorInfo{
+			Id:           int64(a.UserID),
+			Username:     u.Username,
+			Name:         u.Name,
+			Avatar:       expandAvatarBase(imgBase, u.Avatar),
+			ArticleCount: a.ArticleCount,
+			LatestTitle:  latestTitle[a.UserID],
 		}
 		if a.LastPublishedAt != nil {
-			item["lastPublishedAt"] = a.LastPublishedAt.Unix()
+			item.LastPublishedAt = a.LastPublishedAt.Unix()
 		}
 		out = append(out, item)
 	}
 
-	writeJSON(ctx.Response(), 200, map[string]interface{}{
-		"code":    0,
-		"message": "success",
-		"data": map[string]interface{}{
-			"list":     out,
-			"total":    total,
-			"page":     page,
-			"pageSize": pageSize,
-		},
-	})
-	return nil
+	return &pb.AuthorsRes{
+		Code: 0, Message: "success",
+		Data: &pb.PlazaAuthorListData{List: out, Total: total, Page: int64(page), PageSize: int64(pageSize)},
+	}, nil
 }
 
-// batchMapArticles loads authors once and maps list items without body.
-func (s *BlogService) batchMapArticles(list []model.BlogArticle, viewer uint) []map[string]interface{} {
+// batchMapArticlesProto loads authors once and maps list items without body.
+func (s *BlogService) batchMapArticlesProto(list []model.BlogArticle, viewer uint) []*pb.ArticleInfo {
 	ids := make([]uint, 0, len(list))
 	seen := map[uint]struct{}{}
 	for _, a := range list {
@@ -1515,25 +1494,25 @@ func (s *BlogService) batchMapArticles(list []model.BlogArticle, viewer uint) []
 		}
 	}
 	pre := s.prefetchArticleExtras(list, viewer)
-	out := make([]map[string]interface{}, 0, len(list))
+	out := make([]*pb.ArticleInfo, 0, len(list))
 	for i := range list {
 		u := authors[list[i].UserID]
 		d := blogaccess.Evaluate(blogaccess.ArticleAccess{
 			Visibility: list[i].Visibility,
 			OwnerID:    list[i].UserID,
 		}, viewer, false)
-		out = append(out, s.articleToMap(&list[i], &u, d, viewer, false, pre))
+		out = append(out, s.articleToProto(&list[i], &u, d, viewer, false, pre))
 	}
 	return out
 }
 
 // ---------- analytics ----------
 
-func (s *BlogService) handleAnalytics(ctx khttp.Context) error {
+// Analytics 登录：作者统计（汇总 + top 文章）
+func (s *BlogService) Analytics(ctx context.Context, req *pb.AnalyticsReq) (*pb.AnalyticsRes, error) {
 	pd := auth.GetCurrentUser(ctx)
 	if pd == nil || pd.UserID == 0 {
-		writeJSON(ctx.Response(), 401, map[string]interface{}{"code": 1, "message": "请先登录"})
-		return nil
+		return nil, blogErr(http.StatusUnauthorized, "请先登录")
 	}
 	type row struct {
 		Views    int64
@@ -1550,62 +1529,54 @@ func (s *BlogService) handleAnalytics(ctx khttp.Context) error {
 	// top articles by views
 	var top []model.BlogArticle
 	_ = s.db.Where("user_id = ?", pd.UserID).Order("view_count DESC").Limit(10).Find(&top).Error
-	topOut := make([]map[string]interface{}, 0, len(top))
+	data := &pb.AnalyticsData{
+		TotalArticles: r.Articles,
+		TotalViews:    r.Views,
+		TotalLikes:    r.Likes,
+		TotalComments: r.Comments,
+	}
 	for _, a := range top {
-		topOut = append(topOut, map[string]interface{}{
-			"id":           a.ID,
-			"slug":         a.Slug,
-			"title":        a.Title,
-			"viewCount":    a.ViewCount,
-			"likeCount":    a.LikeCount,
-			"commentCount": a.CommentCount,
-			"visibility":   a.Visibility,
+		data.TopArticles = append(data.TopArticles, &pb.AnalyticsTopArticle{
+			Id:           int64(a.ID),
+			Slug:         a.Slug,
+			Title:        a.Title,
+			ViewCount:    int64(a.ViewCount),
+			LikeCount:    int64(a.LikeCount),
+			CommentCount: int64(a.CommentCount),
+			Visibility:   a.Visibility,
 		})
 	}
-	writeJSON(ctx.Response(), 200, map[string]interface{}{
-		"code":    0,
-		"message": "success",
-		"data": map[string]interface{}{
-			"totalArticles": r.Articles,
-			"totalViews":    r.Views,
-			"totalLikes":    r.Likes,
-			"totalComments": r.Comments,
-			"topArticles":   topOut,
-		},
-	})
-	return nil
+	return &pb.AnalyticsRes{Code: 0, Message: "success", Data: data}, nil
 }
 
 // ---------- categories ----------
 
-func (s *BlogService) handleListCategoriesPublic(ctx khttp.Context) error {
-	username := strings.TrimSpace(ctx.Request().URL.Query().Get("username"))
+// ListCategoriesPublic 公开：作者公开分类列表（仅含 >0 篇公开文章的分类）
+func (s *BlogService) ListCategoriesPublic(ctx context.Context, req *pb.ListCategoriesPublicReq) (*pb.ListCategoriesPublicRes, error) {
+	username := strings.TrimSpace(req.Username)
 	if username == "" {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "缺少用户名"})
-		return nil
+		return nil, blogErr(http.StatusBadRequest, "缺少用户名")
 	}
 	u, err := s.findUserByUsername(username)
 	if err != nil {
-		writeJSON(ctx.Response(), 404, map[string]interface{}{"code": 1, "message": "用户不存在"})
-		return nil
+		return nil, blogErr(http.StatusNotFound, "用户不存在")
 	}
 	// 访客侧不强制创建默认分类（避免写路径）；仅列出已有
 	var list []model.BlogCategory
 	_ = s.db.Where("user_id = ?", u.ID).Order("is_default DESC, sort_order ASC, id ASC").Find(&list).Error
 	counts := s.categoryArticleCounts(list, true)
 	// 前台不展示 0 篇公开文章的分类（访客侧仿佛不存在）
-	out := make([]map[string]interface{}, 0, len(list))
+	out := make([]*pb.CategoryInfo, 0, len(list))
 	for _, c := range list {
 		n := counts[c.ID]
 		if n <= 0 {
 			continue
 		}
-		out = append(out, map[string]interface{}{
-			"id": c.ID, "name": c.Name, "sortOrder": c.SortOrder, "articleCount": n, "isDefault": c.IsDefault,
+		out = append(out, &pb.CategoryInfo{
+			Id: int64(c.ID), Name: c.Name, SortOrder: int32(c.SortOrder), ArticleCount: n, IsDefault: c.IsDefault,
 		})
 	}
-	writeJSON(ctx.Response(), 200, map[string]interface{}{"code": 0, "message": "success", "list": out})
-	return nil
+	return &pb.ListCategoriesPublicRes{Code: 0, Message: "success", List: out}, nil
 }
 
 // categoryArticleCounts 分类计数一次 GROUP BY 聚合；publicOnly 时仅统计公开文章。
@@ -1636,145 +1607,116 @@ func (s *BlogService) categoryArticleCounts(list []model.BlogCategory, publicOnl
 	return out
 }
 
-func (s *BlogService) handleCategoryMine(ctx khttp.Context) error {
+// CategoryMine 登录：我的分类列表（自动确保默认分类存在）
+func (s *BlogService) CategoryMine(ctx context.Context, req *pb.CategoryMineReq) (*pb.CategoryMineRes, error) {
 	pd := auth.GetCurrentUser(ctx)
 	if pd == nil || pd.UserID == 0 {
-		writeJSON(ctx.Response(), 401, map[string]interface{}{"code": 1, "message": "请先登录"})
-		return nil
+		return nil, blogErr(http.StatusUnauthorized, "请先登录")
 	}
 	// 管理页确保默认分类存在
 	_, _ = blogsync.EnsureDefaultCategory(s.db, pd.UserID)
 	var list []model.BlogCategory
 	_ = s.db.Where("user_id = ?", pd.UserID).Order("is_default DESC, sort_order ASC, id ASC").Find(&list).Error
 	counts := s.categoryArticleCounts(list, false)
-	out := make([]map[string]interface{}, 0, len(list))
+	out := make([]*pb.CategoryInfo, 0, len(list))
 	for _, c := range list {
-		out = append(out, map[string]interface{}{
-			"id": c.ID, "name": c.Name, "sortOrder": c.SortOrder, "articleCount": counts[c.ID], "isDefault": c.IsDefault,
+		out = append(out, &pb.CategoryInfo{
+			Id: int64(c.ID), Name: c.Name, SortOrder: int32(c.SortOrder), ArticleCount: counts[c.ID], IsDefault: c.IsDefault,
 		})
 	}
-	writeJSON(ctx.Response(), 200, map[string]interface{}{"code": 0, "message": "success", "list": out})
-	return nil
+	return &pb.CategoryMineRes{Code: 0, Message: "success", List: out}, nil
 }
 
-func (s *BlogService) handleCategoryCreate(ctx khttp.Context) error {
+// CategoryCreate 登录：创建分类
+func (s *BlogService) CategoryCreate(ctx context.Context, req *pb.CategoryCreateReq) (*pb.CategoryCreateRes, error) {
 	pd := auth.GetCurrentUser(ctx)
 	if pd == nil || pd.UserID == 0 {
-		writeJSON(ctx.Response(), 401, map[string]interface{}{"code": 1, "message": "请先登录"})
-		return nil
+		return nil, blogErr(http.StatusUnauthorized, "请先登录")
 	}
-	var body struct {
-		Name      string `json:"name"`
-		SortOrder int    `json:"sortOrder"`
-	}
-	if err := json.NewDecoder(ctx.Request().Body).Decode(&body); err != nil {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "参数错误"})
-		return nil
-	}
-	name := strings.TrimSpace(body.Name)
+	name := strings.TrimSpace(req.Name)
 	if name == "" || utf8.RuneCountInString(name) > 64 {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "分类名无效"})
-		return nil
+		return nil, blogErr(http.StatusBadRequest, "分类名无效")
 	}
-	c := model.BlogCategory{UserID: pd.UserID, Name: name, SortOrder: body.SortOrder, IsDefault: false}
+	c := model.BlogCategory{UserID: pd.UserID, Name: name, SortOrder: int(req.SortOrder), IsDefault: false}
 	if err := s.db.Create(&c).Error; err != nil {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "创建失败，可能重名"})
-		return nil
+		return nil, blogErr(http.StatusBadRequest, "创建失败，可能重名")
 	}
-	writeJSON(ctx.Response(), 200, map[string]interface{}{
-		"code": 0, "message": "success",
-		"data": map[string]interface{}{"id": c.ID, "name": c.Name, "sortOrder": c.SortOrder, "isDefault": c.IsDefault},
-	})
-	return nil
+	return &pb.CategoryCreateRes{
+		Code: 0, Message: "success",
+		Data: &pb.CategoryCreateData{Id: int64(c.ID), Name: c.Name, SortOrder: int32(c.SortOrder), IsDefault: c.IsDefault},
+	}, nil
 }
 
-func (s *BlogService) handleCategoryUpdate(ctx khttp.Context) error {
+// CategoryUpdate 登录：更新分类（name/sortOrder 省略保留原值）
+func (s *BlogService) CategoryUpdate(ctx context.Context, req *pb.CategoryUpdateReq) (*pb.CategoryUpdateRes, error) {
 	pd := auth.GetCurrentUser(ctx)
 	if pd == nil || pd.UserID == 0 {
-		writeJSON(ctx.Response(), 401, map[string]interface{}{"code": 1, "message": "请先登录"})
-		return nil
+		return nil, blogErr(http.StatusUnauthorized, "请先登录")
 	}
-	var body struct {
-		ID        uint   `json:"id"`
-		Name      string `json:"name"`
-		SortOrder *int   `json:"sortOrder"`
-	}
-	if err := json.NewDecoder(ctx.Request().Body).Decode(&body); err != nil || body.ID == 0 {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "参数错误"})
-		return nil
+	if req.Id == 0 {
+		return nil, blogErr(http.StatusBadRequest, "参数错误")
 	}
 	var c model.BlogCategory
-	if err := s.db.Where("id = ? AND user_id = ?", body.ID, pd.UserID).First(&c).Error; err != nil {
-		writeJSON(ctx.Response(), 404, map[string]interface{}{"code": 1, "message": "分类不存在"})
-		return nil
+	if err := s.db.Where("id = ? AND user_id = ?", req.Id, pd.UserID).First(&c).Error; err != nil {
+		return nil, blogErr(http.StatusNotFound, "分类不存在")
 	}
-	if n := strings.TrimSpace(body.Name); n != "" {
+	if n := strings.TrimSpace(req.Name); n != "" {
 		c.Name = n
 	}
-	if body.SortOrder != nil {
-		c.SortOrder = *body.SortOrder
+	if req.SortOrder != nil {
+		c.SortOrder = int(req.SortOrder.Value)
 	}
 	if err := s.db.Save(&c).Error; err != nil {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "保存失败"})
-		return nil
+		return nil, blogErr(http.StatusBadRequest, "保存失败")
 	}
-	writeJSON(ctx.Response(), 200, map[string]interface{}{"code": 0, "message": "success", "data": map[string]interface{}{
-		"id": c.ID, "name": c.Name, "sortOrder": c.SortOrder, "isDefault": c.IsDefault,
-	}})
-	return nil
+	return &pb.CategoryUpdateRes{
+		Code: 0, Message: "success",
+		Data: &pb.CategoryCreateData{Id: int64(c.ID), Name: c.Name, SortOrder: int32(c.SortOrder), IsDefault: c.IsDefault},
+	}, nil
 }
 
-func (s *BlogService) handleCategoryDelete(ctx khttp.Context) error {
+// CategoryDelete 登录：删除分类（默认分类不可删；文章改挂默认分类）
+func (s *BlogService) CategoryDelete(ctx context.Context, req *pb.CategoryDeleteReq) (*pb.CategoryDeleteRes, error) {
 	pd := auth.GetCurrentUser(ctx)
 	if pd == nil || pd.UserID == 0 {
-		writeJSON(ctx.Response(), 401, map[string]interface{}{"code": 1, "message": "请先登录"})
-		return nil
+		return nil, blogErr(http.StatusUnauthorized, "请先登录")
 	}
-	var body struct {
-		ID uint `json:"id"`
-	}
-	if err := json.NewDecoder(ctx.Request().Body).Decode(&body); err != nil || body.ID == 0 {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "参数错误"})
-		return nil
+	if req.Id == 0 {
+		return nil, blogErr(http.StatusBadRequest, "参数错误")
 	}
 	var c model.BlogCategory
-	if err := s.db.Where("id = ? AND user_id = ?", body.ID, pd.UserID).First(&c).Error; err != nil {
-		writeJSON(ctx.Response(), 404, map[string]interface{}{"code": 1, "message": "分类不存在"})
-		return nil
+	if err := s.db.Where("id = ? AND user_id = ?", req.Id, pd.UserID).First(&c).Error; err != nil {
+		return nil, blogErr(http.StatusNotFound, "分类不存在")
 	}
 	if c.IsDefault {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "默认分类不能删除"})
-		return nil
+		return nil, blogErr(http.StatusBadRequest, "默认分类不能删除")
 	}
-	res := s.db.Where("id = ? AND user_id = ?", body.ID, pd.UserID).Delete(&model.BlogCategory{})
+	res := s.db.Where("id = ? AND user_id = ?", req.Id, pd.UserID).Delete(&model.BlogCategory{})
 	if res.RowsAffected == 0 {
-		writeJSON(ctx.Response(), 404, map[string]interface{}{"code": 1, "message": "分类不存在"})
-		return nil
+		return nil, blogErr(http.StatusNotFound, "分类不存在")
 	}
 	// 非默认分类文章改挂到默认分类
 	if defID, err := blogsync.EnsureDefaultCategory(s.db, pd.UserID); err == nil && defID > 0 {
-		_ = s.db.Model(&model.BlogArticle{}).Where("category_id = ?", body.ID).Update("category_id", defID).Error
+		_ = s.db.Model(&model.BlogArticle{}).Where("category_id = ?", req.Id).Update("category_id", defID).Error
 	} else {
-		_ = s.db.Model(&model.BlogArticle{}).Where("category_id = ?", body.ID).Update("category_id", nil).Error
+		_ = s.db.Model(&model.BlogArticle{}).Where("category_id = ?", req.Id).Update("category_id", nil).Error
 	}
-	writeJSON(ctx.Response(), 200, map[string]interface{}{"code": 0, "message": "已删除"})
-	return nil
+	return &pb.CategoryDeleteRes{Code: 0, Message: "已删除"}, nil
 }
 
 // ---------- comments ----------
 
-func (s *BlogService) handleListComments(ctx khttp.Context) error {
+// ListComments 公开：文章评论列表（顶层分页 + 嵌套 replies）
+func (s *BlogService) ListComments(ctx context.Context, req *pb.ListCommentsReq) (*pb.ListCommentsRes, error) {
 	imgBase := s.publicImageBase()
-	articleID, _ := strconv.ParseUint(ctx.Request().URL.Query().Get("articleId"), 10, 64)
+	articleID := uint(req.ArticleId)
 	if articleID == 0 {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "缺少 articleId"})
-		return nil
+		return nil, blogErr(http.StatusBadRequest, "缺少 articleId")
 	}
 	// ensure article is at least meta-visible
 	var a model.BlogArticle
 	if err := s.db.First(&a, articleID).Error; err != nil {
-		writeJSON(ctx.Response(), 404, map[string]interface{}{"code": 1, "message": "文章不存在"})
-		return nil
+		return nil, blogErr(http.StatusNotFound, "文章不存在")
 	}
 	viewer := blogViewerID(ctx)
 	d := blogaccess.Evaluate(blogaccess.ArticleAccess{
@@ -1784,10 +1726,15 @@ func (s *BlogService) handleListComments(ctx khttp.Context) error {
 	}, viewer, false)
 	// comments only when meta visible (public/password teaser/owner)
 	if !d.CanSeeMeta {
-		writeJSON(ctx.Response(), 404, map[string]interface{}{"code": 1, "message": "文章不存在"})
-		return nil
+		return nil, blogErr(http.StatusNotFound, "文章不存在")
 	}
-	page, pageSize := parsePage(ctx.Request())
+	page, pageSize := int(req.Page), int(req.PageSize)
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 || pageSize > 50 {
+		pageSize = 20
+	}
 
 	// 仅分页顶层；子回复嵌套在 replies 中返回（与题解评论一致）。
 	// 顶层用 SQL 分页（parent_id = 0 + LIMIT/OFFSET），再按层级批量拉取本页顶层的后代，
@@ -1858,70 +1805,64 @@ func (s *BlogService) handleListComments(ctx khttp.Context) error {
 		}
 	}
 
-	var buildNode func(id uint) map[string]interface{}
-	buildNode = func(id uint) map[string]interface{} {
+	var buildNode func(id uint) *pb.CommentInfo
+	buildNode = func(id uint) *pb.CommentInfo {
 		c := byID[id]
 		u := users[c.UserID]
-		m := map[string]interface{}{
-			"id": c.ID, "articleId": c.ArticleID, "parentId": c.ParentID,
-			"content": c.Content, "createdAt": c.CreatedAt.Unix(),
-			"userId": c.UserID, "likeCount": c.LikeCount, "liked": likedSet[c.ID],
-			"author": map[string]interface{}{
-				"id": u.ID, "username": u.Username, "name": u.Name, "avatar": expandAvatarBase(imgBase, u.Avatar),
+		m := &pb.CommentInfo{
+			Id:        int64(c.ID),
+			ArticleId: int64(c.ArticleID),
+			ParentId:  int64(c.ParentID),
+			Content:   c.Content,
+			CreatedAt: c.CreatedAt.Unix(),
+			UserId:    int64(c.UserID),
+			LikeCount: int32(c.LikeCount),
+			Liked:     likedSet[c.ID],
+			Author: &pb.Author{
+				Id: int64(u.ID), Username: u.Username, Name: u.Name, Avatar: expandAvatarBase(imgBase, u.Avatar),
 			},
 		}
 		if c.ParentID > 0 {
 			if p, ok := byID[c.ParentID]; ok {
 				pu := users[p.UserID]
-				m["replyToUserId"] = p.UserID
-				m["replyToUsername"] = pu.Username
-				m["replyToName"] = pu.Name
+				m.ReplyToUserId = int64(p.UserID)
+				m.ReplyToUsername = pu.Username
+				m.ReplyToName = pu.Name
 			}
 		}
 		reps := children[id]
-		outReps := make([]map[string]interface{}, 0, len(reps))
 		for _, rid := range reps {
-			outReps = append(outReps, buildNode(rid))
+			m.Replies = append(m.Replies, buildNode(rid))
 		}
-		m["replies"] = outReps
 		return m
 	}
 
-	out := make([]map[string]interface{}, 0, len(rootIDs))
+	out := make([]*pb.CommentInfo, 0, len(rootIDs))
 	for _, id := range rootIDs {
 		out = append(out, buildNode(id))
 	}
-	writeJSON(ctx.Response(), 200, map[string]interface{}{
-		"code": 0, "message": "success",
-		"data": map[string]interface{}{"list": out, "total": total, "page": page, "pageSize": pageSize},
-	})
-	return nil
+	return &pb.ListCommentsRes{
+		Code: 0, Message: "success",
+		Data: &pb.CommentListData{List: out, Total: total, Page: int64(page), PageSize: int64(pageSize)},
+	}, nil
 }
 
-func (s *BlogService) handleCommentCreate(ctx khttp.Context) error {
+// CommentCreate 登录：发表评论
+func (s *BlogService) CommentCreate(ctx context.Context, req *pb.CommentCreateReq) (*pb.CommentCreateRes, error) {
 	pd := auth.GetCurrentUser(ctx)
 	if pd == nil || pd.UserID == 0 {
-		writeJSON(ctx.Response(), 401, map[string]interface{}{"code": 1, "message": "请先登录"})
-		return nil
+		return nil, blogErr(http.StatusUnauthorized, "请先登录")
 	}
-	var body struct {
-		ArticleID uint   `json:"articleId"`
-		ParentID  uint   `json:"parentId"`
-		Content   string `json:"content"`
+	if req.ArticleId == 0 {
+		return nil, blogErr(http.StatusBadRequest, "参数错误")
 	}
-	if err := json.NewDecoder(ctx.Request().Body).Decode(&body); err != nil || body.ArticleID == 0 {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "参数错误"})
-		return nil
-	}
-	content := strings.TrimSpace(body.Content)
+	content := strings.TrimSpace(req.Content)
 	if content == "" || utf8.RuneCountInString(content) > maxCommentLen {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "评论内容无效"})
-		return nil
+		return nil, blogErr(http.StatusBadRequest, "评论内容无效")
 	}
 	var a model.BlogArticle
-	if err := s.db.First(&a, body.ArticleID).Error; err != nil {
-		writeJSON(ctx.Response(), 404, map[string]interface{}{"code": 1, "message": "文章不存在"})
-		return nil
+	if err := s.db.First(&a, req.ArticleId).Error; err != nil {
+		return nil, blogErr(http.StatusNotFound, "文章不存在")
 	}
 	// only comment when body is readable without password OR viewer is owner
 	// (password articles: must unlock first — we allow comment if public or owner)
@@ -1931,18 +1872,15 @@ func (s *BlogService) handleCommentCreate(ctx khttp.Context) error {
 		HasPassword: a.PasswordHash != "",
 	}, pd.UserID, false)
 	if !d.CanSeeBody && blogaccess.NormalizeVisibility(a.Visibility) != blogaccess.VisibilityPassword {
-		writeJSON(ctx.Response(), 403, map[string]interface{}{"code": 1, "message": "无法评论此文章"})
-		return nil
+		return nil, blogErr(http.StatusForbidden, "无法评论此文章")
 	}
 	if blogaccess.NormalizeVisibility(a.Visibility) == blogaccess.VisibilityPrivate && pd.UserID != a.UserID {
-		writeJSON(ctx.Response(), 403, map[string]interface{}{"code": 1, "message": "无法评论此文章"})
-		return nil
+		return nil, blogErr(http.StatusForbidden, "无法评论此文章")
 	}
-	if body.ParentID > 0 {
+	if req.ParentId > 0 {
 		var parent model.BlogComment
-		if err := s.db.Where("id = ? AND article_id = ?", body.ParentID, body.ArticleID).First(&parent).Error; err != nil {
-			writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "父评论不存在"})
-			return nil
+		if err := s.db.Where("id = ? AND article_id = ?", req.ParentId, req.ArticleId).First(&parent).Error; err != nil {
+			return nil, blogErr(http.StatusBadRequest, "父评论不存在")
 		}
 		// 限制嵌套深度（与题解评论一致：最多 3 层）
 		depth := 1
@@ -1956,19 +1894,17 @@ func (s *BlogService) handleCommentCreate(ctx khttp.Context) error {
 			pid = p.ParentID
 		}
 		if depth >= maxBlogCmtDepth {
-			writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "回复层级已达上限"})
-			return nil
+			return nil, blogErr(http.StatusBadRequest, "回复层级已达上限")
 		}
 	}
 	c := model.BlogComment{
-		ArticleID: body.ArticleID,
+		ArticleID: uint(req.ArticleId),
 		UserID:    pd.UserID,
-		ParentID:  body.ParentID,
+		ParentID:  uint(req.ParentId),
 		Content:   content,
 	}
 	if err := s.db.Create(&c).Error; err != nil {
-		writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "发表失败"})
-		return nil
+		return nil, blogErr(http.StatusInternalServerError, "发表失败")
 	}
 	_ = s.db.Model(&model.BlogArticle{}).Where("id = ?", a.ID).
 		UpdateColumn("comment_count", gorm.Expr("comment_count + 1")).Error
@@ -1987,9 +1923,9 @@ func (s *BlogService) handleCommentCreate(ctx khttp.Context) error {
 		"articleTitle": a.Title,
 		"commentId":    c.ID,
 	})
-	if body.ParentID > 0 {
+	if req.ParentId > 0 {
 		var parent model.BlogComment
-		if s.db.First(&parent, body.ParentID).Error == nil && parent.UserID > 0 && parent.UserID != pd.UserID {
+		if s.db.First(&parent, req.ParentId).Error == nil && parent.UserID > 0 && parent.UserID != pd.UserID {
 			_ = CreateNotification(s.db, model.Notification{
 				UserID:  parent.UserID,
 				Type:    model.NotifTypeBlogCommentReply,
@@ -2014,39 +1950,32 @@ func (s *BlogService) handleCommentCreate(ctx khttp.Context) error {
 		})
 	}
 
-	writeJSON(ctx.Response(), 200, map[string]interface{}{
-		"code": 0, "message": "success",
-		"data": map[string]interface{}{
-			"id": c.ID, "articleId": c.ArticleID, "parentId": c.ParentID,
-			"content": c.Content, "createdAt": c.CreatedAt.Unix(), "userId": c.UserID,
+	return &pb.CommentCreateRes{
+		Code: 0, Message: "success",
+		Data: &pb.CommentCreateData{
+			Id: int64(c.ID), ArticleId: int64(c.ArticleID), ParentId: int64(c.ParentID),
+			Content: c.Content, CreatedAt: c.CreatedAt.Unix(), UserId: int64(c.UserID),
 		},
-	})
-	return nil
+	}, nil
 }
 
-func (s *BlogService) handleCommentDelete(ctx khttp.Context) error {
+// CommentDelete 登录：删除评论（作者/文章作者/站管；级联删除子树 + 点赞）
+func (s *BlogService) CommentDelete(ctx context.Context, req *pb.CommentDeleteReq) (*pb.CommentDeleteRes, error) {
 	pd := auth.GetCurrentUser(ctx)
 	if pd == nil || pd.UserID == 0 {
-		writeJSON(ctx.Response(), 401, map[string]interface{}{"code": 1, "message": "请先登录"})
-		return nil
+		return nil, blogErr(http.StatusUnauthorized, "请先登录")
 	}
-	var body struct {
-		ID uint `json:"id"`
-	}
-	if err := json.NewDecoder(ctx.Request().Body).Decode(&body); err != nil || body.ID == 0 {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "参数错误"})
-		return nil
+	if req.Id == 0 {
+		return nil, blogErr(http.StatusBadRequest, "参数错误")
 	}
 	var c model.BlogComment
-	if err := s.db.First(&c, body.ID).Error; err != nil {
-		writeJSON(ctx.Response(), 404, map[string]interface{}{"code": 1, "message": "评论不存在"})
-		return nil
+	if err := s.db.First(&c, req.Id).Error; err != nil {
+		return nil, blogErr(http.StatusNotFound, "评论不存在")
 	}
 	var a model.BlogArticle
 	_ = s.db.First(&a, c.ArticleID).Error
 	if c.UserID != pd.UserID && a.UserID != pd.UserID && !auth.PayloadHasPerm(pd, rbac.PermContentBlogModerate) {
-		writeJSON(ctx.Response(), 403, map[string]interface{}{"code": 1, "message": "无权删除"})
-		return nil
+		return nil, blogErr(http.StatusForbidden, "无权删除")
 	}
 	// 级联删除子树 + 点赞
 	ids := s.collectBlogCommentSubtree(c.ID, c.ArticleID)
@@ -2055,8 +1984,7 @@ func (s *BlogService) handleCommentDelete(ctx khttp.Context) error {
 	}
 	_ = s.db.Where("comment_id IN ?", ids).Delete(&model.BlogCommentLike{}).Error
 	if err := s.db.Where("id IN ?", ids).Delete(&model.BlogComment{}).Error; err != nil {
-		writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "删除失败"})
-		return nil
+		return nil, blogErr(http.StatusInternalServerError, "删除失败")
 	}
 	n := len(ids)
 	_ = s.db.Model(&model.BlogArticle{}).
@@ -2066,8 +1994,7 @@ func (s *BlogService) handleCommentDelete(ctx khttp.Context) error {
 	_ = s.db.Model(&model.BlogArticle{}).
 		Where("id = ? AND comment_count < 0", c.ArticleID).
 		UpdateColumn("comment_count", 0).Error
-	writeJSON(ctx.Response(), 200, map[string]interface{}{"code": 0, "message": "已删除"})
-	return nil
+	return &pb.CommentDeleteRes{Code: 0, Message: "已删除"}, nil
 }
 
 // collectBlogCommentSubtree returns id + all descendants under the same article.
@@ -2095,35 +2022,28 @@ func (s *BlogService) collectBlogCommentSubtree(rootID, articleID uint) []uint {
 // ---------- likes ----------
 
 // handleCommentLikeToggle 博客评论点赞 toggle。
-func (s *BlogService) handleCommentLikeToggle(ctx khttp.Context) error {
+// CommentLikeToggle 登录：博客评论点赞 toggle
+func (s *BlogService) CommentLikeToggle(ctx context.Context, req *pb.CommentLikeToggleReq) (*pb.CommentLikeToggleRes, error) {
 	pd := auth.GetCurrentUser(ctx)
 	if pd == nil || pd.UserID == 0 {
-		writeJSON(ctx.Response(), 401, map[string]interface{}{"code": 1, "message": "请先登录"})
-		return nil
+		return nil, blogErr(http.StatusUnauthorized, "请先登录")
 	}
-	var body struct {
-		CommentID uint `json:"commentId"`
-	}
-	if err := json.NewDecoder(ctx.Request().Body).Decode(&body); err != nil || body.CommentID == 0 {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "参数错误"})
-		return nil
+	if req.CommentId == 0 {
+		return nil, blogErr(http.StatusBadRequest, "参数错误")
 	}
 	var c model.BlogComment
-	if err := s.db.First(&c, body.CommentID).Error; err != nil {
-		writeJSON(ctx.Response(), 404, map[string]interface{}{"code": 1, "message": "评论不存在"})
-		return nil
+	if err := s.db.First(&c, req.CommentId).Error; err != nil {
+		return nil, blogErr(http.StatusNotFound, "评论不存在")
 	}
 	var a model.BlogArticle
 	if err := s.db.First(&a, c.ArticleID).Error; err != nil {
-		writeJSON(ctx.Response(), 404, map[string]interface{}{"code": 1, "message": "文章不存在"})
-		return nil
+		return nil, blogErr(http.StatusNotFound, "文章不存在")
 	}
 	d := blogaccess.Evaluate(blogaccess.ArticleAccess{
 		Visibility: a.Visibility, OwnerID: a.UserID, HasPassword: a.PasswordHash != "",
 	}, pd.UserID, false)
 	if !d.CanSeeMeta {
-		writeJSON(ctx.Response(), 404, map[string]interface{}{"code": 1, "message": "评论不存在"})
-		return nil
+		return nil, blogErr(http.StatusNotFound, "评论不存在")
 	}
 
 	liked := false
@@ -2131,18 +2051,18 @@ func (s *BlogService) handleCommentLikeToggle(ctx khttp.Context) error {
 	notifyAuthor := false
 	err := s.db.Transaction(func(tx *gorm.DB) error {
 		var existing model.BlogCommentLike
-		qerr := tx.Where("comment_id = ? AND user_id = ?", body.CommentID, pd.UserID).First(&existing).Error
+		qerr := tx.Where("comment_id = ? AND user_id = ?", req.CommentId, pd.UserID).First(&existing).Error
 		if qerr == nil {
 			if err := tx.Delete(&existing).Error; err != nil {
 				return err
 			}
-			if err := tx.Model(&model.BlogComment{}).Where("id = ? AND like_count > 0", body.CommentID).
+			if err := tx.Model(&model.BlogComment{}).Where("id = ? AND like_count > 0", req.CommentId).
 				UpdateColumn("like_count", gorm.Expr("like_count - 1")).Error; err != nil {
 				return err
 			}
 			liked = false
 		} else if qerr == gorm.ErrRecordNotFound {
-			if err := tx.Create(&model.BlogCommentLike{CommentID: body.CommentID, UserID: pd.UserID}).Error; err != nil {
+			if err := tx.Create(&model.BlogCommentLike{CommentID: uint(req.CommentId), UserID: pd.UserID}).Error; err != nil {
 				// 并发唯一冲突：视为已赞
 				if strings.Contains(err.Error(), "duplicate") || strings.Contains(err.Error(), "unique") {
 					liked = true
@@ -2150,7 +2070,7 @@ func (s *BlogService) handleCommentLikeToggle(ctx khttp.Context) error {
 				}
 				return err
 			}
-			if err := tx.Model(&model.BlogComment{}).Where("id = ?", body.CommentID).
+			if err := tx.Model(&model.BlogComment{}).Where("id = ?", req.CommentId).
 				UpdateColumn("like_count", gorm.Expr("like_count + 1")).Error; err != nil {
 				return err
 			}
@@ -2159,11 +2079,10 @@ func (s *BlogService) handleCommentLikeToggle(ctx khttp.Context) error {
 		} else {
 			return qerr
 		}
-		return tx.Model(&model.BlogComment{}).Select("like_count").Where("id = ?", body.CommentID).Scan(&likeCount).Error
+		return tx.Model(&model.BlogComment{}).Select("like_count").Where("id = ?", req.CommentId).Scan(&likeCount).Error
 	})
 	if err != nil {
-		writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "操作失败，请稍后重试"})
-		return nil
+		return nil, blogErr(http.StatusInternalServerError, "操作失败，请稍后重试")
 	}
 	if notifyAuthor {
 		actorName := pd.Name
@@ -2189,62 +2108,55 @@ func (s *BlogService) handleCommentLikeToggle(ctx khttp.Context) error {
 			}),
 		})
 	}
-	writeJSON(ctx.Response(), 200, map[string]interface{}{
-		"code": 0, "message": "success",
-		"data": map[string]interface{}{"liked": liked, "likeCount": likeCount, "commentId": body.CommentID},
-	})
-	return nil
+	return &pb.CommentLikeToggleRes{
+		Code: 0, Message: "success",
+		Data: &pb.CommentLikeData{Liked: liked, LikeCount: int32(likeCount), CommentId: req.CommentId},
+	}, nil
 }
 
-func (s *BlogService) handleLikeToggle(ctx khttp.Context) error {
+// LikeToggle 登录：文章点赞 toggle
+func (s *BlogService) LikeToggle(ctx context.Context, req *pb.LikeToggleReq) (*pb.LikeToggleRes, error) {
 	pd := auth.GetCurrentUser(ctx)
 	if pd == nil || pd.UserID == 0 {
-		writeJSON(ctx.Response(), 401, map[string]interface{}{"code": 1, "message": "请先登录"})
-		return nil
+		return nil, blogErr(http.StatusUnauthorized, "请先登录")
 	}
-	var body struct {
-		ArticleID uint `json:"articleId"`
-	}
-	if err := json.NewDecoder(ctx.Request().Body).Decode(&body); err != nil || body.ArticleID == 0 {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "参数错误"})
-		return nil
+	if req.ArticleId == 0 {
+		return nil, blogErr(http.StatusBadRequest, "参数错误")
 	}
 	var a model.BlogArticle
-	if err := s.db.First(&a, body.ArticleID).Error; err != nil {
-		writeJSON(ctx.Response(), 404, map[string]interface{}{"code": 1, "message": "文章不存在"})
-		return nil
+	if err := s.db.First(&a, req.ArticleId).Error; err != nil {
+		return nil, blogErr(http.StatusNotFound, "文章不存在")
 	}
 	d := blogaccess.Evaluate(blogaccess.ArticleAccess{
 		Visibility: a.Visibility, OwnerID: a.UserID, HasPassword: a.PasswordHash != "",
 	}, pd.UserID, false)
 	if !d.CanSeeMeta {
-		writeJSON(ctx.Response(), 404, map[string]interface{}{"code": 1, "message": "文章不存在"})
-		return nil
+		return nil, blogErr(http.StatusNotFound, "文章不存在")
 	}
 	liked := false
 	var likeCount int
 	notifyAuthor := false
 	err := s.db.Transaction(func(tx *gorm.DB) error {
 		var existing model.BlogLike
-		qerr := tx.Where("article_id = ? AND user_id = ?", body.ArticleID, pd.UserID).First(&existing).Error
+		qerr := tx.Where("article_id = ? AND user_id = ?", req.ArticleId, pd.UserID).First(&existing).Error
 		if qerr == nil {
 			if err := tx.Delete(&existing).Error; err != nil {
 				return err
 			}
-			if err := tx.Model(&model.BlogArticle{}).Where("id = ? AND like_count > 0", body.ArticleID).
+			if err := tx.Model(&model.BlogArticle{}).Where("id = ? AND like_count > 0", req.ArticleId).
 				UpdateColumn("like_count", gorm.Expr("like_count - 1")).Error; err != nil {
 				return err
 			}
 			liked = false
 		} else if qerr == gorm.ErrRecordNotFound {
-			if err := tx.Create(&model.BlogLike{ArticleID: body.ArticleID, UserID: pd.UserID}).Error; err != nil {
+			if err := tx.Create(&model.BlogLike{ArticleID: uint(req.ArticleId), UserID: pd.UserID}).Error; err != nil {
 				if strings.Contains(err.Error(), "duplicate") || strings.Contains(err.Error(), "unique") {
 					liked = true
 					return nil
 				}
 				return err
 			}
-			if err := tx.Model(&model.BlogArticle{}).Where("id = ?", body.ArticleID).
+			if err := tx.Model(&model.BlogArticle{}).Where("id = ?", req.ArticleId).
 				UpdateColumn("like_count", gorm.Expr("like_count + 1")).Error; err != nil {
 				return err
 			}
@@ -2253,11 +2165,10 @@ func (s *BlogService) handleLikeToggle(ctx khttp.Context) error {
 		} else {
 			return qerr
 		}
-		return tx.Model(&model.BlogArticle{}).Select("like_count").Where("id = ?", body.ArticleID).Scan(&likeCount).Error
+		return tx.Model(&model.BlogArticle{}).Select("like_count").Where("id = ?", req.ArticleId).Scan(&likeCount).Error
 	})
 	if err != nil {
-		writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "操作失败，请稍后重试"})
-		return nil
+		return nil, blogErr(http.StatusInternalServerError, "操作失败，请稍后重试")
 	}
 	if notifyAuthor {
 		actorName := pd.Name
@@ -2282,90 +2193,83 @@ func (s *BlogService) handleLikeToggle(ctx khttp.Context) error {
 			}),
 		})
 	}
-	writeJSON(ctx.Response(), 200, map[string]interface{}{
-		"code": 0, "message": "success",
-		"data": map[string]interface{}{"liked": liked, "likeCount": likeCount},
-	})
-	return nil
+	return &pb.LikeToggleRes{
+		Code: 0, Message: "success",
+		Data: &pb.LikeData{Liked: liked, LikeCount: int32(likeCount)},
+	}, nil
 }
 
 // ---------- report ----------
 
-func (s *BlogService) handleReport(ctx khttp.Context) error {
+// Report 登录：举报博客文章
+func (s *BlogService) Report(ctx context.Context, req *pb.ReportReq) (*pb.ReportRes, error) {
 	pd := auth.GetCurrentUser(ctx)
 	if pd == nil || pd.UserID == 0 {
-		writeJSON(ctx.Response(), 401, map[string]interface{}{"code": 1, "message": "请先登录"})
-		return nil
+		return nil, blogErr(http.StatusUnauthorized, "请先登录")
 	}
-	var body struct {
-		ArticleID uint   `json:"articleId"`
-		Reason    string `json:"reason"`
+	if req.ArticleId == 0 {
+		return nil, blogErr(http.StatusBadRequest, "参数错误")
 	}
-	if err := json.NewDecoder(ctx.Request().Body).Decode(&body); err != nil || body.ArticleID == 0 {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "参数错误"})
-		return nil
-	}
-	reason := strings.TrimSpace(strings.ReplaceAll(body.Reason, "\r\n", "\n"))
+	reason := strings.TrimSpace(strings.ReplaceAll(req.Reason, "\r\n", "\n"))
 	if reason == "" {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "请填写举报原因"})
-		return nil
+		return nil, blogErr(http.StatusBadRequest, "请填写举报原因")
 	}
 	if utf8.RuneCountInString(reason) > 500 {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "举报原因过长"})
-		return nil
+		return nil, blogErr(http.StatusBadRequest, "举报原因过长")
 	}
 	var a model.BlogArticle
-	if err := s.db.First(&a, body.ArticleID).Error; err != nil {
-		writeJSON(ctx.Response(), 404, map[string]interface{}{"code": 1, "message": "文章不存在"})
-		return nil
+	if err := s.db.First(&a, req.ArticleId).Error; err != nil {
+		return nil, blogErr(http.StatusNotFound, "文章不存在")
 	}
 	if a.UserID == pd.UserID {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "不能举报自己的文章"})
-		return nil
+		return nil, blogErr(http.StatusBadRequest, "不能举报自己的文章")
 	}
 	var existing model.BlogReport
-	if s.db.Where("user_id = ? AND article_id = ?", pd.UserID, body.ArticleID).First(&existing).Error == nil {
-		writeJSON(ctx.Response(), 200, map[string]interface{}{
-			"code": 0, "message": "你已举报过该文章，我们会尽快处理",
-			"data": map[string]interface{}{"id": existing.ID, "alreadyReported": true},
-		})
-		return nil
+	if s.db.Where("user_id = ? AND article_id = ?", pd.UserID, req.ArticleId).First(&existing).Error == nil {
+		return &pb.ReportRes{
+			Code: 0, Message: "你已举报过该文章，我们会尽快处理",
+			Data: &pb.ReportData{Id: int64(existing.ID), AlreadyReported: true},
+		}, nil
 	}
 	row := model.BlogReport{
 		UserID:    pd.UserID,
-		ArticleID: body.ArticleID,
+		ArticleID: uint(req.ArticleId),
 		Reason:    reason,
 		Status:    "pending",
 	}
 	if err := s.db.Create(&row).Error; err != nil {
-		writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "提交失败，请稍后重试"})
-		return nil
+		return nil, blogErr(http.StatusInternalServerError, "提交失败，请稍后重试")
 	}
 	s.notifyAdminsBlogReport(pd, &a, reason, row.ID)
-	writeJSON(ctx.Response(), 200, map[string]interface{}{
-		"code": 0, "message": "已收到举报，我们会尽快处理",
-		"data": map[string]interface{}{"id": row.ID, "alreadyReported": false},
-	})
-	return nil
+	return &pb.ReportRes{
+		Code: 0, Message: "已收到举报，我们会尽快处理",
+		Data: &pb.ReportData{Id: int64(row.ID), AlreadyReported: false},
+	}, nil
 }
 
 // handleReportList 举报处理台：博客文章举报列表（需 content.report.handle）。
 // query: status=pending|resolved|dismissed|all（默认 pending）、page/pageSize
-func (s *BlogService) handleReportList(ctx khttp.Context) error {
+// ReportList 举报处理台：博客文章举报列表（需 content.report.handle）
+// query: status=pending|resolved|dismissed|all（默认 pending）、page/pageSize
+func (s *BlogService) ReportList(ctx context.Context, req *pb.ReportListReq) (*pb.ReportListRes, error) {
 	pd := auth.GetCurrentUser(ctx)
 	if !auth.PayloadHasPerm(pd, rbac.PermContentReportHandle) {
-		writeJSON(ctx.Response(), 403, map[string]interface{}{"code": 1, "message": "需要举报处理权限"})
-		return nil
+		return nil, blogErr(http.StatusForbidden, "需要举报处理权限")
 	}
-	status := strings.TrimSpace(ctx.Request().URL.Query().Get("status"))
+	status := strings.TrimSpace(req.Status)
 	if status == "" {
 		status = "pending"
 	}
 	if status != "all" && status != "pending" && status != "resolved" && status != "dismissed" {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "不支持的状态筛选"})
-		return nil
+		return nil, blogErr(http.StatusBadRequest, "不支持的状态筛选")
 	}
-	page, pageSize := parsePage(ctx.Request())
+	page, pageSize := int(req.Page), int(req.PageSize)
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 || pageSize > 50 {
+		pageSize = 20
+	}
 	q := s.db.Model(&model.BlogReport{})
 	if status != "all" {
 		q = q.Where("status = ?", status)
@@ -2413,80 +2317,67 @@ func (s *BlogService) handleReportList(ctx khttp.Context) error {
 		}
 	}
 
-	out := make([]map[string]interface{}, 0, len(rows))
+	out := make([]*pb.ReportItem, 0, len(rows))
 	for _, r := range rows {
-		item := map[string]interface{}{
-			"id":        r.ID,
-			"createdAt": r.CreatedAt.Unix(),
-			"status":    r.Status,
-			"reason":    r.Reason,
-			"articleId": r.ArticleID,
-			"reporter": map[string]interface{}{
-				"userId":   r.UserID,
-				"username": users[r.UserID].Username,
+		item := &pb.ReportItem{
+			Id:        int64(r.ID),
+			CreatedAt: r.CreatedAt.Unix(),
+			Status:    r.Status,
+			Reason:    r.Reason,
+			ArticleId: int64(r.ArticleID),
+			Reporter: &pb.ReportReporterInfo{
+				UserId:   int64(r.UserID),
+				Username: users[r.UserID].Username,
 			},
+			Target: &pb.ReportTargetInfo{Exists: false},
 		}
-		target := map[string]interface{}{"exists": false}
 		if a, ok := arts[r.ArticleID]; ok {
-			target = map[string]interface{}{
-				"exists":         true,
-				"slug":           a.Slug,
-				"title":          a.Title,
-				"authorUserId":   a.UserID,
-				"authorUsername": users[a.UserID].Username,
+			item.Target = &pb.ReportTargetInfo{
+				Exists:         true,
+				Slug:           a.Slug,
+				Title:          a.Title,
+				AuthorUserId:   int64(a.UserID),
+				AuthorUsername: users[a.UserID].Username,
 			}
 		}
-		item["target"] = target
 		out = append(out, item)
 	}
-	writeJSON(ctx.Response(), 200, map[string]interface{}{
-		"code": 0, "message": "success",
-		"data": map[string]interface{}{
-			"list": out, "total": total, "page": page, "pageSize": pageSize,
-		},
-	})
-	return nil
+	return &pb.ReportListRes{
+		Code: 0, Message: "success",
+		Data: &pb.ReportListData{List: out, Total: total, Page: int64(page), PageSize: int64(pageSize)},
+	}, nil
 }
 
 // handleReportHandle 处理博客举报：resolve=已处理 / dismiss=驳回（需 content.report.handle）
-func (s *BlogService) handleReportHandle(ctx khttp.Context) error {
+// ReportHandle 处理博客举报：resolve=已处理 / dismiss=驳回（需 content.report.handle）
+func (s *BlogService) ReportHandle(ctx context.Context, req *pb.ReportHandleReq) (*pb.ReportHandleRes, error) {
 	pd := auth.GetCurrentUser(ctx)
 	if !auth.PayloadHasPerm(pd, rbac.PermContentReportHandle) {
-		writeJSON(ctx.Response(), 403, map[string]interface{}{"code": 1, "message": "需要举报处理权限"})
-		return nil
+		return nil, blogErr(http.StatusForbidden, "需要举报处理权限")
 	}
-	var body struct {
-		ID     uint   `json:"id"`
-		Action string `json:"action"` // resolve|dismiss
-	}
-	if err := json.NewDecoder(ctx.Request().Body).Decode(&body); err != nil || body.ID == 0 {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "参数错误"})
-		return nil
+	if req.Id == 0 {
+		return nil, blogErr(http.StatusBadRequest, "参数错误")
 	}
 	var next string
-	switch body.Action {
+	switch req.Action {
 	case "resolve":
 		next = "resolved"
 	case "dismiss":
 		next = "dismissed"
 	default:
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "不支持的操作"})
-		return nil
+		return nil, blogErr(http.StatusBadRequest, "不支持的操作")
 	}
 	var row model.BlogReport
-	if s.db.First(&row, body.ID).Error != nil {
-		writeJSON(ctx.Response(), 404, map[string]interface{}{"code": 1, "message": "举报不存在"})
-		return nil
+	if s.db.First(&row, req.Id).Error != nil {
+		return nil, blogErr(http.StatusNotFound, "举报不存在")
 	}
 	if err := s.db.Model(&row).Update("status", next).Error; err != nil {
-		writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "操作失败，请稍后重试"})
-		return nil
+		return nil, blogErr(http.StatusInternalServerError, "操作失败，请稍后重试")
 	}
-	writeJSON(ctx.Response(), 200, map[string]interface{}{
-		"code": 0, "message": "success",
-		"data": map[string]interface{}{"id": row.ID, "status": next},
-	})
-	return nil
+	return &pb.ReportHandleRes{
+		Code: 0, Message: "success",
+		Data: &pb.ReportHandleData{Id: int64(row.ID), Status: next},
+	}, nil
 }
 
 // notifyAdminsBlogReport 站内通知全部站管 + 可配置收件人邮件
@@ -2777,33 +2668,30 @@ func (s *BlogService) listBlogTagCounts(authorID, viewerID uint, keyword string,
 	return rows, err
 }
 
-func (s *BlogService) handleListTagsPublic(ctx khttp.Context) error {
-	username := strings.TrimSpace(ctx.Request().URL.Query().Get("username"))
+// ListTagsPublic 公开：作者公开文标签聚合
+func (s *BlogService) ListTagsPublic(ctx context.Context, req *pb.ListTagsPublicReq) (*pb.ListTagsPublicRes, error) {
+	username := strings.TrimSpace(req.Username)
 	if username == "" {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "缺少用户名"})
-		return nil
+		return nil, blogErr(http.StatusBadRequest, "缺少用户名")
 	}
 	u, err := s.findUserByUsername(username)
 	if err != nil {
-		writeJSON(ctx.Response(), 404, map[string]interface{}{"code": 1, "message": "用户不存在"})
-		return nil
+		return nil, blogErr(http.StatusNotFound, "用户不存在")
 	}
-	limit, _ := strconv.Atoi(ctx.Request().URL.Query().Get("limit"))
 	rows, err := s.listBlogTagCounts(
 		u.ID,
 		blogViewerID(ctx),
-		ctx.Request().URL.Query().Get("keyword"),
-		limit,
+		req.Keyword,
+		int(req.Limit),
 	)
 	if err != nil {
-		writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "加载失败"})
-		return nil
+		return nil, blogErr(http.StatusInternalServerError, "加载失败")
 	}
-	writeJSON(ctx.Response(), 200, map[string]interface{}{
-		"code": 0, "message": "success",
-		"data": rows,
-	})
-	return nil
+	out := make([]*pb.TagCount, 0, len(rows))
+	for _, t := range rows {
+		out = append(out, &pb.TagCount{Name: t.Name, Count: t.Count})
+	}
+	return &pb.ListTagsPublicRes{Code: 0, Message: "success", Data: out}, nil
 }
 
 func (s *BlogService) themeEnabledFor(userID uint) bool {
@@ -2820,14 +2708,14 @@ func (s *BlogService) themeEnabledFor(userID uint) bool {
 	return blogaccess.ThemeEnabled(globalAll, nil)
 }
 
-func (s *BlogService) handleThemeStatus(ctx khttp.Context) error {
-	username := strings.TrimSpace(ctx.Request().URL.Query().Get("username"))
+// ThemeStatus 公开：博客主题状态
+func (s *BlogService) ThemeStatus(ctx context.Context, req *pb.ThemeStatusReq) (*pb.ThemeStatusRes, error) {
+	username := strings.TrimSpace(req.Username)
 	var userID uint
 	if username != "" {
 		u, err := s.findUserByUsername(username)
 		if err != nil {
-			writeJSON(ctx.Response(), 404, map[string]interface{}{"code": 1, "message": "用户不存在"})
-			return nil
+			return nil, blogErr(http.StatusNotFound, "用户不存在")
 		}
 		userID = u.ID
 	} else {
@@ -2838,59 +2726,50 @@ func (s *BlogService) handleThemeStatus(ctx khttp.Context) error {
 		enabled = s.themeEnabledFor(userID)
 	}
 	siteCfg := s.loadSiteConfig(userID)
-	writeJSON(ctx.Response(), 200, map[string]interface{}{
-		"code": 0, "message": "success",
-		"data": map[string]interface{}{
-			"enabled":     enabled,
-			"themeId":     siteCfg.ThemeID,
-			"colorScheme": siteCfg.ColorScheme,
-			"subtitle":    siteCfg.Subtitle,
-			"socialLinks": siteCfg.SocialLinks,
-			"aboutMd":     siteCfg.AboutMD,
-			"homeIntroMd": siteCfg.HomeIntroMD,
-			"friendsMd":   siteCfg.FriendsMD,
-			"customTheme": nil, // reserved extension point
+	return &pb.ThemeStatusRes{
+		Code: 0, Message: "success",
+		Data: &pb.ThemeStatusData{
+			Enabled:     enabled,
+			ThemeId:     siteCfg.ThemeID,
+			ColorScheme: siteCfg.ColorScheme,
+			Subtitle:    siteCfg.Subtitle,
+			SocialLinks: socialLinksToProto(siteCfg.SocialLinks),
+			AboutMd:     siteCfg.AboutMD,
+			HomeIntroMd: siteCfg.HomeIntroMD,
+			FriendsMd:   siteCfg.FriendsMD,
 		},
-	})
-	return nil
+	}, nil
 }
 
 // handleThemeConfigSave owner saves theme + slots + social links.
-func (s *BlogService) handleThemeConfigSave(ctx khttp.Context) error {
+// ThemeConfigSave 登录：保存主题配置（themeId + social links + MD 槽位）
+func (s *BlogService) ThemeConfigSave(ctx context.Context, req *pb.ThemeConfigSaveReq) (*pb.ThemeConfigSaveRes, error) {
 	pd := auth.GetCurrentUser(ctx)
 	if pd == nil || pd.UserID == 0 {
-		writeJSON(ctx.Response(), 401, map[string]interface{}{"code": 1, "message": "请先登录"})
-		return nil
+		return nil, blogErr(http.StatusUnauthorized, "请先登录")
 	}
-	if !s.requireActivated(ctx, pd.UserID) {
-		return nil
+	if err := s.requireActivated(ctx, pd.UserID); err != nil {
+		return nil, err
 	}
-	var body struct {
-		ThemeID     string           `json:"themeId"`
-		ColorScheme string           `json:"colorScheme"`
-		Subtitle    string           `json:"subtitle"`
-		SocialLinks []blogSocialLink `json:"socialLinks"`
-		AboutMD     *string          `json:"aboutMd"`
-		HomeIntroMD *string          `json:"homeIntroMd"`
-		FriendsMD   *string          `json:"friendsMd"`
-	}
-	if err := json.NewDecoder(ctx.Request().Body).Decode(&body); err != nil {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "参数错误"})
-		return nil
-	}
-	themeID := normalizeThemeID(body.ThemeID)
-	colorScheme := normalizeColorScheme(body.ColorScheme)
-	subtitle := strings.TrimSpace(body.Subtitle)
+	themeID := normalizeThemeID(req.ThemeId)
+	colorScheme := normalizeColorScheme(req.ColorScheme)
+	subtitle := strings.TrimSpace(req.Subtitle)
 	if utf8.RuneCountInString(subtitle) > maxSubtitle {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "副标题过长"})
-		return nil
+		return nil, blogErr(http.StatusBadRequest, "副标题过长")
 	}
 	// re-validate social links via JSON round-trip
-	rawLinks, _ := json.Marshal(body.SocialLinks)
-	links := parseSocialLinksJSON(string(rawLinks))
+	links := make([]blogSocialLink, 0, len(req.SocialLinks))
+	for _, l := range req.SocialLinks {
+		if l == nil {
+			continue
+		}
+		links = append(links, blogSocialLink{Type: l.Type, URL: l.Url, Label: l.Label})
+	}
+	rawLinks, _ := json.Marshal(links)
+	parsed := parseSocialLinksJSON(string(rawLinks))
 	// only allow http(s) / mailto for urls
-	clean := make([]blogSocialLink, 0, len(links))
-	for _, l := range links {
+	clean := make([]blogSocialLink, 0, len(parsed))
+	for _, l := range parsed {
 		u := l.URL
 		lu := strings.ToLower(u)
 		if strings.HasPrefix(lu, "javascript:") || strings.HasPrefix(lu, "data:") {
@@ -2912,31 +2791,28 @@ func (s *BlogService) handleThemeConfigSave(ctx khttp.Context) error {
 
 	var aboutMD, homeIntroMD, friendsMD string
 	var haveAbout, haveHome, haveFriends bool
-	if body.AboutMD != nil {
+	if req.AboutMd != nil {
 		haveAbout = true
 		var msg string
-		aboutMD, msg = normalizeSlotMD(*body.AboutMD)
+		aboutMD, msg = normalizeSlotMD(req.AboutMd.Value)
 		if msg != "" {
-			writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": msg})
-			return nil
+			return nil, blogErr(http.StatusBadRequest, msg)
 		}
 	}
-	if body.HomeIntroMD != nil {
+	if req.HomeIntroMd != nil {
 		haveHome = true
 		var msg string
-		homeIntroMD, msg = normalizeSlotMD(*body.HomeIntroMD)
+		homeIntroMD, msg = normalizeSlotMD(req.HomeIntroMd.Value)
 		if msg != "" {
-			writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": msg})
-			return nil
+			return nil, blogErr(http.StatusBadRequest, msg)
 		}
 	}
-	if body.FriendsMD != nil {
+	if req.FriendsMd != nil {
 		haveFriends = true
 		var msg string
-		friendsMD, msg = normalizeSlotMD(*body.FriendsMD)
+		friendsMD, msg = normalizeSlotMD(req.FriendsMd.Value)
 		if msg != "" {
-			writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": msg})
-			return nil
+			return nil, blogErr(http.StatusBadRequest, msg)
 		}
 	}
 
@@ -2960,8 +2836,7 @@ func (s *BlogService) handleThemeConfigSave(ctx khttp.Context) error {
 			cfg.FriendsMD = friendsMD
 		}
 		if err := s.db.Create(&cfg).Error; err != nil {
-			writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "保存失败"})
-			return nil
+			return nil, blogErr(http.StatusInternalServerError, "保存失败")
 		}
 	} else {
 		cfg.ThemeID = themeID
@@ -2978,73 +2853,57 @@ func (s *BlogService) handleThemeConfigSave(ctx khttp.Context) error {
 			cfg.FriendsMD = friendsMD
 		}
 		if err := s.db.Save(&cfg).Error; err != nil {
-			writeJSON(ctx.Response(), 500, map[string]interface{}{"code": 1, "message": "保存失败"})
-			return nil
+			return nil, blogErr(http.StatusInternalServerError, "保存失败")
 		}
 	}
 	view := s.loadSiteConfig(pd.UserID)
-	writeJSON(ctx.Response(), 200, map[string]interface{}{
-		"code": 0, "message": "success",
-		"data": map[string]interface{}{
-			"themeId":     view.ThemeID,
-			"colorScheme": view.ColorScheme,
-			"subtitle":    view.Subtitle,
-			"socialLinks": view.SocialLinks,
-			"aboutMd":     view.AboutMD,
-			"homeIntroMd": view.HomeIntroMD,
-			"friendsMd":   view.FriendsMD,
+	return &pb.ThemeConfigSaveRes{
+		Code: 0, Message: "success",
+		Data: &pb.ThemeConfigData{
+			ThemeId:     view.ThemeID,
+			ColorScheme: view.ColorScheme,
+			Subtitle:    view.Subtitle,
+			SocialLinks: socialLinksToProto(view.SocialLinks),
+			AboutMd:     view.AboutMD,
+			HomeIntroMd: view.HomeIntroMD,
+			FriendsMd:   view.FriendsMD,
 		},
-	})
-	return nil
+	}, nil
 }
 
-func (s *BlogService) handleThemeEnable(ctx khttp.Context) error {
+// ThemeEnable 站管：主题开关（user|batch|all，遗留能力）
+func (s *BlogService) ThemeEnable(ctx context.Context, req *pb.ThemeEnableReq) (*pb.ThemeEnableRes, error) {
 	pd := auth.GetCurrentUser(ctx)
 	if pd == nil || !pd.IsSiteAdmin {
-		writeJSON(ctx.Response(), 403, map[string]interface{}{"code": 1, "message": "仅站点管理员可操作"})
-		return nil
+		return nil, blogErr(http.StatusForbidden, "仅站点管理员可操作")
 	}
-	var body struct {
-		// Mode: user | batch | all
-		Mode    string `json:"mode"`
-		UserID  uint   `json:"userId"`
-		UserIDs []uint `json:"userIds"`
-		Enabled bool   `json:"enabled"`
-	}
-	if err := json.NewDecoder(ctx.Request().Body).Decode(&body); err != nil {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "参数错误"})
-		return nil
-	}
-	mode := strings.ToLower(strings.TrimSpace(body.Mode))
+	mode := strings.ToLower(strings.TrimSpace(req.Mode))
 	switch mode {
 	case "all":
 		var g model.BlogThemeFlag
 		err := s.db.Where("user_id = 0").First(&g).Error
 		if err != nil {
-			g = model.BlogThemeFlag{UserID: 0, Enabled: body.Enabled}
+			g = model.BlogThemeFlag{UserID: 0, Enabled: req.Enabled}
 			_ = s.db.Create(&g).Error
 		} else {
-			g.Enabled = body.Enabled
+			g.Enabled = req.Enabled
 			_ = s.db.Save(&g).Error
 		}
 	case "user":
-		if body.UserID == 0 {
-			writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "缺少 userId"})
-			return nil
+		if req.UserId == 0 {
+			return nil, blogErr(http.StatusBadRequest, "缺少 userId")
 		}
-		s.upsertThemeFlag(body.UserID, body.Enabled)
+		s.upsertThemeFlag(uint(req.UserId), req.Enabled)
 	case "batch":
-		for _, id := range body.UserIDs {
+		for _, id := range req.UserIds {
 			if id > 0 {
-				s.upsertThemeFlag(id, body.Enabled)
+				s.upsertThemeFlag(uint(id), req.Enabled)
 			}
 		}
 	default:
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"code": 1, "message": "mode 须为 user|batch|all"})
-		return nil
+		return nil, blogErr(http.StatusBadRequest, "mode 须为 user|batch|all")
 	}
-	writeJSON(ctx.Response(), 200, map[string]interface{}{"code": 0, "message": "success"})
-	return nil
+	return &pb.ThemeEnableRes{Code: 0, Message: "success"}, nil
 }
 
 func (s *BlogService) upsertThemeFlag(userID uint, enabled bool) {

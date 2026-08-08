@@ -4394,6 +4394,112 @@ func (x *MyPendingEditRes) GetData() *ProblemEditInfo {
 	return nil
 }
 
+type RepairQOJTitlesReq struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// 最大处理条数，0 表示全量
+	Limit int64 `protobuf:"varint,1,opt,name=limit,proto3" json:"limit,omitempty"`
+	// true：对仍无好标题的题访问 qoj.ac 拉官方题头（较慢）
+	Refetch       bool `protobuf:"varint,2,opt,name=refetch,proto3" json:"refetch,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RepairQOJTitlesReq) Reset() {
+	*x = RepairQOJTitlesReq{}
+	mi := &file_core_v1_problem_problem_proto_msgTypes[61]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RepairQOJTitlesReq) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RepairQOJTitlesReq) ProtoMessage() {}
+
+func (x *RepairQOJTitlesReq) ProtoReflect() protoreflect.Message {
+	mi := &file_core_v1_problem_problem_proto_msgTypes[61]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RepairQOJTitlesReq.ProtoReflect.Descriptor instead.
+func (*RepairQOJTitlesReq) Descriptor() ([]byte, []int) {
+	return file_core_v1_problem_problem_proto_rawDescGZIP(), []int{61}
+}
+
+func (x *RepairQOJTitlesReq) GetLimit() int64 {
+	if x != nil {
+		return x.Limit
+	}
+	return 0
+}
+
+func (x *RepairQOJTitlesReq) GetRefetch() bool {
+	if x != nil {
+		return x.Refetch
+	}
+	return false
+}
+
+type RepairQOJTitlesRes struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Code          int64                  `protobuf:"varint,1,opt,name=code,proto3" json:"code,omitempty"`
+	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RepairQOJTitlesRes) Reset() {
+	*x = RepairQOJTitlesRes{}
+	mi := &file_core_v1_problem_problem_proto_msgTypes[62]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RepairQOJTitlesRes) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RepairQOJTitlesRes) ProtoMessage() {}
+
+func (x *RepairQOJTitlesRes) ProtoReflect() protoreflect.Message {
+	mi := &file_core_v1_problem_problem_proto_msgTypes[62]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RepairQOJTitlesRes.ProtoReflect.Descriptor instead.
+func (*RepairQOJTitlesRes) Descriptor() ([]byte, []int) {
+	return file_core_v1_problem_problem_proto_rawDescGZIP(), []int{62}
+}
+
+func (x *RepairQOJTitlesRes) GetCode() int64 {
+	if x != nil {
+		return x.Code
+	}
+	return 0
+}
+
+func (x *RepairQOJTitlesRes) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
 var File_core_v1_problem_problem_proto protoreflect.FileDescriptor
 
 const file_core_v1_problem_problem_proto_rawDesc = "" +
@@ -4772,7 +4878,13 @@ const file_core_v1_problem_problem_proto_rawDesc = "" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12\x1f\n" +
 	"\vhas_pending\x18\x03 \x01(\bR\n" +
 	"hasPending\x128\n" +
-	"\x04data\x18\x04 \x01(\v2$.api.core.v1.problem.ProblemEditInfoR\x04data2\xfc\x18\n" +
+	"\x04data\x18\x04 \x01(\v2$.api.core.v1.problem.ProblemEditInfoR\x04data\"D\n" +
+	"\x12RepairQOJTitlesReq\x12\x14\n" +
+	"\x05limit\x18\x01 \x01(\x03R\x05limit\x12\x18\n" +
+	"\arefetch\x18\x02 \x01(\bR\arefetch\"B\n" +
+	"\x12RepairQOJTitlesRes\x12\x12\n" +
+	"\x04code\x18\x01 \x01(\x03R\x04code\x12\x18\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage2\x91\x1a\n" +
 	"\aProblem\x12o\n" +
 	"\x04List\x12#.api.core.v1.problem.ListProblemReq\x1a#.api.core.v1.problem.ListProblemRes\"\x1d\x82\xd3\xe4\x93\x02\x17\x12\x15/v1/core/problem/list\x12m\n" +
 	"\bListTags\x12 .api.core.v1.problem.ListTagsReq\x1a .api.core.v1.problem.ListTagsRes\"\x1d\x82\xd3\xe4\x93\x02\x17\x12\x15/v1/core/problem/tags\x12k\n" +
@@ -4798,7 +4910,8 @@ const file_core_v1_problem_problem_proto_rawDesc = "" +
 	"\x10ListEditRequests\x12'.api.core.v1.problem.ListProblemEditReq\x1a'.api.core.v1.problem.ListProblemEditRes\"&\x82\xd3\xe4\x93\x02 \x12\x1e/v1/core/problem/edit-requests\x12\x8b\x01\n" +
 	"\n" +
 	"ReviewEdit\x12).api.core.v1.problem.ReviewProblemEditReq\x1a).api.core.v1.problem.ReviewProblemEditRes\"'\x82\xd3\xe4\x93\x02!:\x01*\"\x1c/v1/core/problem/review-edit\x12\x87\x01\n" +
-	"\rMyPendingEdit\x12%.api.core.v1.problem.MyPendingEditReq\x1a%.api.core.v1.problem.MyPendingEditRes\"(\x82\xd3\xe4\x93\x02\"\x12 /v1/core/problem/my-pending-editB>\n" +
+	"\rMyPendingEdit\x12%.api.core.v1.problem.MyPendingEditReq\x1a%.api.core.v1.problem.MyPendingEditRes\"(\x82\xd3\xe4\x93\x02\"\x12 /v1/core/problem/my-pending-edit\x12\x92\x01\n" +
+	"\x0fRepairQOJTitles\x12'.api.core.v1.problem.RepairQOJTitlesReq\x1a'.api.core.v1.problem.RepairQOJTitlesRes\"-\x82\xd3\xe4\x93\x02':\x01*\"\"/v1/core/problem/repair-qoj-titlesB>\n" +
 	"\x13api.core.v1.problemP\x01Z%cwxu-algo/api/core/v1/problem;problemb\x06proto3"
 
 var (
@@ -4813,7 +4926,7 @@ func file_core_v1_problem_problem_proto_rawDescGZIP() []byte {
 	return file_core_v1_problem_problem_proto_rawDescData
 }
 
-var file_core_v1_problem_problem_proto_msgTypes = make([]protoimpl.MessageInfo, 61)
+var file_core_v1_problem_problem_proto_msgTypes = make([]protoimpl.MessageInfo, 63)
 var file_core_v1_problem_problem_proto_goTypes = []any{
 	(*SolutionMeta)(nil),            // 0: api.core.v1.problem.SolutionMeta
 	(*ProblemContributor)(nil),      // 1: api.core.v1.problem.ProblemContributor
@@ -4876,6 +4989,8 @@ var file_core_v1_problem_problem_proto_goTypes = []any{
 	(*ReviewProblemEditRes)(nil),    // 58: api.core.v1.problem.ReviewProblemEditRes
 	(*MyPendingEditReq)(nil),        // 59: api.core.v1.problem.MyPendingEditReq
 	(*MyPendingEditRes)(nil),        // 60: api.core.v1.problem.MyPendingEditRes
+	(*RepairQOJTitlesReq)(nil),      // 61: api.core.v1.problem.RepairQOJTitlesReq
+	(*RepairQOJTitlesRes)(nil),      // 62: api.core.v1.problem.RepairQOJTitlesRes
 }
 var file_core_v1_problem_problem_proto_depIdxs = []int32{
 	0,  // 0: api.core.v1.problem.ProblemInfo.solutions:type_name -> api.core.v1.problem.SolutionMeta
@@ -4924,32 +5039,34 @@ var file_core_v1_problem_problem_proto_depIdxs = []int32{
 	54, // 43: api.core.v1.problem.Problem.ListEditRequests:input_type -> api.core.v1.problem.ListProblemEditReq
 	57, // 44: api.core.v1.problem.Problem.ReviewEdit:input_type -> api.core.v1.problem.ReviewProblemEditReq
 	59, // 45: api.core.v1.problem.Problem.MyPendingEdit:input_type -> api.core.v1.problem.MyPendingEditReq
-	4,  // 46: api.core.v1.problem.Problem.List:output_type -> api.core.v1.problem.ListProblemRes
-	10, // 47: api.core.v1.problem.Problem.ListTags:output_type -> api.core.v1.problem.ListTagsRes
-	9,  // 48: api.core.v1.problem.Problem.Hot:output_type -> api.core.v1.problem.HotProblemRes
-	12, // 49: api.core.v1.problem.Problem.Get:output_type -> api.core.v1.problem.GetProblemRes
-	15, // 50: api.core.v1.problem.Problem.RelatedContests:output_type -> api.core.v1.problem.RelatedContestsRes
-	18, // 51: api.core.v1.problem.Problem.ListSubmissions:output_type -> api.core.v1.problem.ListSubmissionsRes
-	21, // 52: api.core.v1.problem.Problem.FollowingStatus:output_type -> api.core.v1.problem.FollowingStatusRes
-	25, // 53: api.core.v1.problem.Problem.UserProfile:output_type -> api.core.v1.problem.UserProfileRes
-	31, // 54: api.core.v1.problem.Problem.Progress:output_type -> api.core.v1.problem.ProgressRes
-	33, // 55: api.core.v1.problem.Problem.Backfill:output_type -> api.core.v1.problem.BackfillRes
-	37, // 56: api.core.v1.problem.Problem.EmergencyStop:output_type -> api.core.v1.problem.EmergencyStopRes
-	39, // 57: api.core.v1.problem.Problem.ResetAll:output_type -> api.core.v1.problem.ResetAllRes
-	41, // 58: api.core.v1.problem.Problem.Resume:output_type -> api.core.v1.problem.ResumeRes
-	43, // 59: api.core.v1.problem.Problem.RetryFailed:output_type -> api.core.v1.problem.RetryFailedRes
-	45, // 60: api.core.v1.problem.Problem.ClearRecentFailed:output_type -> api.core.v1.problem.ClearRecentFailedRes
-	47, // 61: api.core.v1.problem.Problem.ClearNowCoderContent:output_type -> api.core.v1.problem.ClearNowCoderContentRes
-	49, // 62: api.core.v1.problem.Problem.ToggleAnalyze:output_type -> api.core.v1.problem.TogglePipelineRes
-	49, // 63: api.core.v1.problem.Problem.ToggleFetch:output_type -> api.core.v1.problem.TogglePipelineRes
-	35, // 64: api.core.v1.problem.Problem.ResetQueues:output_type -> api.core.v1.problem.ResetQueuesRes
-	51, // 65: api.core.v1.problem.Problem.AdminUpdate:output_type -> api.core.v1.problem.AdminUpdateProblemRes
-	53, // 66: api.core.v1.problem.Problem.ProposeEdit:output_type -> api.core.v1.problem.ProposeProblemEditRes
-	56, // 67: api.core.v1.problem.Problem.ListEditRequests:output_type -> api.core.v1.problem.ListProblemEditRes
-	58, // 68: api.core.v1.problem.Problem.ReviewEdit:output_type -> api.core.v1.problem.ReviewProblemEditRes
-	60, // 69: api.core.v1.problem.Problem.MyPendingEdit:output_type -> api.core.v1.problem.MyPendingEditRes
-	46, // [46:70] is the sub-list for method output_type
-	22, // [22:46] is the sub-list for method input_type
+	61, // 46: api.core.v1.problem.Problem.RepairQOJTitles:input_type -> api.core.v1.problem.RepairQOJTitlesReq
+	4,  // 47: api.core.v1.problem.Problem.List:output_type -> api.core.v1.problem.ListProblemRes
+	10, // 48: api.core.v1.problem.Problem.ListTags:output_type -> api.core.v1.problem.ListTagsRes
+	9,  // 49: api.core.v1.problem.Problem.Hot:output_type -> api.core.v1.problem.HotProblemRes
+	12, // 50: api.core.v1.problem.Problem.Get:output_type -> api.core.v1.problem.GetProblemRes
+	15, // 51: api.core.v1.problem.Problem.RelatedContests:output_type -> api.core.v1.problem.RelatedContestsRes
+	18, // 52: api.core.v1.problem.Problem.ListSubmissions:output_type -> api.core.v1.problem.ListSubmissionsRes
+	21, // 53: api.core.v1.problem.Problem.FollowingStatus:output_type -> api.core.v1.problem.FollowingStatusRes
+	25, // 54: api.core.v1.problem.Problem.UserProfile:output_type -> api.core.v1.problem.UserProfileRes
+	31, // 55: api.core.v1.problem.Problem.Progress:output_type -> api.core.v1.problem.ProgressRes
+	33, // 56: api.core.v1.problem.Problem.Backfill:output_type -> api.core.v1.problem.BackfillRes
+	37, // 57: api.core.v1.problem.Problem.EmergencyStop:output_type -> api.core.v1.problem.EmergencyStopRes
+	39, // 58: api.core.v1.problem.Problem.ResetAll:output_type -> api.core.v1.problem.ResetAllRes
+	41, // 59: api.core.v1.problem.Problem.Resume:output_type -> api.core.v1.problem.ResumeRes
+	43, // 60: api.core.v1.problem.Problem.RetryFailed:output_type -> api.core.v1.problem.RetryFailedRes
+	45, // 61: api.core.v1.problem.Problem.ClearRecentFailed:output_type -> api.core.v1.problem.ClearRecentFailedRes
+	47, // 62: api.core.v1.problem.Problem.ClearNowCoderContent:output_type -> api.core.v1.problem.ClearNowCoderContentRes
+	49, // 63: api.core.v1.problem.Problem.ToggleAnalyze:output_type -> api.core.v1.problem.TogglePipelineRes
+	49, // 64: api.core.v1.problem.Problem.ToggleFetch:output_type -> api.core.v1.problem.TogglePipelineRes
+	35, // 65: api.core.v1.problem.Problem.ResetQueues:output_type -> api.core.v1.problem.ResetQueuesRes
+	51, // 66: api.core.v1.problem.Problem.AdminUpdate:output_type -> api.core.v1.problem.AdminUpdateProblemRes
+	53, // 67: api.core.v1.problem.Problem.ProposeEdit:output_type -> api.core.v1.problem.ProposeProblemEditRes
+	56, // 68: api.core.v1.problem.Problem.ListEditRequests:output_type -> api.core.v1.problem.ListProblemEditRes
+	58, // 69: api.core.v1.problem.Problem.ReviewEdit:output_type -> api.core.v1.problem.ReviewProblemEditRes
+	60, // 70: api.core.v1.problem.Problem.MyPendingEdit:output_type -> api.core.v1.problem.MyPendingEditRes
+	62, // 71: api.core.v1.problem.Problem.RepairQOJTitles:output_type -> api.core.v1.problem.RepairQOJTitlesRes
+	47, // [47:72] is the sub-list for method output_type
+	22, // [22:47] is the sub-list for method input_type
 	22, // [22:22] is the sub-list for extension type_name
 	22, // [22:22] is the sub-list for extension extendee
 	0,  // [0:22] is the sub-list for field type_name
@@ -4966,7 +5083,7 @@ func file_core_v1_problem_problem_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_core_v1_problem_problem_proto_rawDesc), len(file_core_v1_problem_problem_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   61,
+			NumMessages:   63,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

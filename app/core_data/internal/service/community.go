@@ -6,13 +6,11 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
-	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
 
+	pb "cwxu-algo/api/core/v1/community"
 	"cwxu-algo/api/user/v1/profile"
 	"cwxu-algo/app/common/blogimg"
 	"cwxu-algo/app/common/blogsync"
@@ -30,6 +28,7 @@ import (
 	"github.com/go-kratos/kratos/v2/registry"
 	khttp "github.com/go-kratos/kratos/v2/transport/http"
 	"github.com/redis/go-redis/v9"
+	"google.golang.org/protobuf/encoding/protojson"
 	"gorm.io/gorm"
 )
 
@@ -74,58 +73,41 @@ func (s *CommunityService) expandSolutionMD(md string) string {
 	return blogimg.ExpandStoredImageRefs(md, s.publicImageBase())
 }
 
-// RegisterCommunityRoutes 注册社区相关路由
-func RegisterCommunityRoutes(srv *khttp.Server, s *CommunityService) {
-	r := srv.Route("/")
-	// 评论（全站，支持层级）
-	r.GET("/v1/core/problem/comment/list", s.handleCommentList)
-	r.POST("/v1/core/problem/comment/create", s.handleCommentCreate)
-	r.POST("/v1/core/problem/comment/delete", s.handleCommentDelete)
-	// 用户题解（全站）
-	r.GET("/v1/core/problem/solution/list", s.handleSolutionList)
-	r.GET("/v1/core/problem/solution/get", s.handleSolutionGet)
-	r.POST("/v1/core/problem/solution/create", s.handleSolutionCreate)
-	r.POST("/v1/core/problem/solution/update", s.handleSolutionUpdate)
-	r.POST("/v1/core/problem/solution/delete", s.handleSolutionDelete)
-	// 点赞 / 举报（评论 + 题解）
-	r.POST("/v1/core/problem/like", s.handleLikeToggle)
-	r.POST("/v1/core/problem/report", s.handleReport)
-	// 举报处理台（content.report.handle）
-	r.GET("/v1/core/problem/report/list", s.handleReportList)
-	r.POST("/v1/core/problem/report/handle", s.handleReportHandle)
-	// 发现流：公共域全站聚合；私有域按组织隔离
-	r.GET("/v1/core/activity/feed", s.handleActivityFeed)
-	// 资料页近期
-	r.GET("/v1/core/user/recent-comments", s.handleUserRecentComments)
-	r.GET("/v1/core/user/recent-solutions", s.handleUserRecentSolutions)
-}
+// 实现 proto：api/core/v1/community/community.proto（CommunityHTTPServer）。
+// 原手写 RegisterCommunityRoutes 已迁移为 proto 路由（server/http.go 接线）。
 
 // ---------- comments ----------
 
-func (s *CommunityService) handleCommentList(ctx khttp.Context) error {
-	pid := queryUint(ctx, "problemId")
-	sid := queryUint(ctx, "solutionId")
+func (s *CommunityService) CommentList(ctx context.Context, req *pb.CommentListReq) (*pb.CommentListRes, error) {
+	pid := uint(req.ProblemId)
+	sid := uint(req.SolutionId)
 	// 题解评论：可只传 solutionId；题目讨论：传 problemId（且 solution_id=0）
 	if sid == 0 && pid == 0 {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"success": false, "message": "缺少题目或题解"})
-		return nil
+		return &pb.CommentListRes{Success: false, Message: "缺少题目或题解"}, nil
 	}
 	if sid > 0 {
 		var sol model.ProblemUserSolution
-		if s.db.Select("id, problem_id").First(&sol, sid).Error != nil {
-			writeJSON(ctx.Response(), 404, map[string]interface{}{"success": false, "message": "题解不存在"})
-			return nil
+		if s.db.WithContext(ctx).Select("id, problem_id").First(&sol, sid).Error != nil {
+			return &pb.CommentListRes{Success: false, Message: "题解不存在"}, nil
 		}
 		if pid == 0 {
 			pid = sol.ProblemID
 		} else if sol.ProblemID != pid {
-			writeJSON(ctx.Response(), 400, map[string]interface{}{"success": false, "message": "题解与题目不匹配"})
-			return nil
+			return &pb.CommentListRes{Success: false, Message: "题解与题目不匹配"}, nil
 		}
 	}
-	page, pageSize := pageParams(ctx, 1, 20, 50)
+	page, pageSize := 1, 20
+	if req.Page > 0 {
+		page = int(req.Page)
+	}
+	if req.PageSize > 0 {
+		pageSize = int(req.PageSize)
+	}
+	if pageSize > 50 {
+		pageSize = 50
+	}
 	// 分页只计顶层评论；题目讨论与题解评论互不混入
-	rootQ := s.db.Model(&model.ProblemComment{}).Where("parent_id = 0")
+	rootQ := s.db.WithContext(ctx).Model(&model.ProblemComment{}).Where("parent_id = 0")
 	if sid > 0 {
 		rootQ = rootQ.Where("solution_id = ?", sid)
 	} else {
@@ -144,7 +126,7 @@ func (s *CommunityService) handleCommentList(ctx khttp.Context) error {
 	// 拉本页根下的全部回复
 	var replies []model.ProblemComment
 	if len(rootIDs) > 0 {
-		replyQ := s.db.Where("parent_id > 0 AND root_id IN ?", rootIDs)
+		replyQ := s.db.WithContext(ctx).Where("parent_id > 0 AND root_id IN ?", rootIDs)
 		if sid > 0 {
 			replyQ = replyQ.Where("solution_id = ?", sid)
 		} else {
@@ -175,10 +157,7 @@ func (s *CommunityService) handleCommentList(ctx khttp.Context) error {
 	users := s.batchUsers(ctx, uids)
 
 	// 当前用户点赞集合
-	var viewerID uint
-	if pd := auth.GetCurrentUser(ctx); pd != nil {
-		viewerID = pd.UserID
-	}
+	viewerID := auth.GetCurrentUserId(ctx)
 	commentIDs := make([]uint, 0, len(all))
 	for _, c := range all {
 		commentIDs = append(commentIDs, c.ID)
@@ -186,10 +165,9 @@ func (s *CommunityService) handleCommentList(ctx khttp.Context) error {
 	likedSet := s.likedSet(viewerID, model.CommunityTargetComment, commentIDs)
 
 	// 构建树：先 map，再挂 replies
-	byID := make(map[uint]map[string]interface{}, len(all))
+	byID := make(map[uint]*pb.CommentItem, len(all))
 	for _, c := range all {
 		byID[c.ID] = s.commentToMap(c, users, likedSet)
-		byID[c.ID]["replies"] = []map[string]interface{}{}
 	}
 	// 按 id 升序挂到父节点，保证回复时间序
 	ordered := make([]model.ProblemComment, 0, len(all))
@@ -209,74 +187,57 @@ func (s *CommunityService) handleCommentList(ctx khttp.Context) error {
 				continue
 			}
 		}
-		list, _ := parent["replies"].([]map[string]interface{})
-		parent["replies"] = append(list, byID[c.ID])
+		parent.Replies = append(parent.Replies, byID[c.ID])
 	}
 
-	items := make([]map[string]interface{}, 0, len(roots))
+	items := make([]*pb.CommentItem, 0, len(roots))
 	for _, r := range roots {
 		if m, ok := byID[r.ID]; ok {
 			items = append(items, m)
 		}
 	}
-	writeJSON(ctx.Response(), 200, map[string]interface{}{
-		"success": true, "message": "ok", "list": items, "total": total, "page": page, "pageSize": pageSize,
-	})
-	return nil
+	return &pb.CommentListRes{
+		Success: true, Message: "ok", List: items, Total: total, Page: int64(page), PageSize: int64(pageSize),
+	}, nil
 }
 
-func (s *CommunityService) handleCommentCreate(ctx khttp.Context) error {
+func (s *CommunityService) CommentCreate(ctx context.Context, req *pb.CommentCreateReq) (*pb.CommentCreateRes, error) {
 	pd := auth.GetCurrentUser(ctx)
 	if pd == nil || pd.UserID == 0 {
-		writeJSON(ctx.Response(), 401, map[string]interface{}{"success": false, "message": "请先登录"})
-		return nil
-	}
-	var req struct {
-		ProblemID    uint   `json:"problemId"`
-		SolutionID   uint   `json:"solutionId"`   // 0=题目讨论；>0=题解评论
-		Content      string `json:"content"`
-		ParentID     uint   `json:"parentId"`     // 0=顶层；>0 回复某条
-		SyncToPublic bool   `json:"syncToPublic"` // 仅题目顶层：非公共域时可选同步公共域发现流
-	}
-	if err := readJSONBody(ctx.Request(), &req); err != nil {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"success": false, "message": "参数错误"})
-		return nil
+		return &pb.CommentCreateRes{Success: false, Message: "请先登录"}, nil
 	}
 	content := strings.TrimSpace(strings.ReplaceAll(req.Content, "\r\n", "\n"))
 	if content == "" {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"success": false, "message": "评论不能为空"})
-		return nil
+		return &pb.CommentCreateRes{Success: false, Message: "评论不能为空"}, nil
 	}
 	if utf8.RuneCountInString(content) > maxCommentRunes {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"success": false, "message": "评论过长"})
-		return nil
+		return &pb.CommentCreateRes{Success: false, Message: "评论过长"}, nil
 	}
 
+	pid := uint(req.ProblemId)
+	sid := uint(req.SolutionId)
+	parentID := uint(req.ParentId)
 	var sol model.ProblemUserSolution
-	if req.SolutionID > 0 {
-		if s.db.First(&sol, req.SolutionID).Error != nil {
-			writeJSON(ctx.Response(), 404, map[string]interface{}{"success": false, "message": "题解不存在"})
-			return nil
+	if sid > 0 {
+		if s.db.WithContext(ctx).First(&sol, sid).Error != nil {
+			return &pb.CommentCreateRes{Success: false, Message: "题解不存在"}, nil
 		}
-		if req.ProblemID == 0 {
-			req.ProblemID = sol.ProblemID
-		} else if sol.ProblemID != req.ProblemID {
-			writeJSON(ctx.Response(), 400, map[string]interface{}{"success": false, "message": "题解与题目不匹配"})
-			return nil
+		if pid == 0 {
+			pid = sol.ProblemID
+		} else if sol.ProblemID != pid {
+			return &pb.CommentCreateRes{Success: false, Message: "题解与题目不匹配"}, nil
 		}
 	}
-	if req.ProblemID == 0 {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"success": false, "message": "参数错误"})
-		return nil
+	if pid == 0 {
+		return &pb.CommentCreateRes{Success: false, Message: "参数错误"}, nil
 	}
-	if !s.problemExists(req.ProblemID) {
-		writeJSON(ctx.Response(), 404, map[string]interface{}{"success": false, "message": "题目不存在"})
-		return nil
+	if !s.problemExists(pid) {
+		return &pb.CommentCreateRes{Success: false, Message: "题目不存在"}, nil
 	}
 
 	row := model.ProblemComment{
-		ProblemID:  req.ProblemID,
-		SolutionID: req.SolutionID,
+		ProblemID:  pid,
+		SolutionID: sid,
 		UserID:     pd.UserID,
 		Content:    content,
 		ParentID:   0,
@@ -285,24 +246,21 @@ func (s *CommunityService) handleCommentCreate(ctx khttp.Context) error {
 	}
 
 	var parent model.ProblemComment
-	if req.ParentID > 0 {
-		if s.db.First(&parent, req.ParentID).Error != nil {
-			writeJSON(ctx.Response(), 404, map[string]interface{}{"success": false, "message": "要回复的评论不存在"})
-			return nil
+	if parentID > 0 {
+		if s.db.WithContext(ctx).First(&parent, parentID).Error != nil {
+			return &pb.CommentCreateRes{Success: false, Message: "要回复的评论不存在"}, nil
 		}
-		if parent.ProblemID != req.ProblemID {
-			writeJSON(ctx.Response(), 400, map[string]interface{}{"success": false, "message": "评论与题目不匹配"})
-			return nil
+		if parent.ProblemID != pid {
+			return &pb.CommentCreateRes{Success: false, Message: "评论与题目不匹配"}, nil
 		}
-		if parent.SolutionID != req.SolutionID {
-			writeJSON(ctx.Response(), 400, map[string]interface{}{"success": false, "message": "评论与题解不匹配"})
-			return nil
+		if parent.SolutionID != sid {
+			return &pb.CommentCreateRes{Success: false, Message: "评论与题解不匹配"}, nil
 		}
 		// 挂载点：父深度已达上限时，挂到其父节点（仍记录 replyTo 为用户点击的那条）
 		attach := parent
 		if parent.Depth >= model.MaxCommentDepth && parent.ParentID > 0 {
 			var up model.ProblemComment
-			if s.db.First(&up, parent.ParentID).Error == nil {
+			if s.db.WithContext(ctx).First(&up, parent.ParentID).Error == nil {
 				attach = up
 			}
 		}
@@ -319,22 +277,21 @@ func (s *CommunityService) handleCommentCreate(ctx khttp.Context) error {
 		row.ReplyToUserID = parent.UserID
 	}
 
-	if err := s.db.Create(&row).Error; err != nil {
-		writeJSON(ctx.Response(), 500, map[string]interface{}{"success": false, "message": "发布失败"})
-		return nil
+	if err := s.db.WithContext(ctx).Create(&row).Error; err != nil {
+		return &pb.CommentCreateRes{Success: false, Message: "发布失败"}, nil
 	}
 	// 顶层：root_id = 自身
 	if row.ParentID == 0 {
-		_ = s.db.Model(&row).Update("root_id", row.ID).Error
+		_ = s.db.WithContext(ctx).Model(&row).Update("root_id", row.ID).Error
 		row.RootID = row.ID
 	}
 	// 题解评论：同步 comment_count → 题解 + 镜像博客
 	if row.SolutionID > 0 {
-		_ = s.db.Model(&model.ProblemUserSolution{}).Where("id = ?", row.SolutionID).
+		_ = s.db.WithContext(ctx).Model(&model.ProblemUserSolution{}).Where("id = ?", row.SolutionID).
 			UpdateColumn("comment_count", gorm.Expr("comment_count + 1")).Error
-		var sol model.ProblemUserSolution
-		if s.db.Select("id", "blog_article_id", "like_count", "view_count", "comment_count").First(&sol, row.SolutionID).Error == nil {
-			s.mirrorSolutionCountersToBlog(&sol)
+		var sol2 model.ProblemUserSolution
+		if s.db.WithContext(ctx).Select("id", "blog_article_id", "like_count", "view_count", "comment_count").First(&sol2, row.SolutionID).Error == nil {
+			s.mirrorSolutionCountersToBlog(&sol2)
 		}
 	}
 
@@ -342,12 +299,12 @@ func (s *CommunityService) handleCommentCreate(ctx khttp.Context) error {
 	if row.ParentID == 0 && row.SolutionID == 0 {
 		ex := blogtext.DefaultSummary(content)
 		if pd.OrgID > 0 {
-			_ = s.db.Create(&model.ActivityFeed{
+			_ = s.db.WithContext(ctx).Create(&model.ActivityFeed{
 				OrgID:     pd.OrgID,
 				UserID:    pd.UserID,
 				Type:      model.ActivityTypeComment,
 				RefID:     row.ID,
-				ProblemID: req.ProblemID,
+				ProblemID: pid,
 				Title:     ex,
 				Excerpt:   ex,
 			}).Error
@@ -355,12 +312,12 @@ func (s *CommunityService) handleCommentCreate(ctx khttp.Context) error {
 		if req.SyncToPublic {
 			pubID := s.resolvePublicOrgID(ctx)
 			if pubID > 0 && pubID != pd.OrgID {
-				_ = s.db.Create(&model.ActivityFeed{
+				_ = s.db.WithContext(ctx).Create(&model.ActivityFeed{
 					OrgID:     pubID,
 					UserID:    pd.UserID,
 					Type:      model.ActivityTypeComment,
 					RefID:     row.ID,
-					ProblemID: req.ProblemID,
+					ProblemID: pid,
 					Title:     ex,
 					Excerpt:   ex,
 				}).Error
@@ -387,7 +344,7 @@ func (s *CommunityService) handleCommentCreate(ctx khttp.Context) error {
 			ActorID:   pd.UserID,
 			RefType:   refType,
 			RefID:     refID,
-			ProblemID: req.ProblemID,
+			ProblemID: pid,
 		})
 	}
 
@@ -401,7 +358,7 @@ func (s *CommunityService) handleCommentCreate(ctx khttp.Context) error {
 			ActorID:   pd.UserID,
 			RefType:   "solution",
 			RefID:     row.SolutionID,
-			ProblemID: req.ProblemID,
+			ProblemID: pid,
 		})
 	}
 
@@ -410,131 +367,122 @@ func (s *CommunityService) handleCommentCreate(ctx khttp.Context) error {
 	if row.SolutionID > 0 {
 		mentionRefType, mentionRefID = "solution", row.SolutionID
 	}
-	s.emitMentions(ctx, pd.UserID, pd.Username, content, mentionRefType, mentionRefID, req.ProblemID)
+	s.emitMentions(ctx, pd.UserID, pd.Username, content, mentionRefType, mentionRefID, pid)
 
 	users := s.batchUsers(ctx, []uint{row.UserID, row.ReplyToUserID})
 	item := s.commentToMap(row, users, map[uint]bool{})
-	item["replies"] = []interface{}{}
-	writeJSON(ctx.Response(), 200, map[string]interface{}{
-		"success": true, "message": "已发布",
-		"data": item,
-	})
-	return nil
+	item.Replies = []*pb.CommentItem{}
+	return &pb.CommentCreateRes{
+		Success: true, Message: "已发布",
+		Data: item,
+	}, nil
 }
 
-func (s *CommunityService) handleCommentDelete(ctx khttp.Context) error {
+func (s *CommunityService) CommentDelete(ctx context.Context, req *pb.CommentDeleteReq) (*pb.CommentDeleteRes, error) {
 	pd := auth.GetCurrentUser(ctx)
 	if pd == nil || pd.UserID == 0 {
-		writeJSON(ctx.Response(), 401, map[string]interface{}{"success": false, "message": "请先登录"})
-		return nil
+		return &pb.CommentDeleteRes{Success: false, Message: "请先登录"}, nil
 	}
-	var req struct {
-		ID uint `json:"id"`
-	}
-	if err := readJSONBody(ctx.Request(), &req); err != nil || req.ID == 0 {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"success": false, "message": "参数错误"})
-		return nil
+	id := uint(req.Id)
+	if id == 0 {
+		return &pb.CommentDeleteRes{Success: false, Message: "参数错误"}, nil
 	}
 	var row model.ProblemComment
-	if s.db.First(&row, req.ID).Error != nil {
-		writeJSON(ctx.Response(), 404, map[string]interface{}{"success": false, "message": "评论不存在"})
-		return nil
+	if s.db.WithContext(ctx).First(&row, id).Error != nil {
+		return &pb.CommentDeleteRes{Success: false, Message: "评论不存在"}, nil
 	}
 	if row.UserID != pd.UserID && !auth.HasPerm(ctx, rbac.PermContentCommunityMod) {
-		writeJSON(ctx.Response(), 403, map[string]interface{}{"success": false, "message": "只能删除自己的评论"})
-		return nil
+		return &pb.CommentDeleteRes{Success: false, Message: "只能删除自己的评论"}, nil
 	}
 	// 级联删除子树
 	ids := s.collectCommentSubtreeIDs(row.ID)
 	if len(ids) == 0 {
 		ids = []uint{row.ID}
 	}
-	_ = s.db.Where("id IN ?", ids).Delete(&model.ProblemComment{}).Error
-	_ = s.db.Where("type = ? AND ref_id IN ?", model.ActivityTypeComment, ids).Delete(&model.ActivityFeed{}).Error
-	_ = s.db.Where("target_type = ? AND target_id IN ?", model.CommunityTargetComment, ids).Delete(&model.CommunityLike{}).Error
-	_ = s.db.Where("target_type = ? AND target_id IN ?", model.CommunityTargetComment, ids).Delete(&model.CommunityReport{}).Error
-	writeJSON(ctx.Response(), 200, map[string]interface{}{"success": true, "message": "已删除"})
-	return nil
+	_ = s.db.WithContext(ctx).Where("id IN ?", ids).Delete(&model.ProblemComment{}).Error
+	_ = s.db.WithContext(ctx).Where("type = ? AND ref_id IN ?", model.ActivityTypeComment, ids).Delete(&model.ActivityFeed{}).Error
+	_ = s.db.WithContext(ctx).Where("target_type = ? AND target_id IN ?", model.CommunityTargetComment, ids).Delete(&model.CommunityLike{}).Error
+	_ = s.db.WithContext(ctx).Where("target_type = ? AND target_id IN ?", model.CommunityTargetComment, ids).Delete(&model.CommunityReport{}).Error
+	return &pb.CommentDeleteRes{Success: true, Message: "已删除"}, nil
 }
 
 // ---------- solutions ----------
 
-func (s *CommunityService) handleSolutionList(ctx khttp.Context) error {
-	pid := queryUint(ctx, "problemId")
+func (s *CommunityService) SolutionList(ctx context.Context, req *pb.SolutionListReq) (*pb.SolutionListRes, error) {
+	pid := uint(req.ProblemId)
 	if pid == 0 {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"success": false, "message": "缺少题目"})
-		return nil
+		return &pb.SolutionListRes{Success: false, Message: "缺少题目"}, nil
 	}
-	page, pageSize := pageParams(ctx, 1, 20, 50)
-	q := s.db.Model(&model.ProblemUserSolution{}).Where("problem_id = ?", pid)
+	page, pageSize := 1, 20
+	if req.Page > 0 {
+		page = int(req.Page)
+	}
+	if req.PageSize > 0 {
+		pageSize = int(req.PageSize)
+	}
+	if pageSize > 50 {
+		pageSize = 50
+	}
+	q := s.db.WithContext(ctx).Model(&model.ProblemUserSolution{}).Where("problem_id = ?", pid)
 	var total int64
 	_ = q.Count(&total).Error
 	var list []model.ProblemUserSolution
 	_ = q.Order("id desc").Offset((page - 1) * pageSize).Limit(pageSize).Find(&list).Error
 	users := s.batchUsers(ctx, userIDsFromSolutions(list))
-	var viewerID uint
-	if pd := auth.GetCurrentUser(ctx); pd != nil {
-		viewerID = pd.UserID
-	}
+	viewerID := auth.GetCurrentUserId(ctx)
 	solIDs := make([]uint, 0, len(list))
 	for _, sol := range list {
 		solIDs = append(solIDs, sol.ID)
 	}
 	likedSet := s.likedSet(viewerID, model.CommunityTargetSolution, solIDs)
-	items := make([]map[string]interface{}, 0, len(list))
+	items := make([]*pb.SolutionItem, 0, len(list))
 	for _, sol := range list {
 		u := users[sol.UserID]
-		item := map[string]interface{}{
-			"id":        sol.ID,
-			"problemId": sol.ProblemID,
-			"userId":    sol.UserID,
-			"username":  u.username,
-			"name":      u.name,
-			"avatar":    u.avatar,
-			"title":     sol.Title,
+		item := &pb.SolutionItem{
+			Id:           int64(sol.ID),
+			ProblemId:    int64(sol.ProblemID),
+			UserId:       int64(sol.UserID),
+			Username:     u.username,
+			Name:         u.name,
+			Avatar:       u.avatar,
+			Title:        sol.Title,
 			// 列表不回全文，减轻体积
-			"excerpt":      blogtext.DefaultSummary(sol.ContentMD),
-			"likeCount":    sol.LikeCount,
-			"viewCount":    sol.ViewCount,
-			"commentCount": sol.CommentCount,
-			"liked":        likedSet[sol.ID],
-			"createdAt":    sol.CreatedAt.Unix(),
-			"updatedAt":    sol.UpdatedAt.Unix(),
+			Excerpt:      blogtext.DefaultSummary(sol.ContentMD),
+			LikeCount:    int32(sol.LikeCount),
+			ViewCount:    int32(sol.ViewCount),
+			CommentCount: int32(sol.CommentCount),
+			Liked:        likedSet[sol.ID],
+			CreatedAt:    sol.CreatedAt.Unix(),
+			UpdatedAt:    sol.UpdatedAt.Unix(),
 		}
 		if slug, ok := s.blogSlugFor(sol); ok && u.username != "" {
-			item["blogArticleId"] = sol.BlogArticleID
-			item["blogSlug"] = slug
-			item["blogUsername"] = u.username
+			item.BlogArticleId = int64(sol.BlogArticleID)
+			item.BlogSlug = slug
+			item.BlogUsername = u.username
 		}
 		items = append(items, item)
 	}
-	writeJSON(ctx.Response(), 200, map[string]interface{}{
-		"success": true, "message": "ok", "list": items, "total": total, "page": page, "pageSize": pageSize,
-	})
-	return nil
+	return &pb.SolutionListRes{
+		Success: true, Message: "ok", List: items, Total: total, Page: int64(page), PageSize: int64(pageSize),
+	}, nil
 }
 
-func (s *CommunityService) handleSolutionGet(ctx khttp.Context) error {
-	id := queryUint(ctx, "id")
+func (s *CommunityService) SolutionGet(ctx context.Context, req *pb.SolutionGetReq) (*pb.SolutionGetRes, error) {
+	id := uint(req.Id)
 	if id == 0 {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"success": false, "message": "缺少 id"})
-		return nil
+		return &pb.SolutionGetRes{Success: false, Message: "缺少 id"}, nil
 	}
 	var sol model.ProblemUserSolution
-	if s.db.First(&sol, id).Error != nil {
-		writeJSON(ctx.Response(), 404, map[string]interface{}{"success": false, "message": "题解不存在"})
-		return nil
+	if s.db.WithContext(ctx).First(&sol, id).Error != nil {
+		return &pb.SolutionGetRes{Success: false, Message: "题解不存在"}, nil
 	}
 	users := s.batchUsers(ctx, []uint{sol.UserID})
 	u := users[sol.UserID]
-	var viewerID uint
-	if pd := auth.GetCurrentUser(ctx); pd != nil {
-		viewerID = pd.UserID
-	}
+	viewerID := auth.GetCurrentUserId(ctx)
 	liked := false
 	if viewerID > 0 {
 		var n int64
-		_ = s.db.Model(&model.CommunityLike{}).
+		_ = s.db.WithContext(ctx).Model(&model.CommunityLike{}).
 			Where("user_id = ? AND target_type = ? AND target_id = ?", viewerID, model.CommunityTargetSolution, sol.ID).
 			Count(&n).Error
 		liked = n > 0
@@ -544,7 +492,7 @@ func (s *CommunityService) handleSolutionGet(ctx khttp.Context) error {
 		sol.ViewCount++
 		s.mirrorSolutionCountersToBlog(&sol)
 	} else {
-		_ = s.db.Select("view_count", "like_count", "comment_count", "blog_article_id").First(&sol, sol.ID).Error
+		_ = s.db.WithContext(ctx).Select("view_count", "like_count", "comment_count", "blog_article_id").First(&sol, sol.ID).Error
 	}
 
 	// 旧题解 / 博客镜像丢失：懒同步（有 userDB 时）
@@ -553,351 +501,310 @@ func (s *CommunityService) handleSolutionGet(ctx khttp.Context) error {
 		// 缓存失效时清零以便 Upsert 重建
 		if sol.BlogArticleID > 0 {
 			sol.BlogArticleID = 0
-			_ = s.db.Model(&sol).Update("blog_article_id", 0).Error
+			_ = s.db.WithContext(ctx).Model(&sol).Update("blog_article_id", 0).Error
 		}
 		s.syncSolutionToBlog(&sol)
 		slug, hasBlog = s.blogSlugFor(sol)
 	}
-	data := map[string]interface{}{
-		"id": sol.ID, "problemId": sol.ProblemID, "userId": sol.UserID,
-		"username": u.username, "name": u.name, "avatar": u.avatar,
-		"title": sol.Title, "contentMd": s.expandSolutionMD(sol.ContentMD),
-		"likeCount": sol.LikeCount, "viewCount": sol.ViewCount,
-		"commentCount": sol.CommentCount, "liked": liked,
-		"createdAt": sol.CreatedAt.Unix(), "updatedAt": sol.UpdatedAt.Unix(),
+	data := &pb.SolutionDetail{
+		Id:           int64(sol.ID),
+		ProblemId:    int64(sol.ProblemID),
+		UserId:       int64(sol.UserID),
+		Username:     u.username,
+		Name:         u.name,
+		Avatar:       u.avatar,
+		Title:        sol.Title,
+		ContentMd:    s.expandSolutionMD(sol.ContentMD),
+		LikeCount:    int32(sol.LikeCount),
+		ViewCount:    int32(sol.ViewCount),
+		CommentCount: int32(sol.CommentCount),
+		Liked:        liked,
+		CreatedAt:    sol.CreatedAt.Unix(),
+		UpdatedAt:    sol.UpdatedAt.Unix(),
 	}
 	if hasBlog && slug != "" && u.username != "" {
-		data["blogArticleId"] = sol.BlogArticleID
-		data["blogSlug"] = slug
-		data["blogUsername"] = u.username
+		data.BlogArticleId = int64(sol.BlogArticleID)
+		data.BlogSlug = slug
+		data.BlogUsername = u.username
 	}
-	writeJSON(ctx.Response(), 200, map[string]interface{}{
-		"success": true, "message": "ok", "data": data,
-	})
-	return nil
+	return &pb.SolutionGetRes{Success: true, Message: "ok", Data: data}, nil
 }
 
-func (s *CommunityService) handleSolutionCreate(ctx khttp.Context) error {
+func (s *CommunityService) SolutionCreate(ctx context.Context, req *pb.SolutionCreateReq) (*pb.SolutionCreateRes, error) {
 	pd := auth.GetCurrentUser(ctx)
 	if pd == nil || pd.UserID == 0 {
-		writeJSON(ctx.Response(), 401, map[string]interface{}{"success": false, "message": "请先登录"})
-		return nil
+		return &pb.SolutionCreateRes{Success: false, Message: "请先登录"}, nil
 	}
-	var req struct {
-		ProblemID uint   `json:"problemId"`
-		Title     string `json:"title"`
-		ContentMD string `json:"contentMd"`
-	}
-	if err := readJSONBody(ctx.Request(), &req); err != nil || req.ProblemID == 0 {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"success": false, "message": "参数错误"})
-		return nil
+	if req.ProblemId == 0 {
+		return &pb.SolutionCreateRes{Success: false, Message: "参数错误"}, nil
 	}
 	title := strings.TrimSpace(req.Title)
-	content := strings.TrimSpace(strings.ReplaceAll(req.ContentMD, "\r\n", "\n"))
+	content := strings.TrimSpace(strings.ReplaceAll(req.ContentMd, "\r\n", "\n"))
 	content = blogimg.NormalizeStoredImageRefs(content)
 	if title == "" {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"success": false, "message": "请填写标题"})
-		return nil
+		return &pb.SolutionCreateRes{Success: false, Message: "请填写标题"}, nil
 	}
 	if utf8.RuneCountInString(title) > maxSolutionTitle {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"success": false, "message": "标题过长"})
-		return nil
+		return &pb.SolutionCreateRes{Success: false, Message: "标题过长"}, nil
 	}
 	if content == "" {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"success": false, "message": "题解内容不能为空"})
-		return nil
+		return &pb.SolutionCreateRes{Success: false, Message: "题解内容不能为空"}, nil
 	}
 	if utf8.RuneCountInString(content) > maxSolutionRunes {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"success": false, "message": "题解过长"})
-		return nil
+		return &pb.SolutionCreateRes{Success: false, Message: "题解过长"}, nil
 	}
-	if !s.problemExists(req.ProblemID) {
-		writeJSON(ctx.Response(), 404, map[string]interface{}{"success": false, "message": "题目不存在"})
-		return nil
+	if !s.problemExists(uint(req.ProblemId)) {
+		return &pb.SolutionCreateRes{Success: false, Message: "题目不存在"}, nil
 	}
 	row := model.ProblemUserSolution{
-		ProblemID: req.ProblemID,
+		ProblemID: uint(req.ProblemId),
 		UserID:    pd.UserID,
 		Title:     title,
 		ContentMD: content,
 	}
-	if err := s.db.Create(&row).Error; err != nil {
-		writeJSON(ctx.Response(), 500, map[string]interface{}{"success": false, "message": "发布失败"})
-		return nil
+	if err := s.db.WithContext(ctx).Create(&row).Error; err != nil {
+		return &pb.SolutionCreateRes{Success: false, Message: "发布失败"}, nil
 	}
 	// 同步到个人博客默认分类（失败不阻断发布）
 	s.syncSolutionToBlog(&row)
 	// 题解发现流：写入作者所属全部组织（含公共域 + 各私有域），便于各域可见
 	ex := blogtext.DefaultSummary(content)
 	for _, oid := range s.authorOrgIDs(pd.UserID, pd.OrgID) {
-		_ = s.db.Create(&model.ActivityFeed{
+		_ = s.db.WithContext(ctx).Create(&model.ActivityFeed{
 			OrgID:     oid,
 			UserID:    pd.UserID,
 			Type:      model.ActivityTypeSolution,
 			RefID:     row.ID,
-			ProblemID: req.ProblemID,
+			ProblemID: uint(req.ProblemId),
 			Title:     title,
 			Excerpt:   ex,
 		}).Error
 	}
-	s.emitMentions(ctx, pd.UserID, pd.Username, title+"\n"+content, "solution", row.ID, req.ProblemID)
-	out := map[string]interface{}{
-		"id": row.ID, "problemId": row.ProblemID, "userId": row.UserID,
-		"title": row.Title, "contentMd": s.expandSolutionMD(row.ContentMD), "createdAt": row.CreatedAt.Unix(),
+	s.emitMentions(ctx, pd.UserID, pd.Username, title+"\n"+content, "solution", row.ID, uint(req.ProblemId))
+	out := &pb.SolutionCreateData{
+		Id:        int64(row.ID),
+		ProblemId: int64(row.ProblemID),
+		UserId:    int64(row.UserID),
+		Title:     row.Title,
+		ContentMd: s.expandSolutionMD(row.ContentMD),
+		CreatedAt: row.CreatedAt.Unix(),
 	}
 	if row.BlogArticleID > 0 {
-		out["blogArticleId"] = row.BlogArticleID
+		out.BlogArticleId = int64(row.BlogArticleID)
 		if slug, ok := s.blogSlugFor(row); ok {
-			out["blogSlug"] = slug
-			out["blogUsername"] = pd.Username
+			out.BlogSlug = slug
+			out.BlogUsername = pd.Username
 		}
 	}
-	writeJSON(ctx.Response(), 200, map[string]interface{}{
-		"success": true, "message": "已发布", "data": out,
-	})
-	return nil
+	return &pb.SolutionCreateRes{Success: true, Message: "已发布", Data: out}, nil
 }
 
-func (s *CommunityService) handleSolutionUpdate(ctx khttp.Context) error {
+func (s *CommunityService) SolutionUpdate(ctx context.Context, req *pb.SolutionUpdateReq) (*pb.SolutionUpdateRes, error) {
 	pd := auth.GetCurrentUser(ctx)
 	if pd == nil || pd.UserID == 0 {
-		writeJSON(ctx.Response(), 401, map[string]interface{}{"success": false, "message": "请先登录"})
-		return nil
+		return &pb.SolutionUpdateRes{Success: false, Message: "请先登录"}, nil
 	}
-	var req struct {
-		ID        uint   `json:"id"`
-		Title     string `json:"title"`
-		ContentMD string `json:"contentMd"`
-	}
-	if err := readJSONBody(ctx.Request(), &req); err != nil || req.ID == 0 {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"success": false, "message": "参数错误"})
-		return nil
+	id := uint(req.Id)
+	if id == 0 {
+		return &pb.SolutionUpdateRes{Success: false, Message: "参数错误"}, nil
 	}
 	var row model.ProblemUserSolution
-	if s.db.First(&row, req.ID).Error != nil {
-		writeJSON(ctx.Response(), 404, map[string]interface{}{"success": false, "message": "题解不存在"})
-		return nil
+	if s.db.WithContext(ctx).First(&row, id).Error != nil {
+		return &pb.SolutionUpdateRes{Success: false, Message: "题解不存在"}, nil
 	}
 	if row.UserID != pd.UserID && !auth.HasPerm(ctx, rbac.PermContentCommunityMod) {
-		writeJSON(ctx.Response(), 403, map[string]interface{}{"success": false, "message": "只能编辑自己的题解"})
-		return nil
+		return &pb.SolutionUpdateRes{Success: false, Message: "只能编辑自己的题解"}, nil
 	}
 	title := strings.TrimSpace(req.Title)
-	content := strings.TrimSpace(strings.ReplaceAll(req.ContentMD, "\r\n", "\n"))
+	content := strings.TrimSpace(strings.ReplaceAll(req.ContentMd, "\r\n", "\n"))
 	content = blogimg.NormalizeStoredImageRefs(content)
 	if title == "" || content == "" {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"success": false, "message": "标题和内容不能为空"})
-		return nil
+		return &pb.SolutionUpdateRes{Success: false, Message: "标题和内容不能为空"}, nil
 	}
 	if utf8.RuneCountInString(title) > maxSolutionTitle || utf8.RuneCountInString(content) > maxSolutionRunes {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"success": false, "message": "内容过长"})
-		return nil
+		return &pb.SolutionUpdateRes{Success: false, Message: "内容过长"}, nil
 	}
-	_ = s.db.Model(&row).Updates(map[string]interface{}{
+	_ = s.db.WithContext(ctx).Model(&row).Updates(map[string]interface{}{
 		"title": title, "content_md": content,
 	}).Error
 	row.Title = title
 	row.ContentMD = content
-	_ = s.db.Model(&model.ActivityFeed{}).
+	_ = s.db.WithContext(ctx).Model(&model.ActivityFeed{}).
 		Where("type = ? AND ref_id = ?", model.ActivityTypeSolution, row.ID).
 		Updates(map[string]interface{}{
 			"title": title, "excerpt": blogtext.DefaultSummary(content),
 		}).Error
 	// 同步更新博客镜像
 	s.syncSolutionToBlog(&row)
-	writeJSON(ctx.Response(), 200, map[string]interface{}{"success": true, "message": "已更新"})
-	return nil
+	return &pb.SolutionUpdateRes{Success: true, Message: "已更新"}, nil
 }
 
-func (s *CommunityService) handleSolutionDelete(ctx khttp.Context) error {
+func (s *CommunityService) SolutionDelete(ctx context.Context, req *pb.SolutionDeleteReq) (*pb.SolutionDeleteRes, error) {
 	pd := auth.GetCurrentUser(ctx)
 	if pd == nil || pd.UserID == 0 {
-		writeJSON(ctx.Response(), 401, map[string]interface{}{"success": false, "message": "请先登录"})
-		return nil
+		return &pb.SolutionDeleteRes{Success: false, Message: "请先登录"}, nil
 	}
-	var req struct {
-		ID uint `json:"id"`
-	}
-	if err := readJSONBody(ctx.Request(), &req); err != nil || req.ID == 0 {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"success": false, "message": "参数错误"})
-		return nil
+	id := uint(req.Id)
+	if id == 0 {
+		return &pb.SolutionDeleteRes{Success: false, Message: "参数错误"}, nil
 	}
 	var row model.ProblemUserSolution
-	if s.db.First(&row, req.ID).Error != nil {
-		writeJSON(ctx.Response(), 404, map[string]interface{}{"success": false, "message": "题解不存在"})
-		return nil
+	if s.db.WithContext(ctx).First(&row, id).Error != nil {
+		return &pb.SolutionDeleteRes{Success: false, Message: "题解不存在"}, nil
 	}
 	if row.UserID != pd.UserID && !auth.HasPerm(ctx, rbac.PermContentCommunityMod) {
-		writeJSON(ctx.Response(), 403, map[string]interface{}{"success": false, "message": "只能删除自己的题解"})
-		return nil
+		return &pb.SolutionDeleteRes{Success: false, Message: "只能删除自己的题解"}, nil
 	}
 	// 级联清理题解下评论及其点赞/举报/发现流
 	var commentIDs []uint
-	_ = s.db.Model(&model.ProblemComment{}).Where("solution_id = ?", row.ID).Pluck("id", &commentIDs).Error
+	_ = s.db.WithContext(ctx).Model(&model.ProblemComment{}).Where("solution_id = ?", row.ID).Pluck("id", &commentIDs).Error
 	if len(commentIDs) > 0 {
-		_ = s.db.Where("id IN ?", commentIDs).Delete(&model.ProblemComment{}).Error
-		_ = s.db.Where("type = ? AND ref_id IN ?", model.ActivityTypeComment, commentIDs).Delete(&model.ActivityFeed{}).Error
-		_ = s.db.Where("target_type = ? AND target_id IN ?", model.CommunityTargetComment, commentIDs).Delete(&model.CommunityLike{}).Error
-		_ = s.db.Where("target_type = ? AND target_id IN ?", model.CommunityTargetComment, commentIDs).Delete(&model.CommunityReport{}).Error
+		_ = s.db.WithContext(ctx).Where("id IN ?", commentIDs).Delete(&model.ProblemComment{}).Error
+		_ = s.db.WithContext(ctx).Where("type = ? AND ref_id IN ?", model.ActivityTypeComment, commentIDs).Delete(&model.ActivityFeed{}).Error
+		_ = s.db.WithContext(ctx).Where("target_type = ? AND target_id IN ?", model.CommunityTargetComment, commentIDs).Delete(&model.CommunityLike{}).Error
+		_ = s.db.WithContext(ctx).Where("target_type = ? AND target_id IN ?", model.CommunityTargetComment, commentIDs).Delete(&model.CommunityReport{}).Error
 	}
 	// 先删博客镜像再删题解
 	blogsync.DeleteBySolution(s.udb, row.UserID, row.ID, row.BlogArticleID)
-	_ = s.db.Delete(&row).Error
-	_ = s.db.Where("type = ? AND ref_id = ?", model.ActivityTypeSolution, row.ID).Delete(&model.ActivityFeed{}).Error
-	_ = s.db.Where("target_type = ? AND target_id = ?", model.CommunityTargetSolution, row.ID).Delete(&model.CommunityLike{}).Error
-	_ = s.db.Where("target_type = ? AND target_id = ?", model.CommunityTargetSolution, row.ID).Delete(&model.CommunityReport{}).Error
-	writeJSON(ctx.Response(), 200, map[string]interface{}{"success": true, "message": "已删除"})
-	return nil
+	_ = s.db.WithContext(ctx).Delete(&row).Error
+	_ = s.db.WithContext(ctx).Where("type = ? AND ref_id = ?", model.ActivityTypeSolution, row.ID).Delete(&model.ActivityFeed{}).Error
+	_ = s.db.WithContext(ctx).Where("target_type = ? AND target_id = ?", model.CommunityTargetSolution, row.ID).Delete(&model.CommunityLike{}).Error
+	_ = s.db.WithContext(ctx).Where("target_type = ? AND target_id = ?", model.CommunityTargetSolution, row.ID).Delete(&model.CommunityReport{}).Error
+	return &pb.SolutionDeleteRes{Success: true, Message: "已删除"}, nil
 }
 
 // ---------- like / report ----------
 
-func (s *CommunityService) handleLikeToggle(ctx khttp.Context) error {
+func (s *CommunityService) Like(ctx context.Context, req *pb.LikeReq) (*pb.LikeRes, error) {
 	pd := auth.GetCurrentUser(ctx)
 	if pd == nil || pd.UserID == 0 {
-		writeJSON(ctx.Response(), 401, map[string]interface{}{"success": false, "message": "请先登录"})
-		return nil
-	}
-	var req struct {
-		TargetType string `json:"targetType"` // comment|solution
-		TargetID   uint   `json:"targetId"`
-	}
-	if err := readJSONBody(ctx.Request(), &req); err != nil || req.TargetID == 0 {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"success": false, "message": "参数错误"})
-		return nil
+		return &pb.LikeRes{Success: false, Message: "请先登录"}, nil
 	}
 	tt := strings.TrimSpace(req.TargetType)
+	targetID := uint(req.TargetId)
+	if targetID == 0 {
+		return &pb.LikeRes{Success: false, Message: "参数错误"}, nil
+	}
 	if tt != model.CommunityTargetComment && tt != model.CommunityTargetSolution {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"success": false, "message": "不支持的点赞类型"})
-		return nil
+		return &pb.LikeRes{Success: false, Message: "不支持的点赞类型"}, nil
 	}
 	// 校验目标存在
-	if !s.communityTargetExists(tt, req.TargetID) {
-		writeJSON(ctx.Response(), 404, map[string]interface{}{"success": false, "message": "内容不存在"})
-		return nil
+	if !s.communityTargetExists(tt, targetID) {
+		return &pb.LikeRes{Success: false, Message: "内容不存在"}, nil
 	}
 
 	var existing model.CommunityLike
-	err := s.db.Where("user_id = ? AND target_type = ? AND target_id = ?", pd.UserID, tt, req.TargetID).
+	err := s.db.WithContext(ctx).Where("user_id = ? AND target_type = ? AND target_id = ?", pd.UserID, tt, targetID).
 		First(&existing).Error
 	liked := false
 	if err == nil {
 		// 取消点赞
-		_ = s.db.Delete(&existing).Error
-		s.adjustLikeCount(tt, req.TargetID, -1)
+		_ = s.db.WithContext(ctx).Delete(&existing).Error
+		s.adjustLikeCount(tt, targetID, -1)
 		liked = false
 	} else {
-		if err := s.db.Create(&model.CommunityLike{
-			UserID: pd.UserID, TargetType: tt, TargetID: req.TargetID,
+		if err := s.db.WithContext(ctx).Create(&model.CommunityLike{
+			UserID: pd.UserID, TargetType: tt, TargetID: targetID,
 		}).Error; err != nil {
 			// 并发唯一冲突：视为已点赞
 			liked = true
 		} else {
-			s.adjustLikeCount(tt, req.TargetID, 1)
+			s.adjustLikeCount(tt, targetID, 1)
 			liked = true
-			s.notifyCommunityLike(pd, tt, req.TargetID)
+			s.notifyCommunityLike(pd, tt, targetID)
 		}
 	}
-	count := s.readLikeCount(tt, req.TargetID)
-	writeJSON(ctx.Response(), 200, map[string]interface{}{
-		"success": true, "message": "ok",
-		"data": map[string]interface{}{
-			"liked": liked, "likeCount": count,
-			"targetType": tt, "targetId": req.TargetID,
+	count := s.readLikeCount(tt, targetID)
+	return &pb.LikeRes{
+		Success: true, Message: "ok",
+		Data: &pb.LikeData{
+			Liked: liked, LikeCount: int32(count),
+			TargetType: tt, TargetId: int64(targetID),
 		},
-	})
-	return nil
+	}, nil
 }
 
-func (s *CommunityService) handleReport(ctx khttp.Context) error {
+func (s *CommunityService) Report(ctx context.Context, req *pb.ReportReq) (*pb.ReportRes, error) {
 	pd := auth.GetCurrentUser(ctx)
 	if pd == nil || pd.UserID == 0 {
-		writeJSON(ctx.Response(), 401, map[string]interface{}{"success": false, "message": "请先登录"})
-		return nil
-	}
-	var req struct {
-		TargetType string `json:"targetType"` // comment|solution
-		TargetID   uint   `json:"targetId"`
-		Reason     string `json:"reason"`
-	}
-	if err := readJSONBody(ctx.Request(), &req); err != nil || req.TargetID == 0 {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"success": false, "message": "参数错误"})
-		return nil
+		return &pb.ReportRes{Success: false, Message: "请先登录"}, nil
 	}
 	tt := strings.TrimSpace(req.TargetType)
+	targetID := uint(req.TargetId)
+	if targetID == 0 {
+		return &pb.ReportRes{Success: false, Message: "参数错误"}, nil
+	}
 	if tt != model.CommunityTargetComment && tt != model.CommunityTargetSolution {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"success": false, "message": "不支持的举报类型"})
-		return nil
+		return &pb.ReportRes{Success: false, Message: "不支持的举报类型"}, nil
 	}
 	reason := strings.TrimSpace(strings.ReplaceAll(req.Reason, "\r\n", "\n"))
 	if reason == "" {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"success": false, "message": "请填写举报原因"})
-		return nil
+		return &pb.ReportRes{Success: false, Message: "请填写举报原因"}, nil
 	}
 	if utf8.RuneCountInString(reason) > maxReportReason {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"success": false, "message": "举报原因过长"})
-		return nil
+		return &pb.ReportRes{Success: false, Message: "举报原因过长"}, nil
 	}
-	if !s.communityTargetExists(tt, req.TargetID) {
-		writeJSON(ctx.Response(), 404, map[string]interface{}{"success": false, "message": "内容不存在"})
-		return nil
+	if !s.communityTargetExists(tt, targetID) {
+		return &pb.ReportRes{Success: false, Message: "内容不存在"}, nil
 	}
 	// 不能举报自己
-	if owner := s.communityTargetOwner(tt, req.TargetID); owner == pd.UserID {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"success": false, "message": "不能举报自己的内容"})
-		return nil
+	if owner := s.communityTargetOwner(tt, targetID); owner == pd.UserID {
+		return &pb.ReportRes{Success: false, Message: "不能举报自己的内容"}, nil
 	}
 	var existing model.CommunityReport
-	if s.db.Where("user_id = ? AND target_type = ? AND target_id = ?", pd.UserID, tt, req.TargetID).
+	if s.db.WithContext(ctx).Where("user_id = ? AND target_type = ? AND target_id = ?", pd.UserID, tt, targetID).
 		First(&existing).Error == nil {
-		writeJSON(ctx.Response(), 200, map[string]interface{}{
-			"success": true, "message": "你已举报过该内容，我们会尽快处理",
-			"data": map[string]interface{}{"id": existing.ID, "alreadyReported": true},
-		})
-		return nil
+		return &pb.ReportRes{
+			Success: true, Message: "你已举报过该内容，我们会尽快处理",
+			Data: &pb.ReportData{Id: int64(existing.ID), AlreadyReported: true},
+		}, nil
 	}
 	row := model.CommunityReport{
 		UserID:     pd.UserID,
 		TargetType: tt,
-		TargetID:   req.TargetID,
+		TargetID:   targetID,
 		Reason:     reason,
 		Status:     model.ReportStatusPending,
 	}
-	if err := s.db.Create(&row).Error; err != nil {
-		writeJSON(ctx.Response(), 500, map[string]interface{}{"success": false, "message": "提交失败，请稍后重试"})
-		return nil
+	if err := s.db.WithContext(ctx).Create(&row).Error; err != nil {
+		return &pb.ReportRes{Success: false, Message: "提交失败，请稍后重试"}, nil
 	}
-	s.notifyAdminsCommunityReport(pd, tt, req.TargetID, reason, row.ID)
-	writeJSON(ctx.Response(), 200, map[string]interface{}{
-		"success": true, "message": "已收到举报，我们会尽快处理",
-		"data": map[string]interface{}{"id": row.ID, "alreadyReported": false},
-	})
-	return nil
+	s.notifyAdminsCommunityReport(pd, tt, targetID, reason, row.ID)
+	return &pb.ReportRes{
+		Success: true, Message: "已收到举报，我们会尽快处理",
+		Data: &pb.ReportData{Id: int64(row.ID), AlreadyReported: false},
+	}, nil
 }
 
-// handleReportList 举报处理台：题解/评论举报列表（需 content.report.handle）。
+// ReportList 举报处理台：题解/评论举报列表（需 content.report.handle）。
 // query: status=pending|resolved|dismissed|all（默认 pending）、targetType=comment|solution（默认全部）、page/pageSize
-func (s *CommunityService) handleReportList(ctx khttp.Context) error {
+func (s *CommunityService) ReportList(ctx context.Context, req *pb.ReportListReq) (*pb.ReportListRes, error) {
 	if !auth.HasPerm(ctx, rbac.PermContentReportHandle) {
-		writeJSON(ctx.Response(), 403, map[string]interface{}{"success": false, "message": "需要举报处理权限"})
-		return nil
+		return &pb.ReportListRes{Success: false, Message: "需要举报处理权限"}, nil
 	}
-	status := strings.TrimSpace(ctx.Query().Get("status"))
+	status := strings.TrimSpace(req.Status)
 	if status == "" {
 		status = model.ReportStatusPending
 	}
 	if status != "all" && status != model.ReportStatusPending &&
 		status != model.ReportStatusResolved && status != model.ReportStatusDismissed {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"success": false, "message": "不支持的状态筛选"})
-		return nil
+		return &pb.ReportListRes{Success: false, Message: "不支持的状态筛选"}, nil
 	}
-	tt := strings.TrimSpace(ctx.Query().Get("targetType"))
+	tt := strings.TrimSpace(req.TargetType)
 	if tt != "" && tt != model.CommunityTargetComment && tt != model.CommunityTargetSolution {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"success": false, "message": "不支持的举报类型"})
-		return nil
+		return &pb.ReportListRes{Success: false, Message: "不支持的举报类型"}, nil
 	}
-	page, pageSize := pageParams(ctx, 1, 20, 50)
-	q := s.db.Model(&model.CommunityReport{})
+	page, pageSize := 1, 20
+	if req.Page > 0 {
+		page = int(req.Page)
+	}
+	if req.PageSize > 0 {
+		pageSize = int(req.PageSize)
+	}
+	if pageSize > 50 {
+		pageSize = 50
+	}
+	q := s.db.WithContext(ctx).Model(&model.CommunityReport{})
 	if status != "all" {
 		q = q.Where("status = ?", status)
 	}
@@ -922,7 +829,7 @@ func (s *CommunityService) handleReportList(ctx khttp.Context) error {
 	solMap := map[uint]model.ProblemUserSolution{}
 	if len(solIDs) > 0 {
 		var sols []model.ProblemUserSolution
-		_ = s.db.Select("id", "problem_id", "user_id", "title").Where("id IN ?", solIDs).Find(&sols).Error
+		_ = s.db.WithContext(ctx).Select("id", "problem_id", "user_id", "title").Where("id IN ?", solIDs).Find(&sols).Error
 		for _, v := range sols {
 			solMap[v.ID] = v
 		}
@@ -930,7 +837,7 @@ func (s *CommunityService) handleReportList(ctx khttp.Context) error {
 	cmtMap := map[uint]model.ProblemComment{}
 	if len(cmtIDs) > 0 {
 		var cmts []model.ProblemComment
-		_ = s.db.Select("id", "problem_id", "solution_id", "user_id", "content").Where("id IN ?", cmtIDs).Find(&cmts).Error
+		_ = s.db.WithContext(ctx).Select("id", "problem_id", "solution_id", "user_id", "content").Where("id IN ?", cmtIDs).Find(&cmts).Error
 		for _, v := range cmts {
 			cmtMap[v.ID] = v
 		}
@@ -957,64 +864,58 @@ func (s *CommunityService) handleReportList(ctx khttp.Context) error {
 	}
 	users := s.batchUsers(ctx, uids)
 
-	list := make([]map[string]interface{}, 0, len(rows))
+	list := make([]*pb.ReportItem, 0, len(rows))
 	for _, r := range rows {
-		item := map[string]interface{}{
-			"id":         r.ID,
-			"createdAt":  r.CreatedAt.Format(time.RFC3339),
-			"status":     r.Status,
-			"reason":     r.Reason,
-			"targetType": r.TargetType,
-			"targetId":   r.TargetID,
-			"reporter": map[string]interface{}{
-				"userId":   r.UserID,
-				"username": users[r.UserID].username,
+		item := &pb.ReportItem{
+			Id:         int64(r.ID),
+			CreatedAt:  r.CreatedAt.Format(time.RFC3339),
+			Status:     r.Status,
+			Reason:     r.Reason,
+			TargetType: r.TargetType,
+			TargetId:   int64(r.TargetID),
+			Reporter: &pb.Reporter{
+				UserId:   int64(r.UserID),
+				Username: users[r.UserID].username,
 			},
 		}
-		target := map[string]interface{}{"exists": false}
+		target := &pb.ReportTarget{Exists: false}
 		if r.TargetType == model.CommunityTargetSolution {
 			if sol, ok := solMap[r.TargetID]; ok {
-				target = map[string]interface{}{
-					"exists":         true,
-					"problemId":      sol.ProblemID,
-					"title":          sol.Title,
-					"authorUserId":   sol.UserID,
-					"authorUsername": users[sol.UserID].username,
+				target = &pb.ReportTarget{
+					Exists:         true,
+					ProblemId:      int64(sol.ProblemID),
+					Title:          sol.Title,
+					AuthorUserId:   int64(sol.UserID),
+					AuthorUsername: users[sol.UserID].username,
 				}
 			}
 		} else if c, ok := cmtMap[r.TargetID]; ok {
-			target = map[string]interface{}{
-				"exists":         true,
-				"problemId":      c.ProblemID,
-				"solutionId":     c.SolutionID,
-				"excerpt":        truncateRunes(c.Content, 120),
-				"authorUserId":   c.UserID,
-				"authorUsername": users[c.UserID].username,
+			target = &pb.ReportTarget{
+				Exists:         true,
+				ProblemId:      int64(c.ProblemID),
+				SolutionId:     int64(c.SolutionID),
+				Excerpt:        truncateRunes(c.Content, 120),
+				AuthorUserId:   int64(c.UserID),
+				AuthorUsername: users[c.UserID].username,
 			}
 		}
-		item["target"] = target
+		item.Target = target
 		list = append(list, item)
 	}
-	writeJSON(ctx.Response(), 200, map[string]interface{}{
-		"success": true,
-		"data":    map[string]interface{}{"list": list, "total": total},
-	})
-	return nil
+	return &pb.ReportListRes{
+		Success: true,
+		Data:    &pb.ReportListData{List: list, Total: total},
+	}, nil
 }
 
-// handleReportHandle 处理举报：resolve=已处理 / dismiss=驳回（需 content.report.handle）
-func (s *CommunityService) handleReportHandle(ctx khttp.Context) error {
+// ReportHandle 处理举报：resolve=已处理 / dismiss=驳回（需 content.report.handle）
+func (s *CommunityService) ReportHandle(ctx context.Context, req *pb.ReportHandleReq) (*pb.ReportHandleRes, error) {
 	if !auth.HasPerm(ctx, rbac.PermContentReportHandle) {
-		writeJSON(ctx.Response(), 403, map[string]interface{}{"success": false, "message": "需要举报处理权限"})
-		return nil
+		return &pb.ReportHandleRes{Success: false, Message: "需要举报处理权限"}, nil
 	}
-	var req struct {
-		ID     uint   `json:"id"`
-		Action string `json:"action"` // resolve|dismiss
-	}
-	if err := readJSONBody(ctx.Request(), &req); err != nil || req.ID == 0 {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"success": false, "message": "参数错误"})
-		return nil
+	id := uint(req.Id)
+	if id == 0 {
+		return &pb.ReportHandleRes{Success: false, Message: "参数错误"}, nil
 	}
 	var next string
 	switch req.Action {
@@ -1023,23 +924,19 @@ func (s *CommunityService) handleReportHandle(ctx khttp.Context) error {
 	case "dismiss":
 		next = model.ReportStatusDismissed
 	default:
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"success": false, "message": "不支持的操作"})
-		return nil
+		return &pb.ReportHandleRes{Success: false, Message: "不支持的操作"}, nil
 	}
 	var row model.CommunityReport
-	if s.db.First(&row, req.ID).Error != nil {
-		writeJSON(ctx.Response(), 404, map[string]interface{}{"success": false, "message": "举报不存在"})
-		return nil
+	if s.db.WithContext(ctx).First(&row, id).Error != nil {
+		return &pb.ReportHandleRes{Success: false, Message: "举报不存在"}, nil
 	}
-	if err := s.db.Model(&row).Update("status", next).Error; err != nil {
-		writeJSON(ctx.Response(), 500, map[string]interface{}{"success": false, "message": "操作失败，请稍后重试"})
-		return nil
+	if err := s.db.WithContext(ctx).Model(&row).Update("status", next).Error; err != nil {
+		return &pb.ReportHandleRes{Success: false, Message: "操作失败，请稍后重试"}, nil
 	}
-	writeJSON(ctx.Response(), 200, map[string]interface{}{
-		"success": true,
-		"data":    map[string]interface{}{"id": row.ID, "status": next},
-	})
-	return nil
+	return &pb.ReportHandleRes{
+		Success: true,
+		Data:    &pb.ReportHandleData{Id: int64(row.ID), Status: next},
+	}, nil
 }
 
 // ---------- activity feed ----------
@@ -1047,18 +944,27 @@ func (s *CommunityService) handleReportHandle(ctx khttp.Context) error {
 // 私有域：仅该组织成员产生的内容（按作者 membership 筛选；同内容多 org 行去重）。
 // 题解创建时写入作者所属全部组织，保证各域都能看到。
 
-func (s *CommunityService) handleActivityFeed(ctx khttp.Context) error {
+func (s *CommunityService) ActivityFeed(ctx context.Context, req *pb.ActivityFeedReq) (*pb.ActivityFeedRes, error) {
 	pd := auth.GetCurrentUser(ctx)
 	orgID := uint(0)
 	if pd != nil {
 		orgID = pd.OrgID
 	}
 	// 允许 query 覆盖仅限具备全站统计权限者；普通用户强制当前组织
-	if q := queryUint(ctx, "orgId"); q > 0 && pd != nil && auth.HasPerm(ctx, rbac.PermSiteStatsRead) {
+	if q := uint(req.OrgId); q > 0 && pd != nil && auth.HasPerm(ctx, rbac.PermSiteStatsRead) {
 		orgID = q
 	}
-	page, pageSize := pageParams(ctx, 1, 20, 50)
-	typ := strings.TrimSpace(ctx.Query().Get("type")) // comment|solution|空=全部
+	page, pageSize := 1, 20
+	if req.Page > 0 {
+		page = int(req.Page)
+	}
+	if req.PageSize > 0 {
+		pageSize = int(req.PageSize)
+	}
+	if pageSize > 50 {
+		pageSize = 50
+	}
+	typ := strings.TrimSpace(req.Type) // comment|solution|空=全部
 
 	// 公共域视图：orgId=0（访客）或当前组织即公共域 → 全站聚合
 	publicView := orgID == 0 || s.isPublicOrgID(ctx, orgID)
@@ -1068,10 +974,9 @@ func (s *CommunityService) handleActivityFeed(ctx khttp.Context) error {
 	if publicView && s.rdb != nil {
 		feedCacheKey = fmt.Sprintf("core:activity:feed:v2:pub:%s:p%d:s%d", typ, page, pageSize)
 		if b, err := s.rdb.Get(context.Background(), feedCacheKey).Bytes(); err == nil && len(b) > 0 {
-			var cached map[string]interface{}
-			if json.Unmarshal(b, &cached) == nil && cached != nil {
-				writeJSON(ctx.Response(), 200, cached)
-				return nil
+			var cached pb.ActivityFeedRes
+			if err := protojson.Unmarshal(b, &cached); err == nil {
+				return &cached, nil
 			}
 		}
 	}
@@ -1080,32 +985,31 @@ func (s *CommunityService) handleActivityFeed(ctx khttp.Context) error {
 	var list []model.ActivityFeed
 	if publicView {
 		// 同一内容可能因多 org 行写过多条：按 type+ref_id 取最大 id
-		idSub := s.db.Model(&model.ActivityFeed{}).Select("MAX(id)")
+		idSub := s.db.WithContext(ctx).Model(&model.ActivityFeed{}).Select("MAX(id)")
 		if typ == model.ActivityTypeComment || typ == model.ActivityTypeSolution {
 			idSub = idSub.Where("type = ?", typ)
 		}
 		idSub = idSub.Group("type, ref_id")
-		q := s.db.Model(&model.ActivityFeed{}).Where("id IN (?)", idSub)
+		q := s.db.WithContext(ctx).Model(&model.ActivityFeed{}).Where("id IN (?)", idSub)
 		_ = q.Count(&total).Error
-		_ = s.db.Model(&model.ActivityFeed{}).Where("id IN (?)", idSub).
+		_ = s.db.WithContext(ctx).Model(&model.ActivityFeed{}).Where("id IN (?)", idSub).
 			Order("id desc").Offset((page - 1) * pageSize).Limit(pageSize).Find(&list).Error
 	} else {
 		// 私有域：只看本组织成员的内容（看不到纯公共域外人）；按 type+ref_id 去重
 		memberUIDs := s.privateOrgMemberUIDs(ctx, orgID)
 		if len(memberUIDs) == 0 {
-			writeJSON(ctx.Response(), 200, map[string]interface{}{
-				"success": true, "message": "ok", "list": []interface{}{}, "total": 0, "page": page, "pageSize": pageSize,
-			})
-			return nil
+			return &pb.ActivityFeedRes{
+				Success: true, Message: "ok", List: []*pb.ActivityItem{}, Total: 0, Page: int64(page), PageSize: int64(pageSize),
+			}, nil
 		}
-		idSub := s.db.Model(&model.ActivityFeed{}).Select("MAX(id)").Where("user_id IN ?", memberUIDs)
+		idSub := s.db.WithContext(ctx).Model(&model.ActivityFeed{}).Select("MAX(id)").Where("user_id IN ?", memberUIDs)
 		if typ == model.ActivityTypeComment || typ == model.ActivityTypeSolution {
 			idSub = idSub.Where("type = ?", typ)
 		}
 		idSub = idSub.Group("type, ref_id")
-		q := s.db.Model(&model.ActivityFeed{}).Where("id IN (?)", idSub)
+		q := s.db.WithContext(ctx).Model(&model.ActivityFeed{}).Where("id IN (?)", idSub)
 		_ = q.Count(&total).Error
-		_ = s.db.Model(&model.ActivityFeed{}).Where("id IN (?)", idSub).
+		_ = s.db.WithContext(ctx).Model(&model.ActivityFeed{}).Where("id IN (?)", idSub).
 			Order("id desc").Offset((page - 1) * pageSize).Limit(pageSize).Find(&list).Error
 	}
 
@@ -1140,12 +1044,12 @@ func (s *CommunityService) handleActivityFeed(ctx khttp.Context) error {
 	solMD := map[uint]string{}
 	if len(solRefIDs) > 0 {
 		var sols []model.ProblemUserSolution
-		_ = s.db.Select("id", "content_md").Where("id IN ?", solRefIDs).Find(&sols).Error
+		_ = s.db.WithContext(ctx).Select("id", "content_md").Where("id IN ?", solRefIDs).Find(&sols).Error
 		for _, sol := range sols {
 			solMD[sol.ID] = sol.ContentMD
 		}
 	}
-	items := make([]map[string]interface{}, 0, len(list))
+	items := make([]*pb.ActivityItem, 0, len(list))
 	for _, a := range list {
 		u := users[a.UserID]
 		p := probs[a.ProblemID]
@@ -1159,37 +1063,36 @@ func (s *CommunityService) handleActivityFeed(ctx khttp.Context) error {
 		} else {
 			ex = blogtext.DefaultSummary(a.Excerpt)
 		}
-		items = append(items, map[string]interface{}{
-			"id":           a.ID,
-			"orgId":        a.OrgID,
-			"userId":       a.UserID,
-			"username":     u.username,
-			"name":         u.name,
-			"avatar":       u.avatar,
-			"type":         a.Type,
-			"refId":        a.RefID,
-			"problemId":    a.ProblemID,
-			"problemTitle": p.title,
-			"platform":     p.platform,
-			"title":        a.Title,
-			"excerpt":      ex,
-			"createdAt":    a.CreatedAt.Unix(),
+		items = append(items, &pb.ActivityItem{
+			Id:           int64(a.ID),
+			OrgId:        int64(a.OrgID),
+			UserId:       int64(a.UserID),
+			Username:     u.username,
+			Name:         u.name,
+			Avatar:       u.avatar,
+			Type:         a.Type,
+			RefId:        int64(a.RefID),
+			ProblemId:    int64(a.ProblemID),
+			ProblemTitle: p.title,
+			Platform:     p.platform,
+			Title:        a.Title,
+			Excerpt:      ex,
+			CreatedAt:    a.CreatedAt.Unix(),
 		})
 	}
-	payload := map[string]interface{}{
-		"success": true, "message": "ok", "list": items, "total": total, "page": page, "pageSize": pageSize,
+	payload := &pb.ActivityFeedRes{
+		Success: true, Message: "ok", List: items, Total: total, Page: int64(page), PageSize: int64(pageSize),
 	}
 	if feedCacheKey != "" && s.rdb != nil {
-		if b, err := json.Marshal(payload); err == nil {
+		if b, err := protojson.Marshal(payload); err == nil {
 			_ = s.rdb.Set(context.Background(), feedCacheKey, b, activityFeedCacheTTL).Err()
 		}
 	}
-	writeJSON(ctx.Response(), 200, payload)
-	return nil
+	return payload, nil
 }
 
 // isPublicOrgID 当前 org 是否为系统公共域。
-func (s *CommunityService) isPublicOrgID(ctx khttp.Context, orgID uint) bool {
+func (s *CommunityService) isPublicOrgID(ctx context.Context, orgID uint) bool {
 	if orgID == 0 {
 		return true
 	}
@@ -1227,7 +1130,7 @@ func (s *CommunityService) authorOrgIDs(userID, fallbackOrgID uint) []uint {
 }
 
 // privateOrgMemberUIDs 私有域成员 userId 列表（RPC）；失败时回落空（fail-closed）。
-func (s *CommunityService) privateOrgMemberUIDs(ctx khttp.Context, orgID uint) []uint {
+func (s *CommunityService) privateOrgMemberUIDs(ctx context.Context, orgID uint) []uint {
 	if orgID == 0 {
 		return nil
 	}
@@ -1253,18 +1156,20 @@ func (s *CommunityService) privateOrgMemberUIDs(ctx khttp.Context, orgID uint) [
 
 // ---------- profile recent ----------
 
-func (s *CommunityService) handleUserRecentComments(ctx khttp.Context) error {
-	uid := queryUint(ctx, "userId")
+func (s *CommunityService) UserRecentComments(ctx context.Context, req *pb.UserRecentCommentsReq) (*pb.UserRecentCommentsRes, error) {
+	uid := uint(req.UserId)
 	if uid == 0 {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"success": false, "message": "缺少用户"})
-		return nil
+		return &pb.UserRecentCommentsRes{Success: false, Message: "缺少用户"}, nil
 	}
-	limit := queryInt(ctx, "limit", 10)
+	limit := int(req.Limit)
+	if limit <= 0 {
+		limit = 10
+	}
 	if limit > 50 {
 		limit = 50
 	}
 	var list []model.ProblemComment
-	_ = s.db.Where("user_id = ?", uid).Order("id desc").Limit(limit).Find(&list).Error
+	_ = s.db.WithContext(ctx).Where("user_id = ?", uid).Order("id desc").Limit(limit).Find(&list).Error
 	pids := make([]uint, 0, len(list))
 	seen := map[uint]struct{}{}
 	for _, c := range list {
@@ -1274,30 +1179,35 @@ func (s *CommunityService) handleUserRecentComments(ctx khttp.Context) error {
 		}
 	}
 	probs := s.batchProblems(pids)
-	items := make([]map[string]interface{}, 0, len(list))
+	items := make([]*pb.RecentCommentItem, 0, len(list))
 	for _, c := range list {
 		p := probs[c.ProblemID]
-		items = append(items, map[string]interface{}{
-			"id": c.ID, "problemId": c.ProblemID, "problemTitle": p.title, "platform": p.platform,
-			"content": c.Content, "createdAt": c.CreatedAt.Unix(),
+		items = append(items, &pb.RecentCommentItem{
+			Id:           int64(c.ID),
+			ProblemId:    int64(c.ProblemID),
+			ProblemTitle: p.title,
+			Platform:     p.platform,
+			Content:      c.Content,
+			CreatedAt:    c.CreatedAt.Unix(),
 		})
 	}
-	writeJSON(ctx.Response(), 200, map[string]interface{}{"success": true, "message": "ok", "list": items})
-	return nil
+	return &pb.UserRecentCommentsRes{Success: true, Message: "ok", List: items}, nil
 }
 
-func (s *CommunityService) handleUserRecentSolutions(ctx khttp.Context) error {
-	uid := queryUint(ctx, "userId")
+func (s *CommunityService) UserRecentSolutions(ctx context.Context, req *pb.UserRecentSolutionsReq) (*pb.UserRecentSolutionsRes, error) {
+	uid := uint(req.UserId)
 	if uid == 0 {
-		writeJSON(ctx.Response(), 400, map[string]interface{}{"success": false, "message": "缺少用户"})
-		return nil
+		return &pb.UserRecentSolutionsRes{Success: false, Message: "缺少用户"}, nil
 	}
-	limit := queryInt(ctx, "limit", 10)
+	limit := int(req.Limit)
+	if limit <= 0 {
+		limit = 10
+	}
 	if limit > 50 {
 		limit = 50
 	}
 	var list []model.ProblemUserSolution
-	_ = s.db.Where("user_id = ?", uid).Order("id desc").Limit(limit).Find(&list).Error
+	_ = s.db.WithContext(ctx).Where("user_id = ?", uid).Order("id desc").Limit(limit).Find(&list).Error
 	pids := make([]uint, 0, len(list))
 	seen := map[uint]struct{}{}
 	for _, sol := range list {
@@ -1307,17 +1217,20 @@ func (s *CommunityService) handleUserRecentSolutions(ctx khttp.Context) error {
 		}
 	}
 	probs := s.batchProblems(pids)
-	items := make([]map[string]interface{}, 0, len(list))
+	items := make([]*pb.RecentSolutionItem, 0, len(list))
 	for _, sol := range list {
 		p := probs[sol.ProblemID]
-		items = append(items, map[string]interface{}{
-			"id": sol.ID, "problemId": sol.ProblemID, "problemTitle": p.title, "platform": p.platform,
-			"title": sol.Title, "excerpt": blogtext.DefaultSummary(sol.ContentMD),
-			"createdAt": sol.CreatedAt.Unix(),
+		items = append(items, &pb.RecentSolutionItem{
+			Id:           int64(sol.ID),
+			ProblemId:    int64(sol.ProblemID),
+			ProblemTitle: p.title,
+			Platform:     p.platform,
+			Title:        sol.Title,
+			Excerpt:      blogtext.DefaultSummary(sol.ContentMD),
+			CreatedAt:    sol.CreatedAt.Unix(),
 		})
 	}
-	writeJSON(ctx.Response(), 200, map[string]interface{}{"success": true, "message": "ok", "list": items})
-	return nil
+	return &pb.UserRecentSolutionsRes{Success: true, Message: "ok", List: items}, nil
 }
 
 // syncSolutionToBlog 将题解写入个人博客默认分类；失败仅打日志。
@@ -1366,7 +1279,7 @@ func (s *CommunityService) mirrorSolutionCountersToBlog(sol *model.ProblemUserSo
 }
 
 // recordSolutionUV returns true if this visitor is new for the solution.
-func (s *CommunityService) recordSolutionUV(ctx khttp.Context, solutionID, viewerID uint) bool {
+func (s *CommunityService) recordSolutionUV(ctx context.Context, solutionID, viewerID uint) bool {
 	if solutionID == 0 {
 		return false
 	}
@@ -1384,24 +1297,28 @@ func (s *CommunityService) recordSolutionUV(ctx khttp.Context, solutionID, viewe
 	return true
 }
 
-func communityVisitorKey(ctx khttp.Context, viewerID uint) string {
+func communityVisitorKey(ctx context.Context, viewerID uint) string {
 	if viewerID > 0 {
 		return fmt.Sprintf("u:%d", viewerID)
 	}
-	if c, err := ctx.Request().Cookie("goalgo_vid"); err == nil && c != nil {
+	r, ok := khttp.RequestFromServerContext(ctx)
+	if !ok || r == nil {
+		return "a:anon"
+	}
+	if c, err := r.Cookie("goalgo_vid"); err == nil && c != nil {
 		v := strings.TrimSpace(c.Value)
 		if v != "" && len(v) <= 64 {
 			return "v:" + v
 		}
 	}
-	if h := strings.TrimSpace(ctx.Request().Header.Get("X-Visitor-Id")); h != "" && len(h) <= 64 {
+	if h := strings.TrimSpace(r.Header.Get("X-Visitor-Id")); h != "" && len(h) <= 64 {
 		return "v:" + h
 	}
-	ip := ctx.Request().Header.Get("X-Forwarded-For")
+	ip := r.Header.Get("X-Forwarded-For")
 	if ip == "" {
-		ip = ctx.Request().RemoteAddr
+		ip = r.RemoteAddr
 	}
-	ua := ctx.Request().UserAgent()
+	ua := r.UserAgent()
 	sum := sha256.Sum256([]byte(ip + "|" + ua))
 	return "a:" + hex.EncodeToString(sum[:8])
 }
@@ -1482,29 +1399,29 @@ func (s *CommunityService) blogSlugFor(sol model.ProblemUserSolution) (string, b
 
 // ---------- helpers ----------
 
-func (s *CommunityService) commentToMap(c model.ProblemComment, users map[uint]userBrief, likedSet map[uint]bool) map[string]interface{} {
+func (s *CommunityService) commentToMap(c model.ProblemComment, users map[uint]userBrief, likedSet map[uint]bool) *pb.CommentItem {
 	u := users[c.UserID]
-	m := map[string]interface{}{
-		"id":         c.ID,
-		"problemId":  c.ProblemID,
-		"solutionId": c.SolutionID,
-		"userId":     c.UserID,
-		"username":   u.username,
-		"name":       u.name,
-		"avatar":     u.avatar,
-		"content":    c.Content,
-		"parentId":   c.ParentID,
-		"rootId":     c.RootID,
-		"depth":      c.Depth,
-		"likeCount":  c.LikeCount,
-		"liked":      likedSet[c.ID],
-		"createdAt":  c.CreatedAt.Unix(),
+	m := &pb.CommentItem{
+		Id:         int64(c.ID),
+		ProblemId:  int64(c.ProblemID),
+		SolutionId: int64(c.SolutionID),
+		UserId:     int64(c.UserID),
+		Username:   u.username,
+		Name:       u.name,
+		Avatar:     u.avatar,
+		Content:    c.Content,
+		ParentId:   int64(c.ParentID),
+		RootId:     int64(c.RootID),
+		Depth:      int32(c.Depth),
+		LikeCount:  int32(c.LikeCount),
+		Liked:      likedSet[c.ID],
+		CreatedAt:  c.CreatedAt.Unix(),
 	}
 	if c.ReplyToUserID > 0 {
 		ru := users[c.ReplyToUserID]
-		m["replyToUserId"] = c.ReplyToUserID
-		m["replyToUsername"] = ru.username
-		m["replyToName"] = ru.name
+		m.ReplyToUserId = int64(c.ReplyToUserID)
+		m.ReplyToUsername = ru.username
+		m.ReplyToName = ru.name
 	}
 	return m
 }
@@ -1668,7 +1585,7 @@ func (s *CommunityService) readLikeCount(tt string, id uint) int {
 }
 
 // resolvePublicOrgID 通过 user 服务 GetUserIdsByOrg(0) 回落得到公共域 orgId。
-func (s *CommunityService) resolvePublicOrgID(ctx khttp.Context) uint {
+func (s *CommunityService) resolvePublicOrgID(ctx context.Context) uint {
 	if s.reg == nil {
 		return 0
 	}
@@ -1699,7 +1616,7 @@ func (s *CommunityService) problemExists(id uint) bool {
 	return n > 0
 }
 
-func (s *CommunityService) batchUsers(ctx khttp.Context, ids []uint) map[uint]userBrief {
+func (s *CommunityService) batchUsers(ctx context.Context, ids []uint) map[uint]userBrief {
 	out := map[uint]userBrief{}
 	if len(ids) == 0 || s.reg == nil {
 		return out
@@ -1747,7 +1664,7 @@ func (s *CommunityService) batchProblems(ids []uint) map[uint]probBrief {
 	return out
 }
 
-func (s *CommunityService) emitMentions(ctx khttp.Context, actorID uint, actorName, text, refType string, refID, problemID uint) {
+func (s *CommunityService) emitMentions(ctx context.Context, actorID uint, actorName, text, refType string, refID, problemID uint) {
 	names := notify.ExtractMentions(text)
 	if len(names) == 0 {
 		return
@@ -1787,7 +1704,7 @@ func (s *CommunityService) emitMentions(ctx khttp.Context, actorID uint, actorNa
 	}
 }
 
-func (s *CommunityService) resolveUsernames(ctx khttp.Context, names []string) map[string]uint {
+func (s *CommunityService) resolveUsernames(ctx context.Context, names []string) map[string]uint {
 	out := map[string]uint{}
 	if s.reg == nil {
 		return out
@@ -1854,67 +1771,3 @@ func truncateRunes(s string, max int) string {
 	}
 	return string(rs[:max]) + "…"
 }
-
-func queryUint(ctx khttp.Context, key string) uint {
-	v := strings.TrimSpace(ctx.Query().Get(key))
-	if v == "" {
-		return 0
-	}
-	n, err := strconv.ParseUint(v, 10, 64)
-	if err != nil {
-		return 0
-	}
-	return uint(n)
-}
-
-func queryInt(ctx khttp.Context, key string, def int) int {
-	v := strings.TrimSpace(ctx.Query().Get(key))
-	if v == "" {
-		return def
-	}
-	n, err := strconv.Atoi(v)
-	if err != nil || n <= 0 {
-		return def
-	}
-	return n
-}
-
-func pageParams(ctx khttp.Context, defPage, defSize, maxSize int) (page, pageSize int) {
-	page = defPage
-	pageSize = defSize
-	if v := strings.TrimSpace(ctx.Query().Get("page")); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			page = n
-		}
-	}
-	if v := strings.TrimSpace(ctx.Query().Get("pageSize")); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			pageSize = n
-		}
-	}
-	if pageSize > maxSize {
-		pageSize = maxSize
-	}
-	return
-}
-
-func writeJSON(w http.ResponseWriter, status int, v interface{}) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(v)
-}
-
-func readJSONBody(r *http.Request, dst interface{}) error {
-	defer r.Body.Close()
-	body, err := io.ReadAll(io.LimitReader(r.Body, 2<<20))
-	if err != nil {
-		return err
-	}
-	if len(body) == 0 {
-		return nil
-	}
-	return json.Unmarshal(body, dst)
-}
-
-// silence unused if any
-var _ = time.Now
