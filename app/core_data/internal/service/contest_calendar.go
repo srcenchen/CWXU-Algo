@@ -10,7 +10,9 @@ import (
 	"cwxu-algo/api/core/v1/contest_calendar"
 	"cwxu-algo/api/user/v1/profile"
 	"cwxu-algo/app/common/discovery"
+	"cwxu-algo/app/common/event"
 	mailpkg "cwxu-algo/app/common/mail"
+	"cwxu-algo/app/common/mailqueue"
 	"cwxu-algo/app/common/sitesettings"
 	"cwxu-algo/app/common/utils/auth"
 	"cwxu-algo/app/core_data/internal/data"
@@ -29,10 +31,11 @@ type ContestCalendarService struct {
 	dal  *dal.ContestCalendarDal
 	reg  *discovery.Register
 	data *data.Data
+	mq   *event.RabbitMQ
 }
 
-func NewContestCalendarService(calDal *dal.ContestCalendarDal, reg *discovery.Register, d *data.Data) *ContestCalendarService {
-	return &ContestCalendarService{dal: calDal, reg: reg, data: d}
+func NewContestCalendarService(calDal *dal.ContestCalendarDal, reg *discovery.Register, d *data.Data, mq *event.RabbitMQ) *ContestCalendarService {
+	return &ContestCalendarService{dal: calDal, reg: reg, data: d, mq: mq}
 }
 
 func (s *ContestCalendarService) toItem(m *model.ContestCalendar, subscribed bool) *contest_calendar.CalendarItem {
@@ -365,11 +368,12 @@ func (s *ContestCalendarService) sendSubscribeConfirmMail(
 		Title:     "比赛提醒订阅成功",
 		Preheader: "你已成功订阅比赛邮件提醒",
 	}, inner)
-	if err := sender.Send(to, subject, body); err != nil {
-		log.Warnf("UpsertSub confirm mail FAIL to=%s user=%d: %v", to, sub.UserID, err)
+	// 异步入队：SMTP 发送由 mail consumer 消费，不再阻塞订阅接口
+	if !mailqueue.Enqueue(s.mq, to, subject, body) {
+		log.Warnf("UpsertSub confirm mail enqueue FAIL to=%s user=%d", to, sub.UserID)
 		return
 	}
-	log.Infof("UpsertSub confirm mail OK to=%s user=%d scope=%s", to, sub.UserID, sub.Scope)
+	log.Infof("UpsertSub confirm mail enqueued to=%s user=%d scope=%s", to, sub.UserID, sub.Scope)
 }
 
 func formatAdvanceMinutes(m int) string {

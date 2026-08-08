@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"cwxu-algo/app/common/mail"
+	"cwxu-algo/app/common/mailqueue"
 	"cwxu-algo/app/common/notify"
 	"cwxu-algo/app/core_data/internal/data/dal"
 	"cwxu-algo/app/core_data/internal/data/model"
@@ -485,8 +486,11 @@ func (uc *ProblemUseCase) notifyProblemEditResult(req *model.ProblemEditRequest,
 	}
 	mailHTML := problemEditThankYouEmailHTML(uc.data.DB, req, note)
 	mailSubj := "感谢你的内容贡献 · 已生效"
-	if !notify.EmailUser(uc.data.UserDB, req.UserID, mailSubj, mailHTML) {
-		log.Warnf("notifyProblemEditResult: approval email skipped or failed user=%d", req.UserID)
+	// 异步入队：SMTP 发送由 mail consumer 消费，不再阻塞审核接口
+	if to := notify.LookupUserEmail(uc.data.UserDB, req.UserID); to != "" {
+		if !mailqueue.Enqueue(uc.mq, to, mailSubj, mailHTML) {
+			log.Warnf("notifyProblemEditResult: approval email enqueue failed user=%d", req.UserID)
+		}
 	}
 }
 
