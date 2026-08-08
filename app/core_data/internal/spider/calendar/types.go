@@ -31,6 +31,12 @@ func NormalizePlatform(raw string) string {
 		return "LuoGu"
 	case "qoj":
 		return "QOJ"
+	case "loj":
+		return "LOJ"
+	case "uoj":
+		return "UOJ"
+	case "poj":
+		return "POJ"
 	default:
 		return strings.TrimSpace(raw)
 	}

@@ -18,6 +18,7 @@ import (
 	"cwxu-algo/app/core_data/internal/data/dal"
 	"cwxu-algo/app/core_data/internal/data/model"
 	spiderregistry "cwxu-algo/app/core_data/internal/spider"
+	calspider "cwxu-algo/app/core_data/internal/spider/calendar"
 	"cwxu-algo/app/core_data/task"
 
 	"github.com/go-kratos/kratos/v2/errors"
@@ -639,7 +640,8 @@ func (s SpiderService) GetSpiderMonitor(ctx context.Context, _ *spider.SpiderMon
 		return &spider.SpiderMonitorRes{Code: 1, Message: "需要查看站点配置权限"}, nil
 	}
 
-	// DB 按平台一次 GROUP BY（空库/无该平台行 → 计 0）
+	// DB 按平台一次 GROUP BY（空库/无该平台行 → 计 0）；平台名归一化，
+	// 兼容日历里 cpolar 小写 id（uoj 等），避免与 ojCaps 规范名对不上
 	countBy := func(table string) map[string]int64 {
 		out := make(map[string]int64)
 		if s.db == nil {
@@ -657,14 +659,35 @@ func (s SpiderService) GetSpiderMonitor(ctx context.Context, _ *spider.SpiderMon
 			return out
 		}
 		for _, r := range rows {
-			out[r.Platform] = r.N
+			out[calspider.NormalizePlatform(r.Platform)] += r.N
 		}
 		return out
 	}
 	boundBy := countBy("platforms")
 	submitBy := countBy("submit_logs")
 	problemBy := countBy("problems")
-	contestBy := countBy("contest_calendars")
+	// 比赛数：与「比赛页（组织内出现过的比赛）」同源 contest_logs，按 平台+比赛 去重；
+	// 原用 contest_calendars（公开赛程日历，12h 爬一次、7 天前自动清理），数字波动且与参赛记录口径对不上
+	contestBy := func() map[string]int64 {
+		out := make(map[string]int64)
+		if s.db == nil {
+			return out
+		}
+		type row struct {
+			Platform string
+		}
+		var rows []row
+		if err := s.db.WithContext(ctx).Table("contest_logs").
+			Select("DISTINCT platform, contest_id").
+			Scan(&rows).Error; err != nil {
+			log.Warnf("GetSpiderMonitor: count contest_logs: %v", err)
+			return out
+		}
+		for _, r := range rows {
+			out[calspider.NormalizePlatform(r.Platform)]++
+		}
+		return out
+	}()
 
 	// 账号状态只取一次（洛谷/QOJ）
 	accountStatus := sitesettings.GetAllServiceStatus(ctx, s.rdb)

@@ -286,9 +286,24 @@ func (s *HealthService) collectCapacity(ctx context.Context, resources []*health
 	}
 	snap := opsmetrics.ReadSnapshot(ctx, s.rdb)
 	mau = snap.MAU
-	if day := currentDayVisit(ctx, s.udb); day != nil {
-		todayPV = day.PV
-		todayUV = day.UV
+	// 今日 UV/PV：当天数据在 user 服务的 Redis 日桶（visit:pv:YYYYMMDD / visit:uvset:YYYYMMDD），
+	// site_visit_dailys 只固化到昨天，直接查表当天恒为 0，故 Redis 优先、DB 兜底。
+	if s.rdb != nil {
+		day := time.Now().In(visitStatLoc).Format("20060102")
+		if v, err := s.rdb.Get(ctx, "visit:pv:"+day).Int64(); err == nil {
+			todayPV = v
+		}
+		if n, err := s.rdb.SCard(ctx, "visit:uvset:"+day).Result(); err == nil && n > 0 {
+			todayUV = n
+		} else if n, err := s.rdb.PFCount(ctx, "visit:uv:"+day).Result(); err == nil {
+			todayUV = n
+		}
+	}
+	if todayPV == 0 && todayUV == 0 {
+		if day := currentDayVisit(ctx, s.udb); day != nil {
+			todayPV = day.PV
+			todayUV = day.UV
+		}
 	}
 
 	// 存储：磁盘总量 + 已用；再做「用户均摊」估算
@@ -420,6 +435,15 @@ func amqpHost(dsn string) string {
 	}
 	return s
 }
+
+// visitStatLoc 今日访问统计时区（与 user 服务 visit 日桶一致：Asia/Shanghai）
+var visitStatLoc = func() *time.Location {
+	loc, err := time.LoadLocation("Asia/Shanghai")
+	if err != nil {
+		return time.FixedZone("CST", 8*3600)
+	}
+	return loc
+}()
 
 // DayVisitStat 轻量读取今日 UV/PV（algo_user.site_visit_dailys）
 type dayVisitStat struct {
