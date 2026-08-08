@@ -847,8 +847,8 @@ func manualRefreshKeyTTL() time.Duration {
 	return time.Until(next) + time.Minute
 }
 
-// RefreshSpider 用户手动增量刷新自己的 OJ 做题记录（每日限 manualRefreshDailyLimit 次）。
-// 计数用 Redis INCR 原子自增；超出限额返回剩余 0 并拒绝入队。
+// RefreshSpider 用户手动增量刷新自己的 OJ 做题记录（每日限 manualRefreshDailyLimit 次；
+// 且 5 分钟内仅允许一次）。计数用 Redis INCR 原子自增；超出限额返回剩余 0 并拒绝入队。
 func (s SpiderService) RefreshSpider(ctx context.Context, _ *spider.RefreshSpiderReq) (*spider.RefreshSpiderRes, error) {
 	uid := auth.GetCurrentUserId(ctx)
 	if uid == 0 {
@@ -858,14 +858,36 @@ func (s SpiderService) RefreshSpider(ctx context.Context, _ *spider.RefreshSpide
 		return &spider.RefreshSpiderRes{Code: 1, Message: "服务未就绪，稍后再试"}, nil
 	}
 	day := time.Now().In(manualRefreshLoc).Format("20060102")
-	key := fmt.Sprintf("spider:manual_refresh:%d:%s", uid, day)
-	used, err := s.rdb.Incr(ctx, key).Result()
+	dayKey := fmt.Sprintf("spider:manual_refresh:%d:%s", uid, day)
+
+	// 1) 5 分钟间隔限流（SETNX 原子占位，失败不消耗每日次数）
+	intervalKey := fmt.Sprintf("spider:manual_refresh_interval:%d", uid)
+	ok, err := s.rdb.SetNX(ctx, intervalKey, "1", 5*time.Minute).Result()
+	if err != nil {
+		log.Warnf("RefreshSpider setnx user=%d: %v", uid, err)
+		return &spider.RefreshSpiderRes{Code: 1, Message: "刷新失败，稍后再试"}, nil
+	}
+	if !ok {
+		used, _ := s.rdb.Get(ctx, dayKey).Int64()
+		remaining := manualRefreshDailyLimit - int(used)
+		if remaining < 0 {
+			remaining = 0
+		}
+		return &spider.RefreshSpiderRes{
+			Code:      1,
+			Message:   "刷新太频繁，5 分钟内只能刷新一次",
+			Remaining: int32(remaining),
+		}, nil
+	}
+
+	// 2) 每日次数计数
+	used, err := s.rdb.Incr(ctx, dayKey).Result()
 	if err != nil {
 		log.Warnf("RefreshSpider incr user=%d: %v", uid, err)
 		return &spider.RefreshSpiderRes{Code: 1, Message: "刷新失败，稍后再试"}, nil
 	}
 	if used == 1 {
-		_ = s.rdb.Expire(ctx, key, manualRefreshKeyTTL()).Err()
+		_ = s.rdb.Expire(ctx, dayKey, manualRefreshKeyTTL()).Err()
 	}
 	remaining := manualRefreshDailyLimit - int(used)
 	if remaining < 0 {
