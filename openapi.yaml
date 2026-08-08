@@ -7704,7 +7704,7 @@ components:
                     type: boolean
                 containsProblem:
                     type: boolean
-                    description: 仅 mine 接口带 problemId 时输出：本题是否已在该题单
+                    description: 仅 mine 接口带 problemId 时输出：本题是否已在该题单（optional：未请求时整键省略）
         api.core.v1.problemset.ProblemsetItem:
             type: object
             properties:
