@@ -29,6 +29,46 @@ const (
 	luoguLoginBaseDelay = 500 * time.Millisecond
 )
 
+// luoguLanguageName 洛谷提交记录 language 字段（整数 ID）→ 语言名。
+// 数据源：洛谷 GET /_lfe/config 的 codeLanguages（2026-08-08 实时抓取，34 项）。
+// 仅作展示用；未知 ID 由调用方兜底为 "Others"。
+var luoguLanguageName = map[int]string{
+	1:  "Pascal",
+	2:  "C",
+	3:  "C++98",
+	4:  "C++11",
+	5:  "提交答案",
+	6:  "Python 2",
+	7:  "Python 3",
+	8:  "Java 8",
+	9:  "Node.js LTS",
+	10: "Shell",
+	11: "C++14",
+	12: "C++17",
+	13: "Ruby",
+	14: "Go",
+	15: "Rust",
+	16: "PHP",
+	17: "C# Mono",
+	18: "Visual Basic Mono",
+	19: "Haskell",
+	20: "Kotlin/Native",
+	21: "Kotlin/JVM",
+	22: "Scala",
+	23: "Perl",
+	24: "PyPy 2",
+	25: "PyPy 3",
+	26: "文言",
+	27: "C++20",
+	28: "C++14 (GCC 9)",
+	29: "F#.NET",
+	30: "OCaml",
+	31: "Julia",
+	32: "Lua",
+	33: "Java 21",
+	34: "C++23",
+}
+
 type NewLuoGu struct {
 	mu       sync.RWMutex
 	client   *http.Client
@@ -310,8 +350,8 @@ func (lg *NewLuoGu) FetchSubmitLog(ctx context.Context, userId int64, username s
 		} else {
 			status = "AC"
 		}
-		if sub.Language == 34 {
-			lang = "C++"
+		if name, ok := luoguLanguageName[sub.Language]; ok {
+			lang = name
 		} else {
 			lang = "Others"
 		}
