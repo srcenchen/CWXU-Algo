@@ -82,6 +82,26 @@ func queryInt32(ctx context.Context, keys ...string) int32 {
 	return 0
 }
 
+// activeSubTier 用户当前有效订阅档（过期返回空，惰性回落）
+func activeSubTier(u model.User) string {
+	tier := strings.TrimSpace(u.SubTier)
+	if tier == "" {
+		return ""
+	}
+	if u.SubExpireAt != nil && !u.SubExpireAt.After(time.Now()) {
+		return ""
+	}
+	return tier
+}
+
+// subExpireAtUnix 订阅到期 unix 秒（未订阅/长期返回 0）
+func subExpireAtUnix(u model.User) int64 {
+	if u.SubExpireAt == nil {
+		return 0
+	}
+	return u.SubExpireAt.Unix()
+}
+
 // 与 auth 包校验规则一致
 var profileEmailRe = regexp.MustCompile(`^[^\s@]+@[^\s@]+\.[^\s@]+$`)
 
@@ -350,6 +370,8 @@ func (p *ProfileService) GetList(ctx context.Context, req *profile.GetListReq) (
 			AiSummaryIntervalOverridden: v.AISummaryIntervalMinOverride != nil && *v.AISummaryIntervalMinOverride > 0,
 			DailyRefreshQuota:           refreshQuota,
 			DailyRefreshQuotaOverridden: refreshQuotaOverridden,
+			SubTier:                     activeSubTier(v),
+			SubExpireAt:                 subExpireAtUnix(v),
 			SyncExempt:                  v.SyncExempt,
 			AdminForceDormant:           v.AdminForceDormant,
 			Disabled:                    v.Disabled,
@@ -442,6 +464,19 @@ func (p *ProfileService) Update(ctx context.Context, req *profile.UpdateReq) (*p
 	}
 	if err := p.profileDal.UpdateAvatarEmail(ctx, pro, emailChanged); err != nil {
 		return nil, errors.InternalServer("内部错误", err.Error())
+	}
+	// AI 日报开关（仅 Pro 订阅 active 可开；默认关；省略=不改）
+	if req.AiDailyEnabled != nil {
+		enabled := req.GetAiDailyEnabled()
+		if enabled {
+			tier, active := p.profileDal.SubscriptionTier(ctx, int64(req.UserId))
+			if !active || tier != "pro" {
+				return &profile.UpdateRes{Code: 7, Message: "AI 日报仅 Pro 会员可用"}, nil
+			}
+		}
+		if err := p.profileDal.UpdateAIDailyEnabled(ctx, int64(req.UserId), enabled); err != nil {
+			return nil, errors.InternalServer("内部错误", err.Error())
+		}
 	}
 	// 换头像后删除旧头像对象（又拍云对象 / 旧本地文件），尽力而为
 	deleteStaleAvatar(p.db, oldAvatar, newAvatar)
@@ -600,6 +635,7 @@ func (p *ProfileService) buildGetByIdRes(ctx context.Context, pf *model.User) (*
 	}
 	if canViewPrivate {
 		reply.Email = pf.Email
+		reply.AiDailyEnabled = pf.AIDailyEnabled
 		if pd := auth.GetCurrentUser(ctx); pd != nil {
 			reply.GroupId = p.profileDal.GroupIDForOrg(ctx, int64(pf.ID), pd.OrgID)
 		}
@@ -670,6 +706,7 @@ func (p *ProfileService) GetSyncPolicies(ctx context.Context, req *profile.GetSy
 			SpiderIntervalMin:    int32(v.SpiderIntervalMin),
 			AiSummaryIntervalMin: int32(v.AISummaryIntervalMin),
 			SyncActive:           v.SyncActive,
+			AiDailyEmailEnabled:  v.AIDailyEmailEnabled,
 		})
 	}
 	return res, nil

@@ -122,6 +122,8 @@ func (s *SiteService) protectStoredSecrets(ctx context.Context, row *model.SiteC
 		"upyun_password":    &row.UpyunPassword,
 		"oj_luogu_password": &row.OjLuoguPassword,
 		"oj_qoj_password":   &row.OjQojPassword,
+		"alipay_private_key": &row.AlipayPrivateKey,
+		"alipay_public_key":  &row.AlipayPublicKey,
 	}
 	updates := make(map[string]interface{})
 	for column, value := range values {
@@ -187,6 +189,10 @@ func rowToRuntime(row *model.SiteConfig) *sitesettings.Runtime {
 		OjQojPassword:     decrypt(row.OjQojPassword),
 		OpsNotifyEmails:   strings.TrimSpace(row.OpsNotifyEmails),
 		DataDiskPath:      strings.TrimSpace(row.DataDiskPath),
+		AlipayAppID:       strings.TrimSpace(row.AlipayAppID),
+		AlipayPrivateKey:  decrypt(row.AlipayPrivateKey),
+		AlipayPublicKey:   decrypt(row.AlipayPublicKey),
+		AlipaySandbox:     row.AlipaySandbox,
 	}
 }
 
@@ -275,6 +281,12 @@ func (s *SiteService) GetAdminConfig(ctx context.Context, _ *site.GetAdminConfig
 		SmtpErrMsg:            smtpSt.ErrMsg,
 		OpsNotifyEmails:       row.OpsNotifyEmails,
 		DataDiskPath:          strings.TrimSpace(row.DataDiskPath),
+		AlipayAppId:           strings.TrimSpace(row.AlipayAppID),
+		AlipayPrivateKeyMasked: sitesettings.MaskSecret(decryptSiteSecret(row.AlipayPrivateKey)),
+		AlipayPrivateKeySet:   strings.TrimSpace(decryptSiteSecret(row.AlipayPrivateKey)) != "",
+		AlipayPublicKeyMasked: sitesettings.MaskSecret(decryptSiteSecret(row.AlipayPublicKey)),
+		AlipayPublicKeySet:    strings.TrimSpace(decryptSiteSecret(row.AlipayPublicKey)) != "",
+		AlipaySandbox:         row.AlipaySandbox,
 	}, nil
 }
 
@@ -336,6 +348,11 @@ func (s *SiteService) UpdateConfig(ctx context.Context, req *site.UpdateConfigRe
 	updates["upyun_scheme"] = strings.TrimSpace(req.UpyunScheme)
 	updates["oj_luogu_username"] = strings.TrimSpace(req.OjLuoguUsername)
 	updates["oj_qoj_username"] = strings.TrimSpace(req.OjQojUsername)
+	// 支付宝：app_id / 沙箱始终覆盖保存（沙箱需 set_alipay_sandbox 才写，避免表单未携带时误关）
+	updates["alipay_app_id"] = strings.TrimSpace(req.AlipayAppId)
+	if req.SetAlipaySandbox {
+		updates["alipay_sandbox"] = req.AlipaySandbox
+	}
 
 	if req.ClearSmtpPassword {
 		updates["smtp_password"] = ""
@@ -396,6 +413,26 @@ func (s *SiteService) UpdateConfig(ctx context.Context, req *site.UpdateConfigRe
 			return &site.UpdateConfigRes{Code: 1, Message: "服务器尚未配置配置加密密钥"}, nil
 		}
 		updates["oj_qoj_password"] = encrypted
+	}
+	if req.ClearAlipayPrivateKey {
+		updates["alipay_private_key"] = ""
+	} else if isRealSecret(req.AlipayPrivateKey) {
+		encrypted, encryptErr := secretutil.Encrypt(req.AlipayPrivateKey)
+		if encryptErr != nil {
+			log.Errorf("encrypt alipay private key: %v", encryptErr)
+			return &site.UpdateConfigRes{Code: 1, Message: "服务器尚未配置配置加密密钥"}, nil
+		}
+		updates["alipay_private_key"] = encrypted
+	}
+	if req.ClearAlipayPublicKey {
+		updates["alipay_public_key"] = ""
+	} else if isRealSecret(req.AlipayPublicKey) {
+		encrypted, encryptErr := secretutil.Encrypt(req.AlipayPublicKey)
+		if encryptErr != nil {
+			log.Errorf("encrypt alipay public key: %v", encryptErr)
+			return &site.UpdateConfigRes{Code: 1, Message: "服务器尚未配置配置加密密钥"}, nil
+		}
+		updates["alipay_public_key"] = encrypted
 	}
 
 	if e := s.data.DB.WithContext(ctx).Model(&model.SiteConfig{}).Where("id = ?", 1).Updates(updates).Error; e != nil {

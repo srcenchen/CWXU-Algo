@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"cwxu-algo/api/user/v1/profile"
+	"cwxu-algo/api/user/v1/subscription"
 
 	"github.com/go-kratos/kratos/v2/registry"
 	"github.com/go-kratos/kratos/v2/transport/grpc"
@@ -55,4 +56,13 @@ func ProfileClient(reg *registry.Registrar) (profile.ProfileClient, error) {
 		return nil, err
 	}
 	return profile.NewProfileClient(c), nil
+}
+
+// SubscriptionClient 复用长连接的 SubscriptionClient（AI 分析配额等）。调用方不要 Close 底层连接。
+func SubscriptionClient(reg *registry.Registrar) (subscription.SubscriptionClient, error) {
+	c, err := Conn(reg)
+	if err != nil {
+		return nil, err
+	}
+	return subscription.NewSubscriptionClient(c), nil
 }

@@ -57,6 +57,11 @@ type Runtime struct {
 	OpsNotifyEmails   string `json:"opsNotifyEmails"`
 	// DataDiskPath 运维磁盘统计目录（数据盘挂载点；空=默认 /data，未挂载回退 /）
 	DataDiskPath string `json:"dataDiskPath"`
+	// 支付宝（C 端订阅在线支付）；私钥/公钥已解密
+	AlipayAppID      string `json:"alipayAppId"`
+	AlipayPrivateKey string `json:"alipayPrivateKey"`
+	AlipayPublicKey  string `json:"alipayPublicKey"`
+	AlipaySandbox    bool   `json:"alipaySandbox"`
 }
 
 // Row 与 site_configs 表对齐（轻量，避免依赖 user/internal）
@@ -94,6 +99,10 @@ type Row struct {
 	SmtpErrMsg        string `gorm:"column:smtp_err_msg"`
 	OpsNotifyEmails   string `gorm:"column:ops_notify_emails"`
 	DataDiskPath      string `gorm:"column:data_disk_path"`
+	AlipayAppID       string `gorm:"column:alipay_app_id"`
+	AlipayPrivateKey  string `gorm:"column:alipay_private_key"`
+	AlipayPublicKey   string `gorm:"column:alipay_public_key"`
+	AlipaySandbox     bool   `gorm:"column:alipay_sandbox"`
 }
 
 func (Row) TableName() string { return "site_configs" }
@@ -150,6 +159,10 @@ func (r *Row) ToRuntime() *Runtime {
 		SmtpErrMsg:        r.SmtpErrMsg,
 		OpsNotifyEmails:   strings.TrimSpace(r.OpsNotifyEmails),
 		DataDiskPath:      strings.TrimSpace(r.DataDiskPath),
+		AlipayAppID:       strings.TrimSpace(r.AlipayAppID),
+		AlipayPrivateKey:  decrypt(r.AlipayPrivateKey),
+		AlipayPublicKey:   decrypt(r.AlipayPublicKey),
+		AlipaySandbox:     r.AlipaySandbox,
 	}
 }
 
@@ -202,6 +215,9 @@ func (rt *Runtime) worthCaching() bool {
 		return true
 	}
 	if strings.TrimSpace(rt.OjLuoguUsername) != "" || strings.TrimSpace(rt.OjQojUsername) != "" {
+		return true
+	}
+	if strings.TrimSpace(rt.AlipayAppID) != "" {
 		return true
 	}
 	return false
@@ -299,6 +315,20 @@ func (rt *Runtime) AiAnalyzeConf() *conf.AiAnalyze {
 		Model:    rt.AiAnalyzeModel,
 		Secret:   rt.AiAnalyzeSecret,
 	}
+}
+
+// AlipayConf 支付宝支付配置（C 端订阅在线支付）。
+// Configured=false 表示未配置（app_id 或私钥为空），下单应报「支付未配置」。
+func (rt *Runtime) AlipayConf() (appID, privateKey, publicKey string, sandbox bool, configured bool) {
+	if rt == nil {
+		return "", "", "", false, false
+	}
+	appID = strings.TrimSpace(rt.AlipayAppID)
+	privateKey = strings.TrimSpace(rt.AlipayPrivateKey)
+	publicKey = strings.TrimSpace(rt.AlipayPublicKey)
+	sandbox = rt.AlipaySandbox
+	configured = appID != "" && privateKey != ""
+	return
 }
 
 // MergeFallback 用 yaml 兜底填空字段（仅迁移期）

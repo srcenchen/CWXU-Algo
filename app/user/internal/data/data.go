@@ -29,6 +29,13 @@ import (
 // 与 sitesettings.RedisTTL 配合：即使缓存被误清/毒缓存被剔除，也会在数分钟内恢复。
 const siteSettingsRefreshInterval = 3 * time.Minute
 
+// paymentOrderCloseInterval 支付订单关单轮询：每 1 分钟关闭超过 5 分钟未支付的订单
+// （GuadArt OrderCloser 移植；closed 后支付宝回调仍可履约，条件更新已覆盖）
+const paymentOrderCloseInterval = time.Minute
+
+// paymentOrderPendingTTL 订单待支付超时时间
+const paymentOrderPendingTTL = 5 * time.Minute
+
 const blogImageMigrationBatchSize = 200
 const blogFixedPageMigrationBatchSize = 100
 
@@ -87,8 +94,10 @@ func NewData(c *conf.Data) (*Data, func(), error) {
 	migrateModels(data.DB)
 	PublishSiteSettings(data)
 	stopRefresh := startSiteSettingsRefresh(data)
+	stopOrderCloser := startPaymentOrderCloser(data)
 	cleanup := func() {
 		stopRefresh()
+		stopOrderCloser()
 		log.Info("closing the data resources")
 		sql, _ := data.DB.DB()
 		sql.Close()
@@ -178,6 +187,8 @@ func migrateModels(db *gorm.DB) {
 		&model.RolePermission{},
 		&model.UserRole{},
 		&model.OrgRolePerm{},
+		&model.SubscriptionPlan{},
+		&model.PaymentOrder{},
 	)
 	if err != nil {
 		panic("数据库：数据库自动合并失败")
@@ -189,6 +200,7 @@ func migrateModels(db *gorm.DB) {
 		panic("数据库：图片上传待审唯一索引迁移失败: " + err.Error())
 	}
 	seedPlanQuotas(db)
+	seedSubscriptionPlans(db)
 	seedGoAlgoFramework(db)
 	seedRbac(db)
 	backfillLastLoginAt(db)
@@ -983,6 +995,42 @@ func startSiteSettingsRefresh(d *Data) func() {
 	return func() { close(stopCh) }
 }
 
+// startPaymentOrderCloser 后台关单：pending 超过 5 分钟置 closed（GuadArt OrderCloser 移植）。
+// closed 后支付宝回调仍可履约（ClaimPaidOrder 条件更新已覆盖 pending/closed）。
+func startPaymentOrderCloser(d *Data) func() {
+	if d == nil || d.DB == nil {
+		return func() {}
+	}
+	stopCh := make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(paymentOrderCloseInterval)
+		defer ticker.Stop()
+		ctx := context.Background()
+		for {
+			select {
+			case <-stopCh:
+				return
+			case <-ticker.C:
+				n, err := closeStalePendingOrders(ctx, d)
+				if err != nil {
+					log.Warnf("payment order closer: %v", err)
+				} else if n > 0 {
+					log.Infof("payment order closer closed %d stale orders", n)
+				}
+			}
+		}
+	}()
+	return func() { close(stopCh) }
+}
+
+// closeStalePendingOrders 关单实现（独立函数便于测试）
+func closeStalePendingOrders(ctx context.Context, d *Data) (int64, error) {
+	res := d.DB.WithContext(ctx).Model(&model.PaymentOrder{}).
+		Where("status = ? AND created_at < ?", model.OrderStatusPending, time.Now().Add(-paymentOrderPendingTTL)).
+		Update("status", model.OrderStatusClosed)
+	return res.RowsAffected, res.Error
+}
+
 // seedPlanQuotas 幂等写入默认套餐配额模板
 func seedPlanQuotas(db *gorm.DB) {
 	defaults := []model.PlanQuota{
@@ -993,6 +1041,25 @@ func seedPlanQuotas(db *gorm.DB) {
 	for _, p := range defaults {
 		var n int64
 		if db.Model(&model.PlanQuota{}).Where("plan = ?", p.Plan).Count(&n); n == 0 {
+			_ = db.Create(&p).Error
+		}
+	}
+}
+
+// seedSubscriptionPlans 幂等 upsert 默认 C 端订阅套餐模板（站管可改；改后以库为准）
+func seedSubscriptionPlans(db *gorm.DB) {
+	if db == nil {
+		return
+	}
+	defaults := []model.SubscriptionPlan{
+		{Plan: "free", PriceCents: 0, ManualRefreshDaily: 2, SyncIntervalMin: 180, AiAnalyzeMonth: 0, EnableFetchProblem: false, EnableAiAnalyze: false, EnableAiDaily: false, EnableRegularDaily: true, Days: 30, Enabled: true},
+		{Plan: "plus", PriceCents: 200, ManualRefreshDaily: 15, SyncIntervalMin: 60, AiAnalyzeMonth: 0, EnableFetchProblem: false, EnableAiAnalyze: false, EnableAiDaily: false, EnableRegularDaily: true, Days: 30, Enabled: true},
+		{Plan: "pro", PriceCents: 700, ManualRefreshDaily: 15, SyncIntervalMin: 60, AiAnalyzeMonth: 400, EnableFetchProblem: true, EnableAiAnalyze: true, EnableAiDaily: true, EnableRegularDaily: true, Days: 30, Enabled: true},
+	}
+	for _, p := range defaults {
+		var n int64
+		_ = db.Model(&model.SubscriptionPlan{}).Where("plan = ?", p.Plan).Count(&n).Error
+		if n == 0 {
 			_ = db.Create(&p).Error
 		}
 	}

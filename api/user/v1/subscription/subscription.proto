@@ -1,0 +1,214 @@
+syntax = "proto3";
+
+package api.user.v1.subscription;
+import "google/api/annotations.proto";
+option go_package = "cwxu-algo/api/user/v1/subscription;subscription";
+option java_multiple_files = true;
+option java_package = "api.user.v1.subscription";
+
+// C 端个人订阅（Plus/Pro）：
+// - 套餐档位 free|plus|pro，价格与配额存 subscription_plans（站管可改）
+// - 开通：支付宝在线支付（create-order → 二维码 → 回调履约）或站管人工赋予（grant）
+// - 资格生效点：每日手动刷新配额、自动同步间隔、题面爬取/AI 分析、AI 日报、badge
+service Subscription {
+  // 公开：套餐列表（含价格与配额，前端对比表用）
+  rpc ListPlans (ListPlansReq) returns (ListPlansRes) {
+    option (google.api.http) = {
+      get: "/v1/user/subscription/plans"
+    };
+  }
+  // 登录：创建订单（调支付宝预下单；未配置支付宝时报错）
+  rpc CreateOrder (CreateOrderReq) returns (CreateOrderRes) {
+    option (google.api.http) = {
+      post: "/v1/user/subscription/create-order"
+      body: "*"
+    };
+  }
+  // 登录：查订单状态（前端回流轮询）
+  rpc GetOrder (GetOrderReq) returns (GetOrderRes) {
+    option (google.api.http) = {
+      get: "/v1/user/subscription/order"
+    };
+  }
+  // 登录：我的订阅状态（tier/expireAt/source/剩余天数；tier 空=未订阅）
+  rpc MySubscription (MySubscriptionReq) returns (MySubscriptionRes) {
+    option (google.api.http) = {
+      get: "/v1/user/subscription/my"
+    };
+  }
+  // 站管（PermSiteUserSync）：人工赋予/更新订阅（重复调用覆盖，从 max(now, 当前到期) 起加 days）
+  rpc GrantSubscription (GrantSubscriptionReq) returns (GrantSubscriptionRes) {
+    option (google.api.http) = {
+      post: "/v1/user/subscription/grant"
+      body: "*"
+    };
+  }
+  // 站管：取消订阅（立即回落免费；保留 AI 日报用户偏好）
+  rpc RevokeSubscription (RevokeSubscriptionReq) returns (RevokeSubscriptionRes) {
+    option (google.api.http) = {
+      post: "/v1/user/subscription/revoke"
+      body: "*"
+    };
+  }
+  // 站管：订阅用户列表（keyword 模糊 username/name，服务端过滤与 total 一致）
+  rpc ListSubscriptions (ListSubscriptionsReq) returns (ListSubscriptionsRes) {
+    option (google.api.http) = {
+      get: "/v1/user/subscription/admin/list"
+    };
+  }
+  // 站管：更新套餐配额模板（free 档 priceCents 必须 0）
+  rpc UpdatePlans (UpdatePlansReq) returns (UpdatePlansRes) {
+    option (google.api.http) = {
+      post: "/v1/user/subscription/admin/plans"
+      body: "*"
+    };
+  }
+  // 服务间（core_data）：单用户 AI 分析月配额（0=无配额；非订阅无组织返回 0）
+  rpc GetAiAnalyzeQuota (GetAiAnalyzeQuotaReq) returns (GetAiAnalyzeQuotaRes);
+}
+
+message ListPlansReq {}
+
+message ListPlansRes {
+  int64 code = 1;
+  string message = 2;
+  repeated Plan plans = 3;
+}
+
+// Plan 套餐档位模板（plan = free|plus|pro）
+message Plan {
+  string plan = 1;
+  // 价格（分）；free=0
+  int64 priceCents = 2;
+  // 每日手动刷新做题记录次数
+  int32 manualRefreshDaily = 3;
+  // 自动同步间隔（分钟）
+  int32 syncIntervalMin = 4;
+  // AI 分析题目次数/月（0=无）
+  int32 aiAnalyzeMonth = 5;
+  // 爬题面
+  bool enableFetchProblem = 6;
+  // AI 分析题目
+  bool enableAiAnalyze = 7;
+  // AI 日报（Pro 专属，默认关）
+  bool enableAiDaily = 8;
+  // 常规日报（无 AI）
+  bool enableRegularDaily = 9;
+  // 购买时长（天）
+  int32 days = 10;
+  // 上架
+  bool enabled = 11;
+}
+
+message CreateOrderReq {
+  string plan = 1; // plus|pro
+}
+
+message CreateOrderRes {
+  int64 code = 1;
+  string message = 2;
+  // 订单号（幂等锚点，get-order 轮询用）
+  string orderNo = 3;
+  // 支付宝预下单二维码内容（前端渲染二维码）
+  string qrCode = 4;
+  // 应付金额（分）
+  int64 amountCents = 5;
+  // 订单失效时间（unix 秒）
+  int64 expireAt = 6;
+}
+
+message GetOrderReq {
+  string orderNo = 1;
+}
+
+message GetOrderRes {
+  int64 code = 1;
+  string message = 2;
+  string orderNo = 3;
+  // pending|paid|closed
+  string status = 4;
+  // 支付成功时间（unix 秒；0=未支付）
+  int64 paidAt = 5;
+}
+
+message MySubscriptionReq {}
+
+message MySubscriptionRes {
+  int64 code = 1;
+  string message = 2;
+  // plus|pro；空=未订阅
+  string tier = 3;
+  // 到期时间（unix 秒；0=长期）
+  int64 expireAt = 4;
+  // alipay|manager
+  string source = 5;
+  // 剩余天数（已过期按 0）
+  int32 daysLeft = 6;
+}
+
+message GrantSubscriptionReq {
+  int64 userId = 1;
+  // plus|pro
+  string tier = 2;
+  // 1–365
+  int32 days = 3;
+}
+
+message GrantSubscriptionRes {
+  int64 code = 1;
+  string message = 2;
+}
+
+message RevokeSubscriptionReq {
+  int64 userId = 1;
+}
+
+message RevokeSubscriptionRes {
+  int64 code = 1;
+  string message = 2;
+}
+
+message ListSubscriptionsReq {
+  int64 page = 1;
+  int64 pageSize = 2;
+  // 模糊搜索：username / name
+  string keyword = 3;
+}
+
+message ListSubscriptionsRes {
+  int64 code = 1;
+  string message = 2;
+  repeated SubUser list = 3;
+  int64 total = 4;
+}
+
+message SubUser {
+  int64 userId = 1;
+  string username = 2;
+  string name = 3;
+  // plus|pro；空=未订阅
+  string tier = 4;
+  // 到期时间（unix 秒；0=长期）
+  int64 expireAt = 5;
+  // alipay|manager
+  string source = 6;
+}
+
+message UpdatePlansReq {
+  repeated Plan plans = 1;
+}
+
+message UpdatePlansRes {
+  int64 code = 1;
+  string message = 2;
+}
+
+message GetAiAnalyzeQuotaReq {
+  int64 userId = 1;
+}
+
+message GetAiAnalyzeQuotaRes {
+  // 月配额：>0 为硬上限；0=无配额（不能触发 AI 分析）。
+  // Pro 订阅取套餐 aiAnalyzeMonth；非订阅但有组织取组织套餐配额；无组织返回 0。
+  int32 quotaPerMonth = 1;
+}

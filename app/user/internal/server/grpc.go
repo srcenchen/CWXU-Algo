@@ -2,6 +2,7 @@ package server
 
 import (
 	"cwxu-algo/api/user/v1/profile"
+	"cwxu-algo/api/user/v1/subscription"
 	"cwxu-algo/app/common/conf"
 	"cwxu-algo/app/user/internal/service"
 
@@ -11,7 +12,7 @@ import (
 )
 
 // NewGRPCServer new a gRPC server.
-func NewGRPCServer(c *conf.Server, logger log.Logger, profileService *service.ProfileService) *grpc.Server {
+func NewGRPCServer(c *conf.Server, logger log.Logger, profileService *service.ProfileService, subscriptionService *service.SubscriptionService) *grpc.Server {
 	var opts = []grpc.ServerOption{
 		grpc.Middleware(
 			recovery.Recovery(),
@@ -28,5 +29,6 @@ func NewGRPCServer(c *conf.Server, logger log.Logger, profileService *service.Pr
 	}
 	srv := grpc.NewServer(opts...)
 	profile.RegisterProfileServer(srv, profileService)
+	subscription.RegisterSubscriptionServer(srv, subscriptionService)
 	return srv
 }

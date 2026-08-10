@@ -93,6 +93,13 @@ func (d *ProfileDal) InvalidateProfileCache(ctx context.Context, userID uint) {
 	d.InvalidateDisplayCache(ctx, 0, int64(userID))
 }
 
+// UpdateAIDailyEnabled 更新个人 AI 日报开关（仅 Pro 订阅生效；默认关）
+func (d *ProfileDal) UpdateAIDailyEnabled(ctx context.Context, userID int64, enabled bool) error {
+	return d.db.WithContext(ctx).Model(&model.User{}).
+		Where("id = ?", userID).
+		Update("ai_daily_enabled", enabled).Error
+}
+
 // --- P0 Redis：组织成员 / 展示名 ---
 
 const (
@@ -780,6 +787,28 @@ func (d *ProfileDal) GetProblemPipelineUserIds(ctx context.Context) (fetchIDs, a
 	for id := range aiOn {
 		aiSet[id] = struct{}{}
 	}
+	// 追加 C 端 Pro 订阅用户（套餐开启对应能力时加入名单；过期用户已被惰性过滤）
+	if plan, err := d.PlanByTier(ctx, "pro"); err == nil && plan != nil {
+		var proIDs []int64
+		if qerr := d.db.WithContext(ctx).Model(&model.User{}).
+			Where("sub_tier = ? AND (sub_expire_at IS NULL OR sub_expire_at > ?)", "pro", time.Now()).
+			Pluck("id", &proIDs).Error; qerr == nil {
+			if plan.EnableFetchProblem {
+				for _, id := range proIDs {
+					if _, off := fetchOff[id]; !off {
+						fetchSet[id] = struct{}{}
+					}
+				}
+			}
+			if plan.EnableAiAnalyze {
+				for _, id := range proIDs {
+					if _, off := aiOff[id]; !off {
+						aiSet[id] = struct{}{}
+					}
+				}
+			}
+		}
+	}
 	fetchIDs = make([]int64, 0, len(fetchSet))
 	for id := range fetchSet {
 		fetchIDs = append(fetchIDs, id)
@@ -840,6 +869,9 @@ func (d *ProfileDal) SetSyncIntervalOverrides(ctx context.Context, userID int64,
 // DefaultRefreshQuota 每日手动刷新做题记录全局默认次数（与 core_data RefreshSpider 保持一致）
 const DefaultRefreshQuota = 2
 
+// subPlanCacheTTL 订阅套餐模板缓存（站管改套餐后 InvalidatePlanCache 即时失效）
+const subPlanCacheTTL = 5 * time.Minute
+
 // SetRefreshQuotaOverride 站点管理员设置/清除个人每日手动刷新配额覆盖。
 // quota==nil=清除覆盖（回落全局默认）；否则写该值（0=禁止手动刷新；>0=每日次数）。
 func (d *ProfileDal) SetRefreshQuotaOverride(ctx context.Context, userID int64, quota *int) error {
@@ -860,7 +892,11 @@ func (d *ProfileDal) SetRefreshQuotaOverride(ctx context.Context, userID int64, 
 	})
 }
 
-// GetRefreshQuota 按 userId 取每日手动刷新有效配额（已合并站管覆盖；0=禁止）。
+// GetRefreshQuota 按 userId 取每日手动刷新有效配额（已合并站管覆盖与订阅档）。
+// 合并语义：
+//   - 站管覆盖 0 = 禁止（对所有人生效，含订阅用户）
+//   - 站管覆盖 >0 = 与订阅档配额取最大（付费用户不被管理页下调重置）
+//   - 无覆盖 = 订阅 active 用订阅档配额，否则全局默认
 func (d *ProfileDal) GetRefreshQuota(ctx context.Context, userID int64) (int, bool, error) {
 	if userID <= 0 {
 		return 0, false, fmt.Errorf("invalid user id")
@@ -872,10 +908,96 @@ func (d *ProfileDal) GetRefreshQuota(ctx context.Context, userID int64) (int, bo
 		First(&u).Error; err != nil {
 		return 0, false, err
 	}
-	if u.DailyRefreshQuotaOverride == nil {
-		return DefaultRefreshQuota, false, nil
+	planQuota := 0
+	subscribed := false
+	if tier, active := d.SubscriptionTier(ctx, userID); active {
+		if plan, err := d.PlanByTier(ctx, tier); err == nil && plan != nil && plan.ManualRefreshDaily > 0 {
+			planQuota = plan.ManualRefreshDaily
+			subscribed = true
+		}
 	}
-	return *u.DailyRefreshQuotaOverride, true, nil
+	q, ov := mergeRefreshQuota(u.DailyRefreshQuotaOverride, planQuota, subscribed)
+	return q, ov, nil
+}
+
+// mergeRefreshQuota 每日手动刷新配额合并（纯函数，便于测试）：
+//   - override nil：订阅 active 用订阅档，否则默认 2
+//   - override 0：禁止（永远生效）
+//   - override >0：订阅时与订阅档取最大；未订阅直接生效
+func mergeRefreshQuota(override *int, planQuota int, subscribed bool) (quota int, overridden bool) {
+	if subscribed {
+		if override == nil {
+			return planQuota, false
+		}
+		if *override <= 0 {
+			return 0, true
+		}
+		if *override > planQuota {
+			return *override, true
+		}
+		return planQuota, true
+	}
+	if override == nil {
+		return DefaultRefreshQuota, false
+	}
+	return *override, true
+}
+
+// SubscriptionTier 用户当前订阅档：active = 有档位且未过期（nil 到期视为长期）。
+func (d *ProfileDal) SubscriptionTier(ctx context.Context, userID int64) (tier string, active bool) {
+	if userID <= 0 || d == nil || d.db == nil {
+		return "", false
+	}
+	var u model.User
+	if err := d.db.WithContext(ctx).
+		Select("sub_tier, sub_expire_at").
+		Where("id = ?", userID).
+		First(&u).Error; err != nil {
+		return "", false
+	}
+	tier = strings.TrimSpace(u.SubTier)
+	if tier == "" {
+		return "", false
+	}
+	if u.SubExpireAt != nil && !u.SubExpireAt.After(time.Now()) {
+		// 已过期按未订阅（惰性回落）
+		return "", false
+	}
+	return tier, true
+}
+
+// PlanByTier 按档位取订阅套餐模板（Redis 短缓存 sub:plan:{tier}，TTL 5min）。
+func (d *ProfileDal) PlanByTier(ctx context.Context, tier string) (*model.SubscriptionPlan, error) {
+	tier = strings.TrimSpace(tier)
+	if tier == "" {
+		return nil, fmt.Errorf("empty tier")
+	}
+	if d == nil || d.db == nil {
+		return nil, fmt.Errorf("dal not ready")
+	}
+	cacheKey := fmt.Sprintf("sub:plan:%s", tier)
+	plan, _, err := data2.GetCacheDalTTL[model.SubscriptionPlan](
+		ctx, d.rdb, cacheKey, subPlanCacheTTL,
+		func(p *model.SubscriptionPlan) error {
+			err := d.db.Where("plan = ?", tier).First(p).Error
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return fmt.Errorf("套餐档不存在: %s", tier)
+			}
+			return err
+		},
+	)
+	if err != nil {
+		return nil, err
+	}
+	return plan, nil
+}
+
+// InvalidatePlanCache 站管更新套餐后失效对应档位缓存
+func (d *ProfileDal) InvalidatePlanCache(ctx context.Context, tier string) {
+	if d == nil || d.rdb == nil {
+		return
+	}
+	_ = d.rdb.Del(ctx, fmt.Sprintf("sub:plan:%s", tier)).Err()
 }
 
 // EffectiveProblemPipeline 计算列表展示用有效开关（覆盖优先，否则是否非公共域组织）
@@ -906,6 +1028,23 @@ func clampSyncInterval(v, def int) int {
 	return v
 }
 
+// mergeSpiderInterval 自动爬取间隔合并（纯函数，便于测试）：
+// effective = min(站管覆盖, 组织 MIN, 订阅档)；无任何候选 → 默认 180（与免费默认一致）；
+// 结果夹紧到 [5, 10080]。
+func mergeSpiderInterval(orgMin, overrideMin, subIntervalMin int, subscribed bool) int {
+	mn := 0
+	if orgMin > 0 {
+		mn = orgMin
+	}
+	if overrideMin > 0 && (mn == 0 || overrideMin < mn) {
+		mn = overrideMin
+	}
+	if subscribed && subIntervalMin > 0 && (mn == 0 || subIntervalMin < mn) {
+		mn = subIntervalMin
+	}
+	return clampSyncInterval(mn, 180)
+}
+
 // UserSyncPolicy 一人多组织聚合后的定时策略
 type UserSyncPolicy struct {
 	UserID               int64
@@ -919,6 +1058,8 @@ type UserSyncPolicy struct {
 	SpiderIntervalMin    int
 	AISummaryIntervalMin int
 	SyncActive           bool // 非休眠或已豁免，允许后台定时
+	// AIDailyEmailEnabled 个人 AI 日报：Pro 订阅 active + 套餐开启 + 个人开关（默认关）
+	AIDailyEmailEnabled bool
 }
 
 // GetInactiveDays 站点不活跃天数阈值
@@ -1020,7 +1161,7 @@ func (d *ProfileDal) GetSyncPolicies(ctx context.Context, userIDs []int64) ([]Us
 		}
 	}
 
-	// 个人邮件偏好 + 站管间隔覆盖 + 活跃/豁免 / 强制冻结 / 禁用
+	// 个人邮件偏好 + 站管间隔覆盖 + 活跃/豁免 / 强制冻结 / 禁用 + 订阅
 	type pref struct {
 		ID                           int64
 		EmailEnabled                 bool
@@ -1032,12 +1173,16 @@ func (d *ProfileDal) GetSyncPolicies(ctx context.Context, userIDs []int64) ([]Us
 		LastLoginAt                  *time.Time
 		AdminForceDormant            bool
 		Disabled                     bool
+		SubTier                      string
+		SubExpireAt                  *time.Time
+		AIDailyEnabled               bool
 	}
 	var prefs []pref
 	_ = d.db.WithContext(ctx).Model(&model.User{}).
 		Select(`id, email_enabled, email_weekly_enabled,
 			spider_interval_min_override, ai_summary_interval_min_override,
-			is_site_admin, sync_exempt, last_login_at, admin_force_dormant, disabled`).
+			is_site_admin, sync_exempt, last_login_at, admin_force_dormant, disabled,
+			sub_tier, sub_expire_at, ai_daily_enabled`).
 		Where("id IN ?", userIDs).
 		Scan(&prefs).Error
 	prefMap := make(map[int64]pref, len(prefs))
@@ -1045,30 +1190,61 @@ func (d *ProfileDal) GetSyncPolicies(ctx context.Context, userIDs []int64) ([]Us
 		prefMap[p.ID] = p
 	}
 
+	// 订阅档套餐（active 用户批量查一次；缓存命中即无 DB 开销）
+	subPlan := map[string]*model.SubscriptionPlan{}
+	subActive := func(pr pref) bool {
+		tier := strings.TrimSpace(pr.SubTier)
+		if tier == "" {
+			return false
+		}
+		if pr.SubExpireAt != nil && !pr.SubExpireAt.After(now) {
+			return false
+		}
+		if _, ok := subPlan[tier]; !ok {
+			p, err := d.PlanByTier(ctx, tier)
+			if err != nil {
+				return false
+			}
+			subPlan[tier] = p
+		}
+		return subPlan[tier] != nil
+	}
+
 	out := make([]UserSyncPolicy, 0, len(userIDs))
 	for _, uid := range userIDs {
 		a := byUser[uid]
 		pr := prefMap[uid]
-		sp, ai := 60, 180
+		// 爬取间隔 = min(站管覆盖, 组织 MIN, 订阅档)；无任何候选 → 默认 180（与免费默认一致）
+		ai := 180
 		spiderOn, aiOn, emailOn, weeklyOn, staff := false, false, false, false, false
 		forceSync, paidPlan := false, false
 		if a != nil {
-			if a.spiderMin > 0 {
-				sp = a.spiderMin
-			}
 			if a.aiMin > 0 {
 				ai = a.aiMin
 			}
 			spiderOn, aiOn, emailOn, weeklyOn = a.spiderOn, a.aiOn, a.emailOn, a.weeklyOn
 			staff, forceSync, paidPlan = a.staff, a.forceSync, a.paidPlan
 		}
-		// 站点管理员个人覆盖：优先级最高
-		if pr.SpiderIntervalMinOverride != nil && *pr.SpiderIntervalMinOverride > 0 {
-			sp = clampSyncInterval(*pr.SpiderIntervalMinOverride, 60)
-		}
 		if pr.AISummaryIntervalMinOverride != nil && *pr.AISummaryIntervalMinOverride > 0 {
 			ai = clampSyncInterval(*pr.AISummaryIntervalMinOverride, 180)
 		}
+		// 订阅档：active 且套餐间隔>0 参与 min 合并
+		subTier := ""
+		subInterval := 0
+		if subActive(pr) {
+			subTier = strings.TrimSpace(pr.SubTier)
+			if p := subPlan[subTier]; p != nil {
+				subInterval = p.SyncIntervalMin
+			}
+		}
+		orgMin, overrideMin := 0, 0
+		if a != nil && a.spiderMin > 0 {
+			orgMin = a.spiderMin
+		}
+		if pr.SpiderIntervalMinOverride != nil && *pr.SpiderIntervalMinOverride > 0 {
+			overrideMin = *pr.SpiderIntervalMinOverride
+		}
+		sp := mergeSpiderInterval(orgMin, overrideMin, subInterval, subTier != "")
 
 		ex := dormancy.ExemptFlags{
 			IsSiteAdmin: pr.IsSiteAdmin,
@@ -1079,8 +1255,10 @@ func (d *ProfileDal) GetSyncPolicies(ctx context.Context, userIDs []int64) ([]Us
 		}
 		dormant := dormancy.IsDormant(pr.LastLoginAt, inactiveDays, ex, now, pr.AdminForceDormant, pr.Disabled)
 		syncActive := !dormant
+		// AI 日报：仅 Pro 订阅 active + 套餐开启 + 个人开关
+		aiDaily := subTier == "pro" && pr.AIDailyEnabled && subPlan[subTier] != nil && subPlan[subTier].EnableAiDaily
 		if dormant {
-			spiderOn, aiOn, emailOn, weeklyOn = false, false, false, false
+			spiderOn, aiOn, emailOn, weeklyOn, aiDaily = false, false, false, false, false
 		}
 
 		out = append(out, UserSyncPolicy{
@@ -1095,6 +1273,7 @@ func (d *ProfileDal) GetSyncPolicies(ctx context.Context, userIDs []int64) ([]Us
 			SpiderIntervalMin:    sp,
 			AISummaryIntervalMin: ai,
 			SyncActive:           syncActive,
+			AIDailyEmailEnabled:  aiDaily,
 		})
 	}
 	return out, nil

@@ -5321,6 +5321,153 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/api.user.v1.social.UnfollowRes'
+    /v1/user/subscription/admin/list:
+        get:
+            tags:
+                - Subscription
+            description: 站管：订阅用户列表（keyword 模糊 username/name，服务端过滤与 total 一致）
+            operationId: Subscription_ListSubscriptions
+            parameters:
+                - name: page
+                  in: query
+                  schema:
+                    type: string
+                - name: pageSize
+                  in: query
+                  schema:
+                    type: string
+                - name: keyword
+                  in: query
+                  description: 模糊搜索：username / name
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.user.v1.subscription.ListSubscriptionsRes'
+    /v1/user/subscription/admin/plans:
+        post:
+            tags:
+                - Subscription
+            description: 站管：更新套餐配额模板（free 档 priceCents 必须 0）
+            operationId: Subscription_UpdatePlans
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/api.user.v1.subscription.UpdatePlansReq'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.user.v1.subscription.UpdatePlansRes'
+    /v1/user/subscription/create-order:
+        post:
+            tags:
+                - Subscription
+            description: 登录：创建订单（调支付宝预下单；未配置支付宝时报错）
+            operationId: Subscription_CreateOrder
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/api.user.v1.subscription.CreateOrderReq'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.user.v1.subscription.CreateOrderRes'
+    /v1/user/subscription/grant:
+        post:
+            tags:
+                - Subscription
+            description: 站管（PermSiteUserSync）：人工赋予/更新订阅（重复调用覆盖，从 max(now, 当前到期) 起加 days）
+            operationId: Subscription_GrantSubscription
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/api.user.v1.subscription.GrantSubscriptionReq'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.user.v1.subscription.GrantSubscriptionRes'
+    /v1/user/subscription/my:
+        get:
+            tags:
+                - Subscription
+            description: 登录：我的订阅状态（tier/expireAt/source/剩余天数；tier 空=未订阅）
+            operationId: Subscription_MySubscription
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.user.v1.subscription.MySubscriptionRes'
+    /v1/user/subscription/order:
+        get:
+            tags:
+                - Subscription
+            description: 登录：查订单状态（前端回流轮询）
+            operationId: Subscription_GetOrder
+            parameters:
+                - name: orderNo
+                  in: query
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.user.v1.subscription.GetOrderRes'
+    /v1/user/subscription/plans:
+        get:
+            tags:
+                - Subscription
+            description: 公开：套餐列表（含价格与配额，前端对比表用）
+            operationId: Subscription_ListPlans
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.user.v1.subscription.ListPlansRes'
+    /v1/user/subscription/revoke:
+        post:
+            tags:
+                - Subscription
+            description: 站管：取消订阅（立即回落免费；保留 AI 日报用户偏好）
+            operationId: Subscription_RevokeSubscription
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/api.user.v1.subscription.RevokeSubscriptionReq'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.user.v1.subscription.RevokeSubscriptionRes'
 components:
     schemas:
         api.agent.v1.summary.GetSummaryReply:
@@ -8504,6 +8651,9 @@ components:
                 lastSyncAt:
                     type: string
                     description: 最近一次 OJ 数据同步成功时间（unix 秒；0=尚无记录）
+                aiDailyEnabled:
+                    type: boolean
+                    description: 个人 AI 日报开关（仅 Pro 订阅生效；默认关；隐私字段，仅本人/站管可见）
         api.user.v1.GetByIdRes_Spiders:
             type: object
             properties:
@@ -8671,6 +8821,12 @@ components:
                 dailyRefreshQuotaOverridden:
                     type: boolean
                     description: 是否存在站点管理员个人配额覆盖
+                subTier:
+                    type: string
+                    description: C 端订阅档 plus|pro（过期返回空）
+                subExpireAt:
+                    type: string
+                    description: C 端订阅到期 unix 秒（0=未订阅/长期）
         api.user.v1.GetListRes_OrgBrief:
             type: object
             properties:
@@ -8985,6 +9141,9 @@ components:
                 emailCode:
                     type: string
                     description: 修改/绑定邮箱时必填：发往新邮箱的验证码（purpose=change_email）
+                aiDailyEnabled:
+                    type: boolean
+                    description: AI 日报开关（仅 Pro 订阅 active 可开启；默认关）；省略=不改
         api.user.v1.UpdateRes:
             type: object
             properties:
@@ -9020,6 +9179,9 @@ components:
                 syncActive:
                     type: boolean
                     description: 是否允许后台定时任务（非休眠或已豁免）
+                aiDailyEmailEnabled:
+                    type: boolean
+                    description: 个人 AI 日报（Pro 订阅 active + 套餐开启 + 个人开关；默认关）
         api.user.v1.blog.ActivateReq:
             type: object
             properties:
@@ -12120,6 +12282,19 @@ components:
                 dataDiskPath:
                     type: string
                     description: 运维磁盘统计目录（数据盘挂载点；空=默认 /data，未挂载回退 /）
+                alipayAppId:
+                    type: string
+                    description: 支付宝（C 端订阅在线支付）
+                alipayPrivateKeyMasked:
+                    type: string
+                alipayPrivateKeySet:
+                    type: boolean
+                alipayPublicKeyMasked:
+                    type: string
+                alipayPublicKeySet:
+                    type: boolean
+                alipaySandbox:
+                    type: boolean
         api.user.v1.site.GetConfigRes:
             type: object
             properties:
@@ -12245,6 +12420,21 @@ components:
                 dataDiskPath:
                     type: string
                     description: 运维磁盘统计目录（数据盘挂载点；空=默认 /data，未挂载回退 /）
+                alipayAppId:
+                    type: string
+                    description: 支付宝（C 端订阅在线支付）；key 空串表示不修改
+                alipayPrivateKey:
+                    type: string
+                clearAlipayPrivateKey:
+                    type: boolean
+                alipayPublicKey:
+                    type: string
+                clearAlipayPublicKey:
+                    type: boolean
+                alipaySandbox:
+                    type: boolean
+                setAlipaySandbox:
+                    type: boolean
         api.user.v1.site.UpdateConfigRes:
             type: object
             properties:
@@ -12532,6 +12722,9 @@ components:
                     type: array
                     items:
                         type: string
+                subTier:
+                    type: string
+                    description: C 端订阅档 plus|pro（过期返回空）
             description: 社交用户项（域感知展示）
         api.user.v1.social.UnfollowReq:
             type: object
@@ -12544,6 +12737,192 @@ components:
             properties:
                 success:
                     type: boolean
+                message:
+                    type: string
+        api.user.v1.subscription.CreateOrderReq:
+            type: object
+            properties:
+                plan:
+                    type: string
+        api.user.v1.subscription.CreateOrderRes:
+            type: object
+            properties:
+                code:
+                    type: string
+                message:
+                    type: string
+                orderNo:
+                    type: string
+                    description: 订单号（幂等锚点，get-order 轮询用）
+                qrCode:
+                    type: string
+                    description: 支付宝预下单二维码内容（前端渲染二维码）
+                amountCents:
+                    type: string
+                    description: 应付金额（分）
+                expireAt:
+                    type: string
+                    description: 订单失效时间（unix 秒）
+        api.user.v1.subscription.GetOrderRes:
+            type: object
+            properties:
+                code:
+                    type: string
+                message:
+                    type: string
+                orderNo:
+                    type: string
+                status:
+                    type: string
+                    description: pending|paid|closed
+                paidAt:
+                    type: string
+                    description: 支付成功时间（unix 秒；0=未支付）
+        api.user.v1.subscription.GrantSubscriptionReq:
+            type: object
+            properties:
+                userId:
+                    type: string
+                tier:
+                    type: string
+                    description: plus|pro
+                days:
+                    type: integer
+                    description: 1–365
+                    format: int32
+        api.user.v1.subscription.GrantSubscriptionRes:
+            type: object
+            properties:
+                code:
+                    type: string
+                message:
+                    type: string
+        api.user.v1.subscription.ListPlansRes:
+            type: object
+            properties:
+                code:
+                    type: string
+                message:
+                    type: string
+                plans:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/api.user.v1.subscription.Plan'
+        api.user.v1.subscription.ListSubscriptionsRes:
+            type: object
+            properties:
+                code:
+                    type: string
+                message:
+                    type: string
+                list:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/api.user.v1.subscription.SubUser'
+                total:
+                    type: string
+        api.user.v1.subscription.MySubscriptionRes:
+            type: object
+            properties:
+                code:
+                    type: string
+                message:
+                    type: string
+                tier:
+                    type: string
+                    description: plus|pro；空=未订阅
+                expireAt:
+                    type: string
+                    description: 到期时间（unix 秒；0=长期）
+                source:
+                    type: string
+                    description: alipay|manager
+                daysLeft:
+                    type: integer
+                    description: 剩余天数（已过期按 0）
+                    format: int32
+        api.user.v1.subscription.Plan:
+            type: object
+            properties:
+                plan:
+                    type: string
+                priceCents:
+                    type: string
+                    description: 价格（分）；free=0
+                manualRefreshDaily:
+                    type: integer
+                    description: 每日手动刷新做题记录次数
+                    format: int32
+                syncIntervalMin:
+                    type: integer
+                    description: 自动同步间隔（分钟）
+                    format: int32
+                aiAnalyzeMonth:
+                    type: integer
+                    description: AI 分析题目次数/月（0=无）
+                    format: int32
+                enableFetchProblem:
+                    type: boolean
+                    description: 爬题面
+                enableAiAnalyze:
+                    type: boolean
+                    description: AI 分析题目
+                enableAiDaily:
+                    type: boolean
+                    description: AI 日报（Pro 专属，默认关）
+                enableRegularDaily:
+                    type: boolean
+                    description: 常规日报（无 AI）
+                days:
+                    type: integer
+                    description: 购买时长（天）
+                    format: int32
+                enabled:
+                    type: boolean
+                    description: 上架
+            description: Plan 套餐档位模板（plan = free|plus|pro）
+        api.user.v1.subscription.RevokeSubscriptionReq:
+            type: object
+            properties:
+                userId:
+                    type: string
+        api.user.v1.subscription.RevokeSubscriptionRes:
+            type: object
+            properties:
+                code:
+                    type: string
+                message:
+                    type: string
+        api.user.v1.subscription.SubUser:
+            type: object
+            properties:
+                userId:
+                    type: string
+                username:
+                    type: string
+                name:
+                    type: string
+                tier:
+                    type: string
+                    description: plus|pro；空=未订阅
+                expireAt:
+                    type: string
+                    description: 到期时间（unix 秒；0=长期）
+                source:
+                    type: string
+                    description: alipay|manager
+        api.user.v1.subscription.UpdatePlansReq:
+            type: object
+            properties:
+                plans:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/api.user.v1.subscription.Plan'
+        api.user.v1.subscription.UpdatePlansRes:
+            type: object
+            properties:
+                code:
+                    type: string
                 message:
                     type: string
 tags:
@@ -12628,4 +13007,10 @@ tags:
     - name: Spider
     - name: Statistic
     - name: Submit
+    - name: Subscription
+      description: |-
+        C 端个人订阅（Plus/Pro）：
+         - 套餐档位 free|plus|pro，价格与配额存 subscription_plans（站管可改）
+         - 开通：支付宝在线支付（create-order → 二维码 → 回调履约）或站管人工赋予（grant）
+         - 资格生效点：每日手动刷新配额、自动同步间隔、题面爬取/AI 分析、AI 日报、badge
     - name: Summary

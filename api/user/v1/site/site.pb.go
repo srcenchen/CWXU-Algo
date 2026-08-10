@@ -245,9 +245,16 @@ type GetAdminConfigRes struct {
 	// 运维告警邮件收件人（逗号或换行分隔）；空则不发（OJ 大面积同步出错 / 资源长期占用过高等）
 	OpsNotifyEmails string `protobuf:"bytes,49,opt,name=ops_notify_emails,json=opsNotifyEmails,proto3" json:"ops_notify_emails,omitempty"`
 	// 运维磁盘统计目录（数据盘挂载点；空=默认 /data，未挂载回退 /）
-	DataDiskPath  string `protobuf:"bytes,50,opt,name=data_disk_path,json=dataDiskPath,proto3" json:"data_disk_path,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	DataDiskPath string `protobuf:"bytes,50,opt,name=data_disk_path,json=dataDiskPath,proto3" json:"data_disk_path,omitempty"`
+	// 支付宝（C 端订阅在线支付）
+	AlipayAppId            string `protobuf:"bytes,51,opt,name=alipay_app_id,json=alipayAppId,proto3" json:"alipay_app_id,omitempty"`
+	AlipayPrivateKeyMasked string `protobuf:"bytes,52,opt,name=alipay_private_key_masked,json=alipayPrivateKeyMasked,proto3" json:"alipay_private_key_masked,omitempty"`
+	AlipayPrivateKeySet    bool   `protobuf:"varint,53,opt,name=alipay_private_key_set,json=alipayPrivateKeySet,proto3" json:"alipay_private_key_set,omitempty"`
+	AlipayPublicKeyMasked  string `protobuf:"bytes,54,opt,name=alipay_public_key_masked,json=alipayPublicKeyMasked,proto3" json:"alipay_public_key_masked,omitempty"`
+	AlipayPublicKeySet     bool   `protobuf:"varint,55,opt,name=alipay_public_key_set,json=alipayPublicKeySet,proto3" json:"alipay_public_key_set,omitempty"`
+	AlipaySandbox          bool   `protobuf:"varint,56,opt,name=alipay_sandbox,json=alipaySandbox,proto3" json:"alipay_sandbox,omitempty"`
+	unknownFields          protoimpl.UnknownFields
+	sizeCache              protoimpl.SizeCache
 }
 
 func (x *GetAdminConfigRes) Reset() {
@@ -630,6 +637,48 @@ func (x *GetAdminConfigRes) GetDataDiskPath() string {
 	return ""
 }
 
+func (x *GetAdminConfigRes) GetAlipayAppId() string {
+	if x != nil {
+		return x.AlipayAppId
+	}
+	return ""
+}
+
+func (x *GetAdminConfigRes) GetAlipayPrivateKeyMasked() string {
+	if x != nil {
+		return x.AlipayPrivateKeyMasked
+	}
+	return ""
+}
+
+func (x *GetAdminConfigRes) GetAlipayPrivateKeySet() bool {
+	if x != nil {
+		return x.AlipayPrivateKeySet
+	}
+	return false
+}
+
+func (x *GetAdminConfigRes) GetAlipayPublicKeyMasked() string {
+	if x != nil {
+		return x.AlipayPublicKeyMasked
+	}
+	return ""
+}
+
+func (x *GetAdminConfigRes) GetAlipayPublicKeySet() bool {
+	if x != nil {
+		return x.AlipayPublicKeySet
+	}
+	return false
+}
+
+func (x *GetAdminConfigRes) GetAlipaySandbox() bool {
+	if x != nil {
+		return x.AlipaySandbox
+	}
+	return false
+}
+
 type UpdateConfigReq struct {
 	state     protoimpl.MessageState `protogen:"open.v1"`
 	SiteTitle string                 `protobuf:"bytes,1,opt,name=site_title,json=siteTitle,proto3" json:"site_title,omitempty"`
@@ -676,9 +725,17 @@ type UpdateConfigReq struct {
 	// 运维告警邮件收件人；始终覆盖保存（可清空）
 	OpsNotifyEmails string `protobuf:"bytes,33,opt,name=ops_notify_emails,json=opsNotifyEmails,proto3" json:"ops_notify_emails,omitempty"`
 	// 运维磁盘统计目录（数据盘挂载点；空=默认 /data，未挂载回退 /）
-	DataDiskPath  string `protobuf:"bytes,34,opt,name=data_disk_path,json=dataDiskPath,proto3" json:"data_disk_path,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	DataDiskPath string `protobuf:"bytes,34,opt,name=data_disk_path,json=dataDiskPath,proto3" json:"data_disk_path,omitempty"`
+	// 支付宝（C 端订阅在线支付）；key 空串表示不修改
+	AlipayAppId           string `protobuf:"bytes,35,opt,name=alipay_app_id,json=alipayAppId,proto3" json:"alipay_app_id,omitempty"`
+	AlipayPrivateKey      string `protobuf:"bytes,36,opt,name=alipay_private_key,json=alipayPrivateKey,proto3" json:"alipay_private_key,omitempty"`
+	ClearAlipayPrivateKey bool   `protobuf:"varint,37,opt,name=clear_alipay_private_key,json=clearAlipayPrivateKey,proto3" json:"clear_alipay_private_key,omitempty"`
+	AlipayPublicKey       string `protobuf:"bytes,38,opt,name=alipay_public_key,json=alipayPublicKey,proto3" json:"alipay_public_key,omitempty"`
+	ClearAlipayPublicKey  bool   `protobuf:"varint,39,opt,name=clear_alipay_public_key,json=clearAlipayPublicKey,proto3" json:"clear_alipay_public_key,omitempty"`
+	AlipaySandbox         bool   `protobuf:"varint,40,opt,name=alipay_sandbox,json=alipaySandbox,proto3" json:"alipay_sandbox,omitempty"`
+	SetAlipaySandbox      bool   `protobuf:"varint,41,opt,name=set_alipay_sandbox,json=setAlipaySandbox,proto3" json:"set_alipay_sandbox,omitempty"`
+	unknownFields         protoimpl.UnknownFields
+	sizeCache             protoimpl.SizeCache
 }
 
 func (x *UpdateConfigReq) Reset() {
@@ -947,6 +1004,55 @@ func (x *UpdateConfigReq) GetDataDiskPath() string {
 		return x.DataDiskPath
 	}
 	return ""
+}
+
+func (x *UpdateConfigReq) GetAlipayAppId() string {
+	if x != nil {
+		return x.AlipayAppId
+	}
+	return ""
+}
+
+func (x *UpdateConfigReq) GetAlipayPrivateKey() string {
+	if x != nil {
+		return x.AlipayPrivateKey
+	}
+	return ""
+}
+
+func (x *UpdateConfigReq) GetClearAlipayPrivateKey() bool {
+	if x != nil {
+		return x.ClearAlipayPrivateKey
+	}
+	return false
+}
+
+func (x *UpdateConfigReq) GetAlipayPublicKey() string {
+	if x != nil {
+		return x.AlipayPublicKey
+	}
+	return ""
+}
+
+func (x *UpdateConfigReq) GetClearAlipayPublicKey() bool {
+	if x != nil {
+		return x.ClearAlipayPublicKey
+	}
+	return false
+}
+
+func (x *UpdateConfigReq) GetAlipaySandbox() bool {
+	if x != nil {
+		return x.AlipaySandbox
+	}
+	return false
+}
+
+func (x *UpdateConfigReq) GetSetAlipaySandbox() bool {
+	if x != nil {
+		return x.SetAlipaySandbox
+	}
+	return false
 }
 
 type UpdateConfigRes struct {
@@ -2011,7 +2117,7 @@ const file_user_v1_site_site_proto_rawDesc = "" +
 	"\afavicon\x18\x05 \x01(\tR\afavicon\x12\x1d\n" +
 	"\n" +
 	"footer_icp\x18\x06 \x01(\tR\tfooterIcp\"\x13\n" +
-	"\x11GetAdminConfigReq\"\xe0\x0f\n" +
+	"\x11GetAdminConfigReq\"\x87\x12\n" +
 	"\x11GetAdminConfigRes\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\x03R\x04code\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12\x1d\n" +
@@ -2068,8 +2174,13 @@ const file_user_v1_site_site_proto_rawDesc = "" +
 	"\fsmtp_err_msg\x180 \x01(\tR\n" +
 	"smtpErrMsg\x12*\n" +
 	"\x11ops_notify_emails\x181 \x01(\tR\x0fopsNotifyEmails\x12$\n" +
-	"\x0edata_disk_path\x182 \x01(\tR\fdataDiskPath\"\xd4\n" +
-	"\n" +
+	"\x0edata_disk_path\x182 \x01(\tR\fdataDiskPath\x12\"\n" +
+	"\ralipay_app_id\x183 \x01(\tR\valipayAppId\x129\n" +
+	"\x19alipay_private_key_masked\x184 \x01(\tR\x16alipayPrivateKeyMasked\x123\n" +
+	"\x16alipay_private_key_set\x185 \x01(\bR\x13alipayPrivateKeySet\x127\n" +
+	"\x18alipay_public_key_masked\x186 \x01(\tR\x15alipayPublicKeyMasked\x121\n" +
+	"\x15alipay_public_key_set\x187 \x01(\bR\x12alipayPublicKeySet\x12%\n" +
+	"\x0ealipay_sandbox\x188 \x01(\bR\ralipaySandbox\"\x97\r\n" +
 	"\x0fUpdateConfigReq\x12\x1d\n" +
 	"\n" +
 	"site_title\x18\x01 \x01(\tR\tsiteTitle\x12\x1b\n" +
@@ -2108,7 +2219,14 @@ const file_user_v1_site_site_proto_rawDesc = "" +
 	"\x0foj_qoj_password\x18\x1f \x01(\tR\rojQojPassword\x121\n" +
 	"\x15clear_oj_qoj_password\x18  \x01(\bR\x12clearOjQojPassword\x12*\n" +
 	"\x11ops_notify_emails\x18! \x01(\tR\x0fopsNotifyEmails\x12$\n" +
-	"\x0edata_disk_path\x18\" \x01(\tR\fdataDiskPath\"\xb4\x01\n" +
+	"\x0edata_disk_path\x18\" \x01(\tR\fdataDiskPath\x12\"\n" +
+	"\ralipay_app_id\x18# \x01(\tR\valipayAppId\x12,\n" +
+	"\x12alipay_private_key\x18$ \x01(\tR\x10alipayPrivateKey\x127\n" +
+	"\x18clear_alipay_private_key\x18% \x01(\bR\x15clearAlipayPrivateKey\x12*\n" +
+	"\x11alipay_public_key\x18& \x01(\tR\x0falipayPublicKey\x125\n" +
+	"\x17clear_alipay_public_key\x18' \x01(\bR\x14clearAlipayPublicKey\x12%\n" +
+	"\x0ealipay_sandbox\x18( \x01(\bR\ralipaySandbox\x12,\n" +
+	"\x12set_alipay_sandbox\x18) \x01(\bR\x10setAlipaySandbox\"\xb4\x01\n" +
 	"\x0fUpdateConfigRes\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\x03R\x04code\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12\x1d\n" +

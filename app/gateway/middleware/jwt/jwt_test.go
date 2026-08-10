@@ -48,3 +48,15 @@ func TestBlogPagePublicReadsAreWhitelisted(t *testing.T) {
 		}
 	}
 }
+
+// TestPaymentNotifyIsWhitelisted 支付宝回调免 JWT（验签在 user 服务内完成）
+func TestPaymentNotifyIsWhitelisted(t *testing.T) {
+	for _, path := range []string{
+		"/v1/payment/notify",
+		"/api/payment/notify",
+	} {
+		if _, ok := publicExact[path]; !ok {
+			t.Errorf("payment notify path missing from JWT whitelist: %s", path)
+		}
+	}
+}

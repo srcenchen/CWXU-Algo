@@ -197,6 +197,8 @@ message GetByIdRes {
   repeated Spiders spiders = 7;
   // 最近一次 OJ 数据同步成功时间（unix 秒；0=尚无记录）
   int64 lastSyncAt = 13;
+  // 个人 AI 日报开关（仅 Pro 订阅生效；默认关；隐私字段，仅本人/站管可见）
+  bool aiDailyEnabled = 14;
 }
 
 message GetByNameReq {
@@ -277,6 +279,10 @@ message GetListRes {
     int32 dailyRefreshQuota = 30;
     // 是否存在站点管理员个人配额覆盖
     bool dailyRefreshQuotaOverridden = 31;
+    // C 端订阅档 plus|pro（过期返回空）
+    string subTier = 32;
+    // C 端订阅到期 unix 秒（0=未订阅/长期）
+    int64 subExpireAt = 33;
   }
   repeated List list = 1;
   int64 total = 2;
@@ -291,6 +297,8 @@ message UpdateReq {
   string avatar = 6;
   // 修改/绑定邮箱时必填：发往新邮箱的验证码（purpose=change_email）
   string emailCode = 7;
+  // AI 日报开关（仅 Pro 订阅 active 可开启；默认关）；省略=不改
+  optional bool aiDailyEnabled = 8;
 }
 
 message UpdateRes {
@@ -517,6 +525,8 @@ message UserSyncPolicy {
   bool emailWeeklyEnabled = 10;    // 个人周报偏好
   // 是否允许后台定时任务（非休眠或已豁免）
   bool syncActive = 11;
+  // 个人 AI 日报（Pro 订阅 active + 套餐开启 + 个人开关；默认关）
+  bool aiDailyEmailEnabled = 12;
 }
 
 message GetSyncPoliciesRes {

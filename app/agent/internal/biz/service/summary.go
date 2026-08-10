@@ -117,6 +117,47 @@ func (uc *SummaryUseCase) PersonalLastDay(userId int64) error {
 	return nil
 }
 
+// PersonalDailyRule 仅发规则模板常规日报（不调 LLM，无 AI 成本）。
+// 数据加载与 AI 版共用 loadDailyReportData；门槛沿用 canSendDailyEmail。
+// AI 日报（Pro 订阅 + 套餐开启 + 个人开关）走 PersonalLastDay，普通用户走本方法。
+func (uc *SummaryUseCase) PersonalDailyRule(userId int64) error {
+	if !uc.canSendDailyEmail(userId) {
+		log.Infof("用户 %d 日报未开启或无组织授权，跳过", userId)
+		return nil
+	}
+
+	lockKey := fmt.Sprintf("agent:lock:summary:daily:rule:%d", userId)
+	if !uc.tryAcquireLock(context.Background(), lockKey, 3*time.Minute) {
+		log.Infof("用户 %d 日报生成进行中，跳过", userId)
+		return nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+
+	data, err := uc.loadDailyReportData(ctx, userId)
+	if err != nil {
+		// 瞬时失败：释放锁，MQ 重试可立即重进
+		uc.releaseLock(lockKey)
+		return err
+	}
+
+	brand := uc.brandTitle(ctx)
+	html := RenderDailyRuleHTML(data, brand)
+	if strings.TrimSpace(html) == "" {
+		uc.releaseLock(lockKey)
+		return fmt.Errorf("用户 %d 日报模板渲染为空", userId)
+	}
+
+	subject := fmt.Sprintf("【%s 日报】%s · %s", brand, formatCNDate(data.Yesterday), data.Name)
+	if err := uc.sendHTMLEmail(data.Email, subject, html); err != nil {
+		uc.releaseLock(lockKey)
+		return fmt.Errorf("发送日报失败: %w", err)
+	}
+	log.Infof("用户 %d 常规日报(规则模板)已发送至 %s", userId, data.Email)
+	return nil
+}
+
 func (uc *SummaryUseCase) PersonalRecent(userId int64) error {
 	// 网页 AI 总结，与邮件开关无关
 	lockKey := fmt.Sprintf("agent:lock:summary:recent:%d", userId)

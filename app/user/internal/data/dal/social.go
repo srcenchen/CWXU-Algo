@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"cwxu-algo/app/user/internal/data"
 	"cwxu-algo/app/user/internal/data/model"
@@ -96,6 +97,8 @@ type SocialUser struct {
 	Avatar   string `gorm:"column:avatar"`
 	// 全站特殊身份（公共域 badge 用；列表 SQL 需选出）
 	IsSiteAdmin bool `gorm:"column:is_site_admin"`
+	// SubTier C 端订阅档 plus|pro（过期由映射层判空；列表 SQL 需选出 sub_tier/sub_expire_at）
+	SubTier string `gorm:"column:sub_tier"`
 	// SiteRoles 持有的自定义站点角色名（公共域 badge 用；EnrichDisplay 批量回填）
 	SiteRoles []string `gorm:"-"`
 	// InCurrentOrg 目标是否属于观众当前组织
@@ -112,17 +115,26 @@ type socialUserRow struct {
 	Name        string `gorm:"column:name"`
 	Avatar      string `gorm:"column:avatar"`
 	IsSiteAdmin bool   `gorm:"column:is_site_admin"`
+	SubTier     string `gorm:"column:sub_tier"`
+	SubExpireAt *time.Time `gorm:"column:sub_expire_at"`
 }
 
 func rowsToSocialUsers(rows []socialUserRow) []SocialUser {
 	out := make([]SocialUser, 0, len(rows))
+	now := time.Now()
 	for _, r := range rows {
+		tier := strings.TrimSpace(r.SubTier)
+		if r.SubExpireAt != nil && !r.SubExpireAt.After(now) {
+			// 已过期按未订阅（惰性回落）
+			tier = ""
+		}
 		out = append(out, SocialUser{
 			UserID:      r.UserID,
 			Username:    r.Username,
 			Name:        r.Name,
 			Avatar:      r.Avatar,
 			IsSiteAdmin: r.IsSiteAdmin,
+			SubTier:     tier,
 		})
 	}
 	return out
@@ -150,7 +162,7 @@ func (d *SocialDal) ListFollowing(ctx context.Context, userID uint, page, pageSi
 	}
 	var rows []socialUserRow
 	err := d.db.WithContext(ctx).Table("user_follows f").
-		Select("u.id AS user_id, u.username, u.name, u.avatar, u.is_site_admin").
+		Select("u.id AS user_id, u.username, u.name, u.avatar, u.is_site_admin, u.sub_tier, u.sub_expire_at").
 		Joins("JOIN users u ON u.id = f.followee_id").
 		Where("f.follower_id = ?", userID).
 		Order("f.id DESC").
@@ -177,7 +189,7 @@ func (d *SocialDal) ListFollowers(ctx context.Context, userID uint, page, pageSi
 	}
 	var rows []socialUserRow
 	err := d.db.WithContext(ctx).Table("user_follows f").
-		Select("u.id AS user_id, u.username, u.name, u.avatar, u.is_site_admin").
+		Select("u.id AS user_id, u.username, u.name, u.avatar, u.is_site_admin, u.sub_tier, u.sub_expire_at").
 		Joins("JOIN users u ON u.id = f.follower_id").
 		Where("f.followee_id = ?", userID).
 		Order("f.id DESC").
@@ -213,7 +225,7 @@ func (d *SocialDal) SearchUsers(ctx context.Context, keyword string, page, pageS
 		return nil, 0, err
 	}
 	var rows []socialUserRow
-	err := q.Select("id AS user_id, username, name, avatar, is_site_admin").
+	err := q.Select("id AS user_id, username, name, avatar, is_site_admin, sub_tier, sub_expire_at").
 		Order("id ASC").
 		Offset((page - 1) * pageSize).Limit(pageSize).
 		Scan(&rows).Error
@@ -599,7 +611,7 @@ func (d *SocialDal) SearchUsersInContext(ctx context.Context, keyword string, pa
 		return nil, 0, err
 	}
 	var rows []socialUserRow
-	err := base.Select("u.id AS user_id, u.username, u.name, u.avatar, u.is_site_admin").
+	err := base.Select("u.id AS user_id, u.username, u.name, u.avatar, u.is_site_admin, u.sub_tier, u.sub_expire_at").
 		Order("u.id ASC").
 		Offset((page - 1) * pageSize).Limit(pageSize).
 		Scan(&rows).Error

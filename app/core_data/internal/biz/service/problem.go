@@ -12,6 +12,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"cwxu-algo/api/user/v1/subscription"
 	data2 "cwxu-algo/app/common/data"
 	"cwxu-algo/app/common/discovery"
 	"cwxu-algo/app/common/event"
@@ -21,10 +22,12 @@ import (
 	"cwxu-algo/app/core_data/internal/loadgate"
 	"cwxu-algo/app/core_data/internal/spider"
 	"cwxu-algo/app/core_data/internal/spider/problem_fetch"
+	"cwxu-algo/app/core_data/internal/userrpc"
 	"cwxu-algo/app/core_data/task"
 
 	"github.com/go-kratos/kratos/v2/log"
 	"github.com/go-kratos/kratos/v2/registry"
+	"github.com/redis/go-redis/v9"
 	"github.com/streadway/amqp"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -371,7 +374,8 @@ func (uc *ProblemUseCase) enqueueAnalyze(id uint) error {
 
 // enqueueAnalyzePrio 投递 AI 分析；统一闸门：
 // 1) 近 6 个月有提交（submit_logs）
-// 2) 近窗提交者中至少有一名「题面 AI 资格」用户（默认非公共域组织，可个人覆盖）
+// 2) 近窗提交者中至少有一名「题面 AI 资格」用户（默认非公共域组织 + Pro 订阅，可个人覆盖）
+// 3) AI 分析月度配额：至少一名近窗提交者配额可用（quota>0 且未满）；通过的提交者各计数一次
 // 题面爬取由 shouldEnqueueFetch / problemHasFetchSubmitter 单独闸门。
 func (uc *ProblemUseCase) enqueueAnalyzePrio(id uint, priority uint8) error {
 	if uc.mq == nil {
@@ -391,6 +395,13 @@ func (uc *ProblemUseCase) enqueueAnalyzePrio(id uint, priority uint8) error {
 		log.Debugf("enqueueAnalyze skip no AI-eligible submitters id=%d", id)
 		return nil
 	}
+	// AI 分析月度配额闸门：至少一名近窗提交者配额可用；名单不可用时保守放行（不计数）
+	if submitters := uc.pipelineSubmitterIDs(id, "ai"); submitters != nil {
+		if len(submitters) > 0 && !uc.chargeAiAnalyzeQuota(submitters) {
+			log.Debugf("enqueueAnalyze skip ai quota exhausted id=%d", id)
+			return nil
+		}
+	}
 	body, _ := json.Marshal(event.ProblemAnalyzeEvent{ProblemID: id})
 	if err := uc.declareProblemQueue("problem_analyze"); err != nil {
 		return err
@@ -401,6 +412,86 @@ func (uc *ProblemUseCase) enqueueAnalyzePrio(id uint, priority uint8) error {
 		DeliveryMode: amqp.Persistent,
 		Priority:     priority,
 	})
+}
+
+// aiAnalyzeLoc AI 分析月度配额按上海自然月
+var aiAnalyzeLoc = func() *time.Location {
+	loc, err := time.LoadLocation("Asia/Shanghai")
+	if err != nil {
+		return time.FixedZone("CST", 8*3600)
+	}
+	return loc
+}()
+
+// aiAnalyzeMonthKey 单用户 AI 分析月计数 key
+func aiAnalyzeMonthKey(uid int64, now time.Time) string {
+	return fmt.Sprintf("sub:ai_analyze:%d:%s", uid, now.In(aiAnalyzeLoc).Format("200601"))
+}
+
+// aiQuotaAllows 当月计数未达上限且配额>0（纯函数，便于测试）
+func aiQuotaAllows(used, quota int64) bool {
+	return quota > 0 && used < quota
+}
+
+// aiAnalyzeMonthKeyTTL 计数 key 存活到次月 0 点（+1 分钟缓冲），过期自动清零
+func aiAnalyzeMonthKeyTTL() time.Duration {
+	now := time.Now().In(aiAnalyzeLoc)
+	next := time.Date(now.Year(), now.Month()+1, 1, 0, 0, 0, 0, aiAnalyzeLoc)
+	return time.Until(next) + time.Minute
+}
+
+// chargeAiAnalyzeQuota 对近窗提交者逐个做 AI 分析月配额检查并计数：
+// - quota==0（无配额，如无组织免费用户）：不能触发
+// - quota>0 且当月计数 < quota：通过并 INCR（首次设置月末 TTL）
+// 至少一名提交者通过 → true；RPC/Redis 故障保守放行（该提交者不计数）。
+// 配额值由 user 服务按套餐/组织实时返回，core_data 不缓存。
+func (uc *ProblemUseCase) chargeAiAnalyzeQuota(submitters []int64) bool {
+	if len(submitters) == 0 {
+		return false
+	}
+	ctx := context.Background()
+	anyPass := false
+	for _, uid := range submitters {
+		quota := 0
+		if uc.reg != nil {
+			if cli, err := userrpc.SubscriptionClient(uc.reg); err == nil && cli != nil {
+				q, err := cli.GetAiAnalyzeQuota(ctx, &subscription.GetAiAnalyzeQuotaReq{UserId: uid})
+				if err != nil || q == nil {
+					log.Warnf("GetAiAnalyzeQuota uid=%d: %v", uid, err)
+					anyPass = true // RPC 故障：保守放行该提交者（不计数）
+					continue
+				}
+				quota = int(q.GetQuotaPerMonth())
+			}
+		}
+		if quota <= 0 {
+			continue // 无配额：不能触发
+		}
+		if uc.data == nil || uc.data.RDB == nil {
+			anyPass = true
+			continue
+		}
+		key := aiAnalyzeMonthKey(uid, time.Now())
+		used, err := uc.data.RDB.Get(ctx, key).Int64()
+		if err != nil && err != redis.Nil {
+			log.Warnf("ai analyze get uid=%d: %v", uid, err)
+			anyPass = true // Redis 故障：保守放行
+			continue
+		}
+		if !aiQuotaAllows(used, int64(quota)) {
+			continue // 配额已满：不计数
+		}
+		if _, err := uc.data.RDB.Incr(ctx, key).Result(); err != nil {
+			log.Warnf("ai analyze incr uid=%d: %v", uid, err)
+			anyPass = true
+			continue
+		}
+		if used == 0 {
+			_ = uc.data.RDB.Expire(ctx, key, aiAnalyzeMonthKeyTTL()).Err()
+		}
+		anyPass = true
+	}
+	return anyPass
 }
 
 // nowcoderContestFetchURLs 从 contest_problems 解析比赛页回退链接。

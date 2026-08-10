@@ -2,6 +2,9 @@ package server
 
 import (
 	"context"
+	nethttp "net/http"
+	"strings"
+
 	"cwxu-algo/api/user/v1/auth"
 	blog "cwxu-algo/api/user/v1/blog"
 	"cwxu-algo/api/user/v1/group"
@@ -14,6 +17,7 @@ import (
 	"cwxu-algo/api/user/v1/site"
 	backuppb "cwxu-algo/api/user/v1/site/backup"
 	"cwxu-algo/api/user/v1/social"
+	subscriptionpb "cwxu-algo/api/user/v1/subscription"
 	"cwxu-algo/app/common/conf"
 	_const "cwxu-algo/app/common/const"
 	"cwxu-algo/app/common/opsmetrics"
@@ -22,7 +26,6 @@ import (
 	"cwxu-algo/app/common/utils/safeerrors"
 	"cwxu-algo/app/user/internal/data"
 	"cwxu-algo/app/user/internal/service"
-	"strings"
 
 	"github.com/go-kratos/kratos/v2/log"
 	"github.com/go-kratos/kratos/v2/middleware/auth/jwt"
@@ -57,6 +60,8 @@ func NewWhiteListMatcher() selector.MatchFunc {
 		"/api.user.v1.social.Social/PrivacyStatus": "",
 		// 粘贴板公开查看（单条内容）
 		"/api.user.v1.paste.Paste/Get": "",
+		// 支付宝支付回调（原生路由；operation=路径；签名验签在服务内完成）
+		"/v1/payment/notify": "",
 		// 组织广场公开（仅名/logo/人数）；邀请链接预览公开
 		"/api.user.v1.org.Org/Discover":      "",
 		"/api.user.v1.org.Org/InvitePreview": "",
@@ -107,6 +112,7 @@ func NewHTTPServer(
 	notificationService *service.NotificationService,
 	blogService *service.BlogService,
 	seoService *service.SEOService,
+	subscriptionService *service.SubscriptionService,
 	logger log.Logger,
 
 ) *http.Server {
@@ -150,5 +156,9 @@ func NewHTTPServer(
 	service.RegisterSEORoutes(srv, seoService)
 	service.RegisterBackupRoutes(srv, d)
 	backuppb.RegisterBackupHTTPServer(srv, service.NewBackupService(d))
+	// C 端订阅（套餐/订单/站管管理）
+	subscriptionpb.RegisterSubscriptionHTTPServer(srv, subscriptionService)
+	// 支付宝异步回调：x-www-form-urlencoded 原生 handler（不走 proto JSON）
+	srv.Handle("/v1/payment/notify", nethttp.HandlerFunc(subscriptionService.NotifyHTTP))
 	return srv
 }

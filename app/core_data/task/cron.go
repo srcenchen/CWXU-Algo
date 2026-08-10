@@ -22,7 +22,7 @@ import (
 
 // 与 profile SetSyncIntervals / 组织间隔配置一致
 const (
-	defaultSpiderIntervalMin = 60
+	defaultSpiderIntervalMin = 180 // user 服务不可用时的兜底；与免费默认（无覆盖）一致
 	defaultAIIntervalMin     = 180
 	minSyncIntervalMin       = 5
 	maxSyncIntervalMin       = 7 * 24 * 60 // 10080
@@ -41,6 +41,7 @@ type UserSyncPolicy struct {
 	SpiderIntervalMin    int
 	AISummaryIntervalMin int
 	SyncActive           bool
+	AIDailyEmailEnabled  bool
 }
 
 type CronTask struct {
@@ -192,6 +193,7 @@ func (t *CronTask) fetchPolicies(userIds []int64) map[int64]UserSyncPolicy {
 				AISummaryIntervalMin: clampInterval(int(p.GetAiSummaryIntervalMin()), defaultAIIntervalMin),
 				// 旧 user 服务无该字段时默认 false；兼容：无字段时仍以开关为准（见 runUserProfilePrewarm）
 				SyncActive: p.GetSyncActive() || p.GetEnableSpider() || p.GetEnableAiSummary(),
+				AIDailyEmailEnabled: p.GetAiDailyEmailEnabled(),
 			}
 		}
 	}
@@ -388,6 +390,16 @@ func (t *CronTask) runRecentSummaryTick() {
 		len(userIds), len(seen), published, dedup, failed, skipped, disabled)
 }
 
+// dailySummaryType 日报 MQ 类型分流（纯函数，便于测试）：
+// AI 日报（Pro 订阅 + 套餐开启 + 个人开关）走 PersonalLastDay（调 LLM）；
+// 否则 PersonalDailyRule（规则模板常规日报，无 LLM 成本）。
+func dailySummaryType(aiDailyEnabled bool) string {
+	if aiDailyEnabled {
+		return "PersonalLastDay"
+	}
+	return "PersonalDailyRule"
+}
+
 func (t *CronTask) runDailySummaryTick() {
 	if loadgateSkipTick("summary_mail") {
 		return
@@ -409,7 +421,8 @@ func (t *CronTask) runDailySummaryTick() {
 		p := policies[uid]
 		// 日报：组织授权 + 个人开
 		if p.EnableAIEmail && p.EmailEnabled {
-			if t.summary.Do(uid, "PersonalLastDay").Published {
+			// AI 日报仅 Pro 订阅 + 套餐开启 + 个人开关（默认关）；否则发规则模板常规日报（无 LLM 成本）
+			if t.summary.Do(uid, dailySummaryType(p.AIDailyEmailEnabled)).Published {
 				enqueued++
 			}
 		}

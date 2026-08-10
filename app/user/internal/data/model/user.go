@@ -56,4 +56,14 @@ type User struct {
 	AdminForceDormant bool `gorm:"default:false;index;comment:站管强制冻结同步"`
 	// Disabled 站管禁用账号（禁止登录；后台同步一并暂停）
 	Disabled bool `gorm:"default:false;index;comment:账号禁用禁止登录"`
+
+	// —— C 端个人订阅（Plus/Pro）——
+	// SubTier 订阅档位：plus|pro；空=未订阅
+	SubTier string `gorm:"size:16;default:'';index;comment:订阅档 plus|pro"`
+	// SubExpireAt 订阅到期时间；nil=长期/未订阅（以 SubTier 为准）
+	SubExpireAt *time.Time `gorm:"comment:订阅到期"`
+	// SubSource 订阅来源：alipay|manager
+	SubSource string `gorm:"size:16;default:'';comment:订阅来源 alipay|manager"`
+	// AIDailyEnabled 个人 AI 日报开关（仅 Pro 生效；默认关）
+	AIDailyEnabled bool `gorm:"default:false;comment:AI日报开关(Pro)"`
 }

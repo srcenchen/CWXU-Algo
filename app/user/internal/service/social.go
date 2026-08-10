@@ -50,6 +50,8 @@ func socialUserPB(u dal.SocialUser, avatarBase string) *pb.SocialUser {
 		IsSiteAdmin:  u.IsSiteAdmin,
 		// 自定义站点角色名（公共域 badge）
 		SiteRoles: siteRoles,
+		// C 端订阅档（badge 数据源；已过期映射为空）
+		SubTier: u.SubTier,
 	}
 }
 

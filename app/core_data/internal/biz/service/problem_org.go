@@ -46,35 +46,43 @@ func (uc *ProblemUseCase) problemHasOrgSubmitter(problemID uint) bool {
 }
 
 func (uc *ProblemUseCase) problemHasPipelineSubmitter(problemID uint, kind string) bool {
+	ids := uc.pipelineSubmitterIDs(problemID, kind)
+	return len(ids) > 0
+}
+
+// pipelineSubmitterIDs 近窗有指定流水线资格用户提交的 userId 列表（去重，最多 50）。
+// 名单不可用时返回 nil（调用方保守放行）；无资格提交返回空切片。
+func (uc *ProblemUseCase) pipelineSubmitterIDs(problemID uint, kind string) []int64 {
 	if problemID == 0 {
-		return false
+		return nil
 	}
 	users, ok := uc.pipelineUserIDs(kind)
 	if !ok {
 		// 拉不到名单时保守放行，避免 user 短暂故障拖死流水线
-		log.Warnf("problemHasPipelineSubmitter(%s): list unavailable, allow id=%d", kind, problemID)
-		return true
+		log.Warnf("pipelineSubmitterIDs(%s): list unavailable, allow id=%d", kind, problemID)
+		return nil
 	}
 	if len(users) == 0 {
-		return false
+		return []int64{}
 	}
 	ids := make([]int64, 0, len(users))
 	for id := range users {
 		ids = append(ids, id)
 	}
 	cutoff := time.Now().Add(-backfillWindow)
-	var n int64
+	var uids []int64
 	err := uc.data.DB.Model(&model.SubmitLog{}).
 		Where("problem_id = ?", problemID).
 		Where("time IS NOT NULL AND time >= ?", cutoff).
 		Where("user_id IN ?", ids).
-		Limit(1).
-		Count(&n).Error
+		Distinct().
+		Limit(50).
+		Pluck("user_id", &uids).Error
 	if err != nil {
-		log.Warnf("problemHasPipelineSubmitter(%s) query id=%d: %v", kind, problemID, err)
-		return true
+		log.Warnf("pipelineSubmitterIDs(%s) query id=%d: %v", kind, problemID, err)
+		return nil
 	}
-	return n > 0
+	return uids
 }
 
 // shouldEnqueueFetch 是否入队爬题面：近窗有爬取资格用户提交

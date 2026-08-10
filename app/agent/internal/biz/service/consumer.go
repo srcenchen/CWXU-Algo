@@ -53,6 +53,8 @@ func (c *Consumer) Consume() {
 			switch msg.Type {
 			case "PersonalLastDay":
 				runErr = c.summary.PersonalLastDay(msg.UserId)
+			case "PersonalDailyRule":
+				runErr = c.summary.PersonalDailyRule(msg.UserId)
 			case "PersonalRecent":
 				runErr = c.summary.PersonalRecent(msg.UserId)
 			case "WeeklyStaff", "WeeklyReportForCoach":

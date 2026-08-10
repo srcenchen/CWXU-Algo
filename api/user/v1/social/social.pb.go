@@ -1275,15 +1275,17 @@ func (x *PrivacyStatusRes) GetPrivacyConfigured() bool {
 
 // 社交用户项（域感知展示）
 type SocialUser struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	UserId        int64                  `protobuf:"varint,1,opt,name=userId,proto3" json:"userId,omitempty"`
-	Username      string                 `protobuf:"bytes,2,opt,name=username,proto3" json:"username,omitempty"`
-	Name          string                 `protobuf:"bytes,3,opt,name=name,proto3" json:"name,omitempty"`
-	Avatar        string                 `protobuf:"bytes,4,opt,name=avatar,proto3" json:"avatar,omitempty"`
-	InCurrentOrg  bool                   `protobuf:"varint,5,opt,name=inCurrentOrg,proto3" json:"inCurrentOrg,omitempty"`
-	SharedOrgs    []*SharedOrg           `protobuf:"bytes,6,rep,name=sharedOrgs,proto3" json:"sharedOrgs,omitempty"`
-	IsSiteAdmin   bool                   `protobuf:"varint,7,opt,name=isSiteAdmin,proto3" json:"isSiteAdmin,omitempty"`
-	SiteRoles     []string               `protobuf:"bytes,8,rep,name=siteRoles,proto3" json:"siteRoles,omitempty"`
+	state        protoimpl.MessageState `protogen:"open.v1"`
+	UserId       int64                  `protobuf:"varint,1,opt,name=userId,proto3" json:"userId,omitempty"`
+	Username     string                 `protobuf:"bytes,2,opt,name=username,proto3" json:"username,omitempty"`
+	Name         string                 `protobuf:"bytes,3,opt,name=name,proto3" json:"name,omitempty"`
+	Avatar       string                 `protobuf:"bytes,4,opt,name=avatar,proto3" json:"avatar,omitempty"`
+	InCurrentOrg bool                   `protobuf:"varint,5,opt,name=inCurrentOrg,proto3" json:"inCurrentOrg,omitempty"`
+	SharedOrgs   []*SharedOrg           `protobuf:"bytes,6,rep,name=sharedOrgs,proto3" json:"sharedOrgs,omitempty"`
+	IsSiteAdmin  bool                   `protobuf:"varint,7,opt,name=isSiteAdmin,proto3" json:"isSiteAdmin,omitempty"`
+	SiteRoles    []string               `protobuf:"bytes,8,rep,name=siteRoles,proto3" json:"siteRoles,omitempty"`
+	// C 端订阅档 plus|pro（过期返回空）
+	SubTier       string `protobuf:"bytes,9,opt,name=subTier,proto3" json:"subTier,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1372,6 +1374,13 @@ func (x *SocialUser) GetSiteRoles() []string {
 		return x.SiteRoles
 	}
 	return nil
+}
+
+func (x *SocialUser) GetSubTier() string {
+	if x != nil {
+		return x.SubTier
+	}
+	return ""
 }
 
 // 双方共属的其他组织内称呼（隐私边界：观众必须同属该组织）
@@ -1521,7 +1530,7 @@ const file_user_v1_social_social_proto_rawDesc = "" +
 	"\x10PrivacyStatusRes\x12\x18\n" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12,\n" +
-	"\x11privacyConfigured\x18\x03 \x01(\bR\x11privacyConfigured\"\x8f\x02\n" +
+	"\x11privacyConfigured\x18\x03 \x01(\bR\x11privacyConfigured\"\xa9\x02\n" +
 	"\n" +
 	"SocialUser\x12\x16\n" +
 	"\x06userId\x18\x01 \x01(\x03R\x06userId\x12\x1a\n" +
@@ -1533,7 +1542,8 @@ const file_user_v1_social_social_proto_rawDesc = "" +
 	"sharedOrgs\x18\x06 \x03(\v2\x1d.api.user.v1.social.SharedOrgR\n" +
 	"sharedOrgs\x12 \n" +
 	"\visSiteAdmin\x18\a \x01(\bR\visSiteAdmin\x12\x1c\n" +
-	"\tsiteRoles\x18\b \x03(\tR\tsiteRoles\"]\n" +
+	"\tsiteRoles\x18\b \x03(\tR\tsiteRoles\x12\x18\n" +
+	"\asubTier\x18\t \x01(\tR\asubTier\"]\n" +
 	"\tSharedOrg\x12\x14\n" +
 	"\x05orgId\x18\x01 \x01(\x03R\x05orgId\x12\x18\n" +
 	"\aorgName\x18\x02 \x01(\tR\aorgName\x12 \n" +

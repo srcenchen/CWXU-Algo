@@ -82,9 +82,11 @@ type GetByIdRes struct {
 	EmailWeeklyAllowedByOrg bool                  `protobuf:"varint,12,opt,name=emailWeeklyAllowedByOrg,proto3" json:"emailWeeklyAllowedByOrg,omitempty"`
 	Spiders                 []*GetByIdRes_Spiders `protobuf:"bytes,7,rep,name=spiders,proto3" json:"spiders,omitempty"`
 	// 最近一次 OJ 数据同步成功时间（unix 秒；0=尚无记录）
-	LastSyncAt    int64 `protobuf:"varint,13,opt,name=lastSyncAt,proto3" json:"lastSyncAt,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	LastSyncAt int64 `protobuf:"varint,13,opt,name=lastSyncAt,proto3" json:"lastSyncAt,omitempty"`
+	// 个人 AI 日报开关（仅 Pro 订阅生效；默认关；隐私字段，仅本人/站管可见）
+	AiDailyEnabled bool `protobuf:"varint,14,opt,name=aiDailyEnabled,proto3" json:"aiDailyEnabled,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *GetByIdRes) Reset() {
@@ -206,6 +208,13 @@ func (x *GetByIdRes) GetLastSyncAt() int64 {
 		return x.LastSyncAt
 	}
 	return 0
+}
+
+func (x *GetByIdRes) GetAiDailyEnabled() bool {
+	if x != nil {
+		return x.AiDailyEnabled
+	}
+	return false
 }
 
 type GetByNameReq struct {
@@ -445,9 +454,11 @@ type UpdateReq struct {
 	Email  string `protobuf:"bytes,4,opt,name=email,proto3" json:"email,omitempty"`
 	Avatar string `protobuf:"bytes,6,opt,name=avatar,proto3" json:"avatar,omitempty"`
 	// 修改/绑定邮箱时必填：发往新邮箱的验证码（purpose=change_email）
-	EmailCode     string `protobuf:"bytes,7,opt,name=emailCode,proto3" json:"emailCode,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	EmailCode string `protobuf:"bytes,7,opt,name=emailCode,proto3" json:"emailCode,omitempty"`
+	// AI 日报开关（仅 Pro 订阅 active 可开启；默认关）；省略=不改
+	AiDailyEnabled *bool `protobuf:"varint,8,opt,name=aiDailyEnabled,proto3,oneof" json:"aiDailyEnabled,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *UpdateReq) Reset() {
@@ -513,6 +524,13 @@ func (x *UpdateReq) GetEmailCode() string {
 		return x.EmailCode
 	}
 	return ""
+}
+
+func (x *UpdateReq) GetAiDailyEnabled() bool {
+	if x != nil && x.AiDailyEnabled != nil {
+		return *x.AiDailyEnabled
+	}
+	return false
 }
 
 type UpdateRes struct {
@@ -2406,9 +2424,11 @@ type UserSyncPolicy struct {
 	EmailEnabled         bool                   `protobuf:"varint,9,opt,name=emailEnabled,proto3" json:"emailEnabled,omitempty"`              // 个人日报偏好
 	EmailWeeklyEnabled   bool                   `protobuf:"varint,10,opt,name=emailWeeklyEnabled,proto3" json:"emailWeeklyEnabled,omitempty"` // 个人周报偏好
 	// 是否允许后台定时任务（非休眠或已豁免）
-	SyncActive    bool `protobuf:"varint,11,opt,name=syncActive,proto3" json:"syncActive,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	SyncActive bool `protobuf:"varint,11,opt,name=syncActive,proto3" json:"syncActive,omitempty"`
+	// 个人 AI 日报（Pro 订阅 active + 套餐开启 + 个人开关；默认关）
+	AiDailyEmailEnabled bool `protobuf:"varint,12,opt,name=aiDailyEmailEnabled,proto3" json:"aiDailyEmailEnabled,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
 }
 
 func (x *UserSyncPolicy) Reset() {
@@ -2514,6 +2534,13 @@ func (x *UserSyncPolicy) GetEmailWeeklyEnabled() bool {
 func (x *UserSyncPolicy) GetSyncActive() bool {
 	if x != nil {
 		return x.SyncActive
+	}
+	return false
+}
+
+func (x *UserSyncPolicy) GetAiDailyEmailEnabled() bool {
+	if x != nil {
+		return x.AiDailyEmailEnabled
 	}
 	return false
 }
@@ -3135,8 +3162,12 @@ type GetListRes_List struct {
 	DailyRefreshQuota int32 `protobuf:"varint,30,opt,name=dailyRefreshQuota,proto3" json:"dailyRefreshQuota,omitempty"`
 	// 是否存在站点管理员个人配额覆盖
 	DailyRefreshQuotaOverridden bool `protobuf:"varint,31,opt,name=dailyRefreshQuotaOverridden,proto3" json:"dailyRefreshQuotaOverridden,omitempty"`
-	unknownFields               protoimpl.UnknownFields
-	sizeCache                   protoimpl.SizeCache
+	// C 端订阅档 plus|pro（过期返回空）
+	SubTier string `protobuf:"bytes,32,opt,name=subTier,proto3" json:"subTier,omitempty"`
+	// C 端订阅到期 unix 秒（0=未订阅/长期）
+	SubExpireAt   int64 `protobuf:"varint,33,opt,name=subExpireAt,proto3" json:"subExpireAt,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *GetListRes_List) Reset() {
@@ -3380,6 +3411,20 @@ func (x *GetListRes_List) GetDailyRefreshQuotaOverridden() bool {
 	return false
 }
 
+func (x *GetListRes_List) GetSubTier() string {
+	if x != nil {
+		return x.SubTier
+	}
+	return ""
+}
+
+func (x *GetListRes_List) GetSubExpireAt() int64 {
+	if x != nil {
+		return x.SubExpireAt
+	}
+	return 0
+}
+
 type GetByIdsRes_UserProfile struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	UserId        int64                  `protobuf:"varint,1,opt,name=userId,proto3" json:"userId,omitempty"`
@@ -3455,7 +3500,7 @@ const file_user_v1_profile_profile_proto_rawDesc = "" +
 	"\x1duser/v1/profile/profile.proto\x12\vapi.user.v1\x1a\x1cgoogle/api/annotations.proto\"$\n" +
 	"\n" +
 	"GetByIdReq\x12\x16\n" +
-	"\x06userId\x18\x01 \x01(\x03R\x06userId\"\xa3\x05\n" +
+	"\x06userId\x18\x01 \x01(\x03R\x06userId\"\xcb\x05\n" +
 	"\n" +
 	"GetByIdRes\x12\x16\n" +
 	"\x06userId\x18\x01 \x01(\x04R\x06userId\x12\x1a\n" +
@@ -3473,7 +3518,8 @@ const file_user_v1_profile_profile_proto_rawDesc = "" +
 	"\aspiders\x18\a \x03(\v2\x1f.api.user.v1.GetByIdRes.SpidersR\aspiders\x12\x1e\n" +
 	"\n" +
 	"lastSyncAt\x18\r \x01(\x03R\n" +
-	"lastSyncAt\x1a\xd5\x01\n" +
+	"lastSyncAt\x12&\n" +
+	"\x0eaiDailyEnabled\x18\x0e \x01(\bR\x0eaiDailyEnabled\x1a\xd5\x01\n" +
 	"\aSpiders\x12\x1a\n" +
 	"\bplatform\x18\x01 \x01(\tR\bplatform\x12\x1a\n" +
 	"\busername\x18\x02 \x01(\tR\busername\x12\x16\n" +
@@ -3501,8 +3547,7 @@ const file_user_v1_profile_profile_proto_rawDesc = "" +
 	"\x05scope\x18\x03 \x01(\tR\x05scope\x12\x18\n" +
 	"\akeyword\x18\x04 \x01(\tR\akeyword\x12 \n" +
 	"\vdormantOnly\x18\x05 \x01(\bR\vdormantOnly\x12\"\n" +
-	"\finactiveDays\x18\x06 \x01(\x05R\finactiveDays\"\xcf\n" +
-	"\n" +
+	"\finactiveDays\x18\x06 \x01(\x05R\finactiveDays\"\x8b\v\n" +
 	"\n" +
 	"GetListRes\x120\n" +
 	"\x04list\x18\x01 \x03(\v2\x1c.api.user.v1.GetListRes.ListR\x04list\x12\x14\n" +
@@ -3510,7 +3555,7 @@ const file_user_v1_profile_profile_proto_rawDesc = "" +
 	"\bOrgBrief\x12\x14\n" +
 	"\x05orgId\x18\x01 \x01(\x04R\x05orgId\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x12\n" +
-	"\x04role\x18\x03 \x01(\tR\x04role\x1a\xae\t\n" +
+	"\x04role\x18\x03 \x01(\tR\x04role\x1a\xea\t\n" +
 	"\x04List\x12\x16\n" +
 	"\x06userId\x18\x01 \x01(\x04R\x06userId\x12\x1a\n" +
 	"\busername\x18\x02 \x01(\tR\busername\x12\x12\n" +
@@ -3546,13 +3591,17 @@ const file_user_v1_profile_profile_proto_rawDesc = "" +
 	"\x12isResourceReviewer\x18\x1c \x01(\bB\x02\x18\x01R\x12isResourceReviewer\x12\x1c\n" +
 	"\tsiteRoles\x18\x1d \x03(\tR\tsiteRoles\x12,\n" +
 	"\x11dailyRefreshQuota\x18\x1e \x01(\x05R\x11dailyRefreshQuota\x12@\n" +
-	"\x1bdailyRefreshQuotaOverridden\x18\x1f \x01(\bR\x1bdailyRefreshQuotaOverridden\"\x83\x01\n" +
+	"\x1bdailyRefreshQuotaOverridden\x18\x1f \x01(\bR\x1bdailyRefreshQuotaOverridden\x12\x18\n" +
+	"\asubTier\x18  \x01(\tR\asubTier\x12 \n" +
+	"\vsubExpireAt\x18! \x01(\x03R\vsubExpireAt\"\xc3\x01\n" +
 	"\tUpdateReq\x12\x16\n" +
 	"\x06userId\x18\x01 \x01(\x04R\x06userId\x12\x12\n" +
 	"\x04name\x18\x03 \x01(\tR\x04name\x12\x14\n" +
 	"\x05email\x18\x04 \x01(\tR\x05email\x12\x16\n" +
 	"\x06avatar\x18\x06 \x01(\tR\x06avatar\x12\x1c\n" +
-	"\temailCode\x18\a \x01(\tR\temailCode\"9\n" +
+	"\temailCode\x18\a \x01(\tR\temailCode\x12+\n" +
+	"\x0eaiDailyEnabled\x18\b \x01(\bH\x00R\x0eaiDailyEnabled\x88\x01\x01B\x11\n" +
+	"\x0f_aiDailyEnabled\"9\n" +
 	"\tUpdateRes\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\x03R\x04code\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\"@\n" +
@@ -3662,7 +3711,7 @@ const file_user_v1_profile_profile_proto_rawDesc = "" +
 	"\x04code\x18\x01 \x01(\x03R\x04code\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\".\n" +
 	"\x12GetSyncPoliciesReq\x12\x18\n" +
-	"\auserIds\x18\x01 \x03(\x03R\auserIds\"\xc4\x03\n" +
+	"\auserIds\x18\x01 \x03(\x03R\auserIds\"\xf6\x03\n" +
 	"\x0eUserSyncPolicy\x12\x16\n" +
 	"\x06userId\x18\x01 \x01(\x03R\x06userId\x12\"\n" +
 	"\fenableSpider\x18\x02 \x01(\bR\fenableSpider\x12(\n" +
@@ -3679,7 +3728,8 @@ const file_user_v1_profile_profile_proto_rawDesc = "" +
 	" \x01(\bR\x12emailWeeklyEnabled\x12\x1e\n" +
 	"\n" +
 	"syncActive\x18\v \x01(\bR\n" +
-	"syncActive\"M\n" +
+	"syncActive\x120\n" +
+	"\x13aiDailyEmailEnabled\x18\f \x01(\bR\x13aiDailyEmailEnabled\"M\n" +
 	"\x12GetSyncPoliciesRes\x127\n" +
 	"\bpolicies\x18\x01 \x03(\v2\x1b.api.user.v1.UserSyncPolicyR\bpolicies\".\n" +
 	"\x10GetByUsernameReq\x12\x1a\n" +
@@ -3868,6 +3918,7 @@ func file_user_v1_profile_profile_proto_init() {
 	if File_user_v1_profile_profile_proto != nil {
 		return
 	}
+	file_user_v1_profile_profile_proto_msgTypes[6].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{

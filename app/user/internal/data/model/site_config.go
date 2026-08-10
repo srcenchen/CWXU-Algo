@@ -62,7 +62,13 @@ type SiteConfig struct {
 	SmtpStatus   string `gorm:"size:16;column:smtp_status;default:unchecked;comment:邮件服务状态"`
 	SmtpStatusAt int64  `gorm:"column:smtp_status_at;default:0;comment:邮件状态更新时间 unix"`
 	SmtpErrMsg   string `gorm:"type:text;column:smtp_err_msg;comment:邮件最近错误"`
-	UpdatedAt    time.Time `gorm:"autoUpdateTime"`
+	// 支付宝（C 端订阅在线支付）；私钥/公钥经 secretutil 加密存储
+	AlipayAppID     string `gorm:"size:64;column:alipay_app_id;default:'';comment:支付宝应用APPID"`
+	AlipayPrivateKey string `gorm:"type:text;column:alipay_private_key;default:'';comment:支付宝应用私钥(加密)"`
+	AlipayPublicKey  string `gorm:"type:text;column:alipay_public_key;default:'';comment:支付宝公钥(加密)"`
+	// AlipaySandbox 沙箱环境开关（默认 false=生产）
+	AlipaySandbox bool `gorm:"column:alipay_sandbox;default:false;comment:支付宝沙箱"`
+	UpdatedAt     time.Time `gorm:"autoUpdateTime"`
 }
 
 func (SiteConfig) TableName() string { return "site_configs" }

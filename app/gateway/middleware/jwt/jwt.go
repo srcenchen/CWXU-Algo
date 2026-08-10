@@ -41,6 +41,9 @@ var publicExact = map[string]struct{}{
 	"/v1/user/auth/register":       {},
 	"/v1/user/auth/send-code":      {},
 	"/v1/user/auth/reset-password": {},
+	// 支付宝支付回调（表单 POST，签名验签由 user 服务完成）
+	"/v1/payment/notify": {},
+	"/api/payment/notify": {},
 	// Profile 公开读
 	"/v1/user/profile/get-by-id":       {},
 	"/v1/user/profile/get-by-username": {},
