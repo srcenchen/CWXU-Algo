@@ -21,8 +21,9 @@ import (
 	"github.com/go-kratos/kratos/v2/log"
 )
 
-// paymentNotifyURL 支付FM异步回调地址（不存库；环境变量 PAYMENT_NOTIFY_URL 可覆盖）
-const paymentNotifyURL = "https://algo.zhiyuansofts.cn/v1/payment/notify"
+// paymentNotifyURL 支付FM异步回调地址（不存库；环境变量 PAYMENT_NOTIFY_URL 可覆盖）。
+// 必须走 /api 前缀：nginx 仅反代 /api/* → 网关 /v1/*（/v1/* 会被前端 SPA 兜底返回 HTML）。
+const paymentNotifyURL = "https://algo.zhiyuansofts.cn/api/payment/notify"
 
 func notifyURL() string {
 	if v := strings.TrimSpace(os.Getenv("PAYMENT_NOTIFY_URL")); v != "" {
