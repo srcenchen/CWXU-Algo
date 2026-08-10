@@ -1173,19 +1173,19 @@ func (d *ProfileDal) GetSyncPolicies(ctx context.Context, userIDs []int64) ([]Us
 
 	// 个人邮件偏好 + 站管间隔覆盖 + 活跃/豁免 / 强制冻结 / 禁用 + 订阅
 	type pref struct {
-		ID                           int64
-		EmailEnabled                 bool
-		EmailWeeklyEnabled           bool
-		SpiderIntervalMinOverride    *int
-		AISummaryIntervalMinOverride *int
-		IsSiteAdmin                  bool
-		SyncExempt                   bool
-		LastLoginAt                  *time.Time
-		AdminForceDormant            bool
-		Disabled                     bool
-		SubTier                      string
-		SubExpireAt                  *time.Time
-		AIDailyEnabled               bool
+		ID                           int64     `gorm:"column:id"`
+		EmailEnabled                 bool      `gorm:"column:email_enabled"`
+		EmailWeeklyEnabled           bool      `gorm:"column:email_weekly_enabled"`
+		SpiderIntervalMinOverride    *int      `gorm:"column:spider_interval_min_override"`
+		AISummaryIntervalMinOverride *int      `gorm:"column:ai_summary_interval_min_override"`
+		IsSiteAdmin                  bool      `gorm:"column:is_site_admin"`
+		SyncExempt                   bool      `gorm:"column:sync_exempt"`
+		LastLoginAt                  *time.Time `gorm:"column:last_login_at"`
+		AdminForceDormant            bool      `gorm:"column:admin_force_dormant"`
+		Disabled                     bool      `gorm:"column:disabled"`
+		SubTier                      string    `gorm:"column:sub_tier"`
+		SubExpireAt                  *time.Time `gorm:"column:sub_expire_at"`
+		AIDailyEnabled               bool      `gorm:"column:ai_daily_enabled"`
 	}
 	var prefs []pref
 	_ = d.db.WithContext(ctx).Model(&model.User{}).

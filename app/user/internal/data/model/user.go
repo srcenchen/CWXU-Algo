@@ -65,5 +65,6 @@ type User struct {
 	// SubSource 订阅来源：payfm|manager
 	SubSource string `gorm:"size:16;default:'';comment:订阅来源 payfm|manager"`
 	// AIDailyEnabled 个人 AI 日报开关（仅 Pro 生效；默认关）
-	AIDailyEnabled bool `gorm:"default:false;comment:AI日报开关(Pro)"`
+	// column 显式指定：避免 NamingStrategy 把 AIDaily 拆成 a_i_daily → a_idaily_enabled
+	AIDailyEnabled bool `gorm:"column:ai_daily_enabled;default:false;comment:AI日报开关(Pro)"`
 }
