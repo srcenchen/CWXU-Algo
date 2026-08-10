@@ -12358,6 +12358,9 @@ components:
                     type: string
                 footerIcp:
                     type: string
+                alipayConfigured:
+                    type: boolean
+                    description: 支付是否已完整配置（appId + 应用私钥 + 支付宝公钥 齐备；公开布尔，无敏感信息）
         api.user.v1.site.TestEmailReq:
             type: object
             properties:
@@ -12889,6 +12892,9 @@ components:
                 aiDailyEnabled:
                     type: boolean
                     description: AI 日报当前是否生效（Pro 订阅 + 套餐开启 + 个人开关已开）
+                aiAnalyzeUnlimited:
+                    type: boolean
+                    description: 组织开通 AI 分析：无限配额（组织成员优先消耗组织，不受 aiAnalyzeQuota 数字限制）
         api.user.v1.subscription.MySubscriptionRes:
             type: object
             properties:

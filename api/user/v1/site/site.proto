@@ -64,6 +64,8 @@ message GetConfigRes {
   string site_logo = 4;
   string favicon = 5;
   string footer_icp = 6;
+  // 支付是否已完整配置（appId + 应用私钥 + 支付宝公钥 齐备；公开布尔，无敏感信息）
+  bool alipay_configured = 7;
 }
 
 message GetAdminConfigReq {}

@@ -441,10 +441,11 @@ func aiAnalyzeMonthKeyTTL() time.Duration {
 }
 
 // chargeAiAnalyzeQuota 对近窗提交者逐个做 AI 分析月配额检查并计数：
+// - 组织开通（unlimited=true）：直接通过，不计数（组织成员优先消耗组织无限配额）
 // - quota==0（无配额，如无组织免费用户）：不能触发
 // - quota>0 且当月计数 < quota：通过并 INCR（首次设置月末 TTL）
 // 至少一名提交者通过 → true；RPC/Redis 故障保守放行（该提交者不计数）。
-// 配额值由 user 服务按套餐/组织实时返回，core_data 不缓存。
+// 配额值由 user 服务按组织/套餐实时返回，core_data 不缓存。
 func (uc *ProblemUseCase) chargeAiAnalyzeQuota(submitters []int64) bool {
 	if len(submitters) == 0 {
 		return false
@@ -452,7 +453,6 @@ func (uc *ProblemUseCase) chargeAiAnalyzeQuota(submitters []int64) bool {
 	ctx := context.Background()
 	anyPass := false
 	for _, uid := range submitters {
-		quota := 0
 		if uc.reg != nil {
 			if cli, err := userrpc.SubscriptionClient(uc.reg); err == nil && cli != nil {
 				q, err := cli.GetAiAnalyzeQuota(ctx, &subscription.GetAiAnalyzeQuotaReq{UserId: uid})
@@ -461,35 +461,39 @@ func (uc *ProblemUseCase) chargeAiAnalyzeQuota(submitters []int64) bool {
 					anyPass = true // RPC 故障：保守放行该提交者（不计数）
 					continue
 				}
-				quota = int(q.GetQuotaPerMonth())
+				if q.GetUnlimited() {
+					anyPass = true // 组织开通：无限配额，不计数
+					continue
+				}
+				quota := int(q.GetQuotaPerMonth())
+				if quota <= 0 {
+					continue // 无配额：不能触发
+				}
+				if uc.data == nil || uc.data.RDB == nil {
+					anyPass = true
+					continue
+				}
+				key := aiAnalyzeMonthKey(uid, time.Now())
+				used, err := uc.data.RDB.Get(ctx, key).Int64()
+				if err != nil && err != redis.Nil {
+					log.Warnf("ai analyze get uid=%d: %v", uid, err)
+					anyPass = true // Redis 故障：保守放行
+					continue
+				}
+				if !aiQuotaAllows(used, int64(quota)) {
+					continue // 配额已满：不计数
+				}
+				if _, err := uc.data.RDB.Incr(ctx, key).Result(); err != nil {
+					log.Warnf("ai analyze incr uid=%d: %v", uid, err)
+					anyPass = true
+					continue
+				}
+				if used == 0 {
+					_ = uc.data.RDB.Expire(ctx, key, aiAnalyzeMonthKeyTTL()).Err()
+				}
+				anyPass = true
 			}
 		}
-		if quota <= 0 {
-			continue // 无配额：不能触发
-		}
-		if uc.data == nil || uc.data.RDB == nil {
-			anyPass = true
-			continue
-		}
-		key := aiAnalyzeMonthKey(uid, time.Now())
-		used, err := uc.data.RDB.Get(ctx, key).Int64()
-		if err != nil && err != redis.Nil {
-			log.Warnf("ai analyze get uid=%d: %v", uid, err)
-			anyPass = true // Redis 故障：保守放行
-			continue
-		}
-		if !aiQuotaAllows(used, int64(quota)) {
-			continue // 配额已满：不计数
-		}
-		if _, err := uc.data.RDB.Incr(ctx, key).Result(); err != nil {
-			log.Warnf("ai analyze incr uid=%d: %v", uid, err)
-			anyPass = true
-			continue
-		}
-		if used == 0 {
-			_ = uc.data.RDB.Expire(ctx, key, aiAnalyzeMonthKeyTTL()).Err()
-		}
-		anyPass = true
 	}
 	return anyPass
 }

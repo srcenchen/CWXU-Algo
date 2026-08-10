@@ -1200,8 +1200,11 @@ func (x *GetAiAnalyzeQuotaReq) GetUserId() int64 {
 type GetAiAnalyzeQuotaRes struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// 月配额：>0 为硬上限；0=无配额（不能触发 AI 分析）。
-	// Pro 订阅取套餐 aiAnalyzeMonth；非订阅但有组织取组织套餐配额；无组织返回 0。
+	// Pro 订阅取套餐 aiAnalyzeMonth；无组织免费用户返回 0。
 	QuotaPerMonth int32 `protobuf:"varint,1,opt,name=quotaPerMonth,proto3" json:"quotaPerMonth,omitempty"`
+	// 组织开通 AI 分析（orgs.enable_ai_summary=true）：无限配额。
+	// 组织成员优先消耗组织配额，不受 quotaPerMonth 数字限制。
+	Unlimited     bool `protobuf:"varint,2,opt,name=unlimited,proto3" json:"unlimited,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1241,6 +1244,13 @@ func (x *GetAiAnalyzeQuotaRes) GetQuotaPerMonth() int32 {
 		return x.QuotaPerMonth
 	}
 	return 0
+}
+
+func (x *GetAiAnalyzeQuotaRes) GetUnlimited() bool {
+	if x != nil {
+		return x.Unlimited
+	}
+	return false
 }
 
 type MyAiStatusReq struct {
@@ -1291,8 +1301,10 @@ type MyAiStatusRes struct {
 	AiDailyOrgAllowed bool `protobuf:"varint,5,opt,name=aiDailyOrgAllowed,proto3" json:"aiDailyOrgAllowed,omitempty"`
 	// AI 日报当前是否生效（Pro 订阅 + 套餐开启 + 个人开关已开）
 	AiDailyEnabled bool `protobuf:"varint,6,opt,name=aiDailyEnabled,proto3" json:"aiDailyEnabled,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// 组织开通 AI 分析：无限配额（组织成员优先消耗组织，不受 aiAnalyzeQuota 数字限制）
+	AiAnalyzeUnlimited bool `protobuf:"varint,7,opt,name=aiAnalyzeUnlimited,proto3" json:"aiAnalyzeUnlimited,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *MyAiStatusRes) Reset() {
@@ -1363,6 +1375,13 @@ func (x *MyAiStatusRes) GetAiDailyOrgAllowed() bool {
 func (x *MyAiStatusRes) GetAiDailyEnabled() bool {
 	if x != nil {
 		return x.AiDailyEnabled
+	}
+	return false
+}
+
+func (x *MyAiStatusRes) GetAiAnalyzeUnlimited() bool {
+	if x != nil {
+		return x.AiAnalyzeUnlimited
 	}
 	return false
 }
@@ -1451,17 +1470,19 @@ const file_user_v1_subscription_subscription_proto_rawDesc = "" +
 	"\x04code\x18\x01 \x01(\x03R\x04code\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\".\n" +
 	"\x14GetAiAnalyzeQuotaReq\x12\x16\n" +
-	"\x06userId\x18\x01 \x01(\x03R\x06userId\"<\n" +
+	"\x06userId\x18\x01 \x01(\x03R\x06userId\"Z\n" +
 	"\x14GetAiAnalyzeQuotaRes\x12$\n" +
-	"\rquotaPerMonth\x18\x01 \x01(\x05R\rquotaPerMonth\"\x0f\n" +
-	"\rMyAiStatusReq\"\xe5\x01\n" +
+	"\rquotaPerMonth\x18\x01 \x01(\x05R\rquotaPerMonth\x12\x1c\n" +
+	"\tunlimited\x18\x02 \x01(\bR\tunlimited\"\x0f\n" +
+	"\rMyAiStatusReq\"\x95\x02\n" +
 	"\rMyAiStatusRes\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\x03R\x04code\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12&\n" +
 	"\x0eaiAnalyzeQuota\x18\x03 \x01(\x05R\x0eaiAnalyzeQuota\x12(\n" +
 	"\x0faiAnalyzeSource\x18\x04 \x01(\tR\x0faiAnalyzeSource\x12,\n" +
 	"\x11aiDailyOrgAllowed\x18\x05 \x01(\bR\x11aiDailyOrgAllowed\x12&\n" +
-	"\x0eaiDailyEnabled\x18\x06 \x01(\bR\x0eaiDailyEnabled2\xa6\v\n" +
+	"\x0eaiDailyEnabled\x18\x06 \x01(\bR\x0eaiDailyEnabled\x12.\n" +
+	"\x12aiAnalyzeUnlimited\x18\a \x01(\bR\x12aiAnalyzeUnlimited2\xa6\v\n" +
 	"\fSubscription\x12\x80\x01\n" +
 	"\tListPlans\x12&.api.user.v1.subscription.ListPlansReq\x1a&.api.user.v1.subscription.ListPlansRes\"#\x82\xd3\xe4\x93\x02\x1d\x12\x1b/v1/user/subscription/plans\x12\x90\x01\n" +
 	"\vCreateOrder\x12(.api.user.v1.subscription.CreateOrderReq\x1a(.api.user.v1.subscription.CreateOrderRes\"-\x82\xd3\xe4\x93\x02':\x01*\"\"/v1/user/subscription/create-order\x12}\n" +

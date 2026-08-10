@@ -215,8 +215,11 @@ message GetAiAnalyzeQuotaReq {
 
 message GetAiAnalyzeQuotaRes {
   // 月配额：>0 为硬上限；0=无配额（不能触发 AI 分析）。
-  // Pro 订阅取套餐 aiAnalyzeMonth；非订阅但有组织取组织套餐配额；无组织返回 0。
+  // Pro 订阅取套餐 aiAnalyzeMonth；无组织免费用户返回 0。
   int32 quotaPerMonth = 1;
+  // 组织开通 AI 分析（orgs.enable_ai_summary=true）：无限配额。
+  // 组织成员优先消耗组织配额，不受 quotaPerMonth 数字限制。
+  bool unlimited = 2;
 }
 
 message MyAiStatusReq {}
@@ -232,4 +235,6 @@ message MyAiStatusRes {
   bool aiDailyOrgAllowed = 5;
   // AI 日报当前是否生效（Pro 订阅 + 套餐开启 + 个人开关已开）
   bool aiDailyEnabled = 6;
+  // 组织开通 AI 分析：无限配额（组织成员优先消耗组织，不受 aiAnalyzeQuota 数字限制）
+  bool aiAnalyzeUnlimited = 7;
 }

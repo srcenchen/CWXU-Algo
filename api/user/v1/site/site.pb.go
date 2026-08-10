@@ -59,15 +59,17 @@ func (*GetConfigReq) Descriptor() ([]byte, []int) {
 }
 
 type GetConfigRes struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Code          int64                  `protobuf:"varint,1,opt,name=code,proto3" json:"code,omitempty"`
-	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
-	SiteTitle     string                 `protobuf:"bytes,3,opt,name=site_title,json=siteTitle,proto3" json:"site_title,omitempty"`
-	SiteLogo      string                 `protobuf:"bytes,4,opt,name=site_logo,json=siteLogo,proto3" json:"site_logo,omitempty"`
-	Favicon       string                 `protobuf:"bytes,5,opt,name=favicon,proto3" json:"favicon,omitempty"`
-	FooterIcp     string                 `protobuf:"bytes,6,opt,name=footer_icp,json=footerIcp,proto3" json:"footer_icp,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	Code      int64                  `protobuf:"varint,1,opt,name=code,proto3" json:"code,omitempty"`
+	Message   string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	SiteTitle string                 `protobuf:"bytes,3,opt,name=site_title,json=siteTitle,proto3" json:"site_title,omitempty"`
+	SiteLogo  string                 `protobuf:"bytes,4,opt,name=site_logo,json=siteLogo,proto3" json:"site_logo,omitempty"`
+	Favicon   string                 `protobuf:"bytes,5,opt,name=favicon,proto3" json:"favicon,omitempty"`
+	FooterIcp string                 `protobuf:"bytes,6,opt,name=footer_icp,json=footerIcp,proto3" json:"footer_icp,omitempty"`
+	// 支付是否已完整配置（appId + 应用私钥 + 支付宝公钥 齐备；公开布尔，无敏感信息）
+	AlipayConfigured bool `protobuf:"varint,7,opt,name=alipay_configured,json=alipayConfigured,proto3" json:"alipay_configured,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *GetConfigRes) Reset() {
@@ -140,6 +142,13 @@ func (x *GetConfigRes) GetFooterIcp() string {
 		return x.FooterIcp
 	}
 	return ""
+}
+
+func (x *GetConfigRes) GetAlipayConfigured() bool {
+	if x != nil {
+		return x.AlipayConfigured
+	}
+	return false
 }
 
 type GetAdminConfigReq struct {
@@ -2107,7 +2116,7 @@ var File_user_v1_site_site_proto protoreflect.FileDescriptor
 const file_user_v1_site_site_proto_rawDesc = "" +
 	"\n" +
 	"\x17user/v1/site/site.proto\x12\x10api.user.v1.site\x1a\x1cgoogle/api/annotations.proto\"\x0e\n" +
-	"\fGetConfigReq\"\xb1\x01\n" +
+	"\fGetConfigReq\"\xde\x01\n" +
 	"\fGetConfigRes\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\x03R\x04code\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12\x1d\n" +
@@ -2116,7 +2125,8 @@ const file_user_v1_site_site_proto_rawDesc = "" +
 	"\tsite_logo\x18\x04 \x01(\tR\bsiteLogo\x12\x18\n" +
 	"\afavicon\x18\x05 \x01(\tR\afavicon\x12\x1d\n" +
 	"\n" +
-	"footer_icp\x18\x06 \x01(\tR\tfooterIcp\"\x13\n" +
+	"footer_icp\x18\x06 \x01(\tR\tfooterIcp\x12+\n" +
+	"\x11alipay_configured\x18\a \x01(\bR\x10alipayConfigured\"\x13\n" +
 	"\x11GetAdminConfigReq\"\x87\x12\n" +
 	"\x11GetAdminConfigRes\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\x03R\x04code\x12\x18\n" +

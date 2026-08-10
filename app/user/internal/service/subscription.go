@@ -272,25 +272,27 @@ func (s *SubscriptionService) NotifyHTTP(w http.ResponseWriter, r *http.Request)
 }
 
 // GetAiAnalyzeQuota 服务间：单用户 AI 分析月配额。
-// 语义：Pro 订阅 active → 套餐 AiAnalyzeMonth；非订阅但有组织 → 组织套餐配额（plan_quota.AISummaryPerMonth）；
-// 无组织免费用户 → 0（不能触发 AI 分析）。
+// 语义：组织开通 AI 分析（任一非公共域 active 组织 enable_ai_summary=true）→ 无限
+// （组织成员优先消耗组织配额，不扣个人配额）；否则 Pro 订阅 active → 套餐 AiAnalyzeMonth；
+// 否则 0（不能触发 AI 分析）。
 func (s *SubscriptionService) GetAiAnalyzeQuota(ctx context.Context, req *subscription.GetAiAnalyzeQuotaReq) (*subscription.GetAiAnalyzeQuotaRes, error) {
 	uid := req.GetUserId()
 	if uid <= 0 {
 		return &subscription.GetAiAnalyzeQuotaRes{QuotaPerMonth: 0}, nil
+	}
+	if s.orgAiAnalyzeUnlimited(ctx, uid) {
+		return &subscription.GetAiAnalyzeQuotaRes{Unlimited: true}, nil
 	}
 	if tier, active := s.profileDal.SubscriptionTier(ctx, uid); active && tier == "pro" {
 		if plan, err := s.profileDal.PlanByTier(ctx, tier); err == nil && plan != nil && plan.EnableAiAnalyze {
 			return &subscription.GetAiAnalyzeQuotaRes{QuotaPerMonth: int32(plan.AiAnalyzeMonth)}, nil
 		}
 	}
-	// 非订阅：有组织跟随组织（plan_quota.AISummaryPerMonth by org plan）；无组织 0
-	quota := s.orgAiAnalyzeQuota(ctx, uid)
-	return &subscription.GetAiAnalyzeQuotaRes{QuotaPerMonth: int32(quota)}, nil
+	return &subscription.GetAiAnalyzeQuotaRes{QuotaPerMonth: 0}, nil
 }
 
 // MyAiStatus 登录：当前用户 AI 能力落地状态（会员页标记「实际是否有权限」用）。
-// AI 分析来源独立标记组织开通；落地配额与 GetAiAnalyzeQuota 同语义。
+// AI 分析来源独立标记组织开通；落地语义与 GetAiAnalyzeQuota 一致（组织开通=无限）。
 func (s *SubscriptionService) MyAiStatus(ctx context.Context, _ *subscription.MyAiStatusReq) (*subscription.MyAiStatusRes, error) {
 	uid := int64(auth.GetCurrentUserId(ctx))
 	if uid <= 0 {
@@ -311,21 +313,9 @@ func (s *SubscriptionService) MyAiStatus(ctx context.Context, _ *subscription.My
 			proAiDaily = plan.EnableAiDaily
 		}
 	}
-	orgQuota := s.orgAiAnalyzeQuota(ctx, uid)
-	switch {
-	case proActive && orgQuota > 0:
-		res.AiAnalyzeSource = "pro_org"
-	case proActive:
-		res.AiAnalyzeSource = "pro"
-	case orgQuota > 0:
-		res.AiAnalyzeSource = "org"
-	default:
-		res.AiAnalyzeSource = "none"
-	}
-	quota := orgQuota
-	if proActive && proQuota > quota {
-		quota = proQuota
-	}
+	source, unlimited, quota := resolveAiAnalyzeStatus(proActive, proQuota, s.orgAiAnalyzeUnlimited(ctx, uid))
+	res.AiAnalyzeSource = source
+	res.AiAnalyzeUnlimited = unlimited
 	res.AiAnalyzeQuota = int32(quota)
 
 	// AI 日报：组织授权独立标记；生效 = Pro + 套餐开启 + 个人开关（与定时任务分流一致）
@@ -334,34 +324,33 @@ func (s *SubscriptionService) MyAiStatus(ctx context.Context, _ *subscription.My
 	return res, nil
 }
 
-// orgAiAnalyzeQuota 用户所属非公共域组织的 AI 分析月配额（取最高档组织；无组织返回 0）。
-// 跟随组织 = 组织套餐 plan → plan_quota.AISummaryPerMonth。
-func (s *SubscriptionService) orgAiAnalyzeQuota(ctx context.Context, userID int64) int {
-	type row struct {
-		Plan string
+// resolveAiAnalyzeStatus AI 分析落地状态（纯函数，便于测试）：
+// 组织开通 → 无限（unlimited=true；同时 Pro 订阅标 pro_org，否则 org）；
+// 无组织开通 → Pro 订阅标 pro 并返回套餐配额，否则 none/0。
+func resolveAiAnalyzeStatus(proActive bool, proQuota int, orgUnlimited bool) (source string, unlimited bool, quota int) {
+	switch {
+	case proActive && orgUnlimited:
+		return "pro_org", true, proQuota
+	case proActive:
+		return "pro", false, proQuota
+	case orgUnlimited:
+		return "org", true, 0
+	default:
+		return "none", false, 0
 	}
-	var rows []row
+}
+
+// orgAiAnalyzeUnlimited 用户所属非公共域 active 组织是否开通 AI 分析：
+// 任一组织 enable_ai_summary=true → 组织成员 AI 分析无限（组织优先，个人配额不参与）。
+func (s *SubscriptionService) orgAiAnalyzeUnlimited(ctx context.Context, userID int64) bool {
+	var n int64
 	err := s.data.DB.WithContext(ctx).
 		Table("org_members AS m").
-		Select("o.plan AS plan").
 		Joins("JOIN orgs o ON o.id = m.org_id").
-		Where("m.user_id = ? AND o.slug <> ? AND COALESCE(o.is_system, false) = false AND o.status = ?",
-			userID, model.PublicOrgSlug, model.OrgStatusActive).
-		Scan(&rows).Error
-	if err != nil || len(rows) == 0 {
-		return 0
-	}
-	best := 0
-	for _, r := range rows {
-		var pq model.PlanQuota
-		if err := s.data.DB.WithContext(ctx).Where("plan = ?", r.Plan).First(&pq).Error; err != nil {
-			continue
-		}
-		if pq.AISummaryPerMonth > best {
-			best = pq.AISummaryPerMonth
-		}
-	}
-	return best
+		Where("m.user_id = ? AND o.slug <> ? AND COALESCE(o.is_system, false) = false AND o.status = ? AND o.enable_ai_summary = ?",
+			userID, model.PublicOrgSlug, model.OrgStatusActive, true).
+		Count(&n).Error
+	return err == nil && n > 0
 }
 
 // GrantSubscription 站管：人工赋予/更新订阅（重复调用叠加）
