@@ -16,7 +16,7 @@ endpoints:
     stream: true
     backends:
       - target: 'discovery:///user'
-  # 支付宝支付回调：支付宝服务器直达 user 服务；回调为表单 POST，需放宽超时
+  # 支付FM回调：支付FM服务器直达 user 服务；回调为 GET query / POST form，需放宽超时
   - path: /v1/payment/*
     timeout: 30s
     protocol: HTTP

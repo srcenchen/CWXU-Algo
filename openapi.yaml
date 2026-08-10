@@ -5384,7 +5384,7 @@ paths:
         post:
             tags:
                 - Subscription
-            description: 登录：创建订单（调支付宝预下单；未配置支付宝时报错）
+            description: 登录：创建订单（调支付FM下单；未配置支付时报错）
             operationId: Subscription_CreateOrder
             requestBody:
                 content:
@@ -12330,19 +12330,21 @@ components:
                 dataDiskPath:
                     type: string
                     description: 运维磁盘统计目录（数据盘挂载点；空=默认 /data，未挂载回退 /）
-                alipayAppId:
+                payfmApiBase:
                     type: string
-                    description: 支付宝（C 端订阅在线支付）
-                alipayPrivateKeyMasked:
+                    description: 支付FM（C 端订阅在线支付；聚合支付 https://docs.zhifux.com）
+                payfmMerchantNo:
                     type: string
-                alipayPrivateKeySet:
-                    type: boolean
-                alipayPublicKeyMasked:
+                payfmSecretMasked:
                     type: string
-                alipayPublicKeySet:
+                payfmSecretSet:
                     type: boolean
-                alipaySandbox:
-                    type: boolean
+                payfmPayType:
+                    type: string
+                    description: 支付方式（如 aloop=支付宝轮循池；空=默认 aloop）
+                payfmNotifyUrl:
+                    type: string
+                    description: 回调地址（展示用；下单时带给支付FM）
         api.user.v1.site.GetConfigRes:
             type: object
             properties:
@@ -12358,9 +12360,9 @@ components:
                     type: string
                 footerIcp:
                     type: string
-                alipayConfigured:
+                payfmConfigured:
                     type: boolean
-                    description: 支付是否已完整配置（appId + 应用私钥 + 支付宝公钥 齐备；公开布尔，无敏感信息）
+                    description: 支付是否已完整配置（接口根地址 + 商户号 + 接入密钥 齐备；公开布尔，无敏感信息）
         api.user.v1.site.TestEmailReq:
             type: object
             properties:
@@ -12471,21 +12473,18 @@ components:
                 dataDiskPath:
                     type: string
                     description: 运维磁盘统计目录（数据盘挂载点；空=默认 /data，未挂载回退 /）
-                alipayAppId:
+                payfmApiBase:
                     type: string
-                    description: 支付宝（C 端订阅在线支付）；key 空串表示不修改
-                alipayPrivateKey:
+                    description: 支付FM（C 端订阅在线支付）；密钥空串表示不修改
+                payfmMerchantNo:
                     type: string
-                clearAlipayPrivateKey:
-                    type: boolean
-                alipayPublicKey:
+                payfmSecret:
                     type: string
-                clearAlipayPublicKey:
+                clearPayfmSecret:
                     type: boolean
-                alipaySandbox:
-                    type: boolean
-                setAlipaySandbox:
-                    type: boolean
+                payfmPayType:
+                    type: string
+                    description: 支付方式（如 aloop=支付宝轮循池；空=默认 aloop）
         api.user.v1.site.UpdateConfigRes:
             type: object
             properties:
@@ -12805,9 +12804,9 @@ components:
                 orderNo:
                     type: string
                     description: 订单号（幂等锚点，get-order 轮询用）
-                qrCode:
+                payUrl:
                     type: string
-                    description: 支付宝预下单二维码内容（前端渲染二维码）
+                    description: 支付链接（前端跳转支付FM支付页；get-order 轮询回流）
                 amountCents:
                     type: string
                     description: 应付金额（分）
@@ -12910,7 +12909,7 @@ components:
                     description: 到期时间（unix 秒；0=长期）
                 source:
                     type: string
-                    description: alipay|manager
+                    description: payfm|manager
                 daysLeft:
                     type: integer
                     description: 剩余天数（已过期按 0）
@@ -12984,7 +12983,7 @@ components:
                     description: 到期时间（unix 秒；0=长期）
                 source:
                     type: string
-                    description: alipay|manager
+                    description: payfm|manager
         api.user.v1.subscription.UpdatePlansReq:
             type: object
             properties:
@@ -13085,6 +13084,6 @@ tags:
       description: |-
         C 端个人订阅（Plus/Pro）：
          - 套餐档位 free|plus|pro，价格与配额存 subscription_plans（站管可改）
-         - 开通：支付宝在线支付（create-order → 二维码 → 回调履约）或站管人工赋予（grant）
+         - 开通：支付FM在线支付（create-order → 支付链接跳转 → 回调履约）或站管人工赋予（grant）
          - 资格生效点：每日手动刷新配额、自动同步间隔、题面爬取/AI 分析、AI 日报、badge
     - name: Summary

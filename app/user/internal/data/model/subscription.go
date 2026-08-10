@@ -56,8 +56,8 @@ type PaymentOrder struct {
 	AmountCents int64 `gorm:"not null;comment:金额(分)"`
 	// Status pending|paid|closed
 	Status string `gorm:"size:16;not null;default:'pending';index;comment:状态 pending|paid|closed"`
-	// PlatformOrderNo 支付宝交易号
-	PlatformOrderNo string `gorm:"size:64;default:'';comment:支付宝交易号"`
+	// PlatformOrderNo 支付FM平台订单号
+	PlatformOrderNo string `gorm:"size:64;default:'';comment:支付FM平台订单号"`
 	// PaidAt 支付成功时间
 	PaidAt *time.Time
 }

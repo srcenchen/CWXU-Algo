@@ -62,8 +62,8 @@ type User struct {
 	SubTier string `gorm:"size:16;default:'';index;comment:订阅档 plus|pro"`
 	// SubExpireAt 订阅到期时间；nil=长期/未订阅（以 SubTier 为准）
 	SubExpireAt *time.Time `gorm:"comment:订阅到期"`
-	// SubSource 订阅来源：alipay|manager
-	SubSource string `gorm:"size:16;default:'';comment:订阅来源 alipay|manager"`
+	// SubSource 订阅来源：payfm|manager
+	SubSource string `gorm:"size:16;default:'';comment:订阅来源 payfm|manager"`
 	// AIDailyEnabled 个人 AI 日报开关（仅 Pro 生效；默认关）
 	AIDailyEnabled bool `gorm:"default:false;comment:AI日报开关(Pro)"`
 }

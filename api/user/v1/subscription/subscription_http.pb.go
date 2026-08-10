@@ -30,7 +30,7 @@ const OperationSubscriptionRevokeSubscription = "/api.user.v1.subscription.Subsc
 const OperationSubscriptionUpdatePlans = "/api.user.v1.subscription.Subscription/UpdatePlans"
 
 type SubscriptionHTTPServer interface {
-	// CreateOrder 登录：创建订单（调支付宝预下单；未配置支付宝时报错）
+	// CreateOrder 登录：创建订单（调支付FM下单；未配置支付时报错）
 	CreateOrder(context.Context, *CreateOrderReq) (*CreateOrderRes, error)
 	// GetOrder 登录：查订单状态（前端回流轮询）
 	GetOrder(context.Context, *GetOrderReq) (*GetOrderRes, error)
@@ -247,7 +247,7 @@ func _Subscription_MyAiStatus0_HTTP_Handler(srv SubscriptionHTTPServer) func(ctx
 }
 
 type SubscriptionHTTPClient interface {
-	// CreateOrder 登录：创建订单（调支付宝预下单；未配置支付宝时报错）
+	// CreateOrder 登录：创建订单（调支付FM下单；未配置支付时报错）
 	CreateOrder(ctx context.Context, req *CreateOrderReq, opts ...http.CallOption) (rsp *CreateOrderRes, err error)
 	// GetOrder 登录：查订单状态（前端回流轮询）
 	GetOrder(ctx context.Context, req *GetOrderReq, opts ...http.CallOption) (rsp *GetOrderRes, err error)
@@ -275,7 +275,7 @@ func NewSubscriptionHTTPClient(client *http.Client) SubscriptionHTTPClient {
 	return &SubscriptionHTTPClientImpl{client}
 }
 
-// CreateOrder 登录：创建订单（调支付宝预下单；未配置支付宝时报错）
+// CreateOrder 登录：创建订单（调支付FM下单；未配置支付时报错）
 func (c *SubscriptionHTTPClientImpl) CreateOrder(ctx context.Context, in *CreateOrderReq, opts ...http.CallOption) (*CreateOrderRes, error) {
 	var out CreateOrderRes
 	pattern := "/v1/user/subscription/create-order"

@@ -62,7 +62,7 @@ func NewWhiteListMatcher() selector.MatchFunc {
 		"/api.user.v1.social.Social/PrivacyStatus": "",
 		// 粘贴板公开查看（单条内容）
 		"/api.user.v1.paste.Paste/Get": "",
-		// 支付宝支付回调（原生路由；operation=路径；签名验签在服务内完成）
+		// 支付FM回调（原生路由；operation=路径；签名验签在服务内完成）
 		"/v1/payment/notify": "",
 		// 组织广场公开（仅名/logo/人数）；邀请链接预览公开
 		"/api.user.v1.org.Org/Discover":      "",
@@ -160,7 +160,7 @@ func NewHTTPServer(
 	backuppb.RegisterBackupHTTPServer(srv, service.NewBackupService(d))
 	// C 端订阅（套餐/订单/站管管理）
 	subscriptionpb.RegisterSubscriptionHTTPServer(srv, subscriptionService)
-	// 支付宝异步回调：x-www-form-urlencoded 原生 handler（不走 proto JSON）
+	// 支付FM异步回调：GET query / POST form 原生 handler（不走 proto JSON）
 	srv.Handle("/v1/payment/notify", nethttp.HandlerFunc(subscriptionService.NotifyHTTP))
 	return srv
 }

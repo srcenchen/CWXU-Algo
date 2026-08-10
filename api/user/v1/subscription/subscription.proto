@@ -8,7 +8,7 @@ option java_package = "api.user.v1.subscription";
 
 // C 端个人订阅（Plus/Pro）：
 // - 套餐档位 free|plus|pro，价格与配额存 subscription_plans（站管可改）
-// - 开通：支付宝在线支付（create-order → 二维码 → 回调履约）或站管人工赋予（grant）
+// - 开通：支付FM在线支付（create-order → 支付链接跳转 → 回调履约）或站管人工赋予（grant）
 // - 资格生效点：每日手动刷新配额、自动同步间隔、题面爬取/AI 分析、AI 日报、badge
 service Subscription {
   // 公开：套餐列表（含价格与配额，前端对比表用）
@@ -17,7 +17,7 @@ service Subscription {
       get: "/v1/user/subscription/plans"
     };
   }
-  // 登录：创建订单（调支付宝预下单；未配置支付宝时报错）
+  // 登录：创建订单（调支付FM下单；未配置支付时报错）
   rpc CreateOrder (CreateOrderReq) returns (CreateOrderRes) {
     option (google.api.http) = {
       post: "/v1/user/subscription/create-order"
@@ -115,8 +115,8 @@ message CreateOrderRes {
   string message = 2;
   // 订单号（幂等锚点，get-order 轮询用）
   string orderNo = 3;
-  // 支付宝预下单二维码内容（前端渲染二维码）
-  string qrCode = 4;
+  // 支付链接（前端跳转支付FM支付页；get-order 轮询回流）
+  string payUrl = 4;
   // 应付金额（分）
   int64 amountCents = 5;
   // 订单失效时间（unix 秒）
@@ -146,7 +146,7 @@ message MySubscriptionRes {
   string tier = 3;
   // 到期时间（unix 秒；0=长期）
   int64 expireAt = 4;
-  // alipay|manager
+  // payfm|manager
   string source = 5;
   // 剩余天数（已过期按 0）
   int32 daysLeft = 6;
@@ -196,7 +196,7 @@ message SubUser {
   string tier = 4;
   // 到期时间（unix 秒；0=长期）
   int64 expireAt = 5;
-  // alipay|manager
+  // payfm|manager
   string source = 6;
 }
 

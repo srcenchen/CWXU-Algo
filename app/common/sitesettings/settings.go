@@ -57,11 +57,11 @@ type Runtime struct {
 	OpsNotifyEmails   string `json:"opsNotifyEmails"`
 	// DataDiskPath 运维磁盘统计目录（数据盘挂载点；空=默认 /data，未挂载回退 /）
 	DataDiskPath string `json:"dataDiskPath"`
-	// 支付宝（C 端订阅在线支付）；私钥/公钥已解密
-	AlipayAppID      string `json:"alipayAppId"`
-	AlipayPrivateKey string `json:"alipayPrivateKey"`
-	AlipayPublicKey  string `json:"alipayPublicKey"`
-	AlipaySandbox    bool   `json:"alipaySandbox"`
+	// 支付FM（C 端订阅在线支付；聚合支付 https://docs.zhifux.com）；密钥已解密
+	PayFmApiBase    string `json:"payfmApiBase"`
+	PayFmMerchantNo string `json:"payfmMerchantNo"`
+	PayFmSecret     string `json:"payfmSecret"`
+	PayFmPayType    string `json:"payfmPayType"`
 }
 
 // Row 与 site_configs 表对齐（轻量，避免依赖 user/internal）
@@ -99,10 +99,10 @@ type Row struct {
 	SmtpErrMsg        string `gorm:"column:smtp_err_msg"`
 	OpsNotifyEmails   string `gorm:"column:ops_notify_emails"`
 	DataDiskPath      string `gorm:"column:data_disk_path"`
-	AlipayAppID       string `gorm:"column:alipay_app_id"`
-	AlipayPrivateKey  string `gorm:"column:alipay_private_key"`
-	AlipayPublicKey   string `gorm:"column:alipay_public_key"`
-	AlipaySandbox     bool   `gorm:"column:alipay_sandbox"`
+	PayFmApiBase    string `gorm:"column:payfm_api_base"`
+	PayFmMerchantNo string `gorm:"column:payfm_merchant_no"`
+	PayFmSecret     string `gorm:"column:payfm_secret"`
+	PayFmPayType    string `gorm:"column:payfm_pay_type"`
 }
 
 func (Row) TableName() string { return "site_configs" }
@@ -159,10 +159,10 @@ func (r *Row) ToRuntime() *Runtime {
 		SmtpErrMsg:        r.SmtpErrMsg,
 		OpsNotifyEmails:   strings.TrimSpace(r.OpsNotifyEmails),
 		DataDiskPath:      strings.TrimSpace(r.DataDiskPath),
-		AlipayAppID:       strings.TrimSpace(r.AlipayAppID),
-		AlipayPrivateKey:  decrypt(r.AlipayPrivateKey),
-		AlipayPublicKey:   decrypt(r.AlipayPublicKey),
-		AlipaySandbox:     r.AlipaySandbox,
+		PayFmApiBase:    strings.TrimSpace(r.PayFmApiBase),
+		PayFmMerchantNo: strings.TrimSpace(r.PayFmMerchantNo),
+		PayFmSecret:     decrypt(r.PayFmSecret),
+		PayFmPayType:    strings.TrimSpace(r.PayFmPayType),
 	}
 }
 
@@ -217,7 +217,7 @@ func (rt *Runtime) worthCaching() bool {
 	if strings.TrimSpace(rt.OjLuoguUsername) != "" || strings.TrimSpace(rt.OjQojUsername) != "" {
 		return true
 	}
-	if strings.TrimSpace(rt.AlipayAppID) != "" {
+	if strings.TrimSpace(rt.PayFmApiBase) != "" {
 		return true
 	}
 	return false
@@ -317,17 +317,17 @@ func (rt *Runtime) AiAnalyzeConf() *conf.AiAnalyze {
 	}
 }
 
-// AlipayConf 支付宝支付配置（C 端订阅在线支付）。
-// Configured=false 表示未配置（app_id 或私钥为空），下单应报「支付未配置」。
-func (rt *Runtime) AlipayConf() (appID, privateKey, publicKey string, sandbox bool, configured bool) {
+// PayFmConf 支付FM支付配置（C 端订阅在线支付）。
+// Configured=false 表示未配置（接口根地址/商户号/密钥任一为空），下单应报「支付未配置」。
+func (rt *Runtime) PayFmConf() (apiBase, merchantNo, secret, payType string, configured bool) {
 	if rt == nil {
-		return "", "", "", false, false
+		return "", "", "", "", false
 	}
-	appID = strings.TrimSpace(rt.AlipayAppID)
-	privateKey = strings.TrimSpace(rt.AlipayPrivateKey)
-	publicKey = strings.TrimSpace(rt.AlipayPublicKey)
-	sandbox = rt.AlipaySandbox
-	configured = appID != "" && privateKey != ""
+	apiBase = strings.TrimSpace(rt.PayFmApiBase)
+	merchantNo = strings.TrimSpace(rt.PayFmMerchantNo)
+	secret = strings.TrimSpace(rt.PayFmSecret)
+	payType = strings.TrimSpace(rt.PayFmPayType)
+	configured = apiBase != "" && merchantNo != "" && secret != ""
 	return
 }
 

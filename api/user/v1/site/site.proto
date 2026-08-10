@@ -64,8 +64,8 @@ message GetConfigRes {
   string site_logo = 4;
   string favicon = 5;
   string footer_icp = 6;
-  // 支付是否已完整配置（appId + 应用私钥 + 支付宝公钥 齐备；公开布尔，无敏感信息）
-  bool alipay_configured = 7;
+  // 支付是否已完整配置（接口根地址 + 商户号 + 接入密钥 齐备；公开布尔，无敏感信息）
+  bool payfm_configured = 7;
 }
 
 message GetAdminConfigReq {}
@@ -137,13 +137,15 @@ message GetAdminConfigRes {
   string ops_notify_emails = 49;
   // 运维磁盘统计目录（数据盘挂载点；空=默认 /data，未挂载回退 /）
   string data_disk_path = 50;
-  // 支付宝（C 端订阅在线支付）
-  string alipay_app_id = 51;
-  string alipay_private_key_masked = 52;
-  bool alipay_private_key_set = 53;
-  string alipay_public_key_masked = 54;
-  bool alipay_public_key_set = 55;
-  bool alipay_sandbox = 56;
+  // 支付FM（C 端订阅在线支付；聚合支付 https://docs.zhifux.com）
+  string payfm_api_base = 51;
+  string payfm_merchant_no = 52;
+  string payfm_secret_masked = 53;
+  bool payfm_secret_set = 54;
+  // 支付方式（如 aloop=支付宝轮循池；空=默认 aloop）
+  string payfm_pay_type = 55;
+  // 回调地址（展示用；下单时带给支付FM）
+  string payfm_notify_url = 56;
 }
 
 message UpdateConfigReq {
@@ -192,14 +194,13 @@ message UpdateConfigReq {
   string ops_notify_emails = 33;
   // 运维磁盘统计目录（数据盘挂载点；空=默认 /data，未挂载回退 /）
   string data_disk_path = 34;
-  // 支付宝（C 端订阅在线支付）；key 空串表示不修改
-  string alipay_app_id = 35;
-  string alipay_private_key = 36;
-  bool clear_alipay_private_key = 37;
-  string alipay_public_key = 38;
-  bool clear_alipay_public_key = 39;
-  bool alipay_sandbox = 40;
-  bool set_alipay_sandbox = 41;
+  // 支付FM（C 端订阅在线支付）；密钥空串表示不修改
+  string payfm_api_base = 35;
+  string payfm_merchant_no = 36;
+  string payfm_secret = 37;
+  bool clear_payfm_secret = 38;
+  // 支付方式（如 aloop=支付宝轮循池；空=默认 aloop）
+  string payfm_pay_type = 39;
 }
 
 message UpdateConfigRes {

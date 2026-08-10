@@ -303,8 +303,8 @@ type CreateOrderRes struct {
 	Message string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
 	// 订单号（幂等锚点，get-order 轮询用）
 	OrderNo string `protobuf:"bytes,3,opt,name=orderNo,proto3" json:"orderNo,omitempty"`
-	// 支付宝预下单二维码内容（前端渲染二维码）
-	QrCode string `protobuf:"bytes,4,opt,name=qrCode,proto3" json:"qrCode,omitempty"`
+	// 支付链接（前端跳转支付FM支付页；get-order 轮询回流）
+	PayUrl string `protobuf:"bytes,4,opt,name=payUrl,proto3" json:"payUrl,omitempty"`
 	// 应付金额（分）
 	AmountCents int64 `protobuf:"varint,5,opt,name=amountCents,proto3" json:"amountCents,omitempty"`
 	// 订单失效时间（unix 秒）
@@ -364,9 +364,9 @@ func (x *CreateOrderRes) GetOrderNo() string {
 	return ""
 }
 
-func (x *CreateOrderRes) GetQrCode() string {
+func (x *CreateOrderRes) GetPayUrl() string {
 	if x != nil {
-		return x.QrCode
+		return x.PayUrl
 	}
 	return ""
 }
@@ -551,7 +551,7 @@ type MySubscriptionRes struct {
 	Tier string `protobuf:"bytes,3,opt,name=tier,proto3" json:"tier,omitempty"`
 	// 到期时间（unix 秒；0=长期）
 	ExpireAt int64 `protobuf:"varint,4,opt,name=expireAt,proto3" json:"expireAt,omitempty"`
-	// alipay|manager
+	// payfm|manager
 	Source string `protobuf:"bytes,5,opt,name=source,proto3" json:"source,omitempty"`
 	// 剩余天数（已过期按 0）
 	DaysLeft      int32 `protobuf:"varint,6,opt,name=daysLeft,proto3" json:"daysLeft,omitempty"`
@@ -979,7 +979,7 @@ type SubUser struct {
 	Tier string `protobuf:"bytes,4,opt,name=tier,proto3" json:"tier,omitempty"`
 	// 到期时间（unix 秒；0=长期）
 	ExpireAt int64 `protobuf:"varint,5,opt,name=expireAt,proto3" json:"expireAt,omitempty"`
-	// alipay|manager
+	// payfm|manager
 	Source        string `protobuf:"bytes,6,opt,name=source,proto3" json:"source,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -1417,7 +1417,7 @@ const file_user_v1_subscription_subscription_proto_rawDesc = "" +
 	"\x04code\x18\x01 \x01(\x03R\x04code\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12\x18\n" +
 	"\aorderNo\x18\x03 \x01(\tR\aorderNo\x12\x16\n" +
-	"\x06qrCode\x18\x04 \x01(\tR\x06qrCode\x12 \n" +
+	"\x06payUrl\x18\x04 \x01(\tR\x06payUrl\x12 \n" +
 	"\vamountCents\x18\x05 \x01(\x03R\vamountCents\x12\x1a\n" +
 	"\bexpireAt\x18\x06 \x01(\x03R\bexpireAt\"'\n" +
 	"\vGetOrderReq\x12\x18\n" +

@@ -213,9 +213,9 @@ func (d *SubscriptionDal) Revoke(ctx context.Context, userID int64) error {
 	}).Error
 }
 
-// FulfillAlipay 支付宝支付履约：users.sub_tier / sub_expire_at = max(now, 当前) + plan.Days / sub_source='alipay'。
+// FulfillPayFm 支付FM支付履约：users.sub_tier / sub_expire_at = max(now, 当前) + plan.Days / sub_source='payfm'。
 // 在订单已 paid 的前提下调用（同事务或紧随其后）。
-func (d *SubscriptionDal) FulfillAlipay(ctx context.Context, userID int64, tier string, days int) error {
+func (d *SubscriptionDal) FulfillPayFm(ctx context.Context, userID int64, tier string, days int) error {
 	if days < 1 {
 		return fmt.Errorf("套餐天数非法: %d", days)
 	}
@@ -235,7 +235,7 @@ func (d *SubscriptionDal) FulfillAlipay(ctx context.Context, userID int64, tier 
 		return tx.Model(&model.User{}).Where("id = ?", userID).Updates(map[string]interface{}{
 			"sub_tier":      tier,
 			"sub_expire_at": expire,
-			"sub_source":    "alipay",
+			"sub_source":    "payfm",
 		}).Error
 	})
 }

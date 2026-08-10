@@ -49,7 +49,7 @@ func TestBlogPagePublicReadsAreWhitelisted(t *testing.T) {
 	}
 }
 
-// TestPaymentNotifyIsWhitelisted 支付宝回调免 JWT（验签在 user 服务内完成）
+// TestPaymentNotifyIsWhitelisted 支付FM回调免 JWT（验签在 user 服务内完成）
 func TestPaymentNotifyIsWhitelisted(t *testing.T) {
 	for _, path := range []string{
 		"/v1/payment/notify",

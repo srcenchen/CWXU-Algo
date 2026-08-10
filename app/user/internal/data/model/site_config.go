@@ -62,13 +62,13 @@ type SiteConfig struct {
 	SmtpStatus   string `gorm:"size:16;column:smtp_status;default:unchecked;comment:邮件服务状态"`
 	SmtpStatusAt int64  `gorm:"column:smtp_status_at;default:0;comment:邮件状态更新时间 unix"`
 	SmtpErrMsg   string `gorm:"type:text;column:smtp_err_msg;comment:邮件最近错误"`
-	// 支付宝（C 端订阅在线支付）；私钥/公钥经 secretutil 加密存储
-	AlipayAppID     string `gorm:"size:64;column:alipay_app_id;default:'';comment:支付宝应用APPID"`
-	AlipayPrivateKey string `gorm:"type:text;column:alipay_private_key;default:'';comment:支付宝应用私钥(加密)"`
-	AlipayPublicKey  string `gorm:"type:text;column:alipay_public_key;default:'';comment:支付宝公钥(加密)"`
-	// AlipaySandbox 沙箱环境开关（默认 false=生产）
-	AlipaySandbox bool `gorm:"column:alipay_sandbox;default:false;comment:支付宝沙箱"`
-	UpdatedAt     time.Time `gorm:"autoUpdateTime"`
+	// 支付FM（C 端订阅在线支付；聚合支付 https://docs.zhifux.com）；密钥经 secretutil 加密存储
+	PayFmApiBase    string `gorm:"size:256;column:payfm_api_base;default:'';comment:支付FM接口根地址"`
+	PayFmMerchantNo string `gorm:"size:64;column:payfm_merchant_no;default:'';comment:支付FM商户号"`
+	PayFmSecret     string `gorm:"type:text;column:payfm_secret;default:'';comment:支付FM接入密钥(加密)"`
+	// PayFmPayType 支付方式（如 aloop=支付宝轮循池；空=默认 aloop）
+	PayFmPayType string `gorm:"size:32;column:payfm_pay_type;default:'';comment:支付FM支付方式"`
+	UpdatedAt    time.Time `gorm:"autoUpdateTime"`
 }
 
 func (SiteConfig) TableName() string { return "site_configs" }

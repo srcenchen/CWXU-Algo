@@ -21,7 +21,7 @@ import (
 	"github.com/go-kratos/kratos/v2/log"
 )
 
-// paymentNotifyURL 支付宝异步回调地址（不存库；环境变量 PAYMENT_NOTIFY_URL 可覆盖）
+// paymentNotifyURL 支付FM异步回调地址（不存库；环境变量 PAYMENT_NOTIFY_URL 可覆盖）
 const paymentNotifyURL = "https://algo.zhiyuansofts.cn/v1/payment/notify"
 
 func notifyURL() string {
@@ -44,14 +44,14 @@ func NewSubscriptionService(d *data.Data, subDal *dal.SubscriptionDal, profileDa
 	return &SubscriptionService{data: d, subDal: subDal, profileDal: profileDal}
 }
 
-// paymentGateway 从站点配置构建支付宝网关；未配置返回错误（「支付未配置」）
-func (s *SubscriptionService) paymentGateway(ctx context.Context) (*payment.AlipayGateway, error) {
+// paymentGateway 从站点配置构建支付FM网关；未配置返回错误（「支付未配置」）
+func (s *SubscriptionService) paymentGateway(ctx context.Context) (*payment.PayFmGateway, error) {
 	rt := sitesettings.Load(ctx, s.data.RDB, s.data.DB)
-	appID, privateKey, publicKey, sandbox, configured := rt.AlipayConf()
+	apiBase, merchantNo, secret, payType, configured := rt.PayFmConf()
 	if !configured {
-		return nil, fmt.Errorf("支付未配置（请在站点设置填写支付宝 APPID 与应用私钥）")
+		return nil, fmt.Errorf("支付未配置（请在站点设置填写支付FM接口地址/商户号/接入密钥）")
 	}
-	g, err := payment.NewAlipayGateway(appID, privateKey, publicKey, sandbox, notifyURL())
+	g, err := payment.NewPayFmGateway(apiBase, merchantNo, secret, payType, notifyURL())
 	if err != nil {
 		return nil, err
 	}
@@ -87,7 +87,7 @@ func planPB(p model.SubscriptionPlan) *subscription.Plan {
 	}
 }
 
-// CreateOrder 登录：创建订单（调支付宝预下单）
+// CreateOrder 登录：创建订单（调支付FM下单，返回支付链接）
 func (s *SubscriptionService) CreateOrder(ctx context.Context, req *subscription.CreateOrderReq) (*subscription.CreateOrderRes, error) {
 	pd := auth.GetCurrentUser(ctx)
 	if pd == nil || pd.UserID == 0 {
@@ -114,13 +114,13 @@ func (s *SubscriptionService) CreateOrder(ctx context.Context, req *subscription
 		log.Errorf("CreateOrder 建单 user=%d plan=%s: %v", pd.UserID, plan, err)
 		return &subscription.CreateOrderRes{Code: 1, Message: "下单失败，请稍后再试"}, nil
 	}
-	qrCode, err := g.PreCreate(ctx, orderNo, p.PriceCents, fmt.Sprintf("GoAlgo %s 会员（%d 天）", tierName(plan), p.Days))
+	payURL, err := g.CreateOrder(ctx, orderNo, p.PriceCents, fmt.Sprintf("GoAlgo %s 会员（%d 天）", tierName(plan), p.Days))
 	if err != nil {
-		// 预下单失败：关单并返回错误（支付宝侧可能未配置完整）
+		// 下单失败：关单并返回错误（支付FM侧可能未配置完整）
 		if _, cerr := s.subDal.MarkOrderClosed(ctx, order.ID); cerr != nil {
 			log.Warnf("CreateOrder 关单失败 order=%s: %v", orderNo, cerr)
 		}
-		log.Warnf("CreateOrder 预下单失败 user=%d plan=%s: %v", pd.UserID, plan, err)
+		log.Warnf("CreateOrder 支付FM下单失败 user=%d plan=%s: %v", pd.UserID, plan, err)
 		return &subscription.CreateOrderRes{Code: 1, Message: "下单失败：" + err.Error()}, nil
 	}
 	expireAt := time.Now().Add(15 * time.Minute).Unix()
@@ -128,7 +128,7 @@ func (s *SubscriptionService) CreateOrder(ctx context.Context, req *subscription
 		Code:        0,
 		Message:     "success",
 		OrderNo:     orderNo,
-		QrCode:      qrCode,
+		PayUrl:      payURL,
 		AmountCents: p.PriceCents,
 		ExpireAt:    expireAt,
 	}, nil
@@ -184,8 +184,9 @@ func (s *SubscriptionService) MySubscription(ctx context.Context, _ *subscriptio
 	return res, nil
 }
 
-// NotifyHTTP 支付宝异步回调（原生 HTTP handler：x-www-form-urlencoded，不走 proto JSON）。
-// 流程：验签 → 状态成功 → 订单存在 → 金额相等 → 行锁置 paid（幂等）→ 赢家履约 → 回 success。
+// NotifyHTTP 支付FM异步回调（原生 HTTP handler：GET query / POST form，不走 proto JSON）。
+// 流程：验签（md5(state+商户号+订单号+金额+密钥)，state=1）→ 订单存在 → 金额相等 →
+// 行锁置 paid（幂等）→ 赢家履约 → 回 success。
 func (s *SubscriptionService) NotifyHTTP(w http.ResponseWriter, r *http.Request) {
 	writeAck := func(success bool) {
 		if success {
@@ -219,11 +220,6 @@ func (s *SubscriptionService) NotifyHTTP(w http.ResponseWriter, r *http.Request)
 	if err != nil {
 		log.Warnf("NotifyHTTP 验签失败: %v", err)
 		writeAck(false)
-		return
-	}
-	if !payment.TradeStatusSuccess(ntf.TradeStatus) {
-		log.Infof("NotifyHTTP 非成功状态 %s order=%s", ntf.TradeStatus, ntf.OrderNo)
-		writeAck(true) // 非支付成功通知（如 WAIT_BUYER_PAY）：已受理，不再重试
 		return
 	}
 	// 金额相等校验（订单金额 vs 回调金额；分）——必须在置 paid 之前，防篡改
@@ -262,7 +258,7 @@ func (s *SubscriptionService) NotifyHTTP(w http.ResponseWriter, r *http.Request)
 		writeAck(false)
 		return
 	}
-	if err := s.subDal.FulfillAlipay(r.Context(), int64(order.UserID), order.Plan, plan.Days); err != nil {
+	if err := s.subDal.FulfillPayFm(r.Context(), int64(order.UserID), order.Plan, plan.Days); err != nil {
 		log.Errorf("NotifyHTTP 履约失败 order=%s user=%d: %v", order.OrderNo, order.UserID, err)
 		writeAck(false)
 		return

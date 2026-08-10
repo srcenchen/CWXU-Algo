@@ -66,10 +66,10 @@ type GetConfigRes struct {
 	SiteLogo  string                 `protobuf:"bytes,4,opt,name=site_logo,json=siteLogo,proto3" json:"site_logo,omitempty"`
 	Favicon   string                 `protobuf:"bytes,5,opt,name=favicon,proto3" json:"favicon,omitempty"`
 	FooterIcp string                 `protobuf:"bytes,6,opt,name=footer_icp,json=footerIcp,proto3" json:"footer_icp,omitempty"`
-	// 支付是否已完整配置（appId + 应用私钥 + 支付宝公钥 齐备；公开布尔，无敏感信息）
-	AlipayConfigured bool `protobuf:"varint,7,opt,name=alipay_configured,json=alipayConfigured,proto3" json:"alipay_configured,omitempty"`
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	// 支付是否已完整配置（接口根地址 + 商户号 + 接入密钥 齐备；公开布尔，无敏感信息）
+	PayfmConfigured bool `protobuf:"varint,7,opt,name=payfm_configured,json=payfmConfigured,proto3" json:"payfm_configured,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *GetConfigRes) Reset() {
@@ -144,9 +144,9 @@ func (x *GetConfigRes) GetFooterIcp() string {
 	return ""
 }
 
-func (x *GetConfigRes) GetAlipayConfigured() bool {
+func (x *GetConfigRes) GetPayfmConfigured() bool {
 	if x != nil {
-		return x.AlipayConfigured
+		return x.PayfmConfigured
 	}
 	return false
 }
@@ -255,15 +255,17 @@ type GetAdminConfigRes struct {
 	OpsNotifyEmails string `protobuf:"bytes,49,opt,name=ops_notify_emails,json=opsNotifyEmails,proto3" json:"ops_notify_emails,omitempty"`
 	// 运维磁盘统计目录（数据盘挂载点；空=默认 /data，未挂载回退 /）
 	DataDiskPath string `protobuf:"bytes,50,opt,name=data_disk_path,json=dataDiskPath,proto3" json:"data_disk_path,omitempty"`
-	// 支付宝（C 端订阅在线支付）
-	AlipayAppId            string `protobuf:"bytes,51,opt,name=alipay_app_id,json=alipayAppId,proto3" json:"alipay_app_id,omitempty"`
-	AlipayPrivateKeyMasked string `protobuf:"bytes,52,opt,name=alipay_private_key_masked,json=alipayPrivateKeyMasked,proto3" json:"alipay_private_key_masked,omitempty"`
-	AlipayPrivateKeySet    bool   `protobuf:"varint,53,opt,name=alipay_private_key_set,json=alipayPrivateKeySet,proto3" json:"alipay_private_key_set,omitempty"`
-	AlipayPublicKeyMasked  string `protobuf:"bytes,54,opt,name=alipay_public_key_masked,json=alipayPublicKeyMasked,proto3" json:"alipay_public_key_masked,omitempty"`
-	AlipayPublicKeySet     bool   `protobuf:"varint,55,opt,name=alipay_public_key_set,json=alipayPublicKeySet,proto3" json:"alipay_public_key_set,omitempty"`
-	AlipaySandbox          bool   `protobuf:"varint,56,opt,name=alipay_sandbox,json=alipaySandbox,proto3" json:"alipay_sandbox,omitempty"`
-	unknownFields          protoimpl.UnknownFields
-	sizeCache              protoimpl.SizeCache
+	// 支付FM（C 端订阅在线支付；聚合支付 https://docs.zhifux.com）
+	PayfmApiBase      string `protobuf:"bytes,51,opt,name=payfm_api_base,json=payfmApiBase,proto3" json:"payfm_api_base,omitempty"`
+	PayfmMerchantNo   string `protobuf:"bytes,52,opt,name=payfm_merchant_no,json=payfmMerchantNo,proto3" json:"payfm_merchant_no,omitempty"`
+	PayfmSecretMasked string `protobuf:"bytes,53,opt,name=payfm_secret_masked,json=payfmSecretMasked,proto3" json:"payfm_secret_masked,omitempty"`
+	PayfmSecretSet    bool   `protobuf:"varint,54,opt,name=payfm_secret_set,json=payfmSecretSet,proto3" json:"payfm_secret_set,omitempty"`
+	// 支付方式（如 aloop=支付宝轮循池；空=默认 aloop）
+	PayfmPayType string `protobuf:"bytes,55,opt,name=payfm_pay_type,json=payfmPayType,proto3" json:"payfm_pay_type,omitempty"`
+	// 回调地址（展示用；下单时带给支付FM）
+	PayfmNotifyUrl string `protobuf:"bytes,56,opt,name=payfm_notify_url,json=payfmNotifyUrl,proto3" json:"payfm_notify_url,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *GetAdminConfigRes) Reset() {
@@ -646,46 +648,46 @@ func (x *GetAdminConfigRes) GetDataDiskPath() string {
 	return ""
 }
 
-func (x *GetAdminConfigRes) GetAlipayAppId() string {
+func (x *GetAdminConfigRes) GetPayfmApiBase() string {
 	if x != nil {
-		return x.AlipayAppId
+		return x.PayfmApiBase
 	}
 	return ""
 }
 
-func (x *GetAdminConfigRes) GetAlipayPrivateKeyMasked() string {
+func (x *GetAdminConfigRes) GetPayfmMerchantNo() string {
 	if x != nil {
-		return x.AlipayPrivateKeyMasked
+		return x.PayfmMerchantNo
 	}
 	return ""
 }
 
-func (x *GetAdminConfigRes) GetAlipayPrivateKeySet() bool {
+func (x *GetAdminConfigRes) GetPayfmSecretMasked() string {
 	if x != nil {
-		return x.AlipayPrivateKeySet
-	}
-	return false
-}
-
-func (x *GetAdminConfigRes) GetAlipayPublicKeyMasked() string {
-	if x != nil {
-		return x.AlipayPublicKeyMasked
+		return x.PayfmSecretMasked
 	}
 	return ""
 }
 
-func (x *GetAdminConfigRes) GetAlipayPublicKeySet() bool {
+func (x *GetAdminConfigRes) GetPayfmSecretSet() bool {
 	if x != nil {
-		return x.AlipayPublicKeySet
+		return x.PayfmSecretSet
 	}
 	return false
 }
 
-func (x *GetAdminConfigRes) GetAlipaySandbox() bool {
+func (x *GetAdminConfigRes) GetPayfmPayType() string {
 	if x != nil {
-		return x.AlipaySandbox
+		return x.PayfmPayType
 	}
-	return false
+	return ""
+}
+
+func (x *GetAdminConfigRes) GetPayfmNotifyUrl() string {
+	if x != nil {
+		return x.PayfmNotifyUrl
+	}
+	return ""
 }
 
 type UpdateConfigReq struct {
@@ -735,16 +737,15 @@ type UpdateConfigReq struct {
 	OpsNotifyEmails string `protobuf:"bytes,33,opt,name=ops_notify_emails,json=opsNotifyEmails,proto3" json:"ops_notify_emails,omitempty"`
 	// 运维磁盘统计目录（数据盘挂载点；空=默认 /data，未挂载回退 /）
 	DataDiskPath string `protobuf:"bytes,34,opt,name=data_disk_path,json=dataDiskPath,proto3" json:"data_disk_path,omitempty"`
-	// 支付宝（C 端订阅在线支付）；key 空串表示不修改
-	AlipayAppId           string `protobuf:"bytes,35,opt,name=alipay_app_id,json=alipayAppId,proto3" json:"alipay_app_id,omitempty"`
-	AlipayPrivateKey      string `protobuf:"bytes,36,opt,name=alipay_private_key,json=alipayPrivateKey,proto3" json:"alipay_private_key,omitempty"`
-	ClearAlipayPrivateKey bool   `protobuf:"varint,37,opt,name=clear_alipay_private_key,json=clearAlipayPrivateKey,proto3" json:"clear_alipay_private_key,omitempty"`
-	AlipayPublicKey       string `protobuf:"bytes,38,opt,name=alipay_public_key,json=alipayPublicKey,proto3" json:"alipay_public_key,omitempty"`
-	ClearAlipayPublicKey  bool   `protobuf:"varint,39,opt,name=clear_alipay_public_key,json=clearAlipayPublicKey,proto3" json:"clear_alipay_public_key,omitempty"`
-	AlipaySandbox         bool   `protobuf:"varint,40,opt,name=alipay_sandbox,json=alipaySandbox,proto3" json:"alipay_sandbox,omitempty"`
-	SetAlipaySandbox      bool   `protobuf:"varint,41,opt,name=set_alipay_sandbox,json=setAlipaySandbox,proto3" json:"set_alipay_sandbox,omitempty"`
-	unknownFields         protoimpl.UnknownFields
-	sizeCache             protoimpl.SizeCache
+	// 支付FM（C 端订阅在线支付）；密钥空串表示不修改
+	PayfmApiBase     string `protobuf:"bytes,35,opt,name=payfm_api_base,json=payfmApiBase,proto3" json:"payfm_api_base,omitempty"`
+	PayfmMerchantNo  string `protobuf:"bytes,36,opt,name=payfm_merchant_no,json=payfmMerchantNo,proto3" json:"payfm_merchant_no,omitempty"`
+	PayfmSecret      string `protobuf:"bytes,37,opt,name=payfm_secret,json=payfmSecret,proto3" json:"payfm_secret,omitempty"`
+	ClearPayfmSecret bool   `protobuf:"varint,38,opt,name=clear_payfm_secret,json=clearPayfmSecret,proto3" json:"clear_payfm_secret,omitempty"`
+	// 支付方式（如 aloop=支付宝轮循池；空=默认 aloop）
+	PayfmPayType  string `protobuf:"bytes,39,opt,name=payfm_pay_type,json=payfmPayType,proto3" json:"payfm_pay_type,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *UpdateConfigReq) Reset() {
@@ -1015,53 +1016,39 @@ func (x *UpdateConfigReq) GetDataDiskPath() string {
 	return ""
 }
 
-func (x *UpdateConfigReq) GetAlipayAppId() string {
+func (x *UpdateConfigReq) GetPayfmApiBase() string {
 	if x != nil {
-		return x.AlipayAppId
+		return x.PayfmApiBase
 	}
 	return ""
 }
 
-func (x *UpdateConfigReq) GetAlipayPrivateKey() string {
+func (x *UpdateConfigReq) GetPayfmMerchantNo() string {
 	if x != nil {
-		return x.AlipayPrivateKey
+		return x.PayfmMerchantNo
 	}
 	return ""
 }
 
-func (x *UpdateConfigReq) GetClearAlipayPrivateKey() bool {
+func (x *UpdateConfigReq) GetPayfmSecret() string {
 	if x != nil {
-		return x.ClearAlipayPrivateKey
-	}
-	return false
-}
-
-func (x *UpdateConfigReq) GetAlipayPublicKey() string {
-	if x != nil {
-		return x.AlipayPublicKey
+		return x.PayfmSecret
 	}
 	return ""
 }
 
-func (x *UpdateConfigReq) GetClearAlipayPublicKey() bool {
+func (x *UpdateConfigReq) GetClearPayfmSecret() bool {
 	if x != nil {
-		return x.ClearAlipayPublicKey
+		return x.ClearPayfmSecret
 	}
 	return false
 }
 
-func (x *UpdateConfigReq) GetAlipaySandbox() bool {
+func (x *UpdateConfigReq) GetPayfmPayType() string {
 	if x != nil {
-		return x.AlipaySandbox
+		return x.PayfmPayType
 	}
-	return false
-}
-
-func (x *UpdateConfigReq) GetSetAlipaySandbox() bool {
-	if x != nil {
-		return x.SetAlipaySandbox
-	}
-	return false
+	return ""
 }
 
 type UpdateConfigRes struct {
@@ -2116,7 +2103,7 @@ var File_user_v1_site_site_proto protoreflect.FileDescriptor
 const file_user_v1_site_site_proto_rawDesc = "" +
 	"\n" +
 	"\x17user/v1/site/site.proto\x12\x10api.user.v1.site\x1a\x1cgoogle/api/annotations.proto\"\x0e\n" +
-	"\fGetConfigReq\"\xde\x01\n" +
+	"\fGetConfigReq\"\xdc\x01\n" +
 	"\fGetConfigRes\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\x03R\x04code\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12\x1d\n" +
@@ -2125,9 +2112,9 @@ const file_user_v1_site_site_proto_rawDesc = "" +
 	"\tsite_logo\x18\x04 \x01(\tR\bsiteLogo\x12\x18\n" +
 	"\afavicon\x18\x05 \x01(\tR\afavicon\x12\x1d\n" +
 	"\n" +
-	"footer_icp\x18\x06 \x01(\tR\tfooterIcp\x12+\n" +
-	"\x11alipay_configured\x18\a \x01(\bR\x10alipayConfigured\"\x13\n" +
-	"\x11GetAdminConfigReq\"\x87\x12\n" +
+	"footer_icp\x18\x06 \x01(\tR\tfooterIcp\x12)\n" +
+	"\x10payfm_configured\x18\a \x01(\bR\x0fpayfmConfigured\"\x13\n" +
+	"\x11GetAdminConfigReq\"\xdc\x11\n" +
 	"\x11GetAdminConfigRes\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\x03R\x04code\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12\x1d\n" +
@@ -2184,13 +2171,13 @@ const file_user_v1_site_site_proto_rawDesc = "" +
 	"\fsmtp_err_msg\x180 \x01(\tR\n" +
 	"smtpErrMsg\x12*\n" +
 	"\x11ops_notify_emails\x181 \x01(\tR\x0fopsNotifyEmails\x12$\n" +
-	"\x0edata_disk_path\x182 \x01(\tR\fdataDiskPath\x12\"\n" +
-	"\ralipay_app_id\x183 \x01(\tR\valipayAppId\x129\n" +
-	"\x19alipay_private_key_masked\x184 \x01(\tR\x16alipayPrivateKeyMasked\x123\n" +
-	"\x16alipay_private_key_set\x185 \x01(\bR\x13alipayPrivateKeySet\x127\n" +
-	"\x18alipay_public_key_masked\x186 \x01(\tR\x15alipayPublicKeyMasked\x121\n" +
-	"\x15alipay_public_key_set\x187 \x01(\bR\x12alipayPublicKeySet\x12%\n" +
-	"\x0ealipay_sandbox\x188 \x01(\bR\ralipaySandbox\"\x97\r\n" +
+	"\x0edata_disk_path\x182 \x01(\tR\fdataDiskPath\x12$\n" +
+	"\x0epayfm_api_base\x183 \x01(\tR\fpayfmApiBase\x12*\n" +
+	"\x11payfm_merchant_no\x184 \x01(\tR\x0fpayfmMerchantNo\x12.\n" +
+	"\x13payfm_secret_masked\x185 \x01(\tR\x11payfmSecretMasked\x12(\n" +
+	"\x10payfm_secret_set\x186 \x01(\bR\x0epayfmSecretSet\x12$\n" +
+	"\x0epayfm_pay_type\x187 \x01(\tR\fpayfmPayType\x12(\n" +
+	"\x10payfm_notify_url\x188 \x01(\tR\x0epayfmNotifyUrl\"\x9d\f\n" +
 	"\x0fUpdateConfigReq\x12\x1d\n" +
 	"\n" +
 	"site_title\x18\x01 \x01(\tR\tsiteTitle\x12\x1b\n" +
@@ -2229,14 +2216,12 @@ const file_user_v1_site_site_proto_rawDesc = "" +
 	"\x0foj_qoj_password\x18\x1f \x01(\tR\rojQojPassword\x121\n" +
 	"\x15clear_oj_qoj_password\x18  \x01(\bR\x12clearOjQojPassword\x12*\n" +
 	"\x11ops_notify_emails\x18! \x01(\tR\x0fopsNotifyEmails\x12$\n" +
-	"\x0edata_disk_path\x18\" \x01(\tR\fdataDiskPath\x12\"\n" +
-	"\ralipay_app_id\x18# \x01(\tR\valipayAppId\x12,\n" +
-	"\x12alipay_private_key\x18$ \x01(\tR\x10alipayPrivateKey\x127\n" +
-	"\x18clear_alipay_private_key\x18% \x01(\bR\x15clearAlipayPrivateKey\x12*\n" +
-	"\x11alipay_public_key\x18& \x01(\tR\x0falipayPublicKey\x125\n" +
-	"\x17clear_alipay_public_key\x18' \x01(\bR\x14clearAlipayPublicKey\x12%\n" +
-	"\x0ealipay_sandbox\x18( \x01(\bR\ralipaySandbox\x12,\n" +
-	"\x12set_alipay_sandbox\x18) \x01(\bR\x10setAlipaySandbox\"\xb4\x01\n" +
+	"\x0edata_disk_path\x18\" \x01(\tR\fdataDiskPath\x12$\n" +
+	"\x0epayfm_api_base\x18# \x01(\tR\fpayfmApiBase\x12*\n" +
+	"\x11payfm_merchant_no\x18$ \x01(\tR\x0fpayfmMerchantNo\x12!\n" +
+	"\fpayfm_secret\x18% \x01(\tR\vpayfmSecret\x12,\n" +
+	"\x12clear_payfm_secret\x18& \x01(\bR\x10clearPayfmSecret\x12$\n" +
+	"\x0epayfm_pay_type\x18' \x01(\tR\fpayfmPayType\"\xb4\x01\n" +
 	"\x0fUpdateConfigRes\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\x03R\x04code\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12\x1d\n" +

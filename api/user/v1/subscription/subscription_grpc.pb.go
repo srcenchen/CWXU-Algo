@@ -37,12 +37,12 @@ const (
 //
 // C 端个人订阅（Plus/Pro）：
 // - 套餐档位 free|plus|pro，价格与配额存 subscription_plans（站管可改）
-// - 开通：支付宝在线支付（create-order → 二维码 → 回调履约）或站管人工赋予（grant）
+// - 开通：支付FM在线支付（create-order → 支付链接跳转 → 回调履约）或站管人工赋予（grant）
 // - 资格生效点：每日手动刷新配额、自动同步间隔、题面爬取/AI 分析、AI 日报、badge
 type SubscriptionClient interface {
 	// 公开：套餐列表（含价格与配额，前端对比表用）
 	ListPlans(ctx context.Context, in *ListPlansReq, opts ...grpc.CallOption) (*ListPlansRes, error)
-	// 登录：创建订单（调支付宝预下单；未配置支付宝时报错）
+	// 登录：创建订单（调支付FM下单；未配置支付时报错）
 	CreateOrder(ctx context.Context, in *CreateOrderReq, opts ...grpc.CallOption) (*CreateOrderRes, error)
 	// 登录：查订单状态（前端回流轮询）
 	GetOrder(ctx context.Context, in *GetOrderReq, opts ...grpc.CallOption) (*GetOrderRes, error)
@@ -176,12 +176,12 @@ func (c *subscriptionClient) MyAiStatus(ctx context.Context, in *MyAiStatusReq, 
 //
 // C 端个人订阅（Plus/Pro）：
 // - 套餐档位 free|plus|pro，价格与配额存 subscription_plans（站管可改）
-// - 开通：支付宝在线支付（create-order → 二维码 → 回调履约）或站管人工赋予（grant）
+// - 开通：支付FM在线支付（create-order → 支付链接跳转 → 回调履约）或站管人工赋予（grant）
 // - 资格生效点：每日手动刷新配额、自动同步间隔、题面爬取/AI 分析、AI 日报、badge
 type SubscriptionServer interface {
 	// 公开：套餐列表（含价格与配额，前端对比表用）
 	ListPlans(context.Context, *ListPlansReq) (*ListPlansRes, error)
-	// 登录：创建订单（调支付宝预下单；未配置支付宝时报错）
+	// 登录：创建订单（调支付FM下单；未配置支付时报错）
 	CreateOrder(context.Context, *CreateOrderReq) (*CreateOrderRes, error)
 	// 登录：查订单状态（前端回流轮询）
 	GetOrder(context.Context, *GetOrderReq) (*GetOrderRes, error)
