@@ -722,30 +722,45 @@ func (d *ProfileDal) GetUserIdsByOrg(ctx context.Context, orgID uint) ([]int64, 
 	return ids, err
 }
 
-// GetNonPublicOrgUserIds 至少属于一个非公共域/非系统组织的用户
+// GetNonPublicOrgUserIds 至少属于一个非公共域/非系统组织的用户（兼容旧调用）
 func (d *ProfileDal) GetNonPublicOrgUserIds(ctx context.Context) ([]int64, error) {
+	return d.getNonPublicOrgUserIDsByFeature(ctx, "")
+}
+
+// getNonPublicOrgUserIDsByFeature 非公共域组织成员，可选 feature 过滤（fetch/ai）；空=不过滤
+func (d *ProfileDal) getNonPublicOrgUserIDsByFeature(ctx context.Context, feature string) ([]int64, error) {
 	var ids []int64
-	err := d.db.WithContext(ctx).
+	q := d.db.WithContext(ctx).
 		Table("org_members AS m").
 		Joins("JOIN orgs o ON o.id = m.org_id").
-		Where("o.slug <> ? AND COALESCE(o.is_system, false) = false", model.PublicOrgSlug).
-		Distinct().
-		Pluck("m.user_id", &ids).Error
+		Where("o.slug <> ? AND COALESCE(o.is_system, false) = false", model.PublicOrgSlug)
+	switch feature {
+	case "fetch":
+		q = q.Where("o.enable_fetch_problem = true")
+	case "ai":
+		q = q.Where("o.enable_ai_analyze = true")
+	}
+	err := q.Distinct().Pluck("m.user_id", &ids).Error
 	return ids, err
 }
 
-// GetProblemPipelineUserIds 题面爬取 / AI 资格用户：
-// 默认=非公共域组织成员；个人 *bool 覆盖 true 强制开、false 强制关、null 跟默认。
 func (d *ProfileDal) GetProblemPipelineUserIds(ctx context.Context) (fetchIDs, aiIDs []int64, err error) {
-	orgIDs, err := d.GetNonPublicOrgUserIds(ctx)
+	fetchOrgIDs, err := d.getNonPublicOrgUserIDsByFeature(ctx, "fetch")
 	if err != nil {
 		return nil, nil, err
 	}
-	orgSet := make(map[int64]struct{}, len(orgIDs))
-	for _, id := range orgIDs {
-		orgSet[id] = struct{}{}
+	aiOrgIDs, err := d.getNonPublicOrgUserIDsByFeature(ctx, "ai")
+	if err != nil {
+		return nil, nil, err
 	}
-
+	fetchOrgSet := make(map[int64]struct{}, len(fetchOrgIDs))
+	for _, id := range fetchOrgIDs {
+		fetchOrgSet[id] = struct{}{}
+	}
+	aiOrgSet := make(map[int64]struct{}, len(aiOrgIDs))
+	for _, id := range aiOrgIDs {
+		aiOrgSet[id] = struct{}{}
+	}
 	type overrideRow struct {
 		ID                  int64
 		ProblemFetchEnabled *bool
@@ -781,12 +796,14 @@ func (d *ProfileDal) GetProblemPipelineUserIds(ctx context.Context) (fetchIDs, a
 		}
 	}
 
-	fetchSet := make(map[int64]struct{}, len(orgIDs)+len(fetchOn))
-	aiSet := make(map[int64]struct{}, len(orgIDs)+len(aiOn))
-	for id := range orgSet {
+	fetchSet := make(map[int64]struct{}, len(fetchOrgIDs)+len(fetchOn))
+	aiSet := make(map[int64]struct{}, len(aiOrgIDs)+len(aiOn))
+	for id := range fetchOrgSet {
 		if _, off := fetchOff[id]; !off {
 			fetchSet[id] = struct{}{}
 		}
+	}
+	for id := range aiOrgSet {
 		if _, off := aiOff[id]; !off {
 			aiSet[id] = struct{}{}
 		}

@@ -44,6 +44,8 @@ type OrgInfo struct {
 	AiSummaryIntervalMin int32                  `protobuf:"varint,17,opt,name=aiSummaryIntervalMin,proto3" json:"aiSummaryIntervalMin,omitempty"`
 	AiEmailSchedule      string                 `protobuf:"bytes,18,opt,name=aiEmailSchedule,proto3" json:"aiEmailSchedule,omitempty"`
 	ForceSync            bool                   `protobuf:"varint,19,opt,name=forceSync,proto3" json:"forceSync,omitempty"`
+	EnableFetchProblem   bool                   `protobuf:"varint,25,opt,name=enableFetchProblem,proto3" json:"enableFetchProblem,omitempty"`
+	EnableAiAnalyze      bool                   `protobuf:"varint,26,opt,name=enableAiAnalyze,proto3" json:"enableAiAnalyze,omitempty"`
 	MemberCount          int32                  `protobuf:"varint,20,opt,name=memberCount,proto3" json:"memberCount,omitempty"`
 	// 仅具邀请查看权限时输出
 	InviteCode     string `protobuf:"bytes,21,opt,name=inviteCode,proto3" json:"inviteCode,omitempty"`
@@ -213,6 +215,20 @@ func (x *OrgInfo) GetAiEmailSchedule() string {
 func (x *OrgInfo) GetForceSync() bool {
 	if x != nil {
 		return x.ForceSync
+	}
+	return false
+}
+
+func (x *OrgInfo) GetEnableFetchProblem() bool {
+	if x != nil {
+		return x.EnableFetchProblem
+	}
+	return false
+}
+
+func (x *OrgInfo) GetEnableAiAnalyze() bool {
+	if x != nil {
+		return x.EnableAiAnalyze
 	}
 	return false
 }
@@ -979,6 +995,8 @@ type UpdateReq struct {
 	AiEmailSchedule      *string                `protobuf:"bytes,14,opt,name=aiEmailSchedule,proto3,oneof" json:"aiEmailSchedule,omitempty"`
 	SeatLimit            *int32                 `protobuf:"varint,15,opt,name=seatLimit,proto3,oneof" json:"seatLimit,omitempty"`
 	ForceSync            *bool                  `protobuf:"varint,16,opt,name=forceSync,proto3,oneof" json:"forceSync,omitempty"`
+	EnableFetchProblem   *bool                  `protobuf:"varint,17,opt,name=enableFetchProblem,proto3,oneof" json:"enableFetchProblem,omitempty"`
+	EnableAiAnalyze      *bool                  `protobuf:"varint,18,opt,name=enableAiAnalyze,proto3,oneof" json:"enableAiAnalyze,omitempty"`
 	unknownFields        protoimpl.UnknownFields
 	sizeCache            protoimpl.SizeCache
 }
@@ -1121,6 +1139,20 @@ func (x *UpdateReq) GetSeatLimit() int32 {
 func (x *UpdateReq) GetForceSync() bool {
 	if x != nil && x.ForceSync != nil {
 		return *x.ForceSync
+	}
+	return false
+}
+
+func (x *UpdateReq) GetEnableFetchProblem() bool {
+	if x != nil && x.EnableFetchProblem != nil {
+		return *x.EnableFetchProblem
+	}
+	return false
+}
+
+func (x *UpdateReq) GetEnableAiAnalyze() bool {
+	if x != nil && x.EnableAiAnalyze != nil {
+		return *x.EnableAiAnalyze
 	}
 	return false
 }
@@ -4492,7 +4524,7 @@ var File_user_v1_org_org_proto protoreflect.FileDescriptor
 
 const file_user_v1_org_org_proto_rawDesc = "" +
 	"\n" +
-	"\x15user/v1/org/org.proto\x12\x0fapi.user.v1.org\x1a\x1cgoogle/api/annotations.proto\"\x95\x06\n" +
+	"\x15user/v1/org/org.proto\x12\x0fapi.user.v1.org\x1a\x1cgoogle/api/annotations.proto\"\xef\x06\n" +
 	"\aOrgInfo\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\x03R\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x12\n" +
@@ -4515,7 +4547,9 @@ const file_user_v1_org_org_proto_rawDesc = "" +
 	"\x11spiderIntervalMin\x18\x10 \x01(\x05R\x11spiderIntervalMin\x122\n" +
 	"\x14aiSummaryIntervalMin\x18\x11 \x01(\x05R\x14aiSummaryIntervalMin\x12(\n" +
 	"\x0faiEmailSchedule\x18\x12 \x01(\tR\x0faiEmailSchedule\x12\x1c\n" +
-	"\tforceSync\x18\x13 \x01(\bR\tforceSync\x12 \n" +
+	"\tforceSync\x18\x13 \x01(\bR\tforceSync\x12.\n" +
+	"\x12enableFetchProblem\x18\x19 \x01(\bR\x12enableFetchProblem\x12(\n" +
+	"\x0fenableAiAnalyze\x18\x1a \x01(\bR\x0fenableAiAnalyze\x12 \n" +
 	"\vmemberCount\x18\x14 \x01(\x05R\vmemberCount\x12\x1e\n" +
 	"\n" +
 	"inviteCode\x18\x15 \x01(\tR\n" +
@@ -4573,7 +4607,7 @@ const file_user_v1_org_org_proto_rawDesc = "" +
 	"\tCreateRes\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\x05R\x04code\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12,\n" +
-	"\x04data\x18\x03 \x01(\v2\x18.api.user.v1.org.OrgInfoR\x04data\"\xfb\x06\n" +
+	"\x04data\x18\x03 \x01(\v2\x18.api.user.v1.org.OrgInfoR\x04data\"\x8a\b\n" +
 	"\tUpdateReq\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\x03R\x02id\x12\x17\n" +
 	"\x04name\x18\x02 \x01(\tH\x00R\x04name\x88\x01\x01\x12\x1b\n" +
@@ -4594,7 +4628,9 @@ const file_user_v1_org_org_proto_rawDesc = "" +
 	"\x14aiSummaryIntervalMin\x18\r \x01(\x05H\vR\x14aiSummaryIntervalMin\x88\x01\x01\x12-\n" +
 	"\x0faiEmailSchedule\x18\x0e \x01(\tH\fR\x0faiEmailSchedule\x88\x01\x01\x12!\n" +
 	"\tseatLimit\x18\x0f \x01(\x05H\rR\tseatLimit\x88\x01\x01\x12!\n" +
-	"\tforceSync\x18\x10 \x01(\bH\x0eR\tforceSync\x88\x01\x01B\a\n" +
+	"\tforceSync\x18\x10 \x01(\bH\x0eR\tforceSync\x88\x01\x01\x123\n" +
+	"\x12enableFetchProblem\x18\x11 \x01(\bH\x0fR\x12enableFetchProblem\x88\x01\x01\x12-\n" +
+	"\x0fenableAiAnalyze\x18\x12 \x01(\bH\x10R\x0fenableAiAnalyze\x88\x01\x01B\a\n" +
 	"\x05_nameB\t\n" +
 	"\a_statusB\r\n" +
 	"\v_brandTitleB\f\n" +
@@ -4612,7 +4648,9 @@ const file_user_v1_org_org_proto_rawDesc = "" +
 	"\n" +
 	"_seatLimitB\f\n" +
 	"\n" +
-	"_forceSync\"g\n" +
+	"_forceSyncB\x15\n" +
+	"\x13_enableFetchProblemB\x12\n" +
+	"\x10_enableAiAnalyze\"g\n" +
 	"\tUpdateRes\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\x05R\x04code\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12,\n" +

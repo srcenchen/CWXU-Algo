@@ -135,6 +135,8 @@ message OrgInfo {
   int32 aiSummaryIntervalMin = 17;
   string aiEmailSchedule = 18;
   bool forceSync = 19;
+  bool enableFetchProblem = 25;
+  bool enableAiAnalyze = 26;
   int32 memberCount = 20;
   // 仅具邀请查看权限时输出
   string inviteCode = 21;
@@ -237,6 +239,8 @@ message UpdateReq {
   optional string aiEmailSchedule = 14;
   optional int32 seatLimit = 15;
   optional bool forceSync = 16;
+  optional bool enableFetchProblem = 17;
+  optional bool enableAiAnalyze = 18;
 }
 message UpdateRes {
   int32 code = 1;

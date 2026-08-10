@@ -158,6 +158,8 @@ func (s *OrgService) toOrgInfo(o *model.Org, includeInvite bool) *orgpb.OrgInfo 
 		AiSummaryIntervalMin: int32(o.AISummaryIntervalMin),
 		AiEmailSchedule:      o.AIEmailSchedule,
 		ForceSync:            o.ForceSync,
+		EnableFetchProblem:   o.EnableFetchProblem,
+		EnableAiAnalyze:      o.EnableAiAnalyze,
 		MemberCount:          int32(countOrgSeats(s.db, o)),
 	}
 	if includeInvite {
@@ -654,6 +656,8 @@ func (s *OrgService) Create(ctx context.Context, req *orgpb.CreateReq) (*orgpb.C
 		EnableAIEmail:        true,
 		EnableAIWeeklyEmail:  true,
 		EnableSpider:         true,
+		EnableFetchProblem:   true,
+		EnableAiAnalyze:      true,
 		SpiderIntervalMin:    60,
 		AISummaryIntervalMin: 180,
 		AIEmailSchedule:      "30 7 * * *",
@@ -882,6 +886,12 @@ func (s *OrgService) Update(ctx context.Context, req *orgpb.UpdateReq) (*orgpb.U
 		}
 		if req.ForceSync != nil {
 			updates["force_sync"] = *req.ForceSync
+		}
+		if req.EnableFetchProblem != nil {
+			updates["enable_fetch_problem"] = *req.EnableFetchProblem
+		}
+		if req.EnableAiAnalyze != nil {
+			updates["enable_ai_analyze"] = *req.EnableAiAnalyze
 		}
 	}
 

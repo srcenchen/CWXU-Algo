@@ -11307,6 +11307,10 @@ components:
                     type: string
                 forceSync:
                     type: boolean
+                enableFetchProblem:
+                    type: boolean
+                enableAiAnalyze:
+                    type: boolean
                 memberCount:
                     type: integer
                     format: int32
@@ -11655,6 +11659,10 @@ components:
                     type: integer
                     format: int32
                 forceSync:
+                    type: boolean
+                enableFetchProblem:
+                    type: boolean
+                enableAiAnalyze:
                     type: boolean
         api.user.v1.org.UpdateRes:
             type: object

@@ -64,6 +64,10 @@ type Org struct {
 
 	DailySyncLimit int `gorm:"default:0;comment:组织日同步上限 0=未启用"`
 
+	// 题面流水线开关（站点管理员可写；默认 true 兼容存量组织）
+	EnableFetchProblem bool `gorm:"default:true;comment:题面爬取开关(站管)"`
+	EnableAiAnalyze    bool `gorm:"default:true;comment:题面AI分析开关(站管)"`
+
 	// ForceSync 本队强制同步（集训/比赛期跳过成员休眠）；仅站点管理员可写
 	ForceSync bool `gorm:"default:false;comment:强制同步跳过休眠(站管)"`
 }
