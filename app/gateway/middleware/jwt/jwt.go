@@ -52,6 +52,9 @@ var publicExact = map[string]struct{}{
 	"/v1/user/role/list":               {},
 	"/v1/user/paste/get":               {},
 	"/api/user/paste/get":              {},
+	// C 端订阅：套餐列表公开（前端对比表）
+	"/v1/user/subscription/plans": {},
+	"/api/user/subscription/plans": {},
 	// Blog public reads
 	"/v1/user/blog/by-username":     {},
 	"/api/user/blog/by-username":    {},

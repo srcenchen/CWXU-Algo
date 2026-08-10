@@ -50,6 +50,8 @@ func NewWhiteListMatcher() selector.MatchFunc {
 		"/api.user.v1.role.Role/List":                  "",
 		"/api.user.v1.site.Site/GetConfig":             "",
 		"/api.user.v1.site.Site/VisitPing":             "",
+		// C 端订阅：套餐列表公开（前端对比表）
+		"/api.user.v1.subscription.Subscription/ListPlans": "",
 		// 社交：搜索/列表/计数/关系/身份/隐私状态公开读（JWT 可选，有则按当前域解析）；关注操作仍需登录
 		"/api.user.v1.social.Social/Search":        "",
 		"/api.user.v1.social.Social/Following":     "",
