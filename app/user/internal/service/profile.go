@@ -321,6 +321,12 @@ func (p *ProfileService) GetList(ctx context.Context, req *profile.GetListReq) (
 		if aiMin <= 0 {
 			aiMin = 180
 		}
+		refreshQuota := int32(dal.DefaultRefreshQuota)
+		refreshQuotaOverridden := false
+		if v.DailyRefreshQuotaOverride != nil {
+			refreshQuota = int32(*v.DailyRefreshQuotaOverride)
+			refreshQuotaOverridden = true
+		}
 		item := &profile.GetListRes_List{
 			UserId:                      uint64(v.ID),
 			Username:                    v.Username,
@@ -342,6 +348,8 @@ func (p *ProfileService) GetList(ctx context.Context, req *profile.GetListReq) (
 			AiSummaryIntervalMin:        aiMin,
 			SpiderIntervalOverridden:    v.SpiderIntervalMinOverride != nil && *v.SpiderIntervalMinOverride > 0,
 			AiSummaryIntervalOverridden: v.AISummaryIntervalMinOverride != nil && *v.AISummaryIntervalMinOverride > 0,
+			DailyRefreshQuota:           refreshQuota,
+			DailyRefreshQuotaOverridden: refreshQuotaOverridden,
 			SyncExempt:                  v.SyncExempt,
 			AdminForceDormant:           v.AdminForceDormant,
 			Disabled:                    v.Disabled,
@@ -1074,6 +1082,48 @@ func (p *ProfileService) SetSyncIntervals(ctx context.Context, req *profile.SetS
 		return nil, errors.InternalServer("内部错误", err.Error())
 	}
 	return &profile.SetSyncIntervalsRes{Code: 0, Message: "已更新个人同步间隔"}, nil
+}
+
+// maxRefreshQuota 每日手动刷新配额上限（次）
+const maxRefreshQuota = 100
+
+// SetRefreshQuota 站点管理员设置/清除个人每日手动刷新做题记录配额覆盖。
+// clear=true 清除覆盖回落全局默认（dal.DefaultRefreshQuota）；否则 quota：0=禁止、1-100=每日次数。
+func (p *ProfileService) SetRefreshQuota(ctx context.Context, req *profile.SetRefreshQuotaReq) (*profile.SetRefreshQuotaRes, error) {
+	if !auth.HasPerm(ctx, rbac.PermSiteUserSync) {
+		return nil, errors.Forbidden("权限不足", "需要用户同步运维权限")
+	}
+	if req.UserId <= 0 {
+		return nil, errors.BadRequest("参数错误", "用户ID无效")
+	}
+	var quotaPtr *int
+	if !req.Clear {
+		v := int(req.Quota)
+		if v < 0 || v > maxRefreshQuota {
+			return nil, errors.BadRequest("参数错误", fmt.Sprintf("每日刷新配额须为 0（禁止）或 1–%d 次", maxRefreshQuota))
+		}
+		quotaPtr = &v
+	}
+	if _, err := p.profileDal.GetById(ctx, req.UserId); err != nil {
+		return nil, errors.BadRequest("参数错误", "用户不存在")
+	}
+	if err := p.profileDal.SetRefreshQuotaOverride(ctx, req.UserId, quotaPtr); err != nil {
+		return nil, errors.InternalServer("内部错误", err.Error())
+	}
+	return &profile.SetRefreshQuotaRes{Code: 0, Message: "已更新每日刷新配额"}, nil
+}
+
+// GetRefreshQuota 服务间调用：按 userId 返回每日手动刷新有效配额（0=禁止）。
+// 用户不存在/查询失败时 fail-open 到全局默认（保持旧行为）。
+func (p *ProfileService) GetRefreshQuota(ctx context.Context, req *profile.GetRefreshQuotaReq) (*profile.GetRefreshQuotaRes, error) {
+	if req.GetUserId() <= 0 {
+		return &profile.GetRefreshQuotaRes{Quota: 0}, nil
+	}
+	q, _, err := p.profileDal.GetRefreshQuota(ctx, req.GetUserId())
+	if err != nil {
+		return &profile.GetRefreshQuotaRes{Quota: int32(dal.DefaultRefreshQuota)}, nil
+	}
+	return &profile.GetRefreshQuotaRes{Quota: int32(q)}, nil
 }
 
 // GetByIds 批量获取用户展示名（当前组织 / 指定 org 的组织内名称）

@@ -828,7 +828,8 @@ func (s SpiderService) GetPlatformUsers(ctx context.Context, req *spider.GetPlat
 	return &spider.GetPlatformUsersRes{Code: 0, Message: "success", Total: total, List: list}, nil
 }
 
-// manualRefreshDailyLimit 每个用户每日手动刷新做题记录次数
+// manualRefreshDailyLimit 每个用户每日手动刷新做题记录次数（全局默认；
+// 站管可按用户覆盖：user 服务 daily_refresh_quota_override，0=禁止）
 const manualRefreshDailyLimit = 2
 
 // manualRefreshLoc 手动刷新限流按上海自然日
@@ -857,6 +858,18 @@ func (s SpiderService) RefreshSpider(ctx context.Context, _ *spider.RefreshSpide
 	if s.rdb == nil {
 		return &spider.RefreshSpiderRes{Code: 1, Message: "服务未就绪，稍后再试"}, nil
 	}
+	// 每日配额：优先站管个人覆盖（user 服务），失败回落全局默认（保持旧行为）
+	limit := manualRefreshDailyLimit
+	if s.reg != nil {
+		if cli, err := userrpc.ProfileClient(&s.reg.Reg); err == nil && cli != nil {
+			if q, err := cli.GetRefreshQuota(ctx, &profile.GetRefreshQuotaReq{UserId: int64(uid)}); err == nil && q != nil {
+				limit = int(q.GetQuota())
+			}
+		}
+	}
+	if limit <= 0 {
+		return &spider.RefreshSpiderRes{Code: 1, Message: "该用户每日手动刷新次数已用完（配额 0）", Remaining: 0}, nil
+	}
 	day := time.Now().In(manualRefreshLoc).Format("20060102")
 	dayKey := fmt.Sprintf("spider:manual_refresh:%d:%s", uid, day)
 
@@ -869,7 +882,7 @@ func (s SpiderService) RefreshSpider(ctx context.Context, _ *spider.RefreshSpide
 	}
 	if !ok {
 		used, _ := s.rdb.Get(ctx, dayKey).Int64()
-		remaining := manualRefreshDailyLimit - int(used)
+		remaining := limit - int(used)
 		if remaining < 0 {
 			remaining = 0
 		}
@@ -889,15 +902,15 @@ func (s SpiderService) RefreshSpider(ctx context.Context, _ *spider.RefreshSpide
 	if used == 1 {
 		_ = s.rdb.Expire(ctx, dayKey, manualRefreshKeyTTL()).Err()
 	}
-	remaining := manualRefreshDailyLimit - int(used)
+	remaining := limit - int(used)
 	if remaining < 0 {
 		remaining = 0
 	}
-	if used > manualRefreshDailyLimit {
+	if used > int64(limit) {
 		// 已用完：不入队，提示剩余次数
 		return &spider.RefreshSpiderRes{
 			Code:      1,
-			Message:   fmt.Sprintf("每个用户每日拥有两次手动刷新做题记录次数，当前还剩下 %d 次", remaining),
+			Message:   fmt.Sprintf("每个用户每日拥有 %d 次手动刷新做题记录次数，当前还剩下 %d 次", limit, remaining),
 			Remaining: int32(remaining),
 		}, nil
 	}

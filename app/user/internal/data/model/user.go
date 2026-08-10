@@ -44,6 +44,8 @@ type User struct {
 	SpiderIntervalMinOverride *int `gorm:"comment:爬取间隔覆盖分钟 null=组织MIN"`
 	// AISummaryIntervalMinOverride AI 总结间隔（分钟）
 	AISummaryIntervalMinOverride *int `gorm:"comment:AI总结间隔覆盖分钟 null=组织MIN"`
+	// DailyRefreshQuotaOverride 每日手动刷新做题记录次数覆盖（null=全局默认 2；0=禁止；>0=每日次数）
+	DailyRefreshQuotaOverride *int `gorm:"comment:每日手动刷新配额覆盖 null=默认2 0=禁止"`
 
 	// —— 活跃 / 休眠 ——
 	// LastLoginAt 最近一次登录或已登录 VisitPing 触达

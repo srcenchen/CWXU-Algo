@@ -4620,6 +4620,25 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/api.user.v1.SetProblemPipelineRes'
+    /v1/user/profile/set-refresh-quota:
+        post:
+            tags:
+                - Profile
+            description: 站点管理员：个人每日手动刷新做题记录配额覆盖（0=禁止；1-100=每日次数）
+            operationId: Profile_SetRefreshQuota
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/api.user.v1.SetRefreshQuotaReq'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.user.v1.SetRefreshQuotaRes'
     /v1/user/profile/set-sync-exempt:
         post:
             tags:
@@ -8645,6 +8664,13 @@ components:
                     items:
                         type: string
                     description: 持有的自定义站点角色名（管理端 badge；内置角色不在其中）
+                dailyRefreshQuota:
+                    type: integer
+                    description: 每日手动刷新做题记录有效配额（已应用站管覆盖；0=禁止；默认 2）
+                    format: int32
+                dailyRefreshQuotaOverridden:
+                    type: boolean
+                    description: 是否存在站点管理员个人配额覆盖
         api.user.v1.GetListRes_OrgBrief:
             type: object
             properties:
@@ -8875,6 +8901,27 @@ components:
                     type: string
                     description: 'kind: fetch（题面爬取）| ai（题面 AI 分析）'
         api.user.v1.SetProblemPipelineRes:
+            type: object
+            properties:
+                code:
+                    type: string
+                message:
+                    type: string
+        api.user.v1.SetRefreshQuotaReq:
+            type: object
+            properties:
+                userId:
+                    type: string
+                quota:
+                    type: integer
+                    format: int32
+                clear:
+                    type: boolean
+            description: |-
+                SetRefreshQuotaReq 站点管理员设置个人每日手动刷新做题记录配额覆盖
+                 quota：0=禁止手动刷新；1-100=每日次数
+                 clear=true 时忽略 quota，清除覆盖回落全局默认（2 次/日）
+        api.user.v1.SetRefreshQuotaRes:
             type: object
             properties:
                 code:

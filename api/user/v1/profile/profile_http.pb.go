@@ -39,6 +39,7 @@ const OperationProfileMoveGroup = "/api.user.v1.Profile/MoveGroup"
 const OperationProfileSetDisabled = "/api.user.v1.Profile/SetDisabled"
 const OperationProfileSetEmailEnabled = "/api.user.v1.Profile/SetEmailEnabled"
 const OperationProfileSetProblemPipeline = "/api.user.v1.Profile/SetProblemPipeline"
+const OperationProfileSetRefreshQuota = "/api.user.v1.Profile/SetRefreshQuota"
 const OperationProfileSetSyncExempt = "/api.user.v1.Profile/SetSyncExempt"
 const OperationProfileSetSyncIntervals = "/api.user.v1.Profile/SetSyncIntervals"
 const OperationProfileUpdate = "/api.user.v1.Profile/Update"
@@ -78,6 +79,8 @@ type ProfileHTTPServer interface {
 	SetEmailEnabled(context.Context, *SetEmailEnabledReq) (*SetEmailEnabledRes, error)
 	// SetProblemPipeline 站点管理员：个人题面爬取 / 题面 AI 覆盖开关（kind=fetch|ai）
 	SetProblemPipeline(context.Context, *SetProblemPipelineReq) (*SetProblemPipelineRes, error)
+	// SetRefreshQuota 站点管理员：个人每日手动刷新做题记录配额覆盖（0=禁止；1-100=每日次数）
+	SetRefreshQuota(context.Context, *SetRefreshQuotaReq) (*SetRefreshQuotaRes, error)
 	// SetSyncExempt 站点管理员：标记用户永不休眠（跳过不活跃判定）
 	SetSyncExempt(context.Context, *SetSyncExemptReq) (*SetSyncExemptRes, error)
 	// SetSyncIntervals 站点管理员：个人爬取间隔 / AI 总结间隔覆盖（优先级高于组织 MIN）
@@ -95,6 +98,7 @@ func RegisterProfileHTTPServer(s *http.Server, srv ProfileHTTPServer) {
 	r.POST("/v1/user/profile/set-email-enabled", _Profile_SetEmailEnabled0_HTTP_Handler(srv))
 	r.POST("/v1/user/profile/set-problem-pipeline", _Profile_SetProblemPipeline0_HTTP_Handler(srv))
 	r.POST("/v1/user/profile/set-sync-intervals", _Profile_SetSyncIntervals0_HTTP_Handler(srv))
+	r.POST("/v1/user/profile/set-refresh-quota", _Profile_SetRefreshQuota0_HTTP_Handler(srv))
 	r.POST("/v1/user/profile/set-sync-exempt", _Profile_SetSyncExempt0_HTTP_Handler(srv))
 	r.POST("/v1/user/profile/clear-dormant", _Profile_ClearDormant0_HTTP_Handler(srv))
 	r.POST("/v1/user/profile/force-dormant", _Profile_ForceDormant0_HTTP_Handler(srv))
@@ -275,6 +279,28 @@ func _Profile_SetSyncIntervals0_HTTP_Handler(srv ProfileHTTPServer) func(ctx htt
 			return err
 		}
 		reply := out.(*SetSyncIntervalsRes)
+		return ctx.Result(200, reply)
+	}
+}
+
+func _Profile_SetRefreshQuota0_HTTP_Handler(srv ProfileHTTPServer) func(ctx http.Context) error {
+	return func(ctx http.Context) error {
+		var in SetRefreshQuotaReq
+		if err := ctx.Bind(&in); err != nil {
+			return err
+		}
+		if err := ctx.BindQuery(&in); err != nil {
+			return err
+		}
+		http.SetOperation(ctx, OperationProfileSetRefreshQuota)
+		h := ctx.Middleware(func(ctx context.Context, req interface{}) (interface{}, error) {
+			return srv.SetRefreshQuota(ctx, req.(*SetRefreshQuotaReq))
+		})
+		out, err := h(ctx, &in)
+		if err != nil {
+			return err
+		}
+		reply := out.(*SetRefreshQuotaRes)
 		return ctx.Result(200, reply)
 	}
 }
@@ -623,6 +649,8 @@ type ProfileHTTPClient interface {
 	SetEmailEnabled(ctx context.Context, req *SetEmailEnabledReq, opts ...http.CallOption) (rsp *SetEmailEnabledRes, err error)
 	// SetProblemPipeline 站点管理员：个人题面爬取 / 题面 AI 覆盖开关（kind=fetch|ai）
 	SetProblemPipeline(ctx context.Context, req *SetProblemPipelineReq, opts ...http.CallOption) (rsp *SetProblemPipelineRes, err error)
+	// SetRefreshQuota 站点管理员：个人每日手动刷新做题记录配额覆盖（0=禁止；1-100=每日次数）
+	SetRefreshQuota(ctx context.Context, req *SetRefreshQuotaReq, opts ...http.CallOption) (rsp *SetRefreshQuotaRes, err error)
 	// SetSyncExempt 站点管理员：标记用户永不休眠（跳过不活跃判定）
 	SetSyncExempt(ctx context.Context, req *SetSyncExemptReq, opts ...http.CallOption) (rsp *SetSyncExemptRes, err error)
 	// SetSyncIntervals 站点管理员：个人爬取间隔 / AI 总结间隔覆盖（优先级高于组织 MIN）
@@ -904,6 +932,20 @@ func (c *ProfileHTTPClientImpl) SetProblemPipeline(ctx context.Context, in *SetP
 	pattern := "/v1/user/profile/set-problem-pipeline"
 	path := binding.EncodeURL(pattern, in, false)
 	opts = append(opts, http.Operation(OperationProfileSetProblemPipeline))
+	opts = append(opts, http.PathTemplate(pattern))
+	err := c.cc.Invoke(ctx, "POST", path, in, &out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// SetRefreshQuota 站点管理员：个人每日手动刷新做题记录配额覆盖（0=禁止；1-100=每日次数）
+func (c *ProfileHTTPClientImpl) SetRefreshQuota(ctx context.Context, in *SetRefreshQuotaReq, opts ...http.CallOption) (*SetRefreshQuotaRes, error) {
+	var out SetRefreshQuotaRes
+	pattern := "/v1/user/profile/set-refresh-quota"
+	path := binding.EncodeURL(pattern, in, false)
+	opts = append(opts, http.Operation(OperationProfileSetRefreshQuota))
 	opts = append(opts, http.PathTemplate(pattern))
 	err := c.cc.Invoke(ctx, "POST", path, in, &out, opts...)
 	if err != nil {

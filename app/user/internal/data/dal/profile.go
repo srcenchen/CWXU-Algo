@@ -381,6 +381,7 @@ func (d *ProfileDal) GetList(ctx context.Context, pageSize, pageNum int64, keywo
 		Select("id", "username", "name", "group_id", "avatar", "role_id", "is_site_admin",
 			"problem_fetch_enabled", "problem_ai_enabled",
 			"spider_interval_min_override", "ai_summary_interval_min_override",
+			"daily_refresh_quota_override",
 			"email_enabled", "email_weekly_enabled", "created_at",
 			"sync_exempt", "last_login_at", "admin_force_dormant", "disabled").
 		Order("id").
@@ -836,6 +837,47 @@ func (d *ProfileDal) SetSyncIntervalOverrides(ctx context.Context, userID int64,
 	})
 }
 
+// DefaultRefreshQuota 每日手动刷新做题记录全局默认次数（与 core_data RefreshSpider 保持一致）
+const DefaultRefreshQuota = 2
+
+// SetRefreshQuotaOverride 站点管理员设置/清除个人每日手动刷新配额覆盖。
+// quota==nil=清除覆盖（回落全局默认）；否则写该值（0=禁止手动刷新；>0=每日次数）。
+func (d *ProfileDal) SetRefreshQuotaOverride(ctx context.Context, userID int64, quota *int) error {
+	if userID <= 0 {
+		return fmt.Errorf("invalid user id")
+	}
+	updates := map[string]interface{}{}
+	if quota == nil {
+		updates["daily_refresh_quota_override"] = nil
+	} else {
+		updates["daily_refresh_quota_override"] = *quota
+	}
+	cacheKey := fmt.Sprintf("user:%d:profile", userID)
+	return data2.UpdateCacheDal(ctx, d.rdb, cacheKey, func() error {
+		return d.db.WithContext(ctx).Model(&model.User{}).
+			Where("id = ?", userID).
+			Updates(updates).Error
+	})
+}
+
+// GetRefreshQuota 按 userId 取每日手动刷新有效配额（已合并站管覆盖；0=禁止）。
+func (d *ProfileDal) GetRefreshQuota(ctx context.Context, userID int64) (int, bool, error) {
+	if userID <= 0 {
+		return 0, false, fmt.Errorf("invalid user id")
+	}
+	var u model.User
+	if err := d.db.WithContext(ctx).
+		Select("daily_refresh_quota_override").
+		Where("id = ?", userID).
+		First(&u).Error; err != nil {
+		return 0, false, err
+	}
+	if u.DailyRefreshQuotaOverride == nil {
+		return DefaultRefreshQuota, false, nil
+	}
+	return *u.DailyRefreshQuotaOverride, true, nil
+}
+
 // EffectiveProblemPipeline 计算列表展示用有效开关（覆盖优先，否则是否非公共域组织）
 func EffectiveProblemPipeline(override *bool, isNonPublicOrg bool) bool {
 	if override != nil {
@@ -1219,7 +1261,8 @@ func (d *ProfileDal) GetListByOrg(ctx context.Context, orgID uint, pageSize, pag
 		Select(`u.id, u.username, u.name, COALESCE(m.group_id, 0) AS group_id, u.avatar, u.role_id, u.is_site_admin,
 			u.email_enabled, u.email_weekly_enabled,
 			u.problem_fetch_enabled, u.problem_ai_enabled,
-			u.spider_interval_min_override, u.ai_summary_interval_min_override, u.created_at,
+			u.spider_interval_min_override, u.ai_summary_interval_min_override,
+			u.daily_refresh_quota_override, u.created_at,
 			u.sync_exempt, u.last_login_at, u.admin_force_dormant, u.disabled`).
 		Joins("JOIN org_members AS m ON m.user_id = u.id AND m.org_id = ?", orgID)
 	if like := sqllike.Pattern(kw); like != "" {

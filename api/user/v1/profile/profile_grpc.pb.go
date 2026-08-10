@@ -27,6 +27,8 @@ const (
 	Profile_SetEmailEnabled_FullMethodName         = "/api.user.v1.Profile/SetEmailEnabled"
 	Profile_SetProblemPipeline_FullMethodName      = "/api.user.v1.Profile/SetProblemPipeline"
 	Profile_SetSyncIntervals_FullMethodName        = "/api.user.v1.Profile/SetSyncIntervals"
+	Profile_SetRefreshQuota_FullMethodName         = "/api.user.v1.Profile/SetRefreshQuota"
+	Profile_GetRefreshQuota_FullMethodName         = "/api.user.v1.Profile/GetRefreshQuota"
 	Profile_SetSyncExempt_FullMethodName           = "/api.user.v1.Profile/SetSyncExempt"
 	Profile_ClearDormant_FullMethodName            = "/api.user.v1.Profile/ClearDormant"
 	Profile_ForceDormant_FullMethodName            = "/api.user.v1.Profile/ForceDormant"
@@ -59,6 +61,10 @@ type ProfileClient interface {
 	SetProblemPipeline(ctx context.Context, in *SetProblemPipelineReq, opts ...grpc.CallOption) (*SetProblemPipelineRes, error)
 	// 站点管理员：个人爬取间隔 / AI 总结间隔覆盖（优先级高于组织 MIN）
 	SetSyncIntervals(ctx context.Context, in *SetSyncIntervalsReq, opts ...grpc.CallOption) (*SetSyncIntervalsRes, error)
+	// 站点管理员：个人每日手动刷新做题记录配额覆盖（0=禁止；1-100=每日次数）
+	SetRefreshQuota(ctx context.Context, in *SetRefreshQuotaReq, opts ...grpc.CallOption) (*SetRefreshQuotaRes, error)
+	// 服务间：按 userId 取每日手动刷新有效配额（无 HTTP）
+	GetRefreshQuota(ctx context.Context, in *GetRefreshQuotaReq, opts ...grpc.CallOption) (*GetRefreshQuotaRes, error)
 	// 站点管理员：标记用户永不休眠（跳过不活跃判定）
 	SetSyncExempt(ctx context.Context, in *SetSyncExemptReq, opts ...grpc.CallOption) (*SetSyncExemptRes, error)
 	// 站点管理员：批量解除不活跃（仅刷新 last_login_at 为当前时间；超时后仍会再休眠）
@@ -174,6 +180,26 @@ func (c *profileClient) SetSyncIntervals(ctx context.Context, in *SetSyncInterva
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(SetSyncIntervalsRes)
 	err := c.cc.Invoke(ctx, Profile_SetSyncIntervals_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *profileClient) SetRefreshQuota(ctx context.Context, in *SetRefreshQuotaReq, opts ...grpc.CallOption) (*SetRefreshQuotaRes, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SetRefreshQuotaRes)
+	err := c.cc.Invoke(ctx, Profile_SetRefreshQuota_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *profileClient) GetRefreshQuota(ctx context.Context, in *GetRefreshQuotaReq, opts ...grpc.CallOption) (*GetRefreshQuotaRes, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetRefreshQuotaRes)
+	err := c.cc.Invoke(ctx, Profile_GetRefreshQuota_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -354,6 +380,10 @@ type ProfileServer interface {
 	SetProblemPipeline(context.Context, *SetProblemPipelineReq) (*SetProblemPipelineRes, error)
 	// 站点管理员：个人爬取间隔 / AI 总结间隔覆盖（优先级高于组织 MIN）
 	SetSyncIntervals(context.Context, *SetSyncIntervalsReq) (*SetSyncIntervalsRes, error)
+	// 站点管理员：个人每日手动刷新做题记录配额覆盖（0=禁止；1-100=每日次数）
+	SetRefreshQuota(context.Context, *SetRefreshQuotaReq) (*SetRefreshQuotaRes, error)
+	// 服务间：按 userId 取每日手动刷新有效配额（无 HTTP）
+	GetRefreshQuota(context.Context, *GetRefreshQuotaReq) (*GetRefreshQuotaRes, error)
 	// 站点管理员：标记用户永不休眠（跳过不活跃判定）
 	SetSyncExempt(context.Context, *SetSyncExemptReq) (*SetSyncExemptRes, error)
 	// 站点管理员：批量解除不活跃（仅刷新 last_login_at 为当前时间；超时后仍会再休眠）
@@ -418,6 +448,12 @@ func (UnimplementedProfileServer) SetProblemPipeline(context.Context, *SetProble
 }
 func (UnimplementedProfileServer) SetSyncIntervals(context.Context, *SetSyncIntervalsReq) (*SetSyncIntervalsRes, error) {
 	return nil, status.Error(codes.Unimplemented, "method SetSyncIntervals not implemented")
+}
+func (UnimplementedProfileServer) SetRefreshQuota(context.Context, *SetRefreshQuotaReq) (*SetRefreshQuotaRes, error) {
+	return nil, status.Error(codes.Unimplemented, "method SetRefreshQuota not implemented")
+}
+func (UnimplementedProfileServer) GetRefreshQuota(context.Context, *GetRefreshQuotaReq) (*GetRefreshQuotaRes, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetRefreshQuota not implemented")
 }
 func (UnimplementedProfileServer) SetSyncExempt(context.Context, *SetSyncExemptReq) (*SetSyncExemptRes, error) {
 	return nil, status.Error(codes.Unimplemented, "method SetSyncExempt not implemented")
@@ -628,6 +664,42 @@ func _Profile_SetSyncIntervals_Handler(srv interface{}, ctx context.Context, dec
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(ProfileServer).SetSyncIntervals(ctx, req.(*SetSyncIntervalsReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Profile_SetRefreshQuota_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SetRefreshQuotaReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ProfileServer).SetRefreshQuota(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Profile_SetRefreshQuota_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ProfileServer).SetRefreshQuota(ctx, req.(*SetRefreshQuotaReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Profile_GetRefreshQuota_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetRefreshQuotaReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ProfileServer).GetRefreshQuota(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Profile_GetRefreshQuota_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ProfileServer).GetRefreshQuota(ctx, req.(*GetRefreshQuotaReq))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -958,6 +1030,14 @@ var Profile_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "SetSyncIntervals",
 			Handler:    _Profile_SetSyncIntervals_Handler,
+		},
+		{
+			MethodName: "SetRefreshQuota",
+			Handler:    _Profile_SetRefreshQuota_Handler,
+		},
+		{
+			MethodName: "GetRefreshQuota",
+			Handler:    _Profile_GetRefreshQuota_Handler,
 		},
 		{
 			MethodName: "SetSyncExempt",

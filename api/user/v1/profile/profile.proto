@@ -54,6 +54,15 @@ service Profile {
       body: "*",
     };
   }
+  // 站点管理员：个人每日手动刷新做题记录配额覆盖（0=禁止；1-100=每日次数）
+  rpc SetRefreshQuota (SetRefreshQuotaReq) returns (SetRefreshQuotaRes) {
+    option (google.api.http) = {
+      post: "/v1/user/profile/set-refresh-quota",
+      body: "*",
+    };
+  }
+  // 服务间：按 userId 取每日手动刷新有效配额（无 HTTP）
+  rpc GetRefreshQuota (GetRefreshQuotaReq) returns (GetRefreshQuotaRes);
   // 站点管理员：标记用户永不休眠（跳过不活跃判定）
   rpc SetSyncExempt (SetSyncExemptReq) returns (SetSyncExemptRes) {
     option (google.api.http) = {
@@ -264,6 +273,10 @@ message GetListRes {
     bool isResourceReviewer = 28 [deprecated = true];
     // 持有的自定义站点角色名（管理端 badge；内置角色不在其中）
     repeated string siteRoles = 29;
+    // 每日手动刷新做题记录有效配额（已应用站管覆盖；0=禁止；默认 2）
+    int32 dailyRefreshQuota = 30;
+    // 是否存在站点管理员个人配额覆盖
+    bool dailyRefreshQuotaOverridden = 31;
   }
   repeated List list = 1;
   int64 total = 2;
@@ -335,6 +348,30 @@ message SetSyncIntervalsReq {
 message SetSyncIntervalsRes {
   int64 code = 1;
   string message = 2;
+}
+
+// SetRefreshQuotaReq 站点管理员设置个人每日手动刷新做题记录配额覆盖
+// quota：0=禁止手动刷新；1-100=每日次数
+// clear=true 时忽略 quota，清除覆盖回落全局默认（2 次/日）
+message SetRefreshQuotaReq {
+  int64 userId = 1;
+  int32 quota = 2;
+  bool clear = 3;
+}
+
+message SetRefreshQuotaRes {
+  int64 code = 1;
+  string message = 2;
+}
+
+// GetRefreshQuotaReq 服务间：按 userId 取每日手动刷新有效配额
+message GetRefreshQuotaReq {
+  int64 userId = 1;
+}
+
+message GetRefreshQuotaRes {
+  // 有效配额（已合并站管覆盖；0=禁止；默认 2）
+  int32 quota = 1;
 }
 
 message SetSyncExemptReq {
