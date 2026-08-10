@@ -289,6 +289,51 @@ func (s *SubscriptionService) GetAiAnalyzeQuota(ctx context.Context, req *subscr
 	return &subscription.GetAiAnalyzeQuotaRes{QuotaPerMonth: int32(quota)}, nil
 }
 
+// MyAiStatus 登录：当前用户 AI 能力落地状态（会员页标记「实际是否有权限」用）。
+// AI 分析来源独立标记组织开通；落地配额与 GetAiAnalyzeQuota 同语义。
+func (s *SubscriptionService) MyAiStatus(ctx context.Context, _ *subscription.MyAiStatusReq) (*subscription.MyAiStatusRes, error) {
+	uid := int64(auth.GetCurrentUserId(ctx))
+	if uid <= 0 {
+		return &subscription.MyAiStatusRes{Code: 1, Message: "请先登录"}, nil
+	}
+	res := &subscription.MyAiStatusRes{Code: 0, Message: "success"}
+
+	// AI 分析：Pro active → 套餐值；组织开通单独标记（与 GetAiAnalyzeQuota 落地语义一致）
+	proActive := false
+	proQuota := 0
+	proAiDaily := false
+	if tier, active := s.profileDal.SubscriptionTier(ctx, uid); active && tier == "pro" {
+		proActive = true
+		if plan, err := s.profileDal.PlanByTier(ctx, tier); err == nil && plan != nil {
+			if plan.EnableAiAnalyze {
+				proQuota = plan.AiAnalyzeMonth
+			}
+			proAiDaily = plan.EnableAiDaily
+		}
+	}
+	orgQuota := s.orgAiAnalyzeQuota(ctx, uid)
+	switch {
+	case proActive && orgQuota > 0:
+		res.AiAnalyzeSource = "pro_org"
+	case proActive:
+		res.AiAnalyzeSource = "pro"
+	case orgQuota > 0:
+		res.AiAnalyzeSource = "org"
+	default:
+		res.AiAnalyzeSource = "none"
+	}
+	quota := orgQuota
+	if proActive && proQuota > quota {
+		quota = proQuota
+	}
+	res.AiAnalyzeQuota = int32(quota)
+
+	// AI 日报：组织授权独立标记；生效 = Pro + 套餐开启 + 个人开关（与定时任务分流一致）
+	res.AiDailyOrgAllowed = s.profileDal.UserHasOrgDailyEmailGrant(ctx, uid)
+	res.AiDailyEnabled = proActive && proAiDaily && s.profileDal.AIDailyEnabled(ctx, uid)
+	return res, nil
+}
+
 // orgAiAnalyzeQuota 用户所属非公共域组织的 AI 分析月配额（取最高档组织；无组织返回 0）。
 // 跟随组织 = 组织套餐 plan → plan_quota.AISummaryPerMonth。
 func (s *SubscriptionService) orgAiAnalyzeQuota(ctx context.Context, userID int64) int {

@@ -1243,6 +1243,130 @@ func (x *GetAiAnalyzeQuotaRes) GetQuotaPerMonth() int32 {
 	return 0
 }
 
+type MyAiStatusReq struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MyAiStatusReq) Reset() {
+	*x = MyAiStatusReq{}
+	mi := &file_user_v1_subscription_subscription_proto_msgTypes[20]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MyAiStatusReq) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MyAiStatusReq) ProtoMessage() {}
+
+func (x *MyAiStatusReq) ProtoReflect() protoreflect.Message {
+	mi := &file_user_v1_subscription_subscription_proto_msgTypes[20]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MyAiStatusReq.ProtoReflect.Descriptor instead.
+func (*MyAiStatusReq) Descriptor() ([]byte, []int) {
+	return file_user_v1_subscription_subscription_proto_rawDescGZIP(), []int{20}
+}
+
+type MyAiStatusRes struct {
+	state   protoimpl.MessageState `protogen:"open.v1"`
+	Code    int64                  `protobuf:"varint,1,opt,name=code,proto3" json:"code,omitempty"`
+	Message string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	// AI 分析落地月配额（>0=可分析；与 GetAiAnalyzeQuota 同语义）
+	AiAnalyzeQuota int32 `protobuf:"varint,3,opt,name=aiAnalyzeQuota,proto3" json:"aiAnalyzeQuota,omitempty"`
+	// AI 分析权限来源：pro（Pro 订阅）/ org（组织开通）/ pro_org（两者）/ none
+	AiAnalyzeSource string `protobuf:"bytes,4,opt,name=aiAnalyzeSource,proto3" json:"aiAnalyzeSource,omitempty"`
+	// AI 日报：组织是否已授权日报（组织开通权限）
+	AiDailyOrgAllowed bool `protobuf:"varint,5,opt,name=aiDailyOrgAllowed,proto3" json:"aiDailyOrgAllowed,omitempty"`
+	// AI 日报当前是否生效（Pro 订阅 + 套餐开启 + 个人开关已开）
+	AiDailyEnabled bool `protobuf:"varint,6,opt,name=aiDailyEnabled,proto3" json:"aiDailyEnabled,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *MyAiStatusRes) Reset() {
+	*x = MyAiStatusRes{}
+	mi := &file_user_v1_subscription_subscription_proto_msgTypes[21]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MyAiStatusRes) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MyAiStatusRes) ProtoMessage() {}
+
+func (x *MyAiStatusRes) ProtoReflect() protoreflect.Message {
+	mi := &file_user_v1_subscription_subscription_proto_msgTypes[21]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MyAiStatusRes.ProtoReflect.Descriptor instead.
+func (*MyAiStatusRes) Descriptor() ([]byte, []int) {
+	return file_user_v1_subscription_subscription_proto_rawDescGZIP(), []int{21}
+}
+
+func (x *MyAiStatusRes) GetCode() int64 {
+	if x != nil {
+		return x.Code
+	}
+	return 0
+}
+
+func (x *MyAiStatusRes) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
+func (x *MyAiStatusRes) GetAiAnalyzeQuota() int32 {
+	if x != nil {
+		return x.AiAnalyzeQuota
+	}
+	return 0
+}
+
+func (x *MyAiStatusRes) GetAiAnalyzeSource() string {
+	if x != nil {
+		return x.AiAnalyzeSource
+	}
+	return ""
+}
+
+func (x *MyAiStatusRes) GetAiDailyOrgAllowed() bool {
+	if x != nil {
+		return x.AiDailyOrgAllowed
+	}
+	return false
+}
+
+func (x *MyAiStatusRes) GetAiDailyEnabled() bool {
+	if x != nil {
+		return x.AiDailyEnabled
+	}
+	return false
+}
+
 var File_user_v1_subscription_subscription_proto protoreflect.FileDescriptor
 
 const file_user_v1_subscription_subscription_proto_rawDesc = "" +
@@ -1329,8 +1453,15 @@ const file_user_v1_subscription_subscription_proto_rawDesc = "" +
 	"\x14GetAiAnalyzeQuotaReq\x12\x16\n" +
 	"\x06userId\x18\x01 \x01(\x03R\x06userId\"<\n" +
 	"\x14GetAiAnalyzeQuotaRes\x12$\n" +
-	"\rquotaPerMonth\x18\x01 \x01(\x05R\rquotaPerMonth2\x99\n" +
-	"\n" +
+	"\rquotaPerMonth\x18\x01 \x01(\x05R\rquotaPerMonth\"\x0f\n" +
+	"\rMyAiStatusReq\"\xe5\x01\n" +
+	"\rMyAiStatusRes\x12\x12\n" +
+	"\x04code\x18\x01 \x01(\x03R\x04code\x12\x18\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\x12&\n" +
+	"\x0eaiAnalyzeQuota\x18\x03 \x01(\x05R\x0eaiAnalyzeQuota\x12(\n" +
+	"\x0faiAnalyzeSource\x18\x04 \x01(\tR\x0faiAnalyzeSource\x12,\n" +
+	"\x11aiDailyOrgAllowed\x18\x05 \x01(\bR\x11aiDailyOrgAllowed\x12&\n" +
+	"\x0eaiDailyEnabled\x18\x06 \x01(\bR\x0eaiDailyEnabled2\xa6\v\n" +
 	"\fSubscription\x12\x80\x01\n" +
 	"\tListPlans\x12&.api.user.v1.subscription.ListPlansReq\x1a&.api.user.v1.subscription.ListPlansRes\"#\x82\xd3\xe4\x93\x02\x1d\x12\x1b/v1/user/subscription/plans\x12\x90\x01\n" +
 	"\vCreateOrder\x12(.api.user.v1.subscription.CreateOrderReq\x1a(.api.user.v1.subscription.CreateOrderRes\"-\x82\xd3\xe4\x93\x02':\x01*\"\"/v1/user/subscription/create-order\x12}\n" +
@@ -1340,7 +1471,9 @@ const file_user_v1_subscription_subscription_proto_rawDesc = "" +
 	"\x12RevokeSubscription\x12/.api.user.v1.subscription.RevokeSubscriptionReq\x1a/.api.user.v1.subscription.RevokeSubscriptionRes\"'\x82\xd3\xe4\x93\x02!:\x01*\"\x1c/v1/user/subscription/revoke\x12\x9d\x01\n" +
 	"\x11ListSubscriptions\x12..api.user.v1.subscription.ListSubscriptionsReq\x1a..api.user.v1.subscription.ListSubscriptionsRes\"(\x82\xd3\xe4\x93\x02\"\x12 /v1/user/subscription/admin/list\x12\x8f\x01\n" +
 	"\vUpdatePlans\x12(.api.user.v1.subscription.UpdatePlansReq\x1a(.api.user.v1.subscription.UpdatePlansRes\",\x82\xd3\xe4\x93\x02&:\x01*\"!/v1/user/subscription/admin/plans\x12s\n" +
-	"\x11GetAiAnalyzeQuota\x12..api.user.v1.subscription.GetAiAnalyzeQuotaReq\x1a..api.user.v1.subscription.GetAiAnalyzeQuotaResBM\n" +
+	"\x11GetAiAnalyzeQuota\x12..api.user.v1.subscription.GetAiAnalyzeQuotaReq\x1a..api.user.v1.subscription.GetAiAnalyzeQuotaRes\x12\x8a\x01\n" +
+	"\n" +
+	"MyAiStatus\x12'.api.user.v1.subscription.MyAiStatusReq\x1a'.api.user.v1.subscription.MyAiStatusRes\"*\x82\xd3\xe4\x93\x02$\x12\"/v1/user/subscription/my-ai-statusBM\n" +
 	"\x18api.user.v1.subscriptionP\x01Z/cwxu-algo/api/user/v1/subscription;subscriptionb\x06proto3"
 
 var (
@@ -1355,7 +1488,7 @@ func file_user_v1_subscription_subscription_proto_rawDescGZIP() []byte {
 	return file_user_v1_subscription_subscription_proto_rawDescData
 }
 
-var file_user_v1_subscription_subscription_proto_msgTypes = make([]protoimpl.MessageInfo, 20)
+var file_user_v1_subscription_subscription_proto_msgTypes = make([]protoimpl.MessageInfo, 22)
 var file_user_v1_subscription_subscription_proto_goTypes = []any{
 	(*ListPlansReq)(nil),          // 0: api.user.v1.subscription.ListPlansReq
 	(*ListPlansRes)(nil),          // 1: api.user.v1.subscription.ListPlansRes
@@ -1377,6 +1510,8 @@ var file_user_v1_subscription_subscription_proto_goTypes = []any{
 	(*UpdatePlansRes)(nil),        // 17: api.user.v1.subscription.UpdatePlansRes
 	(*GetAiAnalyzeQuotaReq)(nil),  // 18: api.user.v1.subscription.GetAiAnalyzeQuotaReq
 	(*GetAiAnalyzeQuotaRes)(nil),  // 19: api.user.v1.subscription.GetAiAnalyzeQuotaRes
+	(*MyAiStatusReq)(nil),         // 20: api.user.v1.subscription.MyAiStatusReq
+	(*MyAiStatusRes)(nil),         // 21: api.user.v1.subscription.MyAiStatusRes
 }
 var file_user_v1_subscription_subscription_proto_depIdxs = []int32{
 	2,  // 0: api.user.v1.subscription.ListPlansRes.plans:type_name -> api.user.v1.subscription.Plan
@@ -1391,17 +1526,19 @@ var file_user_v1_subscription_subscription_proto_depIdxs = []int32{
 	13, // 9: api.user.v1.subscription.Subscription.ListSubscriptions:input_type -> api.user.v1.subscription.ListSubscriptionsReq
 	16, // 10: api.user.v1.subscription.Subscription.UpdatePlans:input_type -> api.user.v1.subscription.UpdatePlansReq
 	18, // 11: api.user.v1.subscription.Subscription.GetAiAnalyzeQuota:input_type -> api.user.v1.subscription.GetAiAnalyzeQuotaReq
-	1,  // 12: api.user.v1.subscription.Subscription.ListPlans:output_type -> api.user.v1.subscription.ListPlansRes
-	4,  // 13: api.user.v1.subscription.Subscription.CreateOrder:output_type -> api.user.v1.subscription.CreateOrderRes
-	6,  // 14: api.user.v1.subscription.Subscription.GetOrder:output_type -> api.user.v1.subscription.GetOrderRes
-	8,  // 15: api.user.v1.subscription.Subscription.MySubscription:output_type -> api.user.v1.subscription.MySubscriptionRes
-	10, // 16: api.user.v1.subscription.Subscription.GrantSubscription:output_type -> api.user.v1.subscription.GrantSubscriptionRes
-	12, // 17: api.user.v1.subscription.Subscription.RevokeSubscription:output_type -> api.user.v1.subscription.RevokeSubscriptionRes
-	14, // 18: api.user.v1.subscription.Subscription.ListSubscriptions:output_type -> api.user.v1.subscription.ListSubscriptionsRes
-	17, // 19: api.user.v1.subscription.Subscription.UpdatePlans:output_type -> api.user.v1.subscription.UpdatePlansRes
-	19, // 20: api.user.v1.subscription.Subscription.GetAiAnalyzeQuota:output_type -> api.user.v1.subscription.GetAiAnalyzeQuotaRes
-	12, // [12:21] is the sub-list for method output_type
-	3,  // [3:12] is the sub-list for method input_type
+	20, // 12: api.user.v1.subscription.Subscription.MyAiStatus:input_type -> api.user.v1.subscription.MyAiStatusReq
+	1,  // 13: api.user.v1.subscription.Subscription.ListPlans:output_type -> api.user.v1.subscription.ListPlansRes
+	4,  // 14: api.user.v1.subscription.Subscription.CreateOrder:output_type -> api.user.v1.subscription.CreateOrderRes
+	6,  // 15: api.user.v1.subscription.Subscription.GetOrder:output_type -> api.user.v1.subscription.GetOrderRes
+	8,  // 16: api.user.v1.subscription.Subscription.MySubscription:output_type -> api.user.v1.subscription.MySubscriptionRes
+	10, // 17: api.user.v1.subscription.Subscription.GrantSubscription:output_type -> api.user.v1.subscription.GrantSubscriptionRes
+	12, // 18: api.user.v1.subscription.Subscription.RevokeSubscription:output_type -> api.user.v1.subscription.RevokeSubscriptionRes
+	14, // 19: api.user.v1.subscription.Subscription.ListSubscriptions:output_type -> api.user.v1.subscription.ListSubscriptionsRes
+	17, // 20: api.user.v1.subscription.Subscription.UpdatePlans:output_type -> api.user.v1.subscription.UpdatePlansRes
+	19, // 21: api.user.v1.subscription.Subscription.GetAiAnalyzeQuota:output_type -> api.user.v1.subscription.GetAiAnalyzeQuotaRes
+	21, // 22: api.user.v1.subscription.Subscription.MyAiStatus:output_type -> api.user.v1.subscription.MyAiStatusRes
+	13, // [13:23] is the sub-list for method output_type
+	3,  // [3:13] is the sub-list for method input_type
 	3,  // [3:3] is the sub-list for extension type_name
 	3,  // [3:3] is the sub-list for extension extendee
 	0,  // [0:3] is the sub-list for field type_name
@@ -1418,7 +1555,7 @@ func file_user_v1_subscription_subscription_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_user_v1_subscription_subscription_proto_rawDesc), len(file_user_v1_subscription_subscription_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   20,
+			NumMessages:   22,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

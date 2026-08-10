@@ -1,8 +1,8 @@
 package dal
 
 import (
-	"cwxu-algo/app/common/utils/sqllike"
 	"context"
+	"cwxu-algo/app/common/utils/sqllike"
 	"errors"
 	"fmt"
 	"strings"
@@ -98,6 +98,16 @@ func (d *ProfileDal) UpdateAIDailyEnabled(ctx context.Context, userID int64, ena
 	return d.db.WithContext(ctx).Model(&model.User{}).
 		Where("id = ?", userID).
 		Update("ai_daily_enabled", enabled).Error
+}
+
+// AIDailyEnabled 读取个人 AI 日报开关（仅 Pro 订阅生效；默认关）
+func (d *ProfileDal) AIDailyEnabled(ctx context.Context, userID int64) bool {
+	var enabled bool
+	_ = d.db.WithContext(ctx).Model(&model.User{}).
+		Select("ai_daily_enabled").
+		Where("id = ?", userID).
+		Scan(&enabled).Error
+	return enabled
 }
 
 // --- P0 Redis：组织成员 / 展示名 ---
@@ -1661,4 +1671,3 @@ func (d *ProfileDal) ReplaceScopeGrants(ctx context.Context, orgID, userID uint,
 		return tx.Create(&grants).Error
 	})
 }
-

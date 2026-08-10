@@ -86,6 +86,12 @@ service Spider {
       body: "*"
     };
   }
+  // 用户：查询今日手动刷新做题记录状态（配额 / 剩余 / 冷却；只读）
+  rpc RefreshSpiderStatus (RefreshSpiderStatusReq) returns (RefreshSpiderStatusRes) {
+    option (google.api.http) = {
+      get: "/v1/core/spider/refresh-status"
+    };
+  }
 }
 
 message SetSpiderReq {
@@ -316,5 +322,20 @@ message RefreshSpiderRes {
   string message = 2;
   // 今日剩余手动刷新次数（0=已用完）
   int32 remaining = 3;
+}
+
+message RefreshSpiderStatusReq {}
+
+message RefreshSpiderStatusRes {
+  int64 code = 1;
+  string message = 2;
+  // 今日有效总配额（已合并订阅 / 站管覆盖；0=禁止）
+  int32 limit = 3;
+  // 今日剩余次数（0=已用完）
+  int32 remaining = 4;
+  // 下次可刷新 unix 秒（0=立即可刷新）
+  int64 next_available_at = 5;
+  // 当前生效自动同步间隔（分钟；min(站管覆盖, 组织 MIN, 订阅档)；失败回落默认）
+  int32 sync_interval_min = 6;
 }
 

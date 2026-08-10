@@ -49,12 +49,38 @@ func (d *SubscriptionDal) PlanByTier(ctx context.Context, tier string) (*model.S
 	return &p, nil
 }
 
-// UpsertPlan 逐档 upsert 套餐模板（plan 唯一）
+// UpsertPlan 逐档 upsert 套餐模板（plan 唯一）。
+// 用 map 创建：带 default 标签的字段传零值（0/false）时，GORM 对 struct 会做「零值→默认值」
+// 替换并从 INSERT 剔除（如 manual_refresh_daily=0 会变回 2、enabled=false 无法下架），
+// map 路径不做该处理，可保证零值真实写入。
 func (d *SubscriptionDal) UpsertPlan(ctx context.Context, p model.SubscriptionPlan) error {
-	return d.db.WithContext(ctx).Clauses(clause.OnConflict{
-		Columns:   []clause.Column{{Name: "plan"}},
-		UpdateAll: true,
-	}).Create(&p).Error
+	cols := []string{
+		"plan", "price_cents", "manual_refresh_daily", "sync_interval_min",
+		"ai_analyze_month", "enable_fetch_problem", "enable_ai_analyze",
+		"enable_ai_daily", "enable_regular_daily", "days", "enabled",
+	}
+	now := time.Now()
+	values := map[string]interface{}{
+		"plan":                 p.Plan,
+		"price_cents":          p.PriceCents,
+		"manual_refresh_daily": p.ManualRefreshDaily,
+		"sync_interval_min":    p.SyncIntervalMin,
+		"ai_analyze_month":     p.AiAnalyzeMonth,
+		"enable_fetch_problem": p.EnableFetchProblem,
+		"enable_ai_analyze":    p.EnableAiAnalyze,
+		"enable_ai_daily":      p.EnableAiDaily,
+		"enable_regular_daily": p.EnableRegularDaily,
+		"days":                 p.Days,
+		"enabled":              p.Enabled,
+		"created_at":           now,
+		"updated_at":           now,
+	}
+	return d.db.WithContext(ctx).Model(&model.SubscriptionPlan{}).
+		Clauses(clause.OnConflict{
+			Columns: []clause.Column{{Name: "plan"}},
+			DoUpdates: append(clause.AssignmentColumns(cols),
+				clause.Assignment{Column: clause.Column{Name: "updated_at"}, Value: now}),
+		}).Create(values).Error
 }
 
 // CreateOrder 创建待支付订单（order_no 唯一；重复调用返回已存在订单或错误）

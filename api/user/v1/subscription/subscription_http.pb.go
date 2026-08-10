@@ -24,6 +24,7 @@ const OperationSubscriptionGetOrder = "/api.user.v1.subscription.Subscription/Ge
 const OperationSubscriptionGrantSubscription = "/api.user.v1.subscription.Subscription/GrantSubscription"
 const OperationSubscriptionListPlans = "/api.user.v1.subscription.Subscription/ListPlans"
 const OperationSubscriptionListSubscriptions = "/api.user.v1.subscription.Subscription/ListSubscriptions"
+const OperationSubscriptionMyAiStatus = "/api.user.v1.subscription.Subscription/MyAiStatus"
 const OperationSubscriptionMySubscription = "/api.user.v1.subscription.Subscription/MySubscription"
 const OperationSubscriptionRevokeSubscription = "/api.user.v1.subscription.Subscription/RevokeSubscription"
 const OperationSubscriptionUpdatePlans = "/api.user.v1.subscription.Subscription/UpdatePlans"
@@ -39,6 +40,8 @@ type SubscriptionHTTPServer interface {
 	ListPlans(context.Context, *ListPlansReq) (*ListPlansRes, error)
 	// ListSubscriptions 站管：订阅用户列表（keyword 模糊 username/name，服务端过滤与 total 一致）
 	ListSubscriptions(context.Context, *ListSubscriptionsReq) (*ListSubscriptionsRes, error)
+	// MyAiStatus 登录：我的 AI 能力落地状态（AI 分析配额/来源 + AI 日报权限；会员页标记用）
+	MyAiStatus(context.Context, *MyAiStatusReq) (*MyAiStatusRes, error)
 	// MySubscription 登录：我的订阅状态（tier/expireAt/source/剩余天数；tier 空=未订阅）
 	MySubscription(context.Context, *MySubscriptionReq) (*MySubscriptionRes, error)
 	// RevokeSubscription 站管：取消订阅（立即回落免费；保留 AI 日报用户偏好）
@@ -57,6 +60,7 @@ func RegisterSubscriptionHTTPServer(s *http.Server, srv SubscriptionHTTPServer) 
 	r.POST("/v1/user/subscription/revoke", _Subscription_RevokeSubscription0_HTTP_Handler(srv))
 	r.GET("/v1/user/subscription/admin/list", _Subscription_ListSubscriptions0_HTTP_Handler(srv))
 	r.POST("/v1/user/subscription/admin/plans", _Subscription_UpdatePlans0_HTTP_Handler(srv))
+	r.GET("/v1/user/subscription/my-ai-status", _Subscription_MyAiStatus0_HTTP_Handler(srv))
 }
 
 func _Subscription_ListPlans0_HTTP_Handler(srv SubscriptionHTTPServer) func(ctx http.Context) error {
@@ -223,6 +227,25 @@ func _Subscription_UpdatePlans0_HTTP_Handler(srv SubscriptionHTTPServer) func(ct
 	}
 }
 
+func _Subscription_MyAiStatus0_HTTP_Handler(srv SubscriptionHTTPServer) func(ctx http.Context) error {
+	return func(ctx http.Context) error {
+		var in MyAiStatusReq
+		if err := ctx.BindQuery(&in); err != nil {
+			return err
+		}
+		http.SetOperation(ctx, OperationSubscriptionMyAiStatus)
+		h := ctx.Middleware(func(ctx context.Context, req interface{}) (interface{}, error) {
+			return srv.MyAiStatus(ctx, req.(*MyAiStatusReq))
+		})
+		out, err := h(ctx, &in)
+		if err != nil {
+			return err
+		}
+		reply := out.(*MyAiStatusRes)
+		return ctx.Result(200, reply)
+	}
+}
+
 type SubscriptionHTTPClient interface {
 	// CreateOrder 登录：创建订单（调支付宝预下单；未配置支付宝时报错）
 	CreateOrder(ctx context.Context, req *CreateOrderReq, opts ...http.CallOption) (rsp *CreateOrderRes, err error)
@@ -234,6 +257,8 @@ type SubscriptionHTTPClient interface {
 	ListPlans(ctx context.Context, req *ListPlansReq, opts ...http.CallOption) (rsp *ListPlansRes, err error)
 	// ListSubscriptions 站管：订阅用户列表（keyword 模糊 username/name，服务端过滤与 total 一致）
 	ListSubscriptions(ctx context.Context, req *ListSubscriptionsReq, opts ...http.CallOption) (rsp *ListSubscriptionsRes, err error)
+	// MyAiStatus 登录：我的 AI 能力落地状态（AI 分析配额/来源 + AI 日报权限；会员页标记用）
+	MyAiStatus(ctx context.Context, req *MyAiStatusReq, opts ...http.CallOption) (rsp *MyAiStatusRes, err error)
 	// MySubscription 登录：我的订阅状态（tier/expireAt/source/剩余天数；tier 空=未订阅）
 	MySubscription(ctx context.Context, req *MySubscriptionReq, opts ...http.CallOption) (rsp *MySubscriptionRes, err error)
 	// RevokeSubscription 站管：取消订阅（立即回落免费；保留 AI 日报用户偏好）
@@ -312,6 +337,20 @@ func (c *SubscriptionHTTPClientImpl) ListSubscriptions(ctx context.Context, in *
 	pattern := "/v1/user/subscription/admin/list"
 	path := binding.EncodeURL(pattern, in, true)
 	opts = append(opts, http.Operation(OperationSubscriptionListSubscriptions))
+	opts = append(opts, http.PathTemplate(pattern))
+	err := c.cc.Invoke(ctx, "GET", path, nil, &out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// MyAiStatus 登录：我的 AI 能力落地状态（AI 分析配额/来源 + AI 日报权限；会员页标记用）
+func (c *SubscriptionHTTPClientImpl) MyAiStatus(ctx context.Context, in *MyAiStatusReq, opts ...http.CallOption) (*MyAiStatusRes, error) {
+	var out MyAiStatusRes
+	pattern := "/v1/user/subscription/my-ai-status"
+	path := binding.EncodeURL(pattern, in, true)
+	opts = append(opts, http.Operation(OperationSubscriptionMyAiStatus))
 	opts = append(opts, http.PathTemplate(pattern))
 	err := c.cc.Invoke(ctx, "GET", path, nil, &out, opts...)
 	if err != nil {

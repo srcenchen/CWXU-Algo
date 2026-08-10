@@ -65,6 +65,12 @@ service Subscription {
   }
   // 服务间（core_data）：单用户 AI 分析月配额（0=无配额；非订阅无组织返回 0）
   rpc GetAiAnalyzeQuota (GetAiAnalyzeQuotaReq) returns (GetAiAnalyzeQuotaRes);
+  // 登录：我的 AI 能力落地状态（AI 分析配额/来源 + AI 日报权限；会员页标记用）
+  rpc MyAiStatus (MyAiStatusReq) returns (MyAiStatusRes) {
+    option (google.api.http) = {
+      get: "/v1/user/subscription/my-ai-status"
+    };
+  }
 }
 
 message ListPlansReq {}
@@ -211,4 +217,19 @@ message GetAiAnalyzeQuotaRes {
   // 月配额：>0 为硬上限；0=无配额（不能触发 AI 分析）。
   // Pro 订阅取套餐 aiAnalyzeMonth；非订阅但有组织取组织套餐配额；无组织返回 0。
   int32 quotaPerMonth = 1;
+}
+
+message MyAiStatusReq {}
+
+message MyAiStatusRes {
+  int64 code = 1;
+  string message = 2;
+  // AI 分析落地月配额（>0=可分析；与 GetAiAnalyzeQuota 同语义）
+  int32 aiAnalyzeQuota = 3;
+  // AI 分析权限来源：pro（Pro 订阅）/ org（组织开通）/ pro_org（两者）/ none
+  string aiAnalyzeSource = 4;
+  // AI 日报：组织是否已授权日报（组织开通权限）
+  bool aiDailyOrgAllowed = 5;
+  // AI 日报当前是否生效（Pro 订阅 + 套餐开启 + 个人开关已开）
+  bool aiDailyEnabled = 6;
 }

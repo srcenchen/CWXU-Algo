@@ -19,9 +19,9 @@ import (
 	"cwxu-algo/app/core_data/internal/data"
 	"cwxu-algo/app/core_data/internal/data/dal"
 	"cwxu-algo/app/core_data/internal/data/model"
-	"cwxu-algo/app/core_data/internal/userrpc"
 	spiderregistry "cwxu-algo/app/core_data/internal/spider"
 	calspider "cwxu-algo/app/core_data/internal/spider/calendar"
+	"cwxu-algo/app/core_data/internal/userrpc"
 	"cwxu-algo/app/core_data/task"
 
 	"github.com/go-kratos/kratos/v2/errors"
@@ -832,6 +832,9 @@ func (s SpiderService) GetPlatformUsers(ctx context.Context, req *spider.GetPlat
 // 站管可按用户覆盖：user 服务 daily_refresh_quota_override，0=禁止）
 const manualRefreshDailyLimit = 2
 
+// manualRefreshDefaultIntervalMin 自动同步间隔全局默认（分钟；订阅 60 / 站管覆盖 / 组织 MIN 生效时取更小）
+const manualRefreshDefaultIntervalMin = 180
+
 // manualRefreshLoc 手动刷新限流按上海自然日
 var manualRefreshLoc = func() *time.Location {
 	loc, err := time.LoadLocation("Asia/Shanghai")
@@ -920,6 +923,58 @@ func (s SpiderService) RefreshSpider(ctx context.Context, _ *spider.RefreshSpide
 		Code:      0,
 		Message:   fmt.Sprintf("已开始刷新做题记录，今日剩余 %d 次", remaining),
 		Remaining: int32(remaining),
+	}, nil
+}
+
+// RefreshSpiderStatus 查询今日手动刷新做题记录状态（只读）：
+// 有效配额（订阅/站管覆盖合并，失败回落全局默认）、今日剩余次数、5 分钟冷却截止时间。
+func (s SpiderService) RefreshSpiderStatus(ctx context.Context, _ *spider.RefreshSpiderStatusReq) (*spider.RefreshSpiderStatusRes, error) {
+	uid := auth.GetCurrentUserId(ctx)
+	if uid == 0 {
+		return &spider.RefreshSpiderStatusRes{Code: 1, Message: "请先登录"}, nil
+	}
+	if s.rdb == nil {
+		return &spider.RefreshSpiderStatusRes{Code: 1, Message: "服务未就绪，稍后再试"}, nil
+	}
+	// 有效配额 + 生效同步间隔：user 服务合并（订阅/站管覆盖/组织 MIN），失败回落默认
+	limit := manualRefreshDailyLimit
+	syncIntervalMin := manualRefreshDefaultIntervalMin
+	if s.reg != nil {
+		if cli, err := userrpc.ProfileClient(&s.reg.Reg); err == nil && cli != nil {
+			if st, err := cli.GetSyncStatus(ctx, &profile.GetSyncStatusReq{UserId: int64(uid)}); err == nil && st != nil {
+				if v := int(st.GetSpiderIntervalMin()); v > 0 {
+					syncIntervalMin = v
+				}
+				limit = int(st.GetManualRefreshQuota())
+			}
+		}
+	}
+	if limit < 0 {
+		limit = 0
+	}
+	day := time.Now().In(manualRefreshLoc).Format("20060102")
+	dayKey := fmt.Sprintf("spider:manual_refresh:%d:%s", uid, day)
+	used, _ := s.rdb.Get(ctx, dayKey).Int64()
+	if used < 0 {
+		used = 0
+	}
+	remaining := limit - int(used)
+	if remaining < 0 {
+		remaining = 0
+	}
+	// 5 分钟冷却：intervalKey 的存活期即下次可刷新时间
+	var nextAvailableAt int64
+	intervalKey := fmt.Sprintf("spider:manual_refresh_interval:%d", uid)
+	if ttl, err := s.rdb.TTL(ctx, intervalKey).Result(); err == nil && ttl > 0 {
+		nextAvailableAt = time.Now().Unix() + int64(ttl/time.Second)
+	}
+	return &spider.RefreshSpiderStatusRes{
+		Code:            0,
+		Message:         "success",
+		Limit:           int32(limit),
+		Remaining:       int32(remaining),
+		NextAvailableAt: nextAvailableAt,
+		SyncIntervalMin: int32(syncIntervalMin),
 	}, nil
 }
 

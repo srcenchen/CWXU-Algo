@@ -63,6 +63,8 @@ service Profile {
   }
   // 服务间：按 userId 取每日手动刷新有效配额（无 HTTP）
   rpc GetRefreshQuota (GetRefreshQuotaReq) returns (GetRefreshQuotaRes);
+  // 服务间：按 userId 取定时同步与手动刷新状态（无 HTTP；core 刷新状态用）
+  rpc GetSyncStatus (GetSyncStatusReq) returns (GetSyncStatusRes);
   // 站点管理员：标记用户永不休眠（跳过不活跃判定）
   rpc SetSyncExempt (SetSyncExemptReq) returns (SetSyncExemptRes) {
     option (google.api.http) = {
@@ -380,6 +382,18 @@ message GetRefreshQuotaReq {
 message GetRefreshQuotaRes {
   // 有效配额（已合并站管覆盖；0=禁止；默认 2）
   int32 quota = 1;
+}
+
+// GetSyncStatusReq 服务间：按 userId 取定时同步与手动刷新状态
+message GetSyncStatusReq {
+  int64 userId = 1;
+}
+
+message GetSyncStatusRes {
+  // 有效爬取间隔（分钟；min(站管覆盖, 组织 MIN, 订阅档)；无候选默认 180）
+  int32 spiderIntervalMin = 1;
+  // 每日手动刷新有效配额（已合并订阅/站管覆盖；0=禁止；默认 2）
+  int32 manualRefreshQuota = 2;
 }
 
 message SetSyncExemptReq {

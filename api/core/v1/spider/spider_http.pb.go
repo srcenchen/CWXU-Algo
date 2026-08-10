@@ -23,6 +23,7 @@ const OperationSpiderGetPlatformUsers = "/api.core.v1.spider.Spider/GetPlatformU
 const OperationSpiderGetSpiderMonitor = "/api.core.v1.spider.Spider/GetSpiderMonitor"
 const OperationSpiderPurgeSubmitsAndRecrawl = "/api.core.v1.spider.Spider/PurgeSubmitsAndRecrawl"
 const OperationSpiderRefreshSpider = "/api.core.v1.spider.Spider/RefreshSpider"
+const OperationSpiderRefreshSpiderStatus = "/api.core.v1.spider.Spider/RefreshSpiderStatus"
 const OperationSpiderRepairContestCells = "/api.core.v1.spider.Spider/RepairContestCells"
 const OperationSpiderSetSpider = "/api.core.v1.spider.Spider/SetSpider"
 const OperationSpiderSubmitInventory = "/api.core.v1.spider.Spider/SubmitInventory"
@@ -40,6 +41,8 @@ type SpiderHTTPServer interface {
 	PurgeSubmitsAndRecrawl(context.Context, *PurgeSubmitsAndRecrawlReq) (*PurgeSubmitsAndRecrawlRes, error)
 	// RefreshSpider 用户：手动增量刷新自己的 OJ 做题记录（每日限 2 次；返回剩余次数）
 	RefreshSpider(context.Context, *RefreshSpiderReq) (*RefreshSpiderRes, error)
+	// RefreshSpiderStatus 用户：查询今日手动刷新做题记录状态（配额 / 剩余 / 冷却；只读）
+	RefreshSpiderStatus(context.Context, *RefreshSpiderStatusReq) (*RefreshSpiderStatusRes, error)
 	// RepairContestCells 站管：幂等修复 AtCoder 赛时提交明细相关脏数据（external_id / 赛后练习格 / relative_sec）
 	RepairContestCells(context.Context, *RepairContestCellsReq) (*RepairContestCellsRes, error)
 	SetSpider(context.Context, *SetSpiderReq) (*SetSpiderRep, error)
@@ -68,6 +71,7 @@ func RegisterSpiderHTTPServer(s *http.Server, srv SpiderHTTPServer) {
 	r.POST("/v1/core/spider/repair-contest-cells", _Spider_RepairContestCells0_HTTP_Handler(srv))
 	r.GET("/v1/core/spider/platform-users", _Spider_GetPlatformUsers0_HTTP_Handler(srv))
 	r.POST("/v1/core/spider/refresh", _Spider_RefreshSpider0_HTTP_Handler(srv))
+	r.GET("/v1/core/spider/refresh-status", _Spider_RefreshSpiderStatus0_HTTP_Handler(srv))
 }
 
 func _Spider_SetSpider0_HTTP_Handler(srv SpiderHTTPServer) func(ctx http.Context) error {
@@ -303,6 +307,25 @@ func _Spider_RefreshSpider0_HTTP_Handler(srv SpiderHTTPServer) func(ctx http.Con
 	}
 }
 
+func _Spider_RefreshSpiderStatus0_HTTP_Handler(srv SpiderHTTPServer) func(ctx http.Context) error {
+	return func(ctx http.Context) error {
+		var in RefreshSpiderStatusReq
+		if err := ctx.BindQuery(&in); err != nil {
+			return err
+		}
+		http.SetOperation(ctx, OperationSpiderRefreshSpiderStatus)
+		h := ctx.Middleware(func(ctx context.Context, req interface{}) (interface{}, error) {
+			return srv.RefreshSpiderStatus(ctx, req.(*RefreshSpiderStatusReq))
+		})
+		out, err := h(ctx, &in)
+		if err != nil {
+			return err
+		}
+		reply := out.(*RefreshSpiderStatusRes)
+		return ctx.Result(200, reply)
+	}
+}
+
 type SpiderHTTPClient interface {
 	// GetPlatformUsers 站管：某 OJ 的绑定用户列表（仅站管）
 	GetPlatformUsers(ctx context.Context, req *GetPlatformUsersReq, opts ...http.CallOption) (rsp *GetPlatformUsersRes, err error)
@@ -312,6 +335,8 @@ type SpiderHTTPClient interface {
 	PurgeSubmitsAndRecrawl(ctx context.Context, req *PurgeSubmitsAndRecrawlReq, opts ...http.CallOption) (rsp *PurgeSubmitsAndRecrawlRes, err error)
 	// RefreshSpider 用户：手动增量刷新自己的 OJ 做题记录（每日限 2 次；返回剩余次数）
 	RefreshSpider(ctx context.Context, req *RefreshSpiderReq, opts ...http.CallOption) (rsp *RefreshSpiderRes, err error)
+	// RefreshSpiderStatus 用户：查询今日手动刷新做题记录状态（配额 / 剩余 / 冷却；只读）
+	RefreshSpiderStatus(ctx context.Context, req *RefreshSpiderStatusReq, opts ...http.CallOption) (rsp *RefreshSpiderStatusRes, err error)
 	// RepairContestCells 站管：幂等修复 AtCoder 赛时提交明细相关脏数据（external_id / 赛后练习格 / relative_sec）
 	RepairContestCells(ctx context.Context, req *RepairContestCellsReq, opts ...http.CallOption) (rsp *RepairContestCellsRes, err error)
 	SetSpider(ctx context.Context, req *SetSpiderReq, opts ...http.CallOption) (rsp *SetSpiderRep, err error)
@@ -385,6 +410,20 @@ func (c *SpiderHTTPClientImpl) RefreshSpider(ctx context.Context, in *RefreshSpi
 	opts = append(opts, http.Operation(OperationSpiderRefreshSpider))
 	opts = append(opts, http.PathTemplate(pattern))
 	err := c.cc.Invoke(ctx, "POST", path, in, &out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// RefreshSpiderStatus 用户：查询今日手动刷新做题记录状态（配额 / 剩余 / 冷却；只读）
+func (c *SpiderHTTPClientImpl) RefreshSpiderStatus(ctx context.Context, in *RefreshSpiderStatusReq, opts ...http.CallOption) (*RefreshSpiderStatusRes, error) {
+	var out RefreshSpiderStatusRes
+	pattern := "/v1/core/spider/refresh-status"
+	path := binding.EncodeURL(pattern, in, true)
+	opts = append(opts, http.Operation(OperationSpiderRefreshSpiderStatus))
+	opts = append(opts, http.PathTemplate(pattern))
+	err := c.cc.Invoke(ctx, "GET", path, nil, &out, opts...)
 	if err != nil {
 		return nil, err
 	}

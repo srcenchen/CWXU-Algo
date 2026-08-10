@@ -1816,6 +1816,19 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/api.core.v1.spider.RefreshSpiderRes'
+    /v1/core/spider/refresh-status:
+        get:
+            tags:
+                - Spider
+            description: 用户：查询今日手动刷新做题记录状态（配额 / 剩余 / 冷却；只读）
+            operationId: Spider_RefreshSpiderStatus
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.core.v1.spider.RefreshSpiderStatusRes'
     /v1/core/spider/repair-contest-cells:
         post:
             tags:
@@ -5418,6 +5431,19 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/api.user.v1.subscription.MySubscriptionRes'
+    /v1/user/subscription/my-ai-status:
+        get:
+            tags:
+                - Subscription
+            description: 登录：我的 AI 能力落地状态（AI 分析配额/来源 + AI 日报权限；会员页标记用）
+            operationId: Subscription_MyAiStatus
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.user.v1.subscription.MyAiStatusRes'
     /v1/user/subscription/order:
         get:
             tags:
@@ -8111,6 +8137,28 @@ components:
                 remaining:
                     type: integer
                     description: 今日剩余手动刷新次数（0=已用完）
+                    format: int32
+        api.core.v1.spider.RefreshSpiderStatusRes:
+            type: object
+            properties:
+                code:
+                    type: string
+                message:
+                    type: string
+                limit:
+                    type: integer
+                    description: 今日有效总配额（已合并订阅 / 站管覆盖；0=禁止）
+                    format: int32
+                remaining:
+                    type: integer
+                    description: 今日剩余次数（0=已用完）
+                    format: int32
+                nextAvailableAt:
+                    type: string
+                    description: 下次可刷新 unix 秒（0=立即可刷新）
+                syncIntervalMin:
+                    type: integer
+                    description: 当前生效自动同步间隔（分钟；min(站管覆盖, 组织 MIN, 订阅档)；失败回落默认）
                     format: int32
         api.core.v1.spider.RepairContestCellsReq:
             type: object
@@ -12821,6 +12869,26 @@ components:
                         $ref: '#/components/schemas/api.user.v1.subscription.SubUser'
                 total:
                     type: string
+        api.user.v1.subscription.MyAiStatusRes:
+            type: object
+            properties:
+                code:
+                    type: string
+                message:
+                    type: string
+                aiAnalyzeQuota:
+                    type: integer
+                    description: AI 分析落地月配额（>0=可分析；与 GetAiAnalyzeQuota 同语义）
+                    format: int32
+                aiAnalyzeSource:
+                    type: string
+                    description: AI 分析权限来源：pro（Pro 订阅）/ org（组织开通）/ pro_org（两者）/ none
+                aiDailyOrgAllowed:
+                    type: boolean
+                    description: AI 日报：组织是否已授权日报（组织开通权限）
+                aiDailyEnabled:
+                    type: boolean
+                    description: AI 日报当前是否生效（Pro 订阅 + 套餐开启 + 个人开关已开）
         api.user.v1.subscription.MySubscriptionRes:
             type: object
             properties:

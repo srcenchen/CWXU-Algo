@@ -28,6 +28,7 @@ const (
 	Subscription_ListSubscriptions_FullMethodName  = "/api.user.v1.subscription.Subscription/ListSubscriptions"
 	Subscription_UpdatePlans_FullMethodName        = "/api.user.v1.subscription.Subscription/UpdatePlans"
 	Subscription_GetAiAnalyzeQuota_FullMethodName  = "/api.user.v1.subscription.Subscription/GetAiAnalyzeQuota"
+	Subscription_MyAiStatus_FullMethodName         = "/api.user.v1.subscription.Subscription/MyAiStatus"
 )
 
 // SubscriptionClient is the client API for Subscription service.
@@ -57,6 +58,8 @@ type SubscriptionClient interface {
 	UpdatePlans(ctx context.Context, in *UpdatePlansReq, opts ...grpc.CallOption) (*UpdatePlansRes, error)
 	// 服务间（core_data）：单用户 AI 分析月配额（0=无配额；非订阅无组织返回 0）
 	GetAiAnalyzeQuota(ctx context.Context, in *GetAiAnalyzeQuotaReq, opts ...grpc.CallOption) (*GetAiAnalyzeQuotaRes, error)
+	// 登录：我的 AI 能力落地状态（AI 分析配额/来源 + AI 日报权限；会员页标记用）
+	MyAiStatus(ctx context.Context, in *MyAiStatusReq, opts ...grpc.CallOption) (*MyAiStatusRes, error)
 }
 
 type subscriptionClient struct {
@@ -157,6 +160,16 @@ func (c *subscriptionClient) GetAiAnalyzeQuota(ctx context.Context, in *GetAiAna
 	return out, nil
 }
 
+func (c *subscriptionClient) MyAiStatus(ctx context.Context, in *MyAiStatusReq, opts ...grpc.CallOption) (*MyAiStatusRes, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(MyAiStatusRes)
+	err := c.cc.Invoke(ctx, Subscription_MyAiStatus_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // SubscriptionServer is the server API for Subscription service.
 // All implementations must embed UnimplementedSubscriptionServer
 // for forward compatibility.
@@ -184,6 +197,8 @@ type SubscriptionServer interface {
 	UpdatePlans(context.Context, *UpdatePlansReq) (*UpdatePlansRes, error)
 	// 服务间（core_data）：单用户 AI 分析月配额（0=无配额；非订阅无组织返回 0）
 	GetAiAnalyzeQuota(context.Context, *GetAiAnalyzeQuotaReq) (*GetAiAnalyzeQuotaRes, error)
+	// 登录：我的 AI 能力落地状态（AI 分析配额/来源 + AI 日报权限；会员页标记用）
+	MyAiStatus(context.Context, *MyAiStatusReq) (*MyAiStatusRes, error)
 	mustEmbedUnimplementedSubscriptionServer()
 }
 
@@ -220,6 +235,9 @@ func (UnimplementedSubscriptionServer) UpdatePlans(context.Context, *UpdatePlans
 }
 func (UnimplementedSubscriptionServer) GetAiAnalyzeQuota(context.Context, *GetAiAnalyzeQuotaReq) (*GetAiAnalyzeQuotaRes, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetAiAnalyzeQuota not implemented")
+}
+func (UnimplementedSubscriptionServer) MyAiStatus(context.Context, *MyAiStatusReq) (*MyAiStatusRes, error) {
+	return nil, status.Error(codes.Unimplemented, "method MyAiStatus not implemented")
 }
 func (UnimplementedSubscriptionServer) mustEmbedUnimplementedSubscriptionServer() {}
 func (UnimplementedSubscriptionServer) testEmbeddedByValue()                      {}
@@ -404,6 +422,24 @@ func _Subscription_GetAiAnalyzeQuota_Handler(srv interface{}, ctx context.Contex
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Subscription_MyAiStatus_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(MyAiStatusReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SubscriptionServer).MyAiStatus(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Subscription_MyAiStatus_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SubscriptionServer).MyAiStatus(ctx, req.(*MyAiStatusReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Subscription_ServiceDesc is the grpc.ServiceDesc for Subscription service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -446,6 +482,10 @@ var Subscription_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetAiAnalyzeQuota",
 			Handler:    _Subscription_GetAiAnalyzeQuota_Handler,
+		},
+		{
+			MethodName: "MyAiStatus",
+			Handler:    _Subscription_MyAiStatus_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

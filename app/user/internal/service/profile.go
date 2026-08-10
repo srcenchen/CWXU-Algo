@@ -1163,6 +1163,29 @@ func (p *ProfileService) GetRefreshQuota(ctx context.Context, req *profile.GetRe
 	return &profile.GetRefreshQuotaRes{Quota: int32(q)}, nil
 }
 
+// GetSyncStatus 服务间调用：按 userId 返回定时同步与手动刷新状态（core 刷新状态查询用）。
+// 查询失败时 fail-open：间隔回落默认 180，配额回落全局默认 2。
+func (p *ProfileService) GetSyncStatus(ctx context.Context, req *profile.GetSyncStatusReq) (*profile.GetSyncStatusRes, error) {
+	if req.GetUserId() <= 0 {
+		return &profile.GetSyncStatusRes{}, nil
+	}
+	uid := req.GetUserId()
+	spMin := int32(180)
+	if policies, err := p.profileDal.GetSyncPolicies(ctx, []int64{uid}); err == nil && len(policies) > 0 {
+		if v := policies[0].SpiderIntervalMin; v > 0 {
+			spMin = int32(v)
+		}
+	}
+	quota := int32(dal.DefaultRefreshQuota)
+	if q, _, err := p.profileDal.GetRefreshQuota(ctx, uid); err == nil {
+		quota = int32(q)
+	}
+	return &profile.GetSyncStatusRes{
+		SpiderIntervalMin:  spMin,
+		ManualRefreshQuota: quota,
+	}, nil
+}
+
 // GetByIds 批量获取用户展示名（当前组织 / 指定 org 的组织内名称）
 func (p *ProfileService) GetByIds(ctx context.Context, req *profile.GetByIdsReq) (*profile.GetByIdsRes, error) {
 	avatarBase := avatarPublicBase(p.db)
