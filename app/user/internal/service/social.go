@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"strings"
+	"time"
 
 	pb "cwxu-algo/api/user/v1/social"
 	"cwxu-algo/app/common/utils/auth"
@@ -240,22 +241,30 @@ func (s *SocialService) Identity(ctx context.Context, req *pb.IdentityReq) (*pb.
 		return &pb.IdentityRes{Success: false, Message: "请指定用户"}, nil
 	}
 	var u struct {
-		UserID      uint `gorm:"column:user_id"`
-		Username    string
-		Name        string
-		Avatar      string
-		IsSiteAdmin bool `gorm:"column:is_site_admin"`
+		UserID       uint       `gorm:"column:user_id"`
+		Username     string
+		Name         string
+		Avatar       string
+		IsSiteAdmin  bool       `gorm:"column:is_site_admin"`
+		SubTier      string     `gorm:"column:sub_tier"`
+		SubExpireAt  *time.Time `gorm:"column:sub_expire_at"`
 	}
 	err := s.dbData.DB.WithContext(ctx).Table("users").
-		Select("id AS user_id, username, name, avatar, is_site_admin").
+		Select("id AS user_id, username, name, avatar, is_site_admin, sub_tier, sub_expire_at").
 		Where("id = ?", uid).
 		Take(&u).Error
 	if err != nil {
 		return &pb.IdentityRes{Success: false, Message: "用户不存在"}, nil
 	}
+	// 订阅到期检查（与 rowsToSocialUsers 一致）
+	tier := strings.TrimSpace(u.SubTier)
+	if u.SubExpireAt != nil && !u.SubExpireAt.After(time.Now()) {
+		tier = ""
+	}
 	list := s.enrichList(ctx, []dal.SocialUser{{
 		UserID: u.UserID, Username: u.Username, Name: u.Name, Avatar: u.Avatar,
 		IsSiteAdmin: u.IsSiteAdmin,
+		SubTier: tier,
 	}})
 	if len(list) == 0 {
 		return &pb.IdentityRes{Success: false, Message: "用户不存在"}, nil
