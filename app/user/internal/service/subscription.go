@@ -187,7 +187,7 @@ func (s *SubscriptionService) MySubscription(ctx context.Context, _ *subscriptio
 
 // NotifyHTTP 支付FM异步回调（原生 HTTP handler：GET query / POST form，不走 proto JSON）。
 // 流程：验签（md5(state+商户号+订单号+金额+密钥)，state=1）→ 订单存在 → 金额相等 →
-// 行锁置 paid（幂等）→ 赢家履约 → 回 success。
+// 行锁事务内置 paid + 履约（原子，失败回滚重试）→ 回 success。
 func (s *SubscriptionService) NotifyHTTP(w http.ResponseWriter, r *http.Request) {
 	writeAck := func(success bool) {
 		if success {
@@ -241,8 +241,14 @@ func (s *SubscriptionService) NotifyHTTP(w http.ResponseWriter, r *http.Request)
 		writeAck(false)
 		return
 	}
-	// 行锁置 paid（幂等）：claimed=false 表示已履约过的重复回调
-	order, claimed, err := s.subDal.ClaimPaidOrder(r.Context(), ntf.OrderNo, ntf.PlatformOrderNo, ntf.PayTime)
+	// 行锁事务：置 paid + 履约（原子）；重复回调 claimed=false 表示已履约过，直接成功
+	plan, perr := s.subDal.PlanByTier(r.Context(), order.Plan)
+	if perr != nil || plan == nil || plan.Days < 1 {
+		log.Errorf("NotifyHTTP 套餐缺失 order=%s plan=%s: %v", order.OrderNo, order.Plan, perr)
+		writeAck(false)
+		return
+	}
+	order, claimed, err := s.subDal.ClaimAndFulfillPaidOrder(r.Context(), ntf.OrderNo, ntf.PlatformOrderNo, ntf.PayTime, int64(order.UserID), order.Plan, plan.Days)
 	if err != nil {
 		log.Warnf("NotifyHTTP 订单处理失败 order=%s: %v", ntf.OrderNo, err)
 		writeAck(false)
@@ -253,23 +259,12 @@ func (s *SubscriptionService) NotifyHTTP(w http.ResponseWriter, r *http.Request)
 		writeAck(true)
 		return
 	}
-	plan, perr := s.subDal.PlanByTier(r.Context(), order.Plan)
-	if perr != nil || plan == nil || plan.Days < 1 {
-		log.Errorf("NotifyHTTP 套餐缺失 order=%s plan=%s: %v", order.OrderNo, order.Plan, perr)
-		writeAck(false)
-		return
-	}
-	if err := s.subDal.FulfillPayFm(r.Context(), int64(order.UserID), order.Plan, plan.Days); err != nil {
-		log.Errorf("NotifyHTTP 履约失败 order=%s user=%d: %v", order.OrderNo, order.UserID, err)
-		writeAck(false)
-		return
-	}
 	log.Infof("NotifyHTTP 履约成功 order=%s user=%d plan=%s amount=%d", order.OrderNo, order.UserID, order.Plan, order.AmountCents)
 	writeAck(true)
 }
 
 // GetAiAnalyzeQuota 服务间：单用户 AI 分析月配额。
-// 语义：组织开通 AI 分析（任一非公共域 active 组织 enable_ai_summary=true）→ 无限
+// 语义：组织开通题面 AI 分析（任一非公共域 active 组织 enable_ai_analyze=true）→ 无限
 // （组织成员优先消耗组织配额，不扣个人配额）；否则 Pro 订阅 active → 套餐 AiAnalyzeMonth；
 // 否则 0（不能触发 AI 分析）。
 func (s *SubscriptionService) GetAiAnalyzeQuota(ctx context.Context, req *subscription.GetAiAnalyzeQuotaReq) (*subscription.GetAiAnalyzeQuotaRes, error) {
@@ -337,14 +332,16 @@ func resolveAiAnalyzeStatus(proActive bool, proQuota int, orgUnlimited bool) (so
 	}
 }
 
-// orgAiAnalyzeUnlimited 用户所属非公共域 active 组织是否开通 AI 分析：
-// 任一组织 enable_ai_summary=true → 组织成员 AI 分析无限（组织优先，个人配额不参与）。
+// orgAiAnalyzeUnlimited 用户所属非公共域 active 组织是否开通题面 AI 分析：
+// 任一组织 enable_ai_analyze=true → 组织成员 AI 分析无限（组织优先，个人配额不参与）。
+// 与 core_data 流水线资格（getNonPublicOrgUserIDsByFeature("ai")）及前端 OrgsManage 开关一致，
+// 不用 enable_ai_summary（那是「AI 总结（网页）」开关）。
 func (s *SubscriptionService) orgAiAnalyzeUnlimited(ctx context.Context, userID int64) bool {
 	var n int64
 	err := s.data.DB.WithContext(ctx).
 		Table("org_members AS m").
 		Joins("JOIN orgs o ON o.id = m.org_id").
-		Where("m.user_id = ? AND o.slug <> ? AND COALESCE(o.is_system, false) = false AND o.status = ? AND o.enable_ai_summary = ?",
+		Where("m.user_id = ? AND o.slug <> ? AND COALESCE(o.is_system, false) = false AND o.status = ? AND o.enable_ai_analyze = ?",
 			userID, model.PublicOrgSlug, model.OrgStatusActive, true).
 		Count(&n).Error
 	return err == nil && n > 0

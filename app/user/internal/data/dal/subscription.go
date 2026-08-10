@@ -125,10 +125,15 @@ func (d *SubscriptionDal) MarkOrderClosed(ctx context.Context, id uint) (bool, e
 	return res.RowsAffected > 0, res.Error
 }
 
-// ClaimPaidOrder 回调履约行锁：仅 pending/closed 可置 paid（FOR UPDATE）。
-// 返回 (order, claimed, err)：claimed=true 表示本次调用赢得履约权（从非 paid 置为 paid），
-// false 表示订单已 paid（重复回调）或不存在，调用方不应重复履约。
-func (d *SubscriptionDal) ClaimPaidOrder(ctx context.Context, orderNo, platformOrderNo string, paidAt time.Time) (*model.PaymentOrder, bool, error) {
+// ClaimAndFulfillPaidOrder 支付回调履约：订单置 paid + 用户订阅叠加在同一事务内（FOR UPDATE）。
+// 返回 (order, claimed, err)：claimed=true 表示本次调用赢得履约权（从非 paid 置为 paid 并同步履约），
+// false 表示订单已 paid（重复回调，已履约过），调用方不应再履约。
+// 关键：履约与置 paid 原子，任一步失败整事务回滚，回调重试会从 pending 完整重做，
+// 避免「订单已 paid 但用户权益未发放」的资金损失（旧实现 claim 与 fulfill 分两事务，失败即永久丢单）。
+func (d *SubscriptionDal) ClaimAndFulfillPaidOrder(ctx context.Context, orderNo, platformOrderNo string, paidAt time.Time, userID int64, tier string, days int) (*model.PaymentOrder, bool, error) {
+	if days < 1 {
+		return nil, false, fmt.Errorf("套餐天数非法: %d", days)
+	}
 	var o model.PaymentOrder
 	claimed := false
 	err := d.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -144,6 +149,25 @@ func (d *SubscriptionDal) ClaimPaidOrder(ctx context.Context, orderNo, platformO
 		o.PlatformOrderNo = platformOrderNo
 		o.PaidAt = &paidAt
 		if err := tx.Save(&o).Error; err != nil {
+			return err
+		}
+		var u model.User
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("id = ?", userID).
+			First(&u).Error; err != nil {
+			return err
+		}
+		now := time.Now()
+		base := now
+		if u.SubExpireAt != nil && u.SubExpireAt.After(now) {
+			base = *u.SubExpireAt
+		}
+		expire := base.AddDate(0, 0, days)
+		if err := tx.Model(&model.User{}).Where("id = ?", userID).Updates(map[string]interface{}{
+			"sub_tier":      tier,
+			"sub_expire_at": expire,
+			"sub_source":    "payfm",
+		}).Error; err != nil {
 			return err
 		}
 		claimed = true
@@ -211,33 +235,6 @@ func (d *SubscriptionDal) Revoke(ctx context.Context, userID int64) error {
 		"sub_expire_at": nil,
 		"sub_source":    "",
 	}).Error
-}
-
-// FulfillPayFm 支付FM支付履约：users.sub_tier / sub_expire_at = max(now, 当前) + plan.Days / sub_source='payfm'。
-// 在订单已 paid 的前提下调用（同事务或紧随其后）。
-func (d *SubscriptionDal) FulfillPayFm(ctx context.Context, userID int64, tier string, days int) error {
-	if days < 1 {
-		return fmt.Errorf("套餐天数非法: %d", days)
-	}
-	now := time.Now()
-	return d.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var u model.User
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-			Where("id = ?", userID).
-			First(&u).Error; err != nil {
-			return err
-		}
-		base := now
-		if u.SubExpireAt != nil && u.SubExpireAt.After(now) {
-			base = *u.SubExpireAt
-		}
-		expire := base.AddDate(0, 0, days)
-		return tx.Model(&model.User{}).Where("id = ?", userID).Updates(map[string]interface{}{
-			"sub_tier":      tier,
-			"sub_expire_at": expire,
-			"sub_source":    "payfm",
-		}).Error
-	})
 }
 
 // ListSubscriptions 订阅用户列表（含已过期；keyword 模糊 username/name，服务端过滤与 total 一致）

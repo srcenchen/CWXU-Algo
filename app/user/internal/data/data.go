@@ -996,7 +996,7 @@ func startSiteSettingsRefresh(d *Data) func() {
 }
 
 // startPaymentOrderCloser 后台关单：pending 超过 5 分钟置 closed（GuadArt OrderCloser 移植）。
-// closed 后支付FM回调仍可履约（ClaimPaidOrder 条件更新已覆盖 pending/closed）。
+// closed 后支付FM回调仍可履约（ClaimAndFulfillPaidOrder 覆盖 pending/closed）。
 func startPaymentOrderCloser(d *Data) func() {
 	if d == nil || d.DB == nil {
 		return func() {}

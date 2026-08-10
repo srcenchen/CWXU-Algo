@@ -25,6 +25,7 @@ func TestMergeRefreshQuota(t *testing.T) {
 		{"免费+覆盖5=覆盖生效", &five, 0, false, 5, true},
 		{"免费+覆盖0=禁止", &zero, 0, false, 0, true},
 		{"订阅+覆盖0且plan0=禁止", &zero, 0, true, 0, true},
+		{"订阅+无覆盖且plan0=0（不回落默认2）", nil, 0, true, 0, false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

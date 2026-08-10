@@ -938,7 +938,9 @@ func (d *ProfileDal) GetRefreshQuota(ctx context.Context, userID int64) (int, bo
 	planQuota := 0
 	subscribed := false
 	if tier, active := d.SubscriptionTier(ctx, userID); active {
-		if plan, err := d.PlanByTier(ctx, tier); err == nil && plan != nil && plan.ManualRefreshDaily > 0 {
+		if plan, err := d.PlanByTier(ctx, tier); err == nil && plan != nil {
+			// 订阅 active 即视为已订阅：套餐 ManualRefreshDaily=0 表示「无手动刷新」，
+			// 由 mergeRefreshQuota 返回 0，而非回落全局默认 2。
 			planQuota = plan.ManualRefreshDaily
 			subscribed = true
 		}

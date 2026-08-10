@@ -38,8 +38,8 @@ func TestResolveAiAnalyzeStatus(t *testing.T) {
 	}
 }
 
-// TestOrgAiAnalyzeUnlimited 组织开通 AI 分析判定：
-// 仅「非公共域 + active + enable_ai_summary=true」的组织成员算组织开通（无限）。
+// TestOrgAiAnalyzeUnlimited 组织开通题面 AI 分析判定：
+// 仅「非公共域 + active + enable_ai_analyze=true」的组织成员算组织开通（无限）。
 func TestOrgAiAnalyzeUnlimited(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open("file:org_ai_"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{
 		Logger: logger.Default.LogMode(logger.Silent),
@@ -53,22 +53,22 @@ func TestOrgAiAnalyzeUnlimited(t *testing.T) {
 	s := &SubscriptionService{data: &data.Data{DB: db}}
 
 	// 公共域（is_system）即使开 AI 也不计
-	if err := db.Create(&model.Org{Name: "公共域", Slug: model.PublicOrgSlug, IsSystem: true, EnableAISummary: true}).Error; err != nil {
+	if err := db.Create(&model.Org{Name: "公共域", Slug: model.PublicOrgSlug, IsSystem: true, EnableAiAnalyze: true}).Error; err != nil {
 		t.Fatalf("seed public org: %v", err)
 	}
 	// 普通组织：开 AI 的组织（id=2）、关 AI 的组织（id=3）、suspended 组织（id=4）
 	if err := db.Create([]*model.Org{
-		{Name: "校队A", Slug: "team-a", InviteCode: "INV-A", EnableAISummary: true},
+		{Name: "校队A", Slug: "team-a", InviteCode: "INV-A", EnableAiAnalyze: true},
 		{Name: "校队B", Slug: "team-b", InviteCode: "INV-B"},
 		{Name: "停用队", Slug: "team-c", InviteCode: "INV-C", Status: model.OrgStatusSuspended},
 	}).Error; err != nil {
 		t.Fatalf("seed orgs: %v", err)
 	}
-	// 注意：EnableAISummary 带 default:true 标签，Create struct 时 false 会被 GORM 替换成 true，
+	// 注意：EnableAiAnalyze 带 default:true 标签，Create struct 时 false 会被 GORM 替换成 true，
 	// 关 AI 的组织须用 Updates 显式置 false（与 UpsertPlan 同源的零值写入问题）
 	if err := db.Model(&model.Org{}).Where("slug IN ?", []string{"team-b", "team-c"}).
-		Update("enable_ai_summary", false).Error; err != nil {
-		t.Fatalf("disable ai summary: %v", err)
+		Update("enable_ai_analyze", false).Error; err != nil {
+		t.Fatalf("disable ai analyze: %v", err)
 	}
 	members := []*model.OrgMember{
 		{OrgID: 1, UserID: 10}, // 公共域
