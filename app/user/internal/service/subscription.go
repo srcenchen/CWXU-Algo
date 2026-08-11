@@ -314,8 +314,9 @@ func (s *SubscriptionService) MyAiStatus(ctx context.Context, _ *subscription.My
 	res.AiAnalyzeUnlimited = unlimited
 	res.AiAnalyzeQuota = int32(quota)
 
-	// AI 日报：组织授权独立标记；生效 = Pro + 套餐开启 + 个人开关（与定时任务分流一致）
-	res.AiDailyOrgAllowed = s.profileDal.UserHasOrgDailyEmailGrant(ctx, uid)
+	// AI 日报：组织授权独立标记；生效 = Pro + 套餐开启 + 个人开关（与定时任务分流一致）。
+	// 日报邮件不再要求组织授权，标记固定为 true。
+	res.AiDailyOrgAllowed = true
 	res.AiDailyEnabled = proActive && proAiDaily && s.profileDal.AIDailyEnabled(ctx, uid)
 	return res, nil
 }

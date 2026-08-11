@@ -279,7 +279,7 @@ func (p *ProfileService) GetList(ctx context.Context, req *profile.GetListReq) (
 		}
 	}
 
-	dailyGrant, weeklyGrant := p.profileDal.BatchEmailGrants(ctx, ids)
+	weeklyGrant := p.profileDal.BatchEmailGrants(ctx, ids)
 
 	// 非公共域组织用户集合（题面流水线默认资格）
 	nonPublicSet := map[int64]struct{}{}
@@ -360,7 +360,7 @@ func (p *ProfileService) GetList(ctx context.Context, req *profile.GetListReq) (
 			GroupName:                   gName,
 			EmailEnabled:                v.EmailEnabled,
 			EmailWeeklyEnabled:          v.EmailWeeklyEnabled,
-			EmailAllowedByOrg:           dailyGrant[uid],
+			EmailAllowedByOrg:           true,
 			EmailWeeklyAllowedByOrg:     weeklyGrant[uid],
 			ProblemFetchEnabled:         dal.EffectiveProblemPipeline(v.ProblemFetchEnabled, isNonPublic),
 			ProblemAiEnabled:            dal.EffectiveProblemPipeline(v.ProblemAIEnabled, isNonPublic),
@@ -596,12 +596,12 @@ func (p *ProfileService) buildGetByIdRes(ctx context.Context, pf *model.User) (*
 		}
 	}
 	canViewPrivate := auth.VerifySelfOrAbove(ctx, pf.ID)
-	dailyGrant, weeklyGrant := false, false
+	weeklyGrant := false
 	emailOn, weeklyOn := false, false
 	if canViewPrivate {
-		dailyGrant = p.profileDal.UserHasOrgDailyEmailGrant(ctx, int64(pf.ID))
+		// 日报邮件不再要求组织授权；周报仍须组织 staff 授权
 		weeklyGrant = p.profileDal.UserHasOrgWeeklyEmailGrant(ctx, int64(pf.ID))
-		emailOn = pf.EmailEnabled && dailyGrant
+		emailOn = pf.EmailEnabled
 		weeklyOn = pf.EmailWeeklyEnabled && weeklyGrant
 	}
 	// 当前组织视图：在组织用 org_display_name（空则 username）；不在组织用公共域昵称
@@ -629,7 +629,7 @@ func (p *ProfileService) buildGetByIdRes(ctx context.Context, pf *model.User) (*
 		Spiders:                 spiders,
 		EmailEnabled:            emailOn,
 		EmailWeeklyEnabled:      weeklyOn,
-		EmailAllowedByOrg:       dailyGrant,
+		EmailAllowedByOrg:       true,
 		EmailWeeklyAllowedByOrg: weeklyGrant,
 		LastSyncAt:              lastSyncAt,
 	}
@@ -1317,21 +1317,13 @@ func (p *ProfileService) SetEmailEnabled(ctx context.Context, req *profile.SetEm
 	if kind == "" {
 		kind = "daily"
 	}
-	if req.Enabled {
-		if kind == "weekly" {
-			if !p.profileDal.UserHasOrgWeeklyEmailGrant(ctx, req.UserId) {
-				return &profile.SetEmailEnabledRes{
-					Code:    1,
-					Message: "无法开启周报：需在组织中为教练/队长/团队管理员，且组织已开通周报",
-				}, nil
-			}
-		} else {
-			if !p.profileDal.UserHasOrgDailyEmailGrant(ctx, req.UserId) {
-				return &profile.SetEmailEnabledRes{
-					Code:    1,
-					Message: "无法开启日报：该用户所在组织未开通日报邮件权限",
-				}, nil
-			}
+	// 日报邮件不再要求组织授权；周报仍须组织 staff 授权
+	if req.Enabled && kind == "weekly" {
+		if !p.profileDal.UserHasOrgWeeklyEmailGrant(ctx, req.UserId) {
+			return &profile.SetEmailEnabledRes{
+				Code:    1,
+				Message: "无法开启周报：需在组织中为教练/队长/团队管理员，且组织已开通周报",
+			}, nil
 		}
 	}
 	var err error

@@ -419,8 +419,8 @@ func (t *CronTask) runDailySummaryTick() {
 		}
 		seen[uid] = struct{}{}
 		p := policies[uid]
-		// 日报：组织授权 + 个人开
-		if p.EnableAIEmail && p.EmailEnabled {
+		// 日报：个人开关开即发（不再要求组织授权）
+		if p.EmailEnabled {
 			// AI 日报仅 Pro 订阅 + 套餐开启 + 个人开关（默认关）；否则发规则模板常规日报（无 LLM 成本）
 			if t.summary.Do(uid, dailySummaryType(p.AIDailyEmailEnabled)).Published {
 				enqueued++

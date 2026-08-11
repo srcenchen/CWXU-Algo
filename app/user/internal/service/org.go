@@ -908,10 +908,7 @@ func (s *OrgService) Update(ctx context.Context, req *orgpb.UpdateReq) (*orgpb.U
 		log.Errorf("org update: %v", err)
 		return &orgpb.UpdateRes{Code: 1, Message: "保存失败，请稍后重试"}, nil
 	}
-	// 组织关闭日报授权后：无其它组织授权的用户强制关闭个人日报
-	if req.EnableAiEmail != nil && !*req.EnableAiEmail {
-		s.forceOffDailyEmailWithoutOrgGrant(orgID)
-	}
+	// 组织关闭周报授权后：无其它组织授权的用户强制关闭个人周报
 	if req.EnableAiWeeklyEmail != nil && !*req.EnableAiWeeklyEmail {
 		s.forceOffWeeklyEmailWithoutOrgGrant(orgID)
 	}
@@ -931,28 +928,7 @@ func (s *OrgService) Update(ctx context.Context, req *orgpb.UpdateReq) (*orgpb.U
 	}, nil
 }
 
-// forceOffDailyEmailWithoutOrgGrant 关闭日报组织授权后，对仅依赖该组织授权的用户关个人日报。
-// 集合式单条 UPDATE + RETURNING 受影响 id，避免逐用户 N 次查询/更新。
-func (s *OrgService) forceOffDailyEmailWithoutOrgGrant(changedOrgID uint) {
-	var affected []uint
-	err := s.db.Raw(`
-		UPDATE users SET email_enabled = false
-		WHERE email_enabled = true
-		  AND id IN (SELECT user_id FROM org_members WHERE org_id = ?)
-		  AND NOT EXISTS (
-			SELECT 1 FROM org_members m
-			JOIN orgs o ON o.id = m.org_id
-			WHERE m.user_id = users.id AND o.status = ? AND o.enable_ai_email = true
-		  )
-		RETURNING id
-	`, changedOrgID, model.OrgStatusActive).Scan(&affected).Error
-	if err != nil {
-		log.Errorf("org force off daily email org=%d: %v", changedOrgID, err)
-		return
-	}
-	s.invalidateUserProfileCaches(affected)
-}
-
+// forceOffWeeklyEmailWithoutOrgGrant 关闭周报组织授权后，对仅依赖该组织授权的用户关个人周报。
 func (s *OrgService) forceOffWeeklyEmailWithoutOrgGrant(changedOrgID uint) {
 	var affected []uint
 	err := s.db.Raw(`

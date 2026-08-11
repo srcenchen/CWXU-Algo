@@ -54,7 +54,8 @@ type Org struct {
 
 	// 策略：开关可由组织管理员改；间隔仅站点管理员可写
 	EnableAISummary     bool `gorm:"default:true;comment:AI总结开关(网页)"`
-	EnableAIEmail       bool `gorm:"default:true;comment:AI日报邮件(组织授权)"`
+	// EnableAIEmail 已废弃：日报邮件不再要求组织授权，仅保留字段兼容历史数据
+	EnableAIEmail       bool `gorm:"default:true;comment:AI日报邮件(组织授权,已废弃)"`
 	EnableAIWeeklyEmail bool `gorm:"default:true;comment:AI周报邮件(组织授权,staff)"`
 	EnableSpider        bool `gorm:"default:true;comment:爬虫定时开关"`
 

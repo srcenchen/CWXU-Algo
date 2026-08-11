@@ -174,14 +174,14 @@ func (uc *SummaryUseCase) checkRoleId(userId int64) int {
 	return int(p.RoleId)
 }
 
-// canSendDailyEmail 个人日报开 AND 组织授权日报
+// canSendDailyEmail 个人日报开关开即允许（日报不再要求组织授权）
 // 必须用 GetSyncPolicies，不能用无鉴权 GetById（后者会把 emailEnabled/授权剥成 false）。
 func (uc *SummaryUseCase) canSendDailyEmail(userId int64) bool {
 	p := uc.userSyncPolicy(userId)
 	if p == nil {
 		return false
 	}
-	return p.GetEmailEnabled() && p.GetEnableAiEmail()
+	return p.GetEmailEnabled()
 }
 
 // canSendWeeklyEmail 个人周报开 AND 组织 staff 周报授权

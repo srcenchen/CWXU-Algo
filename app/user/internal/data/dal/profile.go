@@ -673,17 +673,6 @@ func (d *ProfileDal) GetEmailEnabled(ctx context.Context, userId int64) (bool, e
 	return user.EmailEnabled, nil
 }
 
-// UserHasOrgDailyEmailGrant 是否有任一组织授权日报邮件
-func (d *ProfileDal) UserHasOrgDailyEmailGrant(ctx context.Context, userID int64) bool {
-	var n int64
-	_ = d.db.WithContext(ctx).Table("org_members AS m").
-		Joins("JOIN orgs o ON o.id = m.org_id").
-		Where("m.user_id = ? AND o.status = ? AND o.enable_ai_email = ?",
-			userID, model.OrgStatusActive, true).
-		Count(&n)
-	return n > 0
-}
-
 // UserHasOrgWeeklyEmailGrant 是否在授权周报的组织中担任 staff 角色
 func (d *ProfileDal) UserHasOrgWeeklyEmailGrant(ctx context.Context, userID int64) bool {
 	var n int64
@@ -1627,22 +1616,11 @@ func (d *ProfileDal) IsMemberOfOrg(ctx context.Context, userID int64, orgID uint
 	return n > 0
 }
 
-// BatchEmailGrants 批量查询日报/周报组织授权（任一组织满足即 true）
-func (d *ProfileDal) BatchEmailGrants(ctx context.Context, userIDs []int64) (daily map[int64]bool, weekly map[int64]bool) {
-	daily = map[int64]bool{}
-	weekly = map[int64]bool{}
+// BatchEmailGrants 批量查询周报组织授权（任一组织满足即 true）；日报不再受组织授权限制。
+func (d *ProfileDal) BatchEmailGrants(ctx context.Context, userIDs []int64) map[int64]bool {
+	weekly := map[int64]bool{}
 	if len(userIDs) == 0 {
-		return daily, weekly
-	}
-	var dailyIDs []int64
-	_ = d.db.WithContext(ctx).Table("org_members AS m").
-		Joins("JOIN orgs o ON o.id = m.org_id").
-		Where("m.user_id IN ? AND o.status = ? AND o.enable_ai_email = ?",
-			userIDs, model.OrgStatusActive, true).
-		Distinct("m.user_id").
-		Pluck("m.user_id", &dailyIDs)
-	for _, id := range dailyIDs {
-		daily[id] = true
+		return weekly
 	}
 	var weeklyIDs []int64
 	_ = d.db.WithContext(ctx).Table("org_members AS m").
@@ -1656,7 +1634,7 @@ func (d *ProfileDal) BatchEmailGrants(ctx context.Context, userIDs []int64) (dai
 	for _, id := range weeklyIDs {
 		weekly[id] = true
 	}
-	return daily, weekly
+	return weekly
 }
 
 // GetUserIdsByGroup 根据组ID获取用户ID列表
