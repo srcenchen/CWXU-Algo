@@ -400,7 +400,8 @@ func (d *ProfileDal) GetList(ctx context.Context, pageSize, pageNum int64, keywo
 			"spider_interval_min_override", "ai_summary_interval_min_override",
 			"daily_refresh_quota_override",
 			"email_enabled", "email_weekly_enabled", "created_at",
-			"sync_exempt", "last_login_at", "admin_force_dormant", "disabled").
+			"sync_exempt", "last_login_at", "admin_force_dormant", "disabled",
+			"sub_tier", "sub_expire_at").
 		Order("id").
 		Limit(int(pageSize)).Offset(int(pageNum-1) * int(pageSize)).
 		Find(&list).Error
@@ -1471,7 +1472,8 @@ func (d *ProfileDal) GetListByOrg(ctx context.Context, orgID uint, pageSize, pag
 			u.problem_fetch_enabled, u.problem_ai_enabled,
 			u.spider_interval_min_override, u.ai_summary_interval_min_override,
 			u.daily_refresh_quota_override, u.created_at,
-			u.sync_exempt, u.last_login_at, u.admin_force_dormant, u.disabled`).
+			u.sync_exempt, u.last_login_at, u.admin_force_dormant, u.disabled,
+			u.sub_tier, u.sub_expire_at`).
 		Joins("JOIN org_members AS m ON m.user_id = u.id AND m.org_id = ?", orgID)
 	if like := sqllike.Pattern(kw); like != "" {
 		listQ = listQ.Where("u.username ILIKE ? OR u.name ILIKE ? OR m.org_display_name ILIKE ?", like, like, like)
