@@ -980,17 +980,16 @@ func (d *ProfileDal) SyncProblemPipelineOverrides(ctx context.Context, userID in
 //   - 有资格（Pro active 且套餐开启 / 任一非公共域组织开启）→ problem_*_enabled = true
 //   - 无资格 → null（回落组织默认；公共域=关）
 //
-// userIDs 为空时全表扫描（每日定时到期回落用）。
+// userIDs 为空时全表重算（每日定时到期回落 + 一次性迁移：把历史「订阅了但覆盖未写」的用户补开）。
+// 全表 UPDATE 幂等，用户量小（数百级），每日一次成本可忽略。
 func (d *ProfileDal) SyncProblemPipelineOverridesBatch(ctx context.Context, userIDs []int64) (int64, error) {
 	q := d.db.WithContext(ctx).Model(&model.User{})
-	// 限定范围：指定用户；空=全量（每日定时到期回落兜底扫描）
+	// 限定范围：指定用户；空=全量（幂等重算，覆盖历史未同步的订阅/组织资格）
 	if len(userIDs) > 0 {
 		q = q.Where("id IN ?", userIDs)
 	} else {
-		// 全量扫描仅需要处理「覆盖非空」或「订阅已过期但覆盖仍开着」的行；
-		// 资格来源不变的行 UPDATE 是幂等的，直接全量也可，但缩范围省 IO。
-		q = q.Where(`problem_fetch_enabled IS NOT NULL OR problem_ai_enabled IS NOT NULL
-			OR (sub_tier <> '' AND sub_expire_at IS NOT NULL AND sub_expire_at <= ?)`, time.Now())
+		// GORM 拒绝无 WHERE 的 Updates；1=1 显式全表（幂等）
+		q = q.Where("1 = 1")
 	}
 	res := q.Updates(map[string]interface{}{
 		"problem_fetch_enabled": gorm.Expr(`CASE WHEN (
