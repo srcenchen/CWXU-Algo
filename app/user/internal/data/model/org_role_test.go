@@ -18,44 +18,48 @@ func TestOrgRoleRankOrder(t *testing.T) {
 }
 
 func TestCanAppointOrgRole(t *testing.T) {
-	// 组织管理员可任命全部角色（含同级 org_admin）
+	// 组织管理员可任命全部角色（含把下级提到 org_admin）
 	if !CanAppointOrgRole(OrgRoleOrgAdmin, OrgRoleMember, OrgRoleOrgAdmin) {
 		t.Fatal("org_admin should appoint org_admin")
 	}
 	if !CanAppointOrgRole(OrgRoleOrgAdmin, OrgRoleMember, OrgRoleCoach) {
 		t.Fatal("org_admin should appoint coach")
 	}
-	if !CanAppointOrgRole(OrgRoleOrgAdmin, OrgRoleOrgAdmin, OrgRoleMember) {
-		t.Fatal("org_admin should demote peer org_admin")
+	// 收紧：组织管理员也不可降权同级组织管理员（统一生效）
+	if CanAppointOrgRole(OrgRoleOrgAdmin, OrgRoleOrgAdmin, OrgRoleMember) {
+		t.Fatal("org_admin must not demote peer org_admin")
 	}
-	// 教练可任命组长/队长/成员
+	// 教练可任命组长/队长/成员，可把下级提到教练同级
 	if !CanAppointOrgRole(OrgRoleCoach, OrgRoleMember, OrgRoleCaptain) {
 		t.Fatal("coach should appoint captain")
 	}
 	if !CanAppointOrgRole(OrgRoleCoach, OrgRoleMember, OrgRoleGroupLeader) {
 		t.Fatal("coach should appoint group_leader")
 	}
-	// 教练不可任命组织管理员或教练
+	if !CanAppointOrgRole(OrgRoleCoach, OrgRoleMember, OrgRoleCoach) {
+		t.Fatal("coach should promote lower member to coach (own level)")
+	}
+	// 教练不可任命组织管理员（高于自己）
 	if CanAppointOrgRole(OrgRoleCoach, OrgRoleMember, OrgRoleOrgAdmin) {
 		t.Fatal("coach must not appoint org_admin")
 	}
-	if CanAppointOrgRole(OrgRoleCoach, OrgRoleMember, OrgRoleCoach) {
-		t.Fatal("coach must not appoint coach")
-	}
-	// 不可改同级/更高
+	// 不可降同级/更高
 	if CanAppointOrgRole(OrgRoleCoach, OrgRoleCoach, OrgRoleMember) {
 		t.Fatal("coach must not demote peer coach")
 	}
 	if CanAppointOrgRole(OrgRoleCoach, OrgRoleOrgAdmin, OrgRoleMember) {
 		t.Fatal("coach must not demote org_admin")
 	}
-	// 组长可任命队长
+	// 组长可任命队长，可把下级提到组长同级
 	if !CanAppointOrgRole(OrgRoleGroupLeader, OrgRoleMember, OrgRoleCaptain) {
 		t.Fatal("group_leader should appoint captain")
 	}
-	// 组长不可任命组长
-	if CanAppointOrgRole(OrgRoleGroupLeader, OrgRoleMember, OrgRoleGroupLeader) {
-		t.Fatal("group_leader must not appoint group_leader")
+	if !CanAppointOrgRole(OrgRoleGroupLeader, OrgRoleMember, OrgRoleGroupLeader) {
+		t.Fatal("group_leader should promote lower member to group_leader (own level)")
+	}
+	// 组长不可降组长
+	if CanAppointOrgRole(OrgRoleGroupLeader, OrgRoleGroupLeader, OrgRoleMember) {
+		t.Fatal("group_leader must not demote peer group_leader")
 	}
 	// 队长无任命权
 	if CanAppointOrgRole(OrgRoleCaptain, OrgRoleMember, OrgRoleMember) {

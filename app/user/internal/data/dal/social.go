@@ -1,8 +1,8 @@
 package dal
 
 import (
-	"cwxu-algo/app/common/utils/sqllike"
 	"context"
+	"cwxu-algo/app/common/utils/sqllike"
 	"fmt"
 	"strings"
 	"time"
@@ -103,6 +103,8 @@ type SocialUser struct {
 	SiteRoles []string `gorm:"-"`
 	// InCurrentOrg 目标是否属于观众当前组织
 	InCurrentOrg bool `gorm:"-"`
+	// OrgRole 目标在观众当前组织内的角色（member/captain/group_leader/coach/org_admin；非当前域成员为空）
+	OrgRole string `gorm:"-"`
 	// SharedOrgs 双方共属、且非当前域的组织称呼（含公共域；切换组织后仍返回）
 	// 观众不可见的组织绝不出现
 	SharedOrgs []SharedOrgAlias `gorm:"-"`
@@ -110,12 +112,12 @@ type SocialUser struct {
 
 // socialUserRow 纯 DB 扫描行（无切片/派生字段，避免 Scan 崩溃）
 type socialUserRow struct {
-	UserID      uint   `gorm:"column:user_id"`
-	Username    string `gorm:"column:username"`
-	Name        string `gorm:"column:name"`
-	Avatar      string `gorm:"column:avatar"`
-	IsSiteAdmin bool   `gorm:"column:is_site_admin"`
-	SubTier     string `gorm:"column:sub_tier"`
+	UserID      uint       `gorm:"column:user_id"`
+	Username    string     `gorm:"column:username"`
+	Name        string     `gorm:"column:name"`
+	Avatar      string     `gorm:"column:avatar"`
+	IsSiteAdmin bool       `gorm:"column:is_site_admin"`
+	SubTier     string     `gorm:"column:sub_tier"`
 	SubExpireAt *time.Time `gorm:"column:sub_expire_at"`
 }
 
@@ -361,8 +363,10 @@ func (d *SocialDal) EnrichDisplay(ctx context.Context, viewerID, viewerOrgID uin
 
 	// 当前组织内称呼（含是否成员：map 有 key 即成员）
 	currentNames := map[uint]string{}
+	currentRoles := map[uint]string{}
 	if viewerOrgID > 0 {
 		currentNames = d.orgDisplayNameMap(ctx, viewerOrgID, uids)
+		currentRoles = d.orgRoleMap(ctx, viewerOrgID, uids)
 	}
 	// 公共域称呼：优先 org_display_name，否则 users.name（调用方已填 Name）
 	publicNames := map[uint]string{}
@@ -386,6 +390,7 @@ func (d *SocialDal) EnrichDisplay(ctx context.Context, viewerID, viewerOrgID uin
 
 		if dname, inOrg := currentNames[u.UserID]; inOrg {
 			u.InCurrentOrg = true
+			u.OrgRole = currentRoles[u.UserID]
 			if strings.TrimSpace(dname) != "" {
 				u.Name = strings.TrimSpace(dname)
 			} else if u.Username != "" {
@@ -395,6 +400,7 @@ func (d *SocialDal) EnrichDisplay(ctx context.Context, viewerID, viewerOrgID uin
 			}
 		} else {
 			u.InCurrentOrg = false
+			u.OrgRole = ""
 			u.Name = publicName
 		}
 		if u.Name == "" {
@@ -491,6 +497,27 @@ func (d *SocialDal) orgDisplayNameMap(ctx context.Context, orgID uint, userIDs [
 	for _, r := range rows {
 		// 有 membership 即写入 key（空字符串表示在组织但未设称呼）
 		out[r.UserID] = strings.TrimSpace(r.OrgDisplayName)
+	}
+	return out
+}
+
+// orgRoleMap orgID 内 userId → 组织角色（member/captain/group_leader/coach/org_admin）
+func (d *SocialDal) orgRoleMap(ctx context.Context, orgID uint, userIDs []uint) map[uint]string {
+	out := make(map[uint]string)
+	if orgID == 0 || len(userIDs) == 0 {
+		return out
+	}
+	type row struct {
+		UserID uint
+		Role   string
+	}
+	var rows []row
+	_ = d.db.WithContext(ctx).Model(&model.OrgMember{}).
+		Select("user_id, role").
+		Where("org_id = ? AND user_id IN ?", orgID, userIDs).
+		Find(&rows).Error
+	for _, r := range rows {
+		out[r.UserID] = strings.TrimSpace(r.Role)
 	}
 	return out
 }

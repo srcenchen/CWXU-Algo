@@ -217,6 +217,8 @@ message SocialUser {
   repeated string siteRoles = 8;
   // C 端订阅档 plus|pro（过期返回空）
   string subTier = 9;
+  // 目标在当前观众组织内的角色（member|captain|group_leader|coach|org_admin；非当前域成员为空）
+  string orgRole = 10;
 }
 
 // 双方共属的其他组织内称呼（隐私边界：观众必须同属该组织）

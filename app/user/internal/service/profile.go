@@ -452,12 +452,18 @@ func (p *ProfileService) Update(ctx context.Context, req *profile.UpdateReq) (*p
 
 	// 昵称不再由此接口修改（请走组织内称呼）；仅更新头像 / 邮箱
 	// 头像入库规范化：又拍云 URL → path-only key（读时再按当前图床域名扩展）
+	// avatar 为空视为「未传，不改」，避免客户端漏传/空值把已有头像清空并删掉又拍云对象
 	oldAvatar := strings.TrimSpace(cur.Avatar)
-	newAvatar := normalizeAvatarForStore(req.Avatar)
+	newAvatar := oldAvatar
+	if strings.TrimSpace(req.Avatar) != "" {
+		newAvatar = normalizeAvatarForStore(req.Avatar)
+	}
 	pro := model.User{
-		ID:     uint(req.UserId),
-		Avatar: newAvatar,
-		Email:  newEmail,
+		ID:    uint(req.UserId),
+		Email: newEmail,
+	}
+	if newAvatar != oldAvatar {
+		pro.Avatar = newAvatar
 	}
 	if !emailChanged {
 		pro.Email = cur.Email

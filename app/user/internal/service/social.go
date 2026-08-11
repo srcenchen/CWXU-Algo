@@ -53,6 +53,8 @@ func socialUserPB(u dal.SocialUser, avatarBase string) *pb.SocialUser {
 		SiteRoles: siteRoles,
 		// C 端订阅档（badge 数据源；已过期映射为空）
 		SubTier: u.SubTier,
+		// 目标在当前观众组织内的角色（组织管理员等 badge；非当前域成员为空）
+		OrgRole: u.OrgRole,
 	}
 }
 
@@ -241,13 +243,13 @@ func (s *SocialService) Identity(ctx context.Context, req *pb.IdentityReq) (*pb.
 		return &pb.IdentityRes{Success: false, Message: "请指定用户"}, nil
 	}
 	var u struct {
-		UserID       uint       `gorm:"column:user_id"`
-		Username     string
-		Name         string
-		Avatar       string
-		IsSiteAdmin  bool       `gorm:"column:is_site_admin"`
-		SubTier      string     `gorm:"column:sub_tier"`
-		SubExpireAt  *time.Time `gorm:"column:sub_expire_at"`
+		UserID      uint `gorm:"column:user_id"`
+		Username    string
+		Name        string
+		Avatar      string
+		IsSiteAdmin bool       `gorm:"column:is_site_admin"`
+		SubTier     string     `gorm:"column:sub_tier"`
+		SubExpireAt *time.Time `gorm:"column:sub_expire_at"`
 	}
 	err := s.dbData.DB.WithContext(ctx).Table("users").
 		Select("id AS user_id, username, name, avatar, is_site_admin, sub_tier, sub_expire_at").
@@ -264,7 +266,7 @@ func (s *SocialService) Identity(ctx context.Context, req *pb.IdentityReq) (*pb.
 	list := s.enrichList(ctx, []dal.SocialUser{{
 		UserID: u.UserID, Username: u.Username, Name: u.Name, Avatar: u.Avatar,
 		IsSiteAdmin: u.IsSiteAdmin,
-		SubTier: tier,
+		SubTier:     tier,
 	}})
 	if len(list) == 0 {
 		return &pb.IdentityRes{Success: false, Message: "用户不存在"}, nil

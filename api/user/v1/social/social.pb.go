@@ -1285,7 +1285,9 @@ type SocialUser struct {
 	IsSiteAdmin  bool                   `protobuf:"varint,7,opt,name=isSiteAdmin,proto3" json:"isSiteAdmin,omitempty"`
 	SiteRoles    []string               `protobuf:"bytes,8,rep,name=siteRoles,proto3" json:"siteRoles,omitempty"`
 	// C 端订阅档 plus|pro（过期返回空）
-	SubTier       string `protobuf:"bytes,9,opt,name=subTier,proto3" json:"subTier,omitempty"`
+	SubTier string `protobuf:"bytes,9,opt,name=subTier,proto3" json:"subTier,omitempty"`
+	// 目标在当前观众组织内的角色（member|captain|group_leader|coach|org_admin；非当前域成员为空）
+	OrgRole       string `protobuf:"bytes,10,opt,name=orgRole,proto3" json:"orgRole,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1379,6 +1381,13 @@ func (x *SocialUser) GetSiteRoles() []string {
 func (x *SocialUser) GetSubTier() string {
 	if x != nil {
 		return x.SubTier
+	}
+	return ""
+}
+
+func (x *SocialUser) GetOrgRole() string {
+	if x != nil {
+		return x.OrgRole
 	}
 	return ""
 }
@@ -1530,7 +1539,7 @@ const file_user_v1_social_social_proto_rawDesc = "" +
 	"\x10PrivacyStatusRes\x12\x18\n" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12,\n" +
-	"\x11privacyConfigured\x18\x03 \x01(\bR\x11privacyConfigured\"\xa9\x02\n" +
+	"\x11privacyConfigured\x18\x03 \x01(\bR\x11privacyConfigured\"\xc3\x02\n" +
 	"\n" +
 	"SocialUser\x12\x16\n" +
 	"\x06userId\x18\x01 \x01(\x03R\x06userId\x12\x1a\n" +
@@ -1543,7 +1552,9 @@ const file_user_v1_social_social_proto_rawDesc = "" +
 	"sharedOrgs\x12 \n" +
 	"\visSiteAdmin\x18\a \x01(\bR\visSiteAdmin\x12\x1c\n" +
 	"\tsiteRoles\x18\b \x03(\tR\tsiteRoles\x12\x18\n" +
-	"\asubTier\x18\t \x01(\tR\asubTier\"]\n" +
+	"\asubTier\x18\t \x01(\tR\asubTier\x12\x18\n" +
+	"\aorgRole\x18\n" +
+	" \x01(\tR\aorgRole\"]\n" +
 	"\tSharedOrg\x12\x14\n" +
 	"\x05orgId\x18\x01 \x01(\x03R\x05orgId\x12\x18\n" +
 	"\aorgName\x18\x02 \x01(\tR\aorgName\x12 \n" +
