@@ -1,7 +1,7 @@
 package data
 
 import (
-	"cwxu-algo/app/core_data/internal/data/model"
+		"cwxu-algo/app/core_data/internal/data/model"
 
 	"github.com/go-kratos/kratos/v2/log"
 	"gorm.io/gorm"
@@ -95,20 +95,24 @@ func backfillUserTagACIfEmpty(db *gorm.DB) {
 	}
 	log.Infof("user_tag_ac empty, backfill from user_ac_problems + problem_tags…")
 	res := db.Exec(`
-		INSERT INTO user_tag_ac (user_id, tag, count)
-		SELECT u.user_id, pt.tag, COUNT(DISTINCT p.id)::bigint
-		FROM user_ac_problems u
-		JOIN problems p ON (
-			u.problem_key = 'p:' || p.id::text
-			OR (
-				p.external_id IS NOT NULL AND btrim(p.external_id) <> ''
-				AND u.problem_key = 'e:' || p.platform || ':' || p.external_id
+		INSERT INTO user_tag_ac (user_id, tag, count, weight)
+		SELECT user_id, tag, COUNT(DISTINCT p.id)::bigint, ROUND(SUM(weight)::numeric, 2)
+		FROM (
+			SELECT u.user_id AS user_id, pt.tag AS tag, p.id AS pid,
+			       `+model.DifficultyWeightSQL+` AS weight
+			FROM user_ac_problems u
+			JOIN problems p ON (
+				u.problem_key = 'p:' || p.id::text
+				OR (
+					p.external_id IS NOT NULL AND btrim(p.external_id) <> ''
+					AND u.problem_key = 'e:' || p.platform || ':' || p.external_id
+				)
 			)
-		)
-		JOIN problem_tags pt ON pt.problem_id = p.id
-		WHERE p.status = ?
-		GROUP BY u.user_id, pt.tag
-		ON CONFLICT (user_id, tag) DO UPDATE SET count = EXCLUDED.count
+			JOIN problem_tags pt ON pt.problem_id = p.id
+			WHERE p.status = ?
+		) t
+		GROUP BY user_id, tag
+		ON CONFLICT (user_id, tag) DO UPDATE SET count = EXCLUDED.count, weight = EXCLUDED.weight
 	`, model.ProblemStatusCompleted)
 	if res.Error != nil {
 		log.Warnf("user_tag_ac backfill failed: %v", res.Error)

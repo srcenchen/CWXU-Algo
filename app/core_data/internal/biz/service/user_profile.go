@@ -16,12 +16,15 @@ import (
 
 // 画像缓存：ver 精确失效 + latest 兜底（爬虫后仍可读旧画像，同时 MQ 刷新）
 const (
-	// s5：平台过题三段查询（牛客失败不拖垮其它平台）+ 安全 JOIN
-	userProfileCacheSchema = "5"
+	// s6：能力雷达改用难度加权题量 + 饱和锚定（非纯 count 归一化）
+	userProfileCacheSchema = "6"
 	userProfileLatestTTL   = 30 * 24 * time.Hour
 	userProfileVerTTL      = 7 * 24 * time.Hour
 	// userProfileFpKey 用户 AC 指纹缓存：数据未变化时跳过重建，削 3h 整点画像风暴
 	userProfileFpPref = "user_profile:fp:"
+	// profileRadarK 能力雷达饱和锚定：weight=K 时 score≈50（等价 10 道中等题）。
+	// 避免纯题量归一（最强标签恒 100），奖励难度，且跨用户可比。
+	profileRadarK = 30.0
 )
 
 func userProfileFpKey(userID int64) string {
@@ -265,16 +268,12 @@ func (uc *ProblemUseCase) computeUserProfile(userID int64) (*UserProfileSnapshot
 	if tags, err := dal.ListUserTagAC(context.Background(), uc.data.DB, userID, 20); err != nil {
 		log.Errorf("radar preagg user=%d: %v", userID, err)
 	} else {
-		var maxC int64
 		for _, t := range tags {
-			if t.Count > maxC {
-				maxC = t.Count
-			}
-		}
-		for _, t := range tags {
+			// 掌握度 = 饱和锚定：score = 100 × weight/(weight+K)。
+			// weight 已按难度加权；单题/低难度不再虚高（1 道简单题 ≈ 3.2 分）。
 			score := 0.0
-			if maxC > 0 {
-				score = math.Round(float64(t.Count)/float64(maxC)*1000) / 10
+			if t.Weight > 0 {
+				score = math.Round(100*t.Weight/(t.Weight+profileRadarK)*1000) / 1000
 			}
 			snap.Radar = append(snap.Radar, struct {
 				Tag     string

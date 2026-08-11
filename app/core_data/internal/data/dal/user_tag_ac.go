@@ -11,19 +11,36 @@ import (
 	"gorm.io/gorm/clause"
 )
 
-// IncUserTagAC 用户首次 AC 某题后，对该题标签各 +1
-func IncUserTagAC(ctx context.Context, db *gorm.DB, userID int64, tags []string) error {
+// DifficultyWeight 难度 → 能力分权重：简单=1 / 中等=3 / 困难=8 / 未知=2。
+// 线上 difficulty 已归一为 简单/中等/困难（problem_tagger normalizeDifficulty）；
+// 兼容历史 / 原始写法（easy/medium/hard、入门/中级/高级）。
+func DifficultyWeight(d string) float64 {
+	switch strings.ToLower(strings.TrimSpace(d)) {
+	case "简单", "easy", "入门":
+		return 1
+	case "中等", "medium", "中级":
+		return 3
+	case "困难", "hard", "高级":
+		return 8
+	default:
+		return 2
+	}
+}
+
+// IncUserTagAC 用户首次 AC 某题后，对该题标签各 +1（weight 累加该题难度权重）
+func IncUserTagAC(ctx context.Context, db *gorm.DB, userID int64, tags []string, weight float64) error {
 	if db == nil || userID <= 0 {
 		return nil
 	}
 	tags = NormalizeTags(tags)
 	for _, tag := range tags {
-		row := model.UserTagAC{UserID: userID, Tag: tag, Count: 1}
+		row := model.UserTagAC{UserID: userID, Tag: tag, Count: 1, Weight: weight}
 		if err := db.WithContext(ctx).
 			Clauses(clause.OnConflict{
 				Columns: []clause.Column{{Name: "user_id"}, {Name: "tag"}},
 				DoUpdates: clause.Assignments(map[string]interface{}{
-					"count": gorm.Expr("user_tag_ac.count + 1"),
+					"count":  gorm.Expr("user_tag_ac.count + 1"),
+					"weight": gorm.Expr("user_tag_ac.weight + EXCLUDED.weight"),
 				}),
 			}).
 			Create(&row).Error; err != nil {
@@ -48,27 +65,31 @@ func AdjustUserTagACForProblemTagsChange(ctx context.Context, db *gorm.DB, probl
 		return nil
 	}
 
+	// 该题难度权重：标签差分与 AC 加分共用同一 weight
+	var p model.Problem
+	w := 2.0
+	if err := db.WithContext(ctx).Select("difficulty").First(&p, problemID).Error; err == nil {
+		w = DifficultyWeight(p.Difficulty)
+	}
+
 	userIDs, err := listUsersACProblem(ctx, db, problemID)
 	if err != nil {
 		return err
-	}
-	if len(userIDs) == 0 {
-		return nil
 	}
 
 	for _, uid := range userIDs {
 		for _, tag := range removed {
 			if err := db.WithContext(ctx).Exec(`
-				UPDATE user_tag_ac SET count = count - 1
+				UPDATE user_tag_ac SET count = count - 1, weight = weight - ?
 				WHERE user_id = ? AND tag = ? AND count > 0
-			`, uid, tag).Error; err != nil {
+			`, w, uid, tag).Error; err != nil {
 				return err
 			}
 			_ = db.WithContext(ctx).Exec(`
 				DELETE FROM user_tag_ac WHERE user_id = ? AND tag = ? AND count <= 0
 			`, uid, tag).Error
 		}
-		if err := IncUserTagAC(ctx, db, uid, added); err != nil {
+		if err := IncUserTagAC(ctx, db, uid, added, w); err != nil {
 			return err
 		}
 	}
@@ -147,45 +168,49 @@ func IncUserTagACForFirstProblemAC(ctx context.Context, db *gorm.DB, userID int6
 		return nil
 	}
 	var p model.Problem
-	if err := db.WithContext(ctx).Select("id", "tags", "status").First(&p, problemID).Error; err != nil {
+	if err := db.WithContext(ctx).Select("id", "tags", "difficulty", "status").First(&p, problemID).Error; err != nil {
 		return nil // 题不存在则跳过
 	}
 	tags := NormalizeTags([]string(p.Tags))
 	if len(tags) == 0 {
 		return nil
 	}
-	return IncUserTagAC(ctx, db, userID, tags)
+	return IncUserTagAC(ctx, db, userID, tags, DifficultyWeight(p.Difficulty))
 }
 
 // ListUserTagAC 画像雷达
 func ListUserTagAC(ctx context.Context, db *gorm.DB, userID int64, limit int) ([]struct {
-	Tag   string
-	Count int64
+	Tag    string
+	Count  int64
+	Weight float64
 }, error) {
 	if limit <= 0 {
 		limit = 20
 	}
 	type row struct {
-		Tag   string
-		Count int64
+		Tag    string
+		Count  int64
+		Weight float64
 	}
 	var rows []row
 	err := db.WithContext(ctx).
 		Model(&model.UserTagAC{}).
-		Select("tag, count").
+		Select("tag, count, weight").
 		Where("user_id = ? AND count > 0", userID).
 		Order("count DESC, tag ASC").
 		Limit(limit).
 		Find(&rows).Error
 	out := make([]struct {
-		Tag   string
-		Count int64
+		Tag    string
+		Count  int64
+		Weight float64
 	}, 0, len(rows))
 	for _, r := range rows {
 		out = append(out, struct {
-			Tag   string
-			Count int64
-		}{r.Tag, r.Count})
+			Tag    string
+			Count  int64
+			Weight float64
+		}{r.Tag, r.Count, r.Weight})
 	}
 	return out, err
 }
@@ -276,30 +301,37 @@ func RebuildUserTagACForUser(ctx context.Context, db *gorm.DB, userID int64) err
 			return err
 		}
 		// 不强制 COMPLETED：人工打标/部分完成态只要 problem_tags 有行即计入
+		// weight = 按 pid 去重后该标签下各题难度权重之和（p:/e: 双分支同题不重复计权）
 		res := tx.Exec(`
-			INSERT INTO user_tag_ac (user_id, tag, count)
-			SELECT user_id, tag, COUNT(DISTINCT pid)::bigint
+			INSERT INTO user_tag_ac (user_id, tag, count, weight)
+			SELECT user_id, tag, COUNT(*)::bigint, ROUND(SUM(weight)::numeric, 2)
 			FROM (
-				SELECT u.user_id AS user_id, pt.tag AS tag, p.id AS pid
-				FROM user_ac_problems u
-				JOIN problems p ON p.id = NULLIF(substring(u.problem_key, 3), '')::bigint
-				JOIN problem_tags pt ON pt.problem_id = p.id
-				WHERE u.user_id = ?
-				  AND u.problem_key LIKE 'p:%'
-				  AND u.problem_key ~ '^p:[0-9]+$'
-				  AND pt.tag IS NOT NULL AND btrim(pt.tag) <> ''
-				UNION ALL
-				SELECT u.user_id, pt.tag, p.id
-				FROM user_ac_problems u
-				JOIN problems p
-				  ON p.platform = split_part(substring(u.problem_key, 3), ':', 1)
-				 AND p.external_id = substring(substring(u.problem_key, 3) FROM position(':' IN substring(u.problem_key, 3)) + 1)
-				 AND p.external_id IS NOT NULL AND btrim(p.external_id) <> ''
-				JOIN problem_tags pt ON pt.problem_id = p.id
-				WHERE u.user_id = ?
-				  AND u.problem_key LIKE 'e:%'
-				  AND pt.tag IS NOT NULL AND btrim(pt.tag) <> ''
-			) t
+				SELECT user_id, tag, pid, MAX(weight) AS weight
+				FROM (
+					SELECT u.user_id AS user_id, pt.tag AS tag, p.id AS pid,
+					       `+model.DifficultyWeightSQL+` AS weight
+					FROM user_ac_problems u
+					JOIN problems p ON p.id = NULLIF(substring(u.problem_key, 3), '')::bigint
+					JOIN problem_tags pt ON pt.problem_id = p.id
+					WHERE u.user_id = ?
+					  AND u.problem_key LIKE 'p:%'
+					  AND u.problem_key ~ '^p:[0-9]+$'
+					  AND pt.tag IS NOT NULL AND btrim(pt.tag) <> ''
+					UNION ALL
+					SELECT u.user_id, pt.tag, p.id,
+					       `+model.DifficultyWeightSQL+` AS weight
+					FROM user_ac_problems u
+					JOIN problems p
+					  ON p.platform = split_part(substring(u.problem_key, 3), ':', 1)
+					 AND p.external_id = substring(substring(u.problem_key, 3) FROM position(':' IN substring(u.problem_key, 3)) + 1)
+					 AND p.external_id IS NOT NULL AND btrim(p.external_id) <> ''
+					JOIN problem_tags pt ON pt.problem_id = p.id
+					WHERE u.user_id = ?
+					  AND u.problem_key LIKE 'e:%'
+					  AND pt.tag IS NOT NULL AND btrim(pt.tag) <> ''
+				) t
+				GROUP BY user_id, tag, pid
+			) g
 			GROUP BY user_id, tag
 		`, userID, userID)
 		return res.Error
