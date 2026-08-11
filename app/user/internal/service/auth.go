@@ -168,6 +168,13 @@ func (s *AuthService) Login(ctx context.Context, req *pb.LoginReq) (*pb.LoginRes
 		u.AdminForceDormant = false
 	}
 
+	// 订阅到期惰性回落：登录时检测，个人题面爬取/AI 开关跟随剩余资格
+	if s.profileDal != nil {
+		if serr := s.profileDal.SyncProblemPipelineOverrides(ctx, int64(u.ID)); serr != nil {
+			log.Warnf("login sync pipeline overrides user=%d: %v", u.ID, serr)
+		}
+	}
+
 	token, err := IssueJWT(s.db, u)
 	if err != nil {
 		res.Success = false

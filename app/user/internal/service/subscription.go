@@ -260,6 +260,10 @@ func (s *SubscriptionService) NotifyHTTP(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	log.Infof("NotifyHTTP 履约成功 order=%s user=%d plan=%s amount=%d", order.OrderNo, order.UserID, order.Plan, order.AmountCents)
+	// 支付开通：同步个人题面爬取/AI 开关（套餐开启对应能力时自动开）
+	if err := s.profileDal.SyncProblemPipelineOverrides(r.Context(), int64(order.UserID)); err != nil {
+		log.Warnf("NotifyHTTP sync pipeline overrides user=%d: %v", order.UserID, err)
+	}
 	writeAck(true)
 }
 
@@ -371,6 +375,10 @@ func (s *SubscriptionService) GrantSubscription(ctx context.Context, req *subscr
 		log.Errorf("GrantSubscription user=%d: %v", uid, err)
 		return &subscription.GrantSubscriptionRes{Code: 1, Message: "赋予失败，请稍后再试"}, nil
 	}
+	// 资格来源变化：同步个人题面爬取/AI 开关（开通 Pro 自动开，无资格自动回落）
+	if err := s.profileDal.SyncProblemPipelineOverrides(ctx, uid); err != nil {
+		log.Warnf("GrantSubscription sync pipeline overrides user=%d: %v", uid, err)
+	}
 	return &subscription.GrantSubscriptionRes{Code: 0, Message: fmt.Sprintf("已赋予 %s 会员 %d 天", tierName(tier), days)}, nil
 }
 
@@ -386,6 +394,10 @@ func (s *SubscriptionService) RevokeSubscription(ctx context.Context, req *subsc
 	if err := s.subDal.Revoke(ctx, uid); err != nil {
 		log.Errorf("RevokeSubscription user=%d: %v", uid, err)
 		return &subscription.RevokeSubscriptionRes{Code: 1, Message: "取消失败，请稍后再试"}, nil
+	}
+	// 资格来源消失：个人题面开关自动回落（跟随剩余组织资格）
+	if err := s.profileDal.SyncProblemPipelineOverrides(ctx, uid); err != nil {
+		log.Warnf("RevokeSubscription sync pipeline overrides user=%d: %v", uid, err)
 	}
 	return &subscription.RevokeSubscriptionRes{Code: 0, Message: "已取消订阅"}, nil
 }

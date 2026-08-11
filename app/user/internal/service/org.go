@@ -17,6 +17,7 @@ import (
 	"cwxu-algo/app/common/rbac"
 	"cwxu-algo/app/common/utils/auth"
 	"cwxu-algo/app/user/internal/data"
+	"cwxu-algo/app/user/internal/data/dal"
 	"cwxu-algo/app/user/internal/data/model"
 
 	"github.com/go-kratos/kratos/v2/log"
@@ -244,6 +245,10 @@ func (s *OrgService) ensureOrgMember(orgID, userID uint, role string, groupID *u
 		s.invalidateOrgMembersCache(orgID)
 		s.invalidateDisplayCache(orgID, userID)
 		syncOrgMemberSystemRole(s.db, orgID, userID)
+		// 加入组织：自动同步个人题面爬取/AI 开关
+		if serr := dal.NewProfileDalRaw(s.db, s.rdb).SyncProblemPipelineOverrides(context.Background(), int64(userID)); serr != nil {
+			log.Errorf("org ensure member sync pipeline overrides user=%d: %v", userID, serr)
+		}
 	}
 	return err
 }
@@ -361,6 +366,10 @@ func (s *OrgService) addOrgMemberAtomic(orgID, userID uint, role, displayName st
 		s.invalidateOrgMembersCache(orgID)
 		s.invalidateDisplayCache(orgID, userID)
 		syncOrgMemberSystemRole(s.db, orgID, userID)
+		// 加入组织：自动同步个人题面爬取/AI 开关（组织开启对应功能时自动开）
+		if serr := dal.NewProfileDalRaw(s.db, s.rdb).SyncProblemPipelineOverrides(context.Background(), int64(userID)); serr != nil {
+			log.Errorf("org join sync pipeline overrides user=%d: %v", userID, serr)
+		}
 	}
 	return err
 }
@@ -1091,6 +1100,10 @@ func (s *OrgService) Leave(ctx context.Context, req *orgpb.LeaveReq) (*orgpb.Lea
 	}
 	s.invalidateOrgMembersCache(orgID)
 	s.invalidateDisplayCache(orgID, pd.UserID)
+	// 退出组织：自动回落个人题面爬取/AI 开关（跟随剩余资格）
+	if serr := dal.NewProfileDalRaw(s.db, s.rdb).SyncProblemPipelineOverrides(context.Background(), int64(pd.UserID)); serr != nil {
+		log.Errorf("org leave sync pipeline overrides user=%d: %v", pd.UserID, serr)
+	}
 	// membership 已删 → 清除该组织全部角色指派（含自定义）
 	syncOrgMemberSystemRole(s.db, orgID, pd.UserID)
 	// 若当前组织是离开的组织，切回公共域
@@ -1776,6 +1789,10 @@ func (s *OrgService) RemoveMember(ctx context.Context, req *orgpb.RemoveMemberRe
 	syncOrgMemberSystemRole(s.db, orgID, userID)
 	// 若被移出的是其默认组织，回落公共域
 	s.fallbackDefaultOrgIf(userID, orgID)
+	// 移除成员：自动回落个人题面爬取/AI 开关（跟随剩余资格）
+	if serr := dal.NewProfileDalRaw(s.db, s.rdb).SyncProblemPipelineOverrides(context.Background(), int64(userID)); serr != nil {
+		log.Errorf("org remove member sync pipeline overrides user=%d: %v", userID, serr)
+	}
 	return &orgpb.RemoveMemberRes{Code: 0, Message: "已移除成员"}, nil
 }
 

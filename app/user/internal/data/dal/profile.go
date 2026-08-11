@@ -29,6 +29,11 @@ func NewProfileDal(data *data.Data) *ProfileDal {
 	return &ProfileDal{db: data.DB, rdb: data.RDB}
 }
 
+// NewProfileDalRaw 用裸 db/rdb 构造（服务内临时使用，如组织加入/退出同步资格）
+func NewProfileDalRaw(db *gorm.DB, rdb *redis.Client) *ProfileDal {
+	return &ProfileDal{db: db, rdb: rdb}
+}
+
 // GetById 根据Id获取用户详细信息
 func (d *ProfileDal) GetById(ctx context.Context, userId int64) (*model.User, error) {
 	cacheKey := fmt.Sprintf("user:%d:profile", userId)
@@ -892,6 +897,82 @@ func (d *ProfileDal) SetSyncIntervalOverrides(ctx context.Context, userID int64,
 			Where("id = ?", userID).
 			Updates(updates).Error
 	})
+}
+
+// SyncProblemPipelineOverrides 按当前资格来源重算个人题面开关（资格镜像）：
+//   - 有资格（Pro 订阅 active 且套餐开启 或 任一非公共域组织开启对应功能）→ 写 true（自动开）
+//   - 无资格 → 写 null（回落组织默认；公共域=关）
+//
+// 在资格变化入口调用：订阅开通/支付履约/到期回落、加入组织、退出组织。
+// 注意：这会覆盖站管手动设置的个人开关（遵循「资格自动跟随」语义）。
+func (d *ProfileDal) SyncProblemPipelineOverrides(ctx context.Context, userID int64) error {
+	if userID <= 0 {
+		return nil
+	}
+	// 1) Pro 订阅 active 且套餐开启对应能力（rdb nil 时跳过缓存直接查表，测试/容错）
+	fetchFromSub, aiFromSub := false, false
+	if d.rdb == nil {
+		var plan model.SubscriptionPlan
+		if err := d.db.WithContext(ctx).Where("plan = ?", "pro").First(&plan).Error; err == nil {
+			fetchFromSub, aiFromSub = plan.EnableFetchProblem, plan.EnableAiAnalyze
+		}
+	} else if plan, err := d.PlanByTier(ctx, "pro"); err == nil && plan != nil {
+		fetchFromSub, aiFromSub = plan.EnableFetchProblem, plan.EnableAiAnalyze
+	}
+	subActive := false
+	var u struct {
+		SubTier     string
+		SubExpireAt *time.Time
+	}
+	if err := d.db.WithContext(ctx).Model(&model.User{}).
+		Select("sub_tier, sub_expire_at").
+		Where("id = ?", userID).Scan(&u).Error; err != nil {
+		return err
+	}
+	if strings.TrimSpace(u.SubTier) != "" &&
+		(u.SubExpireAt == nil || u.SubExpireAt.After(time.Now())) {
+		subActive = true
+	}
+
+	// 2) 任一非公共域组织开启对应功能
+	fetchFromOrg, aiFromOrg := false, false
+	var orgCount struct {
+		Fetch int64
+		Ai    int64
+	}
+	_ = d.db.WithContext(ctx).
+		Table("org_members AS m").
+		Joins("JOIN orgs o ON o.id = m.org_id").
+		Select("COUNT(*) FILTER (WHERE o.enable_fetch_problem) AS fetch, COUNT(*) FILTER (WHERE o.enable_ai_analyze) AS ai").
+		Where("m.user_id = ? AND o.slug <> ? AND COALESCE(o.is_system, false) = false", userID, model.PublicOrgSlug).
+		Scan(&orgCount).Error
+	fetchFromOrg = orgCount.Fetch > 0
+	aiFromOrg = orgCount.Ai > 0
+
+	updates := map[string]interface{}{}
+	fetchOn := subActive && fetchFromSub || fetchFromOrg
+	aiOn := subActive && aiFromSub || aiFromOrg
+	if fetchOn {
+		updates["problem_fetch_enabled"] = true
+	} else {
+		updates["problem_fetch_enabled"] = nil
+	}
+	if aiOn {
+		updates["problem_ai_enabled"] = true
+	} else {
+		updates["problem_ai_enabled"] = nil
+	}
+	err := d.db.WithContext(ctx).Model(&model.User{}).
+		Where("id = ?", userID).
+		Updates(updates).Error
+	if err != nil {
+		return err
+	}
+	if d.rdb != nil {
+		cacheKey := fmt.Sprintf("user:%d:profile", userID)
+		_ = d.rdb.Del(ctx, cacheKey)
+	}
+	return nil
 }
 
 // DefaultRefreshQuota 每日手动刷新做题记录全局默认次数（与 core_data RefreshSpider 保持一致）
