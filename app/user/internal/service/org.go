@@ -915,6 +915,16 @@ func (s *OrgService) Update(ctx context.Context, req *orgpb.UpdateReq) (*orgpb.U
 	if req.EnableAiWeeklyEmail != nil && !*req.EnableAiWeeklyEmail {
 		s.forceOffWeeklyEmailWithoutOrgGrant(orgID)
 	}
+	// 题面爬取/AI 组织开关变更：旗下成员资格批量重查（清残留个人覆盖，跟随新组织状态）
+	if req.EnableFetchProblem != nil || req.EnableAiAnalyze != nil {
+		var memberIDs []int64
+		_ = s.db.Model(&model.OrgMember{}).Where("org_id = ?", orgID).Pluck("user_id", &memberIDs).Error
+		if len(memberIDs) > 0 {
+			if _, serr := dal.NewProfileDalRaw(s.db, s.rdb).SyncProblemPipelineOverridesBatch(ctx, memberIDs); serr != nil {
+				log.Errorf("org policy change sync pipeline overrides org=%d: %v", orgID, serr)
+			}
+		}
+	}
 	_ = s.db.First(&o, orgID)
 	return &orgpb.UpdateRes{
 		Code: 0, Message: "success", Data: s.toOrgInfo(&o, siteAdmin || canInfo || canToggle),

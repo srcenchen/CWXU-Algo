@@ -122,3 +122,107 @@ func TestSyncProblemPipelineOverrides(t *testing.T) {
 		t.Fatalf("退出组织应回落 null, got fetch=%v ai=%v", a.ProblemFetchEnabled, a.ProblemAIEnabled)
 	}
 }
+
+// TestSyncProblemPipelineOverridesBatch 批量版本：
+// - 组织开关从开变关后，成员残留的 true 覆盖被清掉（回落）
+// - Pro 订阅过期后批量回落
+func TestSyncProblemPipelineOverridesBatch(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	if err := db.AutoMigrate(&model.User{}, &model.Org{}, &model.OrgMember{}, &model.SubscriptionPlan{}); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	d := &ProfileDal{db: db}
+	ctx := context.Background()
+
+	if err := db.Create(&model.SubscriptionPlan{
+		Plan: "pro", Days: 30, SyncIntervalMin: 60,
+		EnableFetchProblem: true, EnableAiAnalyze: true, Enabled: true,
+	}).Error; err != nil {
+		t.Fatalf("seed plan: %v", err)
+	}
+	pub := model.Org{Name: "公共域", Slug: "public", IsSystem: true, Status: "active", InviteCode: "PUB1"}
+	if err := db.Create(&pub).Error; err != nil {
+		t.Fatalf("seed public org: %v", err)
+	}
+	org := model.Org{Name: "校队", Slug: "team-org", Status: "active", InviteCode: "TEAM1", EnableFetchProblem: true, EnableAiAnalyze: true}
+	if err := db.Create(&org).Error; err != nil {
+		t.Fatalf("seed org: %v", err)
+	}
+	// 两个成员：A 仅组织资格；B 组织 + Pro
+	uA := model.User{Username: "user-a", Name: "A", Email: "a@test.dev"}
+	uB := model.User{Username: "user-b", Name: "B", Email: "b@test.dev"}
+	if err := db.Create(&uA).Error; err != nil {
+		t.Fatalf("seed A: %v", err)
+	}
+	if err := db.Create(&uB).Error; err != nil {
+		t.Fatalf("seed B: %v", err)
+	}
+	for _, u := range []model.User{uA, uB} {
+		if err := db.Create(&model.OrgMember{OrgID: org.ID, UserID: u.ID}).Error; err != nil {
+			t.Fatalf("seed membership: %v", err)
+		}
+	}
+	if err := db.Create(&model.OrgMember{OrgID: pub.ID, UserID: uA.ID}).Error; err != nil {
+		t.Fatalf("seed pub membership: %v", err)
+	}
+	if err := db.Model(&model.User{}).Where("id = ?", uB.ID).Updates(map[string]interface{}{
+		"sub_tier": "pro", "sub_expire_at": time.Now().Add(30 * 24 * time.Hour),
+	}).Error; err != nil {
+		t.Fatalf("grant B pro: %v", err)
+	}
+
+	// 加入组织时自动开（模拟单用户同步）
+	for _, uid := range []int64{int64(uA.ID), int64(uB.ID)} {
+		if err := d.SyncProblemPipelineOverrides(ctx, uid); err != nil {
+			t.Fatalf("sync join uid=%d: %v", uid, err)
+		}
+	}
+	var a, b model.User
+	db.First(&a, uA.ID)
+	db.First(&b, uB.ID)
+	if a.ProblemFetchEnabled == nil || !*a.ProblemFetchEnabled || b.ProblemFetchEnabled == nil || !*b.ProblemFetchEnabled {
+		t.Fatalf("组织资格应开 true, A=%v B=%v", a.ProblemFetchEnabled, b.ProblemFetchEnabled)
+	}
+
+	// 组织关闭爬取：成员批量重查 → 残留 true 清掉
+	if err := db.Model(&model.Org{}).Where("id = ?", org.ID).
+		Updates(map[string]interface{}{"enable_fetch_problem": false}).Error; err != nil {
+		t.Fatalf("org fetch off: %v", err)
+	}
+	if _, err := d.SyncProblemPipelineOverridesBatch(ctx, []int64{int64(uA.ID), int64(uB.ID)}); err != nil {
+		t.Fatalf("batch resync: %v", err)
+	}
+	db.First(&a, uA.ID)
+	db.First(&b, uB.ID)
+	// A 无其他资格 → fetch 回落 null；B 有 Pro → fetch 仍 true（订阅资格还在）
+	if a.ProblemFetchEnabled != nil {
+		t.Fatalf("A 组织关爬取应回落 null, got %v", a.ProblemFetchEnabled)
+	}
+	if b.ProblemFetchEnabled == nil || !*b.ProblemFetchEnabled {
+		t.Fatalf("B 有 Pro 应保持 true, got %v", b.ProblemFetchEnabled)
+	}
+	// AI 组织还开着 → 两人 ai 仍 true
+	if a.ProblemAIEnabled == nil || !*a.ProblemAIEnabled {
+		t.Fatalf("A 组织 AI 仍开应 true, got %v", a.ProblemAIEnabled)
+	}
+
+	// 全量批量（定时任务）：B 订阅过期 → 回落；A 无变化
+	if err := db.Model(&model.User{}).Where("id = ?", uB.ID).
+		Update("sub_expire_at", time.Now().Add(-time.Hour)).Error; err != nil {
+		t.Fatalf("expire B: %v", err)
+	}
+	if _, err := d.SyncProblemPipelineOverridesBatch(ctx, nil); err != nil {
+		t.Fatalf("batch full: %v", err)
+	}
+	db.First(&b, uB.ID)
+	// B 过期 + 组织 AI 还开 → ai 仍 true；fetch 组织关了 → 回落 null
+	if b.ProblemFetchEnabled != nil {
+		t.Fatalf("B 过期且组织关爬取应回落 null, got %v", b.ProblemFetchEnabled)
+	}
+	if b.ProblemAIEnabled == nil || !*b.ProblemAIEnabled {
+		t.Fatalf("B 过期但组织 AI 开应 true, got %v", b.ProblemAIEnabled)
+	}
+}

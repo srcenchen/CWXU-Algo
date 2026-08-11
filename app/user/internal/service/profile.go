@@ -649,6 +649,8 @@ func NewProfileService(profileDal *dal.ProfileDal, reg *discovery.Register, prof
 	if d != nil {
 		db = d.DB
 	}
+	// 每日定时：订阅到期 / 资格取消后个人题面开关自动回落
+	startPipelineEligibilitySweep(d)
 	return &ProfileService{
 		profileDal:     profileDal,
 		reg:            reg,

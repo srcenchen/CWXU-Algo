@@ -975,6 +975,45 @@ func (d *ProfileDal) SyncProblemPipelineOverrides(ctx context.Context, userID in
 	return nil
 }
 
+// SyncProblemPipelineOverridesBatch 批量按资格重算个人题面开关（资格镜像）。
+// 逻辑与单用户版一致，但用一条 UPDATE 完成：
+//   - 有资格（Pro active 且套餐开启 / 任一非公共域组织开启）→ problem_*_enabled = true
+//   - 无资格 → null（回落组织默认；公共域=关）
+//
+// userIDs 为空时全表扫描（每日定时到期回落用）。
+func (d *ProfileDal) SyncProblemPipelineOverridesBatch(ctx context.Context, userIDs []int64) (int64, error) {
+	q := d.db.WithContext(ctx).Model(&model.User{})
+	// 限定范围：指定用户；空=全量（每日定时到期回落兜底扫描）
+	if len(userIDs) > 0 {
+		q = q.Where("id IN ?", userIDs)
+	} else {
+		// 全量扫描仅需要处理「覆盖非空」或「订阅已过期但覆盖仍开着」的行；
+		// 资格来源不变的行 UPDATE 是幂等的，直接全量也可，但缩范围省 IO。
+		q = q.Where(`problem_fetch_enabled IS NOT NULL OR problem_ai_enabled IS NOT NULL
+			OR (sub_tier <> '' AND sub_expire_at IS NOT NULL AND sub_expire_at <= ?)`, time.Now())
+	}
+	res := q.Updates(map[string]interface{}{
+		"problem_fetch_enabled": gorm.Expr(`CASE WHEN (
+				(sub_tier = 'pro' AND (sub_expire_at IS NULL OR sub_expire_at > ?)
+					AND EXISTS (SELECT 1 FROM subscription_plans p WHERE p.plan = 'pro' AND p.enable_fetch_problem))
+				OR EXISTS (SELECT 1 FROM org_members m JOIN orgs o ON o.id = m.org_id
+					WHERE m.user_id = users.id AND o.slug <> ? AND COALESCE(o.is_system, false) = false
+					AND o.enable_fetch_problem)
+			) THEN true ELSE NULL END`, time.Now(), model.PublicOrgSlug),
+		"problem_ai_enabled": gorm.Expr(`CASE WHEN (
+				(sub_tier = 'pro' AND (sub_expire_at IS NULL OR sub_expire_at > ?)
+					AND EXISTS (SELECT 1 FROM subscription_plans p WHERE p.plan = 'pro' AND p.enable_ai_analyze))
+				OR EXISTS (SELECT 1 FROM org_members m JOIN orgs o ON o.id = m.org_id
+					WHERE m.user_id = users.id AND o.slug <> ? AND COALESCE(o.is_system, false) = false
+					AND o.enable_ai_analyze)
+			) THEN true ELSE NULL END`, time.Now(), model.PublicOrgSlug),
+	})
+	if res.Error != nil {
+		return 0, res.Error
+	}
+	return res.RowsAffected, nil
+}
+
 // DefaultRefreshQuota 每日手动刷新做题记录全局默认次数（与 core_data RefreshSpider 保持一致）
 const DefaultRefreshQuota = 2
 
