@@ -226,3 +226,83 @@ func TestSyncProblemPipelineOverridesBatch(t *testing.T) {
 		t.Fatalf("B 过期但组织 AI 开应 true, got %v", b.ProblemAIEnabled)
 	}
 }
+
+// TestGetProblemPipelineUserIdsOverride 回归：个人覆盖(true)必须被 GetProblemPipelineUserIds
+// 纳入名单（overrideRow Scan 列映射缺失曾导致覆盖用户不进流水线）。
+func TestGetProblemPipelineUserIdsOverride(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	if err := db.AutoMigrate(&model.User{}, &model.Org{}, &model.OrgMember{}, &model.SubscriptionPlan{}); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	d := &ProfileDal{db: db}
+	ctx := context.Background()
+
+	pub := model.Org{Name: "公共域", Slug: "public", IsSystem: true, Status: "active", InviteCode: "PUB2"}
+	if err := db.Create(&pub).Error; err != nil {
+		t.Fatalf("seed public org: %v", err)
+	}
+	// 用户 A：公共域 + 个人覆盖 true（站管强制开）
+	uA := model.User{Username: "user-a", Name: "A", Email: "a@test.dev"}
+	if err := db.Create(&uA).Error; err != nil {
+		t.Fatalf("seed A: %v", err)
+	}
+	on := true
+	if err := db.Model(&model.User{}).Where("id = ?", uA.ID).
+		Updates(map[string]interface{}{"problem_fetch_enabled": true, "problem_ai_enabled": true}).Error; err != nil {
+		t.Fatalf("set override on: %v", err)
+	}
+	// 用户 B：公共域 + 个人覆盖 false（站管强制关）
+	uB := model.User{Username: "user-b", Name: "B", Email: "b@test.dev"}
+	if err := db.Create(&uB).Error; err != nil {
+		t.Fatalf("seed B: %v", err)
+	}
+	if err := db.Model(&model.User{}).Where("id = ?", uB.ID).
+		Updates(map[string]interface{}{"problem_fetch_enabled": false, "problem_ai_enabled": false}).Error; err != nil {
+		t.Fatalf("set override off: %v", err)
+	}
+	// 用户 C：公共域 + Pro（套餐开启能力）
+	uC := model.User{Username: "user-c", Name: "C", Email: "c@test.dev"}
+	if err := db.Create(&uC).Error; err != nil {
+		t.Fatalf("seed C: %v", err)
+	}
+	if err := db.Create(&model.SubscriptionPlan{
+		Plan: "pro", Days: 30, SyncIntervalMin: 60,
+		EnableFetchProblem: true, EnableAiAnalyze: true, Enabled: true,
+	}).Error; err != nil {
+		t.Fatalf("seed plan: %v", err)
+	}
+	if err := db.Model(&model.User{}).Where("id = ?", uC.ID).Updates(map[string]interface{}{
+		"sub_tier": "pro", "sub_expire_at": time.Now().Add(30 * 24 * time.Hour),
+	}).Error; err != nil {
+		t.Fatalf("grant C pro: %v", err)
+	}
+
+	fetchIDs, aiIDs, err := d.GetProblemPipelineUserIds(ctx)
+	if err != nil {
+		t.Fatalf("pipeline: %v", err)
+	}
+	f := map[int64]bool{}
+	a := map[int64]bool{}
+	for _, id := range fetchIDs {
+		f[id] = true
+	}
+	for _, id := range aiIDs {
+		a[id] = true
+	}
+	if !f[int64(uA.ID)] {
+		t.Fatalf("个人覆盖 true 应进 fetch 名单 (A=%d), got %v", uA.ID, f)
+	}
+	if f[int64(uB.ID)] {
+		t.Fatalf("个人覆盖 false 不应进 fetch 名单 (B=%d)", uB.ID)
+	}
+	if !f[int64(uC.ID)] {
+		t.Fatalf("Pro 订阅应进 fetch 名单 (C=%d)", uC.ID)
+	}
+	if !a[int64(uA.ID)] || a[int64(uB.ID)] || !a[int64(uC.ID)] {
+		t.Fatalf("ai 名单异常: A=%v B=%v C=%v", a[int64(uA.ID)], a[int64(uB.ID)], a[int64(uC.ID)])
+	}
+	_ = on
+}

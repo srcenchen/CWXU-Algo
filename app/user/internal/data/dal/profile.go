@@ -768,9 +768,9 @@ func (d *ProfileDal) GetProblemPipelineUserIds(ctx context.Context) (fetchIDs, a
 		aiOrgSet[id] = struct{}{}
 	}
 	type overrideRow struct {
-		ID                  int64
-		ProblemFetchEnabled *bool
-		ProblemAIEnabled    *bool
+		ID                  int64 `gorm:"column:id"`
+		ProblemFetchEnabled *bool `gorm:"column:problem_fetch_enabled"`
+		ProblemAIEnabled    *bool `gorm:"column:problem_ai_enabled"`
 	}
 	var rows []overrideRow
 	// 只拉有覆盖的用户 + 组织用户（组织用户也需读覆盖）
@@ -821,19 +821,28 @@ func (d *ProfileDal) GetProblemPipelineUserIds(ctx context.Context) (fetchIDs, a
 		aiSet[id] = struct{}{}
 	}
 	// 追加 C 端 Pro 订阅用户（套餐开启对应能力时加入名单；过期用户已被惰性过滤）
-	if plan, err := d.PlanByTier(ctx, "pro"); err == nil && plan != nil {
+	var proPlan *model.SubscriptionPlan
+	if d.rdb == nil {
+		var p model.SubscriptionPlan
+		if err := d.db.WithContext(ctx).Where("plan = ?", "pro").First(&p).Error; err == nil {
+			proPlan = &p
+		}
+	} else if p, err := d.PlanByTier(ctx, "pro"); err == nil {
+		proPlan = p
+	}
+	if proPlan != nil {
 		var proIDs []int64
 		if qerr := d.db.WithContext(ctx).Model(&model.User{}).
 			Where("sub_tier = ? AND (sub_expire_at IS NULL OR sub_expire_at > ?)", "pro", time.Now()).
 			Pluck("id", &proIDs).Error; qerr == nil {
-			if plan.EnableFetchProblem {
+			if proPlan.EnableFetchProblem {
 				for _, id := range proIDs {
 					if _, off := fetchOff[id]; !off {
 						fetchSet[id] = struct{}{}
 					}
 				}
 			}
-			if plan.EnableAiAnalyze {
+			if proPlan.EnableAiAnalyze {
 				for _, id := range proIDs {
 					if _, off := aiOff[id]; !off {
 						aiSet[id] = struct{}{}
