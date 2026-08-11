@@ -13000,6 +13000,9 @@ components:
                 source:
                     type: string
                     description: payfm|manager
+                avatar:
+                    type: string
+                    description: 头像（已扩展为完整 URL；空=未设置）
         api.user.v1.subscription.UpdatePlansReq:
             type: object
             properties:

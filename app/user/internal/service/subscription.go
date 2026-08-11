@@ -413,6 +413,7 @@ func (s *SubscriptionService) ListSubscriptions(ctx context.Context, req *subscr
 		return nil, errors.InternalServer("内部错误", err.Error())
 	}
 	res := &subscription.ListSubscriptionsRes{Code: 0, Message: "success", List: make([]*subscription.SubUser, 0, len(users)), Total: total}
+	avatarBase := avatarPublicBase(s.data.DB)
 	for _, u := range users {
 		var expireAt int64
 		if u.SubExpireAt != nil {
@@ -422,6 +423,7 @@ func (s *SubscriptionService) ListSubscriptions(ctx context.Context, req *subscr
 			UserId:   int64(u.ID),
 			Username: u.Username,
 			Name:     u.Name,
+			Avatar:   expandAvatarBase(avatarBase, u.Avatar),
 			Tier:     u.SubTier,
 			ExpireAt: expireAt,
 			Source:   u.SubSource,

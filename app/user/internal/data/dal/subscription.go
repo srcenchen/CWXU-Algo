@@ -255,7 +255,7 @@ func (d *SubscriptionDal) ListSubscriptions(ctx context.Context, page, pageSize 
 		return nil, 0, err
 	}
 	var users []model.User
-	err := q.Select("id, username, name, sub_tier, sub_expire_at, sub_source").
+	err := q.Select("id, username, name, avatar, sub_tier, sub_expire_at, sub_source").
 		Order("sub_expire_at DESC NULLS LAST, id DESC").
 		Offset(int((page - 1) * pageSize)).Limit(int(pageSize)).
 		Find(&users).Error

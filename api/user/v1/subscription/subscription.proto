@@ -198,6 +198,8 @@ message SubUser {
   int64 expireAt = 5;
   // payfm|manager
   string source = 6;
+  // 头像（已扩展为完整 URL；空=未设置）
+  string avatar = 7;
 }
 
 message UpdatePlansReq {

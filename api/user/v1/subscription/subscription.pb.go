@@ -980,7 +980,9 @@ type SubUser struct {
 	// 到期时间（unix 秒；0=长期）
 	ExpireAt int64 `protobuf:"varint,5,opt,name=expireAt,proto3" json:"expireAt,omitempty"`
 	// payfm|manager
-	Source        string `protobuf:"bytes,6,opt,name=source,proto3" json:"source,omitempty"`
+	Source string `protobuf:"bytes,6,opt,name=source,proto3" json:"source,omitempty"`
+	// 头像（已扩展为完整 URL；空=未设置）
+	Avatar        string `protobuf:"bytes,7,opt,name=avatar,proto3" json:"avatar,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1053,6 +1055,13 @@ func (x *SubUser) GetExpireAt() int64 {
 func (x *SubUser) GetSource() string {
 	if x != nil {
 		return x.Source
+	}
+	return ""
+}
+
+func (x *SubUser) GetAvatar() string {
+	if x != nil {
+		return x.Avatar
 	}
 	return ""
 }
@@ -1456,14 +1465,15 @@ const file_user_v1_subscription_subscription_proto_rawDesc = "" +
 	"\x04code\x18\x01 \x01(\x03R\x04code\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x125\n" +
 	"\x04list\x18\x03 \x03(\v2!.api.user.v1.subscription.SubUserR\x04list\x12\x14\n" +
-	"\x05total\x18\x04 \x01(\x03R\x05total\"\x99\x01\n" +
+	"\x05total\x18\x04 \x01(\x03R\x05total\"\xb1\x01\n" +
 	"\aSubUser\x12\x16\n" +
 	"\x06userId\x18\x01 \x01(\x03R\x06userId\x12\x1a\n" +
 	"\busername\x18\x02 \x01(\tR\busername\x12\x12\n" +
 	"\x04name\x18\x03 \x01(\tR\x04name\x12\x12\n" +
 	"\x04tier\x18\x04 \x01(\tR\x04tier\x12\x1a\n" +
 	"\bexpireAt\x18\x05 \x01(\x03R\bexpireAt\x12\x16\n" +
-	"\x06source\x18\x06 \x01(\tR\x06source\"F\n" +
+	"\x06source\x18\x06 \x01(\tR\x06source\x12\x16\n" +
+	"\x06avatar\x18\a \x01(\tR\x06avatar\"F\n" +
 	"\x0eUpdatePlansReq\x124\n" +
 	"\x05plans\x18\x01 \x03(\v2\x1e.api.user.v1.subscription.PlanR\x05plans\">\n" +
 	"\x0eUpdatePlansRes\x12\x12\n" +
