@@ -1864,7 +1864,9 @@ func (x *RefreshSpiderRes) GetRemaining() int32 {
 }
 
 type RefreshSpiderStatusReq struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// 目标用户 id；0=当前登录用户（站管可传任意 userId 查询他人）
+	UserId        int64 `protobuf:"varint,1,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1897,6 +1899,13 @@ func (x *RefreshSpiderStatusReq) ProtoReflect() protoreflect.Message {
 // Deprecated: Use RefreshSpiderStatusReq.ProtoReflect.Descriptor instead.
 func (*RefreshSpiderStatusReq) Descriptor() ([]byte, []int) {
 	return file_core_v1_spider_spider_proto_rawDescGZIP(), []int{30}
+}
+
+func (x *RefreshSpiderStatusReq) GetUserId() int64 {
+	if x != nil {
+		return x.UserId
+	}
+	return 0
 }
 
 type RefreshSpiderStatusRes struct {
@@ -2240,8 +2249,9 @@ const file_core_v1_spider_spider_proto_rawDesc = "" +
 	"\x10RefreshSpiderRes\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\x03R\x04code\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12\x1c\n" +
-	"\tremaining\x18\x03 \x01(\x05R\tremaining\"\x18\n" +
-	"\x16RefreshSpiderStatusReq\"\xd2\x01\n" +
+	"\tremaining\x18\x03 \x01(\x05R\tremaining\"1\n" +
+	"\x16RefreshSpiderStatusReq\x12\x17\n" +
+	"\auser_id\x18\x01 \x01(\x03R\x06userId\"\xd2\x01\n" +
 	"\x16RefreshSpiderStatusRes\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\x03R\x04code\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12\x14\n" +

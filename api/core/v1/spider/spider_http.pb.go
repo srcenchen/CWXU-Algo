@@ -41,7 +41,8 @@ type SpiderHTTPServer interface {
 	PurgeSubmitsAndRecrawl(context.Context, *PurgeSubmitsAndRecrawlReq) (*PurgeSubmitsAndRecrawlRes, error)
 	// RefreshSpider 用户：手动增量刷新自己的 OJ 做题记录（每日限 2 次；返回剩余次数）
 	RefreshSpider(context.Context, *RefreshSpiderReq) (*RefreshSpiderRes, error)
-	// RefreshSpiderStatus 用户：查询今日手动刷新做题记录状态（配额 / 剩余 / 冷却；只读）
+	// RefreshSpiderStatus 查询今日手动刷新做题记录状态（配额 / 剩余 / 冷却 / 生效间隔；只读）。
+	// userId=0 查询自己；站点管理员可传 userId 查询任意用户。
 	RefreshSpiderStatus(context.Context, *RefreshSpiderStatusReq) (*RefreshSpiderStatusRes, error)
 	// RepairContestCells 站管：幂等修复 AtCoder 赛时提交明细相关脏数据（external_id / 赛后练习格 / relative_sec）
 	RepairContestCells(context.Context, *RepairContestCellsReq) (*RepairContestCellsRes, error)
@@ -335,7 +336,8 @@ type SpiderHTTPClient interface {
 	PurgeSubmitsAndRecrawl(ctx context.Context, req *PurgeSubmitsAndRecrawlReq, opts ...http.CallOption) (rsp *PurgeSubmitsAndRecrawlRes, err error)
 	// RefreshSpider 用户：手动增量刷新自己的 OJ 做题记录（每日限 2 次；返回剩余次数）
 	RefreshSpider(ctx context.Context, req *RefreshSpiderReq, opts ...http.CallOption) (rsp *RefreshSpiderRes, err error)
-	// RefreshSpiderStatus 用户：查询今日手动刷新做题记录状态（配额 / 剩余 / 冷却；只读）
+	// RefreshSpiderStatus 查询今日手动刷新做题记录状态（配额 / 剩余 / 冷却 / 生效间隔；只读）。
+	// userId=0 查询自己；站点管理员可传 userId 查询任意用户。
 	RefreshSpiderStatus(ctx context.Context, req *RefreshSpiderStatusReq, opts ...http.CallOption) (rsp *RefreshSpiderStatusRes, err error)
 	// RepairContestCells 站管：幂等修复 AtCoder 赛时提交明细相关脏数据（external_id / 赛后练习格 / relative_sec）
 	RepairContestCells(ctx context.Context, req *RepairContestCellsReq, opts ...http.CallOption) (rsp *RepairContestCellsRes, err error)
@@ -416,7 +418,8 @@ func (c *SpiderHTTPClientImpl) RefreshSpider(ctx context.Context, in *RefreshSpi
 	return &out, nil
 }
 
-// RefreshSpiderStatus 用户：查询今日手动刷新做题记录状态（配额 / 剩余 / 冷却；只读）
+// RefreshSpiderStatus 查询今日手动刷新做题记录状态（配额 / 剩余 / 冷却 / 生效间隔；只读）。
+// userId=0 查询自己；站点管理员可传 userId 查询任意用户。
 func (c *SpiderHTTPClientImpl) RefreshSpiderStatus(ctx context.Context, in *RefreshSpiderStatusReq, opts ...http.CallOption) (*RefreshSpiderStatusRes, error) {
 	var out RefreshSpiderStatusRes
 	pattern := "/v1/core/spider/refresh-status"

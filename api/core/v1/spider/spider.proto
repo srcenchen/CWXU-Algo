@@ -86,7 +86,8 @@ service Spider {
       body: "*"
     };
   }
-  // 用户：查询今日手动刷新做题记录状态（配额 / 剩余 / 冷却；只读）
+  // 查询今日手动刷新做题记录状态（配额 / 剩余 / 冷却 / 生效间隔；只读）。
+  // userId=0 查询自己；站点管理员可传 userId 查询任意用户。
   rpc RefreshSpiderStatus (RefreshSpiderStatusReq) returns (RefreshSpiderStatusRes) {
     option (google.api.http) = {
       get: "/v1/core/spider/refresh-status"
@@ -324,7 +325,10 @@ message RefreshSpiderRes {
   int32 remaining = 3;
 }
 
-message RefreshSpiderStatusReq {}
+message RefreshSpiderStatusReq {
+  // 目标用户 id；0=当前登录用户（站管可传任意 userId 查询他人）
+  int64 user_id = 1;
+}
 
 message RefreshSpiderStatusRes {
   int64 code = 1;

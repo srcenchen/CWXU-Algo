@@ -66,7 +66,8 @@ type SpiderClient interface {
 	GetPlatformUsers(ctx context.Context, in *GetPlatformUsersReq, opts ...grpc.CallOption) (*GetPlatformUsersRes, error)
 	// 用户：手动增量刷新自己的 OJ 做题记录（每日限 2 次；返回剩余次数）
 	RefreshSpider(ctx context.Context, in *RefreshSpiderReq, opts ...grpc.CallOption) (*RefreshSpiderRes, error)
-	// 用户：查询今日手动刷新做题记录状态（配额 / 剩余 / 冷却；只读）
+	// 查询今日手动刷新做题记录状态（配额 / 剩余 / 冷却 / 生效间隔；只读）。
+	// userId=0 查询自己；站点管理员可传 userId 查询任意用户。
 	RefreshSpiderStatus(ctx context.Context, in *RefreshSpiderStatusReq, opts ...grpc.CallOption) (*RefreshSpiderStatusRes, error)
 }
 
@@ -258,7 +259,8 @@ type SpiderServer interface {
 	GetPlatformUsers(context.Context, *GetPlatformUsersReq) (*GetPlatformUsersRes, error)
 	// 用户：手动增量刷新自己的 OJ 做题记录（每日限 2 次；返回剩余次数）
 	RefreshSpider(context.Context, *RefreshSpiderReq) (*RefreshSpiderRes, error)
-	// 用户：查询今日手动刷新做题记录状态（配额 / 剩余 / 冷却；只读）
+	// 查询今日手动刷新做题记录状态（配额 / 剩余 / 冷却 / 生效间隔；只读）。
+	// userId=0 查询自己；站点管理员可传 userId 查询任意用户。
 	RefreshSpiderStatus(context.Context, *RefreshSpiderStatusReq) (*RefreshSpiderStatusRes, error)
 	mustEmbedUnimplementedSpiderServer()
 }

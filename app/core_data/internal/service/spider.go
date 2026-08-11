@@ -928,10 +928,17 @@ func (s SpiderService) RefreshSpider(ctx context.Context, _ *spider.RefreshSpide
 
 // RefreshSpiderStatus 查询今日手动刷新做题记录状态（只读）：
 // 有效配额（订阅/站管覆盖合并，失败回落全局默认）、今日剩余次数、5 分钟冷却截止时间。
-func (s SpiderService) RefreshSpiderStatus(ctx context.Context, _ *spider.RefreshSpiderStatusReq) (*spider.RefreshSpiderStatusRes, error) {
-	uid := auth.GetCurrentUserId(ctx)
+// userId=0 查自己；站点管理员可传 userId 查询任意用户。
+func (s SpiderService) RefreshSpiderStatus(ctx context.Context, req *spider.RefreshSpiderStatusReq) (*spider.RefreshSpiderStatusRes, error) {
+	uid := int64(auth.GetCurrentUserId(ctx))
 	if uid == 0 {
 		return &spider.RefreshSpiderStatusRes{Code: 1, Message: "请先登录"}, nil
+	}
+	if req != nil && req.GetUserId() > 0 {
+		if !auth.HasPerm(ctx, rbac.PermSiteUserSync) {
+			return &spider.RefreshSpiderStatusRes{Code: 1, Message: "需要用户同步运维权限"}, nil
+		}
+		uid = req.GetUserId()
 	}
 	if s.rdb == nil {
 		return &spider.RefreshSpiderStatusRes{Code: 1, Message: "服务未就绪，稍后再试"}, nil
