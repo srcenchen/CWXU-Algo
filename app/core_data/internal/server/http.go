@@ -2,6 +2,8 @@ package server
 
 import (
 	"context"
+	"encoding/json"
+	stdhttp "net/http"
 
 	"cwxu-algo/api/core/v1/bulletin"
 	"cwxu-algo/api/core/v1/community"
@@ -113,6 +115,26 @@ func NewHTTPServer(c *conf.Server, logger log.Logger, d *data.Data, submitServic
 	contest_log.RegisterContestHTTPServer(srv, contestLogService)
 	bulletin.RegisterBulletinHTTPServer(srv, bulletinService)
 	problem.RegisterProblemHTTPServer(srv, problemService)
+	// 站管触发：全站仅重建能力画像（不重爬 OJ）。HandleFunc 不走 selector 中间件，
+	// auth.VerifySiteAdmin 会自行解析 Authorization JWT 校验站管身份。
+	srv.HandleFunc("/v1/core/problem/rebuild-profiles", func(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+		if r.Method != stdhttp.MethodPost {
+			w.Header().Set("Allow", stdhttp.MethodPost)
+			stdhttp.Error(w, "method not allowed", stdhttp.StatusMethodNotAllowed)
+			return
+		}
+		candidates, published, unauthorized := problemService.RebuildAllProfiles(r.Context())
+		w.Header().Set("Content-Type", "application/json")
+		if unauthorized {
+			w.WriteHeader(stdhttp.StatusForbidden)
+			_ = json.NewEncoder(w).Encode(map[string]any{"code": 1, "message": "仅站点管理员可操作"})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"code": 0, "message": "success",
+			"candidates": candidates, "published": published,
+		})
+	})
 	emergency.RegisterEmergencyHTTPServer(srv, emergencyService)
 	contest_calendar.RegisterContestCalendarHTTPServer(srv, contestCalendarService)
 	community.RegisterCommunityHTTPServer(srv, communityService)

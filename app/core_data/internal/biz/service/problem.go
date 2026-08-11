@@ -110,6 +110,23 @@ func (uc *ProblemUseCase) BindSubmitsAfterSpider(userId int64) {
 	uc.EnqueueUserProfileRebuild(userId)
 }
 
+// RebuildAllUserProfiles 全站「仅重建画像」：对有 AC 的用户强制入队画像重建
+// （队列内 RebuildUserTagAC 重算难度加权 weight，不重新爬取 OJ 提交）。
+// 用于能力雷达评分模型升级后的一次性回填，或站管手动触发。
+func (uc *ProblemUseCase) RebuildAllUserProfiles() (candidates, published int) {
+	if uc.data == nil || uc.data.DB == nil || uc.profileTask == nil {
+		return 0, 0
+	}
+	var userIDs []int64
+	if err := uc.data.DB.Model(&model.UserACProblem{}).Distinct("user_id").Pluck("user_id", &userIDs).Error; err != nil {
+		log.Errorf("RebuildAllUserProfiles: pluck users: %v", err)
+		return 0, 0
+	}
+	pub, dedup, fail := uc.profileTask.DoBatch(userIDs, true)
+	log.Infof("RebuildAllUserProfiles candidates=%d published=%d dedup=%d failed=%d", len(userIDs), pub, dedup, fail)
+	return len(userIDs), pub
+}
+
 // resolveOne 解析并绑定单条提交；返回 (problem, isNew, err)
 // highPriority=true：增量爬虫路径，MQ 最高优先级
 func (uc *ProblemUseCase) resolveOne(sl *model.SubmitLog, highPriority bool) (*model.Problem, bool, error) {
