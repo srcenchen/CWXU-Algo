@@ -2298,6 +2298,588 @@ func (x *AddMemberRes) GetUserId() int64 {
 	return 0
 }
 
+type InviteUserReq struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	OrgId int64                  `protobuf:"varint,1,opt,name=orgId,proto3" json:"orgId,omitempty"`
+	// 按 userId 或 username 搜索邀请
+	UserId         int64  `protobuf:"varint,2,opt,name=userId,proto3" json:"userId,omitempty"`
+	Username       string `protobuf:"bytes,3,opt,name=username,proto3" json:"username,omitempty"`
+	Role           string `protobuf:"bytes,4,opt,name=role,proto3" json:"role,omitempty"`
+	OrgDisplayName string `protobuf:"bytes,5,opt,name=orgDisplayName,proto3" json:"orgDisplayName,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *InviteUserReq) Reset() {
+	*x = InviteUserReq{}
+	mi := &file_user_v1_org_org_proto_msgTypes[31]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *InviteUserReq) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*InviteUserReq) ProtoMessage() {}
+
+func (x *InviteUserReq) ProtoReflect() protoreflect.Message {
+	mi := &file_user_v1_org_org_proto_msgTypes[31]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use InviteUserReq.ProtoReflect.Descriptor instead.
+func (*InviteUserReq) Descriptor() ([]byte, []int) {
+	return file_user_v1_org_org_proto_rawDescGZIP(), []int{31}
+}
+
+func (x *InviteUserReq) GetOrgId() int64 {
+	if x != nil {
+		return x.OrgId
+	}
+	return 0
+}
+
+func (x *InviteUserReq) GetUserId() int64 {
+	if x != nil {
+		return x.UserId
+	}
+	return 0
+}
+
+func (x *InviteUserReq) GetUsername() string {
+	if x != nil {
+		return x.Username
+	}
+	return ""
+}
+
+func (x *InviteUserReq) GetRole() string {
+	if x != nil {
+		return x.Role
+	}
+	return ""
+}
+
+func (x *InviteUserReq) GetOrgDisplayName() string {
+	if x != nil {
+		return x.OrgDisplayName
+	}
+	return ""
+}
+
+type InviteUserRes struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Code          int32                  `protobuf:"varint,1,opt,name=code,proto3" json:"code,omitempty"`
+	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	InviteId      int64                  `protobuf:"varint,3,opt,name=inviteId,proto3" json:"inviteId,omitempty"`
+	UserId        int64                  `protobuf:"varint,4,opt,name=userId,proto3" json:"userId,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *InviteUserRes) Reset() {
+	*x = InviteUserRes{}
+	mi := &file_user_v1_org_org_proto_msgTypes[32]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *InviteUserRes) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*InviteUserRes) ProtoMessage() {}
+
+func (x *InviteUserRes) ProtoReflect() protoreflect.Message {
+	mi := &file_user_v1_org_org_proto_msgTypes[32]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use InviteUserRes.ProtoReflect.Descriptor instead.
+func (*InviteUserRes) Descriptor() ([]byte, []int) {
+	return file_user_v1_org_org_proto_rawDescGZIP(), []int{32}
+}
+
+func (x *InviteUserRes) GetCode() int32 {
+	if x != nil {
+		return x.Code
+	}
+	return 0
+}
+
+func (x *InviteUserRes) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
+func (x *InviteUserRes) GetInviteId() int64 {
+	if x != nil {
+		return x.InviteId
+	}
+	return 0
+}
+
+func (x *InviteUserRes) GetUserId() int64 {
+	if x != nil {
+		return x.UserId
+	}
+	return 0
+}
+
+type InvitesReq struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// 组织管理员查看本组织未决邀请时传；否则返回我收到的邀请
+	OrgId         int64 `protobuf:"varint,1,opt,name=orgId,proto3" json:"orgId,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *InvitesReq) Reset() {
+	*x = InvitesReq{}
+	mi := &file_user_v1_org_org_proto_msgTypes[33]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *InvitesReq) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*InvitesReq) ProtoMessage() {}
+
+func (x *InvitesReq) ProtoReflect() protoreflect.Message {
+	mi := &file_user_v1_org_org_proto_msgTypes[33]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use InvitesReq.ProtoReflect.Descriptor instead.
+func (*InvitesReq) Descriptor() ([]byte, []int) {
+	return file_user_v1_org_org_proto_rawDescGZIP(), []int{33}
+}
+
+func (x *InvitesReq) GetOrgId() int64 {
+	if x != nil {
+		return x.OrgId
+	}
+	return 0
+}
+
+type OrgInviteInfo struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	Id             int64                  `protobuf:"varint,1,opt,name=id,proto3" json:"id,omitempty"`
+	OrgId          int64                  `protobuf:"varint,2,opt,name=orgId,proto3" json:"orgId,omitempty"`
+	OrgName        string                 `protobuf:"bytes,3,opt,name=orgName,proto3" json:"orgName,omitempty"`
+	UserId         int64                  `protobuf:"varint,4,opt,name=userId,proto3" json:"userId,omitempty"`
+	Username       string                 `protobuf:"bytes,5,opt,name=username,proto3" json:"username,omitempty"`
+	Name           string                 `protobuf:"bytes,6,opt,name=name,proto3" json:"name,omitempty"`
+	InviterId      int64                  `protobuf:"varint,7,opt,name=inviterId,proto3" json:"inviterId,omitempty"`
+	InviterName    string                 `protobuf:"bytes,8,opt,name=inviterName,proto3" json:"inviterName,omitempty"`
+	Role           string                 `protobuf:"bytes,9,opt,name=role,proto3" json:"role,omitempty"`
+	OrgDisplayName string                 `protobuf:"bytes,10,opt,name=orgDisplayName,proto3" json:"orgDisplayName,omitempty"`
+	Status         string                 `protobuf:"bytes,11,opt,name=status,proto3" json:"status,omitempty"`
+	CreatedAt      int64                  `protobuf:"varint,12,opt,name=createdAt,proto3" json:"createdAt,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *OrgInviteInfo) Reset() {
+	*x = OrgInviteInfo{}
+	mi := &file_user_v1_org_org_proto_msgTypes[34]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *OrgInviteInfo) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*OrgInviteInfo) ProtoMessage() {}
+
+func (x *OrgInviteInfo) ProtoReflect() protoreflect.Message {
+	mi := &file_user_v1_org_org_proto_msgTypes[34]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use OrgInviteInfo.ProtoReflect.Descriptor instead.
+func (*OrgInviteInfo) Descriptor() ([]byte, []int) {
+	return file_user_v1_org_org_proto_rawDescGZIP(), []int{34}
+}
+
+func (x *OrgInviteInfo) GetId() int64 {
+	if x != nil {
+		return x.Id
+	}
+	return 0
+}
+
+func (x *OrgInviteInfo) GetOrgId() int64 {
+	if x != nil {
+		return x.OrgId
+	}
+	return 0
+}
+
+func (x *OrgInviteInfo) GetOrgName() string {
+	if x != nil {
+		return x.OrgName
+	}
+	return ""
+}
+
+func (x *OrgInviteInfo) GetUserId() int64 {
+	if x != nil {
+		return x.UserId
+	}
+	return 0
+}
+
+func (x *OrgInviteInfo) GetUsername() string {
+	if x != nil {
+		return x.Username
+	}
+	return ""
+}
+
+func (x *OrgInviteInfo) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *OrgInviteInfo) GetInviterId() int64 {
+	if x != nil {
+		return x.InviterId
+	}
+	return 0
+}
+
+func (x *OrgInviteInfo) GetInviterName() string {
+	if x != nil {
+		return x.InviterName
+	}
+	return ""
+}
+
+func (x *OrgInviteInfo) GetRole() string {
+	if x != nil {
+		return x.Role
+	}
+	return ""
+}
+
+func (x *OrgInviteInfo) GetOrgDisplayName() string {
+	if x != nil {
+		return x.OrgDisplayName
+	}
+	return ""
+}
+
+func (x *OrgInviteInfo) GetStatus() string {
+	if x != nil {
+		return x.Status
+	}
+	return ""
+}
+
+func (x *OrgInviteInfo) GetCreatedAt() int64 {
+	if x != nil {
+		return x.CreatedAt
+	}
+	return 0
+}
+
+type InvitesRes struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Code          int32                  `protobuf:"varint,1,opt,name=code,proto3" json:"code,omitempty"`
+	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	List          []*OrgInviteInfo       `protobuf:"bytes,3,rep,name=list,proto3" json:"list,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *InvitesRes) Reset() {
+	*x = InvitesRes{}
+	mi := &file_user_v1_org_org_proto_msgTypes[35]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *InvitesRes) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*InvitesRes) ProtoMessage() {}
+
+func (x *InvitesRes) ProtoReflect() protoreflect.Message {
+	mi := &file_user_v1_org_org_proto_msgTypes[35]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use InvitesRes.ProtoReflect.Descriptor instead.
+func (*InvitesRes) Descriptor() ([]byte, []int) {
+	return file_user_v1_org_org_proto_rawDescGZIP(), []int{35}
+}
+
+func (x *InvitesRes) GetCode() int32 {
+	if x != nil {
+		return x.Code
+	}
+	return 0
+}
+
+func (x *InvitesRes) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
+func (x *InvitesRes) GetList() []*OrgInviteInfo {
+	if x != nil {
+		return x.List
+	}
+	return nil
+}
+
+type InviteReviewReq struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Id            int64                  `protobuf:"varint,1,opt,name=id,proto3" json:"id,omitempty"`
+	Approve       bool                   `protobuf:"varint,2,opt,name=approve,proto3" json:"approve,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *InviteReviewReq) Reset() {
+	*x = InviteReviewReq{}
+	mi := &file_user_v1_org_org_proto_msgTypes[36]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *InviteReviewReq) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*InviteReviewReq) ProtoMessage() {}
+
+func (x *InviteReviewReq) ProtoReflect() protoreflect.Message {
+	mi := &file_user_v1_org_org_proto_msgTypes[36]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use InviteReviewReq.ProtoReflect.Descriptor instead.
+func (*InviteReviewReq) Descriptor() ([]byte, []int) {
+	return file_user_v1_org_org_proto_rawDescGZIP(), []int{36}
+}
+
+func (x *InviteReviewReq) GetId() int64 {
+	if x != nil {
+		return x.Id
+	}
+	return 0
+}
+
+func (x *InviteReviewReq) GetApprove() bool {
+	if x != nil {
+		return x.Approve
+	}
+	return false
+}
+
+type InviteReviewRes struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Code          int32                  `protobuf:"varint,1,opt,name=code,proto3" json:"code,omitempty"`
+	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *InviteReviewRes) Reset() {
+	*x = InviteReviewRes{}
+	mi := &file_user_v1_org_org_proto_msgTypes[37]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *InviteReviewRes) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*InviteReviewRes) ProtoMessage() {}
+
+func (x *InviteReviewRes) ProtoReflect() protoreflect.Message {
+	mi := &file_user_v1_org_org_proto_msgTypes[37]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use InviteReviewRes.ProtoReflect.Descriptor instead.
+func (*InviteReviewRes) Descriptor() ([]byte, []int) {
+	return file_user_v1_org_org_proto_rawDescGZIP(), []int{37}
+}
+
+func (x *InviteReviewRes) GetCode() int32 {
+	if x != nil {
+		return x.Code
+	}
+	return 0
+}
+
+func (x *InviteReviewRes) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
+type InviteCancelReq struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Id            int64                  `protobuf:"varint,1,opt,name=id,proto3" json:"id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *InviteCancelReq) Reset() {
+	*x = InviteCancelReq{}
+	mi := &file_user_v1_org_org_proto_msgTypes[38]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *InviteCancelReq) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*InviteCancelReq) ProtoMessage() {}
+
+func (x *InviteCancelReq) ProtoReflect() protoreflect.Message {
+	mi := &file_user_v1_org_org_proto_msgTypes[38]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use InviteCancelReq.ProtoReflect.Descriptor instead.
+func (*InviteCancelReq) Descriptor() ([]byte, []int) {
+	return file_user_v1_org_org_proto_rawDescGZIP(), []int{38}
+}
+
+func (x *InviteCancelReq) GetId() int64 {
+	if x != nil {
+		return x.Id
+	}
+	return 0
+}
+
+type InviteCancelRes struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Code          int32                  `protobuf:"varint,1,opt,name=code,proto3" json:"code,omitempty"`
+	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *InviteCancelRes) Reset() {
+	*x = InviteCancelRes{}
+	mi := &file_user_v1_org_org_proto_msgTypes[39]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *InviteCancelRes) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*InviteCancelRes) ProtoMessage() {}
+
+func (x *InviteCancelRes) ProtoReflect() protoreflect.Message {
+	mi := &file_user_v1_org_org_proto_msgTypes[39]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use InviteCancelRes.ProtoReflect.Descriptor instead.
+func (*InviteCancelRes) Descriptor() ([]byte, []int) {
+	return file_user_v1_org_org_proto_rawDescGZIP(), []int{39}
+}
+
+func (x *InviteCancelRes) GetCode() int32 {
+	if x != nil {
+		return x.Code
+	}
+	return 0
+}
+
+func (x *InviteCancelRes) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
 type SetDisplayNameReq struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	OrgId int64                  `protobuf:"varint,1,opt,name=orgId,proto3" json:"orgId,omitempty"`
@@ -2310,7 +2892,7 @@ type SetDisplayNameReq struct {
 
 func (x *SetDisplayNameReq) Reset() {
 	*x = SetDisplayNameReq{}
-	mi := &file_user_v1_org_org_proto_msgTypes[31]
+	mi := &file_user_v1_org_org_proto_msgTypes[40]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2322,7 +2904,7 @@ func (x *SetDisplayNameReq) String() string {
 func (*SetDisplayNameReq) ProtoMessage() {}
 
 func (x *SetDisplayNameReq) ProtoReflect() protoreflect.Message {
-	mi := &file_user_v1_org_org_proto_msgTypes[31]
+	mi := &file_user_v1_org_org_proto_msgTypes[40]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2335,7 +2917,7 @@ func (x *SetDisplayNameReq) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetDisplayNameReq.ProtoReflect.Descriptor instead.
 func (*SetDisplayNameReq) Descriptor() ([]byte, []int) {
-	return file_user_v1_org_org_proto_rawDescGZIP(), []int{31}
+	return file_user_v1_org_org_proto_rawDescGZIP(), []int{40}
 }
 
 func (x *SetDisplayNameReq) GetOrgId() int64 {
@@ -2369,7 +2951,7 @@ type SetDisplayNameRes struct {
 
 func (x *SetDisplayNameRes) Reset() {
 	*x = SetDisplayNameRes{}
-	mi := &file_user_v1_org_org_proto_msgTypes[32]
+	mi := &file_user_v1_org_org_proto_msgTypes[41]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2381,7 +2963,7 @@ func (x *SetDisplayNameRes) String() string {
 func (*SetDisplayNameRes) ProtoMessage() {}
 
 func (x *SetDisplayNameRes) ProtoReflect() protoreflect.Message {
-	mi := &file_user_v1_org_org_proto_msgTypes[32]
+	mi := &file_user_v1_org_org_proto_msgTypes[41]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2394,7 +2976,7 @@ func (x *SetDisplayNameRes) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetDisplayNameRes.ProtoReflect.Descriptor instead.
 func (*SetDisplayNameRes) Descriptor() ([]byte, []int) {
-	return file_user_v1_org_org_proto_rawDescGZIP(), []int{32}
+	return file_user_v1_org_org_proto_rawDescGZIP(), []int{41}
 }
 
 func (x *SetDisplayNameRes) GetCode() int32 {
@@ -2422,7 +3004,7 @@ type MemberIdsReq struct {
 
 func (x *MemberIdsReq) Reset() {
 	*x = MemberIdsReq{}
-	mi := &file_user_v1_org_org_proto_msgTypes[33]
+	mi := &file_user_v1_org_org_proto_msgTypes[42]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2434,7 +3016,7 @@ func (x *MemberIdsReq) String() string {
 func (*MemberIdsReq) ProtoMessage() {}
 
 func (x *MemberIdsReq) ProtoReflect() protoreflect.Message {
-	mi := &file_user_v1_org_org_proto_msgTypes[33]
+	mi := &file_user_v1_org_org_proto_msgTypes[42]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2447,7 +3029,7 @@ func (x *MemberIdsReq) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MemberIdsReq.ProtoReflect.Descriptor instead.
 func (*MemberIdsReq) Descriptor() ([]byte, []int) {
-	return file_user_v1_org_org_proto_rawDescGZIP(), []int{33}
+	return file_user_v1_org_org_proto_rawDescGZIP(), []int{42}
 }
 
 func (x *MemberIdsReq) GetOrgId() int64 {
@@ -2485,7 +3067,7 @@ type MemberIdsRes struct {
 
 func (x *MemberIdsRes) Reset() {
 	*x = MemberIdsRes{}
-	mi := &file_user_v1_org_org_proto_msgTypes[34]
+	mi := &file_user_v1_org_org_proto_msgTypes[43]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2497,7 +3079,7 @@ func (x *MemberIdsRes) String() string {
 func (*MemberIdsRes) ProtoMessage() {}
 
 func (x *MemberIdsRes) ProtoReflect() protoreflect.Message {
-	mi := &file_user_v1_org_org_proto_msgTypes[34]
+	mi := &file_user_v1_org_org_proto_msgTypes[43]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2510,7 +3092,7 @@ func (x *MemberIdsRes) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MemberIdsRes.ProtoReflect.Descriptor instead.
 func (*MemberIdsRes) Descriptor() ([]byte, []int) {
-	return file_user_v1_org_org_proto_rawDescGZIP(), []int{34}
+	return file_user_v1_org_org_proto_rawDescGZIP(), []int{43}
 }
 
 func (x *MemberIdsRes) GetCode() int32 {
@@ -2564,7 +3146,7 @@ type InviteReq struct {
 
 func (x *InviteReq) Reset() {
 	*x = InviteReq{}
-	mi := &file_user_v1_org_org_proto_msgTypes[35]
+	mi := &file_user_v1_org_org_proto_msgTypes[44]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2576,7 +3158,7 @@ func (x *InviteReq) String() string {
 func (*InviteReq) ProtoMessage() {}
 
 func (x *InviteReq) ProtoReflect() protoreflect.Message {
-	mi := &file_user_v1_org_org_proto_msgTypes[35]
+	mi := &file_user_v1_org_org_proto_msgTypes[44]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2589,7 +3171,7 @@ func (x *InviteReq) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InviteReq.ProtoReflect.Descriptor instead.
 func (*InviteReq) Descriptor() ([]byte, []int) {
-	return file_user_v1_org_org_proto_rawDescGZIP(), []int{35}
+	return file_user_v1_org_org_proto_rawDescGZIP(), []int{44}
 }
 
 func (x *InviteReq) GetOrgId() int64 {
@@ -2612,7 +3194,7 @@ type InviteRes struct {
 
 func (x *InviteRes) Reset() {
 	*x = InviteRes{}
-	mi := &file_user_v1_org_org_proto_msgTypes[36]
+	mi := &file_user_v1_org_org_proto_msgTypes[45]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2624,7 +3206,7 @@ func (x *InviteRes) String() string {
 func (*InviteRes) ProtoMessage() {}
 
 func (x *InviteRes) ProtoReflect() protoreflect.Message {
-	mi := &file_user_v1_org_org_proto_msgTypes[36]
+	mi := &file_user_v1_org_org_proto_msgTypes[45]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2637,7 +3219,7 @@ func (x *InviteRes) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InviteRes.ProtoReflect.Descriptor instead.
 func (*InviteRes) Descriptor() ([]byte, []int) {
-	return file_user_v1_org_org_proto_rawDescGZIP(), []int{36}
+	return file_user_v1_org_org_proto_rawDescGZIP(), []int{45}
 }
 
 func (x *InviteRes) GetCode() int32 {
@@ -2684,7 +3266,7 @@ type InvitePreviewReq struct {
 
 func (x *InvitePreviewReq) Reset() {
 	*x = InvitePreviewReq{}
-	mi := &file_user_v1_org_org_proto_msgTypes[37]
+	mi := &file_user_v1_org_org_proto_msgTypes[46]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2696,7 +3278,7 @@ func (x *InvitePreviewReq) String() string {
 func (*InvitePreviewReq) ProtoMessage() {}
 
 func (x *InvitePreviewReq) ProtoReflect() protoreflect.Message {
-	mi := &file_user_v1_org_org_proto_msgTypes[37]
+	mi := &file_user_v1_org_org_proto_msgTypes[46]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2709,7 +3291,7 @@ func (x *InvitePreviewReq) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InvitePreviewReq.ProtoReflect.Descriptor instead.
 func (*InvitePreviewReq) Descriptor() ([]byte, []int) {
-	return file_user_v1_org_org_proto_rawDescGZIP(), []int{37}
+	return file_user_v1_org_org_proto_rawDescGZIP(), []int{46}
 }
 
 func (x *InvitePreviewReq) GetCode() string {
@@ -2735,7 +3317,7 @@ type InvitePreviewRes struct {
 
 func (x *InvitePreviewRes) Reset() {
 	*x = InvitePreviewRes{}
-	mi := &file_user_v1_org_org_proto_msgTypes[38]
+	mi := &file_user_v1_org_org_proto_msgTypes[47]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2747,7 +3329,7 @@ func (x *InvitePreviewRes) String() string {
 func (*InvitePreviewRes) ProtoMessage() {}
 
 func (x *InvitePreviewRes) ProtoReflect() protoreflect.Message {
-	mi := &file_user_v1_org_org_proto_msgTypes[38]
+	mi := &file_user_v1_org_org_proto_msgTypes[47]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2760,7 +3342,7 @@ func (x *InvitePreviewRes) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InvitePreviewRes.ProtoReflect.Descriptor instead.
 func (*InvitePreviewRes) Descriptor() ([]byte, []int) {
-	return file_user_v1_org_org_proto_rawDescGZIP(), []int{38}
+	return file_user_v1_org_org_proto_rawDescGZIP(), []int{47}
 }
 
 func (x *InvitePreviewRes) GetCode() int32 {
@@ -2828,7 +3410,7 @@ type InviteRotateReq struct {
 
 func (x *InviteRotateReq) Reset() {
 	*x = InviteRotateReq{}
-	mi := &file_user_v1_org_org_proto_msgTypes[39]
+	mi := &file_user_v1_org_org_proto_msgTypes[48]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2840,7 +3422,7 @@ func (x *InviteRotateReq) String() string {
 func (*InviteRotateReq) ProtoMessage() {}
 
 func (x *InviteRotateReq) ProtoReflect() protoreflect.Message {
-	mi := &file_user_v1_org_org_proto_msgTypes[39]
+	mi := &file_user_v1_org_org_proto_msgTypes[48]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2853,7 +3435,7 @@ func (x *InviteRotateReq) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InviteRotateReq.ProtoReflect.Descriptor instead.
 func (*InviteRotateReq) Descriptor() ([]byte, []int) {
-	return file_user_v1_org_org_proto_rawDescGZIP(), []int{39}
+	return file_user_v1_org_org_proto_rawDescGZIP(), []int{48}
 }
 
 func (x *InviteRotateReq) GetOrgId() int64 {
@@ -2874,7 +3456,7 @@ type InviteRotateRes struct {
 
 func (x *InviteRotateRes) Reset() {
 	*x = InviteRotateRes{}
-	mi := &file_user_v1_org_org_proto_msgTypes[40]
+	mi := &file_user_v1_org_org_proto_msgTypes[49]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2886,7 +3468,7 @@ func (x *InviteRotateRes) String() string {
 func (*InviteRotateRes) ProtoMessage() {}
 
 func (x *InviteRotateRes) ProtoReflect() protoreflect.Message {
-	mi := &file_user_v1_org_org_proto_msgTypes[40]
+	mi := &file_user_v1_org_org_proto_msgTypes[49]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2899,7 +3481,7 @@ func (x *InviteRotateRes) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InviteRotateRes.ProtoReflect.Descriptor instead.
 func (*InviteRotateRes) Descriptor() ([]byte, []int) {
-	return file_user_v1_org_org_proto_rawDescGZIP(), []int{40}
+	return file_user_v1_org_org_proto_rawDescGZIP(), []int{49}
 }
 
 func (x *InviteRotateRes) GetCode() int32 {
@@ -2932,7 +3514,7 @@ type JoinRequestsReq struct {
 
 func (x *JoinRequestsReq) Reset() {
 	*x = JoinRequestsReq{}
-	mi := &file_user_v1_org_org_proto_msgTypes[41]
+	mi := &file_user_v1_org_org_proto_msgTypes[50]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2944,7 +3526,7 @@ func (x *JoinRequestsReq) String() string {
 func (*JoinRequestsReq) ProtoMessage() {}
 
 func (x *JoinRequestsReq) ProtoReflect() protoreflect.Message {
-	mi := &file_user_v1_org_org_proto_msgTypes[41]
+	mi := &file_user_v1_org_org_proto_msgTypes[50]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2957,7 +3539,7 @@ func (x *JoinRequestsReq) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use JoinRequestsReq.ProtoReflect.Descriptor instead.
 func (*JoinRequestsReq) Descriptor() ([]byte, []int) {
-	return file_user_v1_org_org_proto_rawDescGZIP(), []int{41}
+	return file_user_v1_org_org_proto_rawDescGZIP(), []int{50}
 }
 
 func (x *JoinRequestsReq) GetOrgId() int64 {
@@ -2982,7 +3564,7 @@ type JoinRequestInfo struct {
 
 func (x *JoinRequestInfo) Reset() {
 	*x = JoinRequestInfo{}
-	mi := &file_user_v1_org_org_proto_msgTypes[42]
+	mi := &file_user_v1_org_org_proto_msgTypes[51]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2994,7 +3576,7 @@ func (x *JoinRequestInfo) String() string {
 func (*JoinRequestInfo) ProtoMessage() {}
 
 func (x *JoinRequestInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_user_v1_org_org_proto_msgTypes[42]
+	mi := &file_user_v1_org_org_proto_msgTypes[51]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3007,7 +3589,7 @@ func (x *JoinRequestInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use JoinRequestInfo.ProtoReflect.Descriptor instead.
 func (*JoinRequestInfo) Descriptor() ([]byte, []int) {
-	return file_user_v1_org_org_proto_rawDescGZIP(), []int{42}
+	return file_user_v1_org_org_proto_rawDescGZIP(), []int{51}
 }
 
 func (x *JoinRequestInfo) GetId() int64 {
@@ -3070,7 +3652,7 @@ type JoinRequestsRes struct {
 
 func (x *JoinRequestsRes) Reset() {
 	*x = JoinRequestsRes{}
-	mi := &file_user_v1_org_org_proto_msgTypes[43]
+	mi := &file_user_v1_org_org_proto_msgTypes[52]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3082,7 +3664,7 @@ func (x *JoinRequestsRes) String() string {
 func (*JoinRequestsRes) ProtoMessage() {}
 
 func (x *JoinRequestsRes) ProtoReflect() protoreflect.Message {
-	mi := &file_user_v1_org_org_proto_msgTypes[43]
+	mi := &file_user_v1_org_org_proto_msgTypes[52]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3095,7 +3677,7 @@ func (x *JoinRequestsRes) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use JoinRequestsRes.ProtoReflect.Descriptor instead.
 func (*JoinRequestsRes) Descriptor() ([]byte, []int) {
-	return file_user_v1_org_org_proto_rawDescGZIP(), []int{43}
+	return file_user_v1_org_org_proto_rawDescGZIP(), []int{52}
 }
 
 func (x *JoinRequestsRes) GetCode() int32 {
@@ -3129,7 +3711,7 @@ type JoinReviewReq struct {
 
 func (x *JoinReviewReq) Reset() {
 	*x = JoinReviewReq{}
-	mi := &file_user_v1_org_org_proto_msgTypes[44]
+	mi := &file_user_v1_org_org_proto_msgTypes[53]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3141,7 +3723,7 @@ func (x *JoinReviewReq) String() string {
 func (*JoinReviewReq) ProtoMessage() {}
 
 func (x *JoinReviewReq) ProtoReflect() protoreflect.Message {
-	mi := &file_user_v1_org_org_proto_msgTypes[44]
+	mi := &file_user_v1_org_org_proto_msgTypes[53]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3154,7 +3736,7 @@ func (x *JoinReviewReq) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use JoinReviewReq.ProtoReflect.Descriptor instead.
 func (*JoinReviewReq) Descriptor() ([]byte, []int) {
-	return file_user_v1_org_org_proto_rawDescGZIP(), []int{44}
+	return file_user_v1_org_org_proto_rawDescGZIP(), []int{53}
 }
 
 func (x *JoinReviewReq) GetId() int64 {
@@ -3181,7 +3763,7 @@ type JoinReviewRes struct {
 
 func (x *JoinReviewRes) Reset() {
 	*x = JoinReviewRes{}
-	mi := &file_user_v1_org_org_proto_msgTypes[45]
+	mi := &file_user_v1_org_org_proto_msgTypes[54]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3193,7 +3775,7 @@ func (x *JoinReviewRes) String() string {
 func (*JoinReviewRes) ProtoMessage() {}
 
 func (x *JoinReviewRes) ProtoReflect() protoreflect.Message {
-	mi := &file_user_v1_org_org_proto_msgTypes[45]
+	mi := &file_user_v1_org_org_proto_msgTypes[54]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3206,7 +3788,7 @@ func (x *JoinReviewRes) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use JoinReviewRes.ProtoReflect.Descriptor instead.
 func (*JoinReviewRes) Descriptor() ([]byte, []int) {
-	return file_user_v1_org_org_proto_rawDescGZIP(), []int{45}
+	return file_user_v1_org_org_proto_rawDescGZIP(), []int{54}
 }
 
 func (x *JoinReviewRes) GetCode() int32 {
@@ -3233,7 +3815,7 @@ type SetSiteAdminReq struct {
 
 func (x *SetSiteAdminReq) Reset() {
 	*x = SetSiteAdminReq{}
-	mi := &file_user_v1_org_org_proto_msgTypes[46]
+	mi := &file_user_v1_org_org_proto_msgTypes[55]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3245,7 +3827,7 @@ func (x *SetSiteAdminReq) String() string {
 func (*SetSiteAdminReq) ProtoMessage() {}
 
 func (x *SetSiteAdminReq) ProtoReflect() protoreflect.Message {
-	mi := &file_user_v1_org_org_proto_msgTypes[46]
+	mi := &file_user_v1_org_org_proto_msgTypes[55]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3258,7 +3840,7 @@ func (x *SetSiteAdminReq) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetSiteAdminReq.ProtoReflect.Descriptor instead.
 func (*SetSiteAdminReq) Descriptor() ([]byte, []int) {
-	return file_user_v1_org_org_proto_rawDescGZIP(), []int{46}
+	return file_user_v1_org_org_proto_rawDescGZIP(), []int{55}
 }
 
 func (x *SetSiteAdminReq) GetUserId() int64 {
@@ -3285,7 +3867,7 @@ type SetSiteAdminRes struct {
 
 func (x *SetSiteAdminRes) Reset() {
 	*x = SetSiteAdminRes{}
-	mi := &file_user_v1_org_org_proto_msgTypes[47]
+	mi := &file_user_v1_org_org_proto_msgTypes[56]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3297,7 +3879,7 @@ func (x *SetSiteAdminRes) String() string {
 func (*SetSiteAdminRes) ProtoMessage() {}
 
 func (x *SetSiteAdminRes) ProtoReflect() protoreflect.Message {
-	mi := &file_user_v1_org_org_proto_msgTypes[47]
+	mi := &file_user_v1_org_org_proto_msgTypes[56]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3310,7 +3892,7 @@ func (x *SetSiteAdminRes) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetSiteAdminRes.ProtoReflect.Descriptor instead.
 func (*SetSiteAdminRes) Descriptor() ([]byte, []int) {
-	return file_user_v1_org_org_proto_rawDescGZIP(), []int{47}
+	return file_user_v1_org_org_proto_rawDescGZIP(), []int{56}
 }
 
 func (x *SetSiteAdminRes) GetCode() int32 {
@@ -3337,7 +3919,7 @@ type SquadListReq struct {
 
 func (x *SquadListReq) Reset() {
 	*x = SquadListReq{}
-	mi := &file_user_v1_org_org_proto_msgTypes[48]
+	mi := &file_user_v1_org_org_proto_msgTypes[57]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3349,7 +3931,7 @@ func (x *SquadListReq) String() string {
 func (*SquadListReq) ProtoMessage() {}
 
 func (x *SquadListReq) ProtoReflect() protoreflect.Message {
-	mi := &file_user_v1_org_org_proto_msgTypes[48]
+	mi := &file_user_v1_org_org_proto_msgTypes[57]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3362,7 +3944,7 @@ func (x *SquadListReq) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SquadListReq.ProtoReflect.Descriptor instead.
 func (*SquadListReq) Descriptor() ([]byte, []int) {
-	return file_user_v1_org_org_proto_rawDescGZIP(), []int{48}
+	return file_user_v1_org_org_proto_rawDescGZIP(), []int{57}
 }
 
 func (x *SquadListReq) GetOrgId() int64 {
@@ -3393,7 +3975,7 @@ type SquadInfo struct {
 
 func (x *SquadInfo) Reset() {
 	*x = SquadInfo{}
-	mi := &file_user_v1_org_org_proto_msgTypes[49]
+	mi := &file_user_v1_org_org_proto_msgTypes[58]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3405,7 +3987,7 @@ func (x *SquadInfo) String() string {
 func (*SquadInfo) ProtoMessage() {}
 
 func (x *SquadInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_user_v1_org_org_proto_msgTypes[49]
+	mi := &file_user_v1_org_org_proto_msgTypes[58]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3418,7 +4000,7 @@ func (x *SquadInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SquadInfo.ProtoReflect.Descriptor instead.
 func (*SquadInfo) Descriptor() ([]byte, []int) {
-	return file_user_v1_org_org_proto_rawDescGZIP(), []int{49}
+	return file_user_v1_org_org_proto_rawDescGZIP(), []int{58}
 }
 
 func (x *SquadInfo) GetId() int64 {
@@ -3474,7 +4056,7 @@ type SquadListRes struct {
 
 func (x *SquadListRes) Reset() {
 	*x = SquadListRes{}
-	mi := &file_user_v1_org_org_proto_msgTypes[50]
+	mi := &file_user_v1_org_org_proto_msgTypes[59]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3486,7 +4068,7 @@ func (x *SquadListRes) String() string {
 func (*SquadListRes) ProtoMessage() {}
 
 func (x *SquadListRes) ProtoReflect() protoreflect.Message {
-	mi := &file_user_v1_org_org_proto_msgTypes[50]
+	mi := &file_user_v1_org_org_proto_msgTypes[59]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3499,7 +4081,7 @@ func (x *SquadListRes) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SquadListRes.ProtoReflect.Descriptor instead.
 func (*SquadListRes) Descriptor() ([]byte, []int) {
-	return file_user_v1_org_org_proto_rawDescGZIP(), []int{50}
+	return file_user_v1_org_org_proto_rawDescGZIP(), []int{59}
 }
 
 func (x *SquadListRes) GetCode() int32 {
@@ -3535,7 +4117,7 @@ type SquadCreateReq struct {
 
 func (x *SquadCreateReq) Reset() {
 	*x = SquadCreateReq{}
-	mi := &file_user_v1_org_org_proto_msgTypes[51]
+	mi := &file_user_v1_org_org_proto_msgTypes[60]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3547,7 +4129,7 @@ func (x *SquadCreateReq) String() string {
 func (*SquadCreateReq) ProtoMessage() {}
 
 func (x *SquadCreateReq) ProtoReflect() protoreflect.Message {
-	mi := &file_user_v1_org_org_proto_msgTypes[51]
+	mi := &file_user_v1_org_org_proto_msgTypes[60]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3560,7 +4142,7 @@ func (x *SquadCreateReq) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SquadCreateReq.ProtoReflect.Descriptor instead.
 func (*SquadCreateReq) Descriptor() ([]byte, []int) {
-	return file_user_v1_org_org_proto_rawDescGZIP(), []int{51}
+	return file_user_v1_org_org_proto_rawDescGZIP(), []int{60}
 }
 
 func (x *SquadCreateReq) GetOrgId() int64 {
@@ -3604,7 +4186,7 @@ type SquadData struct {
 
 func (x *SquadData) Reset() {
 	*x = SquadData{}
-	mi := &file_user_v1_org_org_proto_msgTypes[52]
+	mi := &file_user_v1_org_org_proto_msgTypes[61]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3616,7 +4198,7 @@ func (x *SquadData) String() string {
 func (*SquadData) ProtoMessage() {}
 
 func (x *SquadData) ProtoReflect() protoreflect.Message {
-	mi := &file_user_v1_org_org_proto_msgTypes[52]
+	mi := &file_user_v1_org_org_proto_msgTypes[61]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3629,7 +4211,7 @@ func (x *SquadData) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SquadData.ProtoReflect.Descriptor instead.
 func (*SquadData) Descriptor() ([]byte, []int) {
-	return file_user_v1_org_org_proto_rawDescGZIP(), []int{52}
+	return file_user_v1_org_org_proto_rawDescGZIP(), []int{61}
 }
 
 func (x *SquadData) GetId() int64 {
@@ -3678,7 +4260,7 @@ type SquadCreateRes struct {
 
 func (x *SquadCreateRes) Reset() {
 	*x = SquadCreateRes{}
-	mi := &file_user_v1_org_org_proto_msgTypes[53]
+	mi := &file_user_v1_org_org_proto_msgTypes[62]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3690,7 +4272,7 @@ func (x *SquadCreateRes) String() string {
 func (*SquadCreateRes) ProtoMessage() {}
 
 func (x *SquadCreateRes) ProtoReflect() protoreflect.Message {
-	mi := &file_user_v1_org_org_proto_msgTypes[53]
+	mi := &file_user_v1_org_org_proto_msgTypes[62]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3703,7 +4285,7 @@ func (x *SquadCreateRes) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SquadCreateRes.ProtoReflect.Descriptor instead.
 func (*SquadCreateRes) Descriptor() ([]byte, []int) {
-	return file_user_v1_org_org_proto_rawDescGZIP(), []int{53}
+	return file_user_v1_org_org_proto_rawDescGZIP(), []int{62}
 }
 
 func (x *SquadCreateRes) GetCode() int32 {
@@ -3739,7 +4321,7 @@ type SquadUpdateReq struct {
 
 func (x *SquadUpdateReq) Reset() {
 	*x = SquadUpdateReq{}
-	mi := &file_user_v1_org_org_proto_msgTypes[54]
+	mi := &file_user_v1_org_org_proto_msgTypes[63]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3751,7 +4333,7 @@ func (x *SquadUpdateReq) String() string {
 func (*SquadUpdateReq) ProtoMessage() {}
 
 func (x *SquadUpdateReq) ProtoReflect() protoreflect.Message {
-	mi := &file_user_v1_org_org_proto_msgTypes[54]
+	mi := &file_user_v1_org_org_proto_msgTypes[63]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3764,7 +4346,7 @@ func (x *SquadUpdateReq) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SquadUpdateReq.ProtoReflect.Descriptor instead.
 func (*SquadUpdateReq) Descriptor() ([]byte, []int) {
-	return file_user_v1_org_org_proto_rawDescGZIP(), []int{54}
+	return file_user_v1_org_org_proto_rawDescGZIP(), []int{63}
 }
 
 func (x *SquadUpdateReq) GetId() int64 {
@@ -3805,7 +4387,7 @@ type SquadUpdateRes struct {
 
 func (x *SquadUpdateRes) Reset() {
 	*x = SquadUpdateRes{}
-	mi := &file_user_v1_org_org_proto_msgTypes[55]
+	mi := &file_user_v1_org_org_proto_msgTypes[64]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3817,7 +4399,7 @@ func (x *SquadUpdateRes) String() string {
 func (*SquadUpdateRes) ProtoMessage() {}
 
 func (x *SquadUpdateRes) ProtoReflect() protoreflect.Message {
-	mi := &file_user_v1_org_org_proto_msgTypes[55]
+	mi := &file_user_v1_org_org_proto_msgTypes[64]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3830,7 +4412,7 @@ func (x *SquadUpdateRes) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SquadUpdateRes.ProtoReflect.Descriptor instead.
 func (*SquadUpdateRes) Descriptor() ([]byte, []int) {
-	return file_user_v1_org_org_proto_rawDescGZIP(), []int{55}
+	return file_user_v1_org_org_proto_rawDescGZIP(), []int{64}
 }
 
 func (x *SquadUpdateRes) GetCode() int32 {
@@ -3856,7 +4438,7 @@ type SquadDeleteReq struct {
 
 func (x *SquadDeleteReq) Reset() {
 	*x = SquadDeleteReq{}
-	mi := &file_user_v1_org_org_proto_msgTypes[56]
+	mi := &file_user_v1_org_org_proto_msgTypes[65]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3868,7 +4450,7 @@ func (x *SquadDeleteReq) String() string {
 func (*SquadDeleteReq) ProtoMessage() {}
 
 func (x *SquadDeleteReq) ProtoReflect() protoreflect.Message {
-	mi := &file_user_v1_org_org_proto_msgTypes[56]
+	mi := &file_user_v1_org_org_proto_msgTypes[65]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3881,7 +4463,7 @@ func (x *SquadDeleteReq) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SquadDeleteReq.ProtoReflect.Descriptor instead.
 func (*SquadDeleteReq) Descriptor() ([]byte, []int) {
-	return file_user_v1_org_org_proto_rawDescGZIP(), []int{56}
+	return file_user_v1_org_org_proto_rawDescGZIP(), []int{65}
 }
 
 func (x *SquadDeleteReq) GetId() int64 {
@@ -3901,7 +4483,7 @@ type SquadDeleteRes struct {
 
 func (x *SquadDeleteRes) Reset() {
 	*x = SquadDeleteRes{}
-	mi := &file_user_v1_org_org_proto_msgTypes[57]
+	mi := &file_user_v1_org_org_proto_msgTypes[66]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3913,7 +4495,7 @@ func (x *SquadDeleteRes) String() string {
 func (*SquadDeleteRes) ProtoMessage() {}
 
 func (x *SquadDeleteRes) ProtoReflect() protoreflect.Message {
-	mi := &file_user_v1_org_org_proto_msgTypes[57]
+	mi := &file_user_v1_org_org_proto_msgTypes[66]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3926,7 +4508,7 @@ func (x *SquadDeleteRes) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SquadDeleteRes.ProtoReflect.Descriptor instead.
 func (*SquadDeleteRes) Descriptor() ([]byte, []int) {
-	return file_user_v1_org_org_proto_rawDescGZIP(), []int{57}
+	return file_user_v1_org_org_proto_rawDescGZIP(), []int{66}
 }
 
 func (x *SquadDeleteRes) GetCode() int32 {
@@ -3952,7 +4534,7 @@ type SquadMembersReq struct {
 
 func (x *SquadMembersReq) Reset() {
 	*x = SquadMembersReq{}
-	mi := &file_user_v1_org_org_proto_msgTypes[58]
+	mi := &file_user_v1_org_org_proto_msgTypes[67]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3964,7 +4546,7 @@ func (x *SquadMembersReq) String() string {
 func (*SquadMembersReq) ProtoMessage() {}
 
 func (x *SquadMembersReq) ProtoReflect() protoreflect.Message {
-	mi := &file_user_v1_org_org_proto_msgTypes[58]
+	mi := &file_user_v1_org_org_proto_msgTypes[67]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3977,7 +4559,7 @@ func (x *SquadMembersReq) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SquadMembersReq.ProtoReflect.Descriptor instead.
 func (*SquadMembersReq) Descriptor() ([]byte, []int) {
-	return file_user_v1_org_org_proto_rawDescGZIP(), []int{58}
+	return file_user_v1_org_org_proto_rawDescGZIP(), []int{67}
 }
 
 func (x *SquadMembersReq) GetSquadId() int64 {
@@ -3999,7 +4581,7 @@ type SquadMemberInfo struct {
 
 func (x *SquadMemberInfo) Reset() {
 	*x = SquadMemberInfo{}
-	mi := &file_user_v1_org_org_proto_msgTypes[59]
+	mi := &file_user_v1_org_org_proto_msgTypes[68]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4011,7 +4593,7 @@ func (x *SquadMemberInfo) String() string {
 func (*SquadMemberInfo) ProtoMessage() {}
 
 func (x *SquadMemberInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_user_v1_org_org_proto_msgTypes[59]
+	mi := &file_user_v1_org_org_proto_msgTypes[68]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4024,7 +4606,7 @@ func (x *SquadMemberInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SquadMemberInfo.ProtoReflect.Descriptor instead.
 func (*SquadMemberInfo) Descriptor() ([]byte, []int) {
-	return file_user_v1_org_org_proto_rawDescGZIP(), []int{59}
+	return file_user_v1_org_org_proto_rawDescGZIP(), []int{68}
 }
 
 func (x *SquadMemberInfo) GetUserId() int64 {
@@ -4067,7 +4649,7 @@ type SquadMembersRes struct {
 
 func (x *SquadMembersRes) Reset() {
 	*x = SquadMembersRes{}
-	mi := &file_user_v1_org_org_proto_msgTypes[60]
+	mi := &file_user_v1_org_org_proto_msgTypes[69]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4079,7 +4661,7 @@ func (x *SquadMembersRes) String() string {
 func (*SquadMembersRes) ProtoMessage() {}
 
 func (x *SquadMembersRes) ProtoReflect() protoreflect.Message {
-	mi := &file_user_v1_org_org_proto_msgTypes[60]
+	mi := &file_user_v1_org_org_proto_msgTypes[69]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4092,7 +4674,7 @@ func (x *SquadMembersRes) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SquadMembersRes.ProtoReflect.Descriptor instead.
 func (*SquadMembersRes) Descriptor() ([]byte, []int) {
-	return file_user_v1_org_org_proto_rawDescGZIP(), []int{60}
+	return file_user_v1_org_org_proto_rawDescGZIP(), []int{69}
 }
 
 func (x *SquadMembersRes) GetCode() int32 {
@@ -4135,7 +4717,7 @@ type SquadMemberSetReq struct {
 
 func (x *SquadMemberSetReq) Reset() {
 	*x = SquadMemberSetReq{}
-	mi := &file_user_v1_org_org_proto_msgTypes[61]
+	mi := &file_user_v1_org_org_proto_msgTypes[70]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4147,7 +4729,7 @@ func (x *SquadMemberSetReq) String() string {
 func (*SquadMemberSetReq) ProtoMessage() {}
 
 func (x *SquadMemberSetReq) ProtoReflect() protoreflect.Message {
-	mi := &file_user_v1_org_org_proto_msgTypes[61]
+	mi := &file_user_v1_org_org_proto_msgTypes[70]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4160,7 +4742,7 @@ func (x *SquadMemberSetReq) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SquadMemberSetReq.ProtoReflect.Descriptor instead.
 func (*SquadMemberSetReq) Descriptor() ([]byte, []int) {
-	return file_user_v1_org_org_proto_rawDescGZIP(), []int{61}
+	return file_user_v1_org_org_proto_rawDescGZIP(), []int{70}
 }
 
 func (x *SquadMemberSetReq) GetSquadId() int64 {
@@ -4194,7 +4776,7 @@ type SquadMemberSetRes struct {
 
 func (x *SquadMemberSetRes) Reset() {
 	*x = SquadMemberSetRes{}
-	mi := &file_user_v1_org_org_proto_msgTypes[62]
+	mi := &file_user_v1_org_org_proto_msgTypes[71]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4206,7 +4788,7 @@ func (x *SquadMemberSetRes) String() string {
 func (*SquadMemberSetRes) ProtoMessage() {}
 
 func (x *SquadMemberSetRes) ProtoReflect() protoreflect.Message {
-	mi := &file_user_v1_org_org_proto_msgTypes[62]
+	mi := &file_user_v1_org_org_proto_msgTypes[71]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4219,7 +4801,7 @@ func (x *SquadMemberSetRes) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SquadMemberSetRes.ProtoReflect.Descriptor instead.
 func (*SquadMemberSetRes) Descriptor() ([]byte, []int) {
-	return file_user_v1_org_org_proto_rawDescGZIP(), []int{62}
+	return file_user_v1_org_org_proto_rawDescGZIP(), []int{71}
 }
 
 func (x *SquadMemberSetRes) GetCode() int32 {
@@ -4246,7 +4828,7 @@ type ScopeListReq struct {
 
 func (x *ScopeListReq) Reset() {
 	*x = ScopeListReq{}
-	mi := &file_user_v1_org_org_proto_msgTypes[63]
+	mi := &file_user_v1_org_org_proto_msgTypes[72]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4258,7 +4840,7 @@ func (x *ScopeListReq) String() string {
 func (*ScopeListReq) ProtoMessage() {}
 
 func (x *ScopeListReq) ProtoReflect() protoreflect.Message {
-	mi := &file_user_v1_org_org_proto_msgTypes[63]
+	mi := &file_user_v1_org_org_proto_msgTypes[72]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4271,7 +4853,7 @@ func (x *ScopeListReq) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ScopeListReq.ProtoReflect.Descriptor instead.
 func (*ScopeListReq) Descriptor() ([]byte, []int) {
-	return file_user_v1_org_org_proto_rawDescGZIP(), []int{63}
+	return file_user_v1_org_org_proto_rawDescGZIP(), []int{72}
 }
 
 func (x *ScopeListReq) GetOrgId() int64 {
@@ -4299,7 +4881,7 @@ type ScopeListRes struct {
 
 func (x *ScopeListRes) Reset() {
 	*x = ScopeListRes{}
-	mi := &file_user_v1_org_org_proto_msgTypes[64]
+	mi := &file_user_v1_org_org_proto_msgTypes[73]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4311,7 +4893,7 @@ func (x *ScopeListRes) String() string {
 func (*ScopeListRes) ProtoMessage() {}
 
 func (x *ScopeListRes) ProtoReflect() protoreflect.Message {
-	mi := &file_user_v1_org_org_proto_msgTypes[64]
+	mi := &file_user_v1_org_org_proto_msgTypes[73]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4324,7 +4906,7 @@ func (x *ScopeListRes) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ScopeListRes.ProtoReflect.Descriptor instead.
 func (*ScopeListRes) Descriptor() ([]byte, []int) {
-	return file_user_v1_org_org_proto_rawDescGZIP(), []int{64}
+	return file_user_v1_org_org_proto_rawDescGZIP(), []int{73}
 }
 
 func (x *ScopeListRes) GetCode() int32 {
@@ -4358,7 +4940,7 @@ type ScopeGrant struct {
 
 func (x *ScopeGrant) Reset() {
 	*x = ScopeGrant{}
-	mi := &file_user_v1_org_org_proto_msgTypes[65]
+	mi := &file_user_v1_org_org_proto_msgTypes[74]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4370,7 +4952,7 @@ func (x *ScopeGrant) String() string {
 func (*ScopeGrant) ProtoMessage() {}
 
 func (x *ScopeGrant) ProtoReflect() protoreflect.Message {
-	mi := &file_user_v1_org_org_proto_msgTypes[65]
+	mi := &file_user_v1_org_org_proto_msgTypes[74]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4383,7 +4965,7 @@ func (x *ScopeGrant) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ScopeGrant.ProtoReflect.Descriptor instead.
 func (*ScopeGrant) Descriptor() ([]byte, []int) {
-	return file_user_v1_org_org_proto_rawDescGZIP(), []int{65}
+	return file_user_v1_org_org_proto_rawDescGZIP(), []int{74}
 }
 
 func (x *ScopeGrant) GetScopeType() string {
@@ -4411,7 +4993,7 @@ type ScopeSetReq struct {
 
 func (x *ScopeSetReq) Reset() {
 	*x = ScopeSetReq{}
-	mi := &file_user_v1_org_org_proto_msgTypes[66]
+	mi := &file_user_v1_org_org_proto_msgTypes[75]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4423,7 +5005,7 @@ func (x *ScopeSetReq) String() string {
 func (*ScopeSetReq) ProtoMessage() {}
 
 func (x *ScopeSetReq) ProtoReflect() protoreflect.Message {
-	mi := &file_user_v1_org_org_proto_msgTypes[66]
+	mi := &file_user_v1_org_org_proto_msgTypes[75]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4436,7 +5018,7 @@ func (x *ScopeSetReq) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ScopeSetReq.ProtoReflect.Descriptor instead.
 func (*ScopeSetReq) Descriptor() ([]byte, []int) {
-	return file_user_v1_org_org_proto_rawDescGZIP(), []int{66}
+	return file_user_v1_org_org_proto_rawDescGZIP(), []int{75}
 }
 
 func (x *ScopeSetReq) GetOrgId() int64 {
@@ -4471,7 +5053,7 @@ type ScopeSetRes struct {
 
 func (x *ScopeSetRes) Reset() {
 	*x = ScopeSetRes{}
-	mi := &file_user_v1_org_org_proto_msgTypes[67]
+	mi := &file_user_v1_org_org_proto_msgTypes[76]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4483,7 +5065,7 @@ func (x *ScopeSetRes) String() string {
 func (*ScopeSetRes) ProtoMessage() {}
 
 func (x *ScopeSetRes) ProtoReflect() protoreflect.Message {
-	mi := &file_user_v1_org_org_proto_msgTypes[67]
+	mi := &file_user_v1_org_org_proto_msgTypes[76]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4496,7 +5078,7 @@ func (x *ScopeSetRes) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ScopeSetRes.ProtoReflect.Descriptor instead.
 func (*ScopeSetRes) Descriptor() ([]byte, []int) {
-	return file_user_v1_org_org_proto_rawDescGZIP(), []int{67}
+	return file_user_v1_org_org_proto_rawDescGZIP(), []int{76}
 }
 
 func (x *ScopeSetRes) GetCode() int32 {
@@ -4736,7 +5318,51 @@ const file_user_v1_org_org_proto_rawDesc = "" +
 	"\fAddMemberRes\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\x05R\x04code\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12\x16\n" +
-	"\x06userId\x18\x03 \x01(\x03R\x06userId\"i\n" +
+	"\x06userId\x18\x03 \x01(\x03R\x06userId\"\x95\x01\n" +
+	"\rInviteUserReq\x12\x14\n" +
+	"\x05orgId\x18\x01 \x01(\x03R\x05orgId\x12\x16\n" +
+	"\x06userId\x18\x02 \x01(\x03R\x06userId\x12\x1a\n" +
+	"\busername\x18\x03 \x01(\tR\busername\x12\x12\n" +
+	"\x04role\x18\x04 \x01(\tR\x04role\x12&\n" +
+	"\x0eorgDisplayName\x18\x05 \x01(\tR\x0eorgDisplayName\"q\n" +
+	"\rInviteUserRes\x12\x12\n" +
+	"\x04code\x18\x01 \x01(\x05R\x04code\x12\x18\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\x12\x1a\n" +
+	"\binviteId\x18\x03 \x01(\x03R\binviteId\x12\x16\n" +
+	"\x06userId\x18\x04 \x01(\x03R\x06userId\"\"\n" +
+	"\n" +
+	"InvitesReq\x12\x14\n" +
+	"\x05orgId\x18\x01 \x01(\x03R\x05orgId\"\xc9\x02\n" +
+	"\rOrgInviteInfo\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\x03R\x02id\x12\x14\n" +
+	"\x05orgId\x18\x02 \x01(\x03R\x05orgId\x12\x18\n" +
+	"\aorgName\x18\x03 \x01(\tR\aorgName\x12\x16\n" +
+	"\x06userId\x18\x04 \x01(\x03R\x06userId\x12\x1a\n" +
+	"\busername\x18\x05 \x01(\tR\busername\x12\x12\n" +
+	"\x04name\x18\x06 \x01(\tR\x04name\x12\x1c\n" +
+	"\tinviterId\x18\a \x01(\x03R\tinviterId\x12 \n" +
+	"\vinviterName\x18\b \x01(\tR\vinviterName\x12\x12\n" +
+	"\x04role\x18\t \x01(\tR\x04role\x12&\n" +
+	"\x0eorgDisplayName\x18\n" +
+	" \x01(\tR\x0eorgDisplayName\x12\x16\n" +
+	"\x06status\x18\v \x01(\tR\x06status\x12\x1c\n" +
+	"\tcreatedAt\x18\f \x01(\x03R\tcreatedAt\"n\n" +
+	"\n" +
+	"InvitesRes\x12\x12\n" +
+	"\x04code\x18\x01 \x01(\x05R\x04code\x12\x18\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\x122\n" +
+	"\x04list\x18\x03 \x03(\v2\x1e.api.user.v1.org.OrgInviteInfoR\x04list\";\n" +
+	"\x0fInviteReviewReq\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\x03R\x02id\x12\x18\n" +
+	"\aapprove\x18\x02 \x01(\bR\aapprove\"?\n" +
+	"\x0fInviteReviewRes\x12\x12\n" +
+	"\x04code\x18\x01 \x01(\x05R\x04code\x12\x18\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\"!\n" +
+	"\x0fInviteCancelReq\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\x03R\x02id\"?\n" +
+	"\x0fInviteCancelRes\x12\x12\n" +
+	"\x04code\x18\x01 \x01(\x05R\x04code\x12\x18\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\"i\n" +
 	"\x11SetDisplayNameReq\x12\x14\n" +
 	"\x05orgId\x18\x01 \x01(\x03R\x05orgId\x12\x16\n" +
 	"\x06userId\x18\x02 \x01(\x03R\x06userId\x12&\n" +
@@ -4891,7 +5517,7 @@ const file_user_v1_org_org_proto_rawDesc = "" +
 	"\vScopeSetRes\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\x05R\x04code\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12\x14\n" +
-	"\x05count\x18\x03 \x01(\x05R\x05count2\xfc\x18\n" +
+	"\x05count\x18\x03 \x01(\x05R\x05count2\xcd\x1c\n" +
 	"\x03Org\x12U\n" +
 	"\x04List\x12\x18.api.user.v1.org.ListReq\x1a\x18.api.user.v1.org.ListRes\"\x19\x82\xd3\xe4\x93\x02\x13\x12\x11/v1/user/org/list\x12e\n" +
 	"\bDiscover\x12\x1c.api.user.v1.org.DiscoverReq\x1a\x1c.api.user.v1.org.DiscoverRes\"\x1d\x82\xd3\xe4\x93\x02\x17\x12\x15/v1/user/org/discover\x12Q\n" +
@@ -4905,7 +5531,12 @@ const file_user_v1_org_org_proto_rawDesc = "" +
 	"\aMembers\x12\x1b.api.user.v1.org.MembersReq\x1a\x1b.api.user.v1.org.MembersRes\"\x1c\x82\xd3\xe4\x93\x02\x16\x12\x14/v1/user/org/members\x12m\n" +
 	"\aSetRole\x12\x1b.api.user.v1.org.SetRoleReq\x1a\x1b.api.user.v1.org.SetRoleRes\"(\x82\xd3\xe4\x93\x02\":\x01*\"\x1d/v1/user/org/members/set-role\x12z\n" +
 	"\fRemoveMember\x12 .api.user.v1.org.RemoveMemberReq\x1a .api.user.v1.org.RemoveMemberRes\"&\x82\xd3\xe4\x93\x02 :\x01*\"\x1b/v1/user/org/members/remove\x12n\n" +
-	"\tAddMember\x12\x1d.api.user.v1.org.AddMemberReq\x1a\x1d.api.user.v1.org.AddMemberRes\"#\x82\xd3\xe4\x93\x02\x1d:\x01*\"\x18/v1/user/org/members/add\x12\x8a\x01\n" +
+	"\tAddMember\x12\x1d.api.user.v1.org.AddMemberReq\x1a\x1d.api.user.v1.org.AddMemberRes\"#\x82\xd3\xe4\x93\x02\x1d:\x01*\"\x18/v1/user/org/members/add\x12t\n" +
+	"\n" +
+	"InviteUser\x12\x1e.api.user.v1.org.InviteUserReq\x1a\x1e.api.user.v1.org.InviteUserRes\"&\x82\xd3\xe4\x93\x02 :\x01*\"\x1b/v1/user/org/members/invite\x12a\n" +
+	"\aInvites\x12\x1b.api.user.v1.org.InvitesReq\x1a\x1b.api.user.v1.org.InvitesRes\"\x1c\x82\xd3\xe4\x93\x02\x16\x12\x14/v1/user/org/invites\x12z\n" +
+	"\fInviteReview\x12 .api.user.v1.org.InviteReviewReq\x1a .api.user.v1.org.InviteReviewRes\"&\x82\xd3\xe4\x93\x02 :\x01*\"\x1b/v1/user/org/invites/review\x12z\n" +
+	"\fInviteCancel\x12 .api.user.v1.org.InviteCancelReq\x1a .api.user.v1.org.InviteCancelRes\"&\x82\xd3\xe4\x93\x02 :\x01*\"\x1b/v1/user/org/invites/cancel\x12\x8a\x01\n" +
 	"\x0eSetDisplayName\x12\".api.user.v1.org.SetDisplayNameReq\x1a\".api.user.v1.org.SetDisplayNameRes\"0\x82\xd3\xe4\x93\x02*:\x01*\"%/v1/user/org/members/set-display-name\x12j\n" +
 	"\tMemberIds\x12\x1d.api.user.v1.org.MemberIdsReq\x1a\x1d.api.user.v1.org.MemberIdsRes\"\x1f\x82\xd3\xe4\x93\x02\x19\x12\x17/v1/user/org/member-ids\x12]\n" +
 	"\x06Invite\x12\x1a.api.user.v1.org.InviteReq\x1a\x1a.api.user.v1.org.InviteRes\"\x1b\x82\xd3\xe4\x93\x02\x15\x12\x13/v1/user/org/invite\x12z\n" +
@@ -4937,7 +5568,7 @@ func file_user_v1_org_org_proto_rawDescGZIP() []byte {
 	return file_user_v1_org_org_proto_rawDescData
 }
 
-var file_user_v1_org_org_proto_msgTypes = make([]protoimpl.MessageInfo, 68)
+var file_user_v1_org_org_proto_msgTypes = make([]protoimpl.MessageInfo, 77)
 var file_user_v1_org_org_proto_goTypes = []any{
 	(*OrgInfo)(nil),           // 0: api.user.v1.org.OrgInfo
 	(*ScopeRef)(nil),          // 1: api.user.v1.org.ScopeRef
@@ -4970,43 +5601,52 @@ var file_user_v1_org_org_proto_goTypes = []any{
 	(*RemoveMemberRes)(nil),   // 28: api.user.v1.org.RemoveMemberRes
 	(*AddMemberReq)(nil),      // 29: api.user.v1.org.AddMemberReq
 	(*AddMemberRes)(nil),      // 30: api.user.v1.org.AddMemberRes
-	(*SetDisplayNameReq)(nil), // 31: api.user.v1.org.SetDisplayNameReq
-	(*SetDisplayNameRes)(nil), // 32: api.user.v1.org.SetDisplayNameRes
-	(*MemberIdsReq)(nil),      // 33: api.user.v1.org.MemberIdsReq
-	(*MemberIdsRes)(nil),      // 34: api.user.v1.org.MemberIdsRes
-	(*InviteReq)(nil),         // 35: api.user.v1.org.InviteReq
-	(*InviteRes)(nil),         // 36: api.user.v1.org.InviteRes
-	(*InvitePreviewReq)(nil),  // 37: api.user.v1.org.InvitePreviewReq
-	(*InvitePreviewRes)(nil),  // 38: api.user.v1.org.InvitePreviewRes
-	(*InviteRotateReq)(nil),   // 39: api.user.v1.org.InviteRotateReq
-	(*InviteRotateRes)(nil),   // 40: api.user.v1.org.InviteRotateRes
-	(*JoinRequestsReq)(nil),   // 41: api.user.v1.org.JoinRequestsReq
-	(*JoinRequestInfo)(nil),   // 42: api.user.v1.org.JoinRequestInfo
-	(*JoinRequestsRes)(nil),   // 43: api.user.v1.org.JoinRequestsRes
-	(*JoinReviewReq)(nil),     // 44: api.user.v1.org.JoinReviewReq
-	(*JoinReviewRes)(nil),     // 45: api.user.v1.org.JoinReviewRes
-	(*SetSiteAdminReq)(nil),   // 46: api.user.v1.org.SetSiteAdminReq
-	(*SetSiteAdminRes)(nil),   // 47: api.user.v1.org.SetSiteAdminRes
-	(*SquadListReq)(nil),      // 48: api.user.v1.org.SquadListReq
-	(*SquadInfo)(nil),         // 49: api.user.v1.org.SquadInfo
-	(*SquadListRes)(nil),      // 50: api.user.v1.org.SquadListRes
-	(*SquadCreateReq)(nil),    // 51: api.user.v1.org.SquadCreateReq
-	(*SquadData)(nil),         // 52: api.user.v1.org.SquadData
-	(*SquadCreateRes)(nil),    // 53: api.user.v1.org.SquadCreateRes
-	(*SquadUpdateReq)(nil),    // 54: api.user.v1.org.SquadUpdateReq
-	(*SquadUpdateRes)(nil),    // 55: api.user.v1.org.SquadUpdateRes
-	(*SquadDeleteReq)(nil),    // 56: api.user.v1.org.SquadDeleteReq
-	(*SquadDeleteRes)(nil),    // 57: api.user.v1.org.SquadDeleteRes
-	(*SquadMembersReq)(nil),   // 58: api.user.v1.org.SquadMembersReq
-	(*SquadMemberInfo)(nil),   // 59: api.user.v1.org.SquadMemberInfo
-	(*SquadMembersRes)(nil),   // 60: api.user.v1.org.SquadMembersRes
-	(*SquadMemberSetReq)(nil), // 61: api.user.v1.org.SquadMemberSetReq
-	(*SquadMemberSetRes)(nil), // 62: api.user.v1.org.SquadMemberSetRes
-	(*ScopeListReq)(nil),      // 63: api.user.v1.org.ScopeListReq
-	(*ScopeListRes)(nil),      // 64: api.user.v1.org.ScopeListRes
-	(*ScopeGrant)(nil),        // 65: api.user.v1.org.ScopeGrant
-	(*ScopeSetReq)(nil),       // 66: api.user.v1.org.ScopeSetReq
-	(*ScopeSetRes)(nil),       // 67: api.user.v1.org.ScopeSetRes
+	(*InviteUserReq)(nil),     // 31: api.user.v1.org.InviteUserReq
+	(*InviteUserRes)(nil),     // 32: api.user.v1.org.InviteUserRes
+	(*InvitesReq)(nil),        // 33: api.user.v1.org.InvitesReq
+	(*OrgInviteInfo)(nil),     // 34: api.user.v1.org.OrgInviteInfo
+	(*InvitesRes)(nil),        // 35: api.user.v1.org.InvitesRes
+	(*InviteReviewReq)(nil),   // 36: api.user.v1.org.InviteReviewReq
+	(*InviteReviewRes)(nil),   // 37: api.user.v1.org.InviteReviewRes
+	(*InviteCancelReq)(nil),   // 38: api.user.v1.org.InviteCancelReq
+	(*InviteCancelRes)(nil),   // 39: api.user.v1.org.InviteCancelRes
+	(*SetDisplayNameReq)(nil), // 40: api.user.v1.org.SetDisplayNameReq
+	(*SetDisplayNameRes)(nil), // 41: api.user.v1.org.SetDisplayNameRes
+	(*MemberIdsReq)(nil),      // 42: api.user.v1.org.MemberIdsReq
+	(*MemberIdsRes)(nil),      // 43: api.user.v1.org.MemberIdsRes
+	(*InviteReq)(nil),         // 44: api.user.v1.org.InviteReq
+	(*InviteRes)(nil),         // 45: api.user.v1.org.InviteRes
+	(*InvitePreviewReq)(nil),  // 46: api.user.v1.org.InvitePreviewReq
+	(*InvitePreviewRes)(nil),  // 47: api.user.v1.org.InvitePreviewRes
+	(*InviteRotateReq)(nil),   // 48: api.user.v1.org.InviteRotateReq
+	(*InviteRotateRes)(nil),   // 49: api.user.v1.org.InviteRotateRes
+	(*JoinRequestsReq)(nil),   // 50: api.user.v1.org.JoinRequestsReq
+	(*JoinRequestInfo)(nil),   // 51: api.user.v1.org.JoinRequestInfo
+	(*JoinRequestsRes)(nil),   // 52: api.user.v1.org.JoinRequestsRes
+	(*JoinReviewReq)(nil),     // 53: api.user.v1.org.JoinReviewReq
+	(*JoinReviewRes)(nil),     // 54: api.user.v1.org.JoinReviewRes
+	(*SetSiteAdminReq)(nil),   // 55: api.user.v1.org.SetSiteAdminReq
+	(*SetSiteAdminRes)(nil),   // 56: api.user.v1.org.SetSiteAdminRes
+	(*SquadListReq)(nil),      // 57: api.user.v1.org.SquadListReq
+	(*SquadInfo)(nil),         // 58: api.user.v1.org.SquadInfo
+	(*SquadListRes)(nil),      // 59: api.user.v1.org.SquadListRes
+	(*SquadCreateReq)(nil),    // 60: api.user.v1.org.SquadCreateReq
+	(*SquadData)(nil),         // 61: api.user.v1.org.SquadData
+	(*SquadCreateRes)(nil),    // 62: api.user.v1.org.SquadCreateRes
+	(*SquadUpdateReq)(nil),    // 63: api.user.v1.org.SquadUpdateReq
+	(*SquadUpdateRes)(nil),    // 64: api.user.v1.org.SquadUpdateRes
+	(*SquadDeleteReq)(nil),    // 65: api.user.v1.org.SquadDeleteReq
+	(*SquadDeleteRes)(nil),    // 66: api.user.v1.org.SquadDeleteRes
+	(*SquadMembersReq)(nil),   // 67: api.user.v1.org.SquadMembersReq
+	(*SquadMemberInfo)(nil),   // 68: api.user.v1.org.SquadMemberInfo
+	(*SquadMembersRes)(nil),   // 69: api.user.v1.org.SquadMembersRes
+	(*SquadMemberSetReq)(nil), // 70: api.user.v1.org.SquadMemberSetReq
+	(*SquadMemberSetRes)(nil), // 71: api.user.v1.org.SquadMemberSetRes
+	(*ScopeListReq)(nil),      // 72: api.user.v1.org.ScopeListReq
+	(*ScopeListRes)(nil),      // 73: api.user.v1.org.ScopeListRes
+	(*ScopeGrant)(nil),        // 74: api.user.v1.org.ScopeGrant
+	(*ScopeSetReq)(nil),       // 75: api.user.v1.org.ScopeSetReq
+	(*ScopeSetRes)(nil),       // 76: api.user.v1.org.ScopeSetRes
 }
 var file_user_v1_org_org_proto_depIdxs = []int32{
 	0,  // 0: api.user.v1.org.ListRes.list:type_name -> api.user.v1.org.OrgInfo
@@ -5018,75 +5658,84 @@ var file_user_v1_org_org_proto_depIdxs = []int32{
 	2,  // 6: api.user.v1.org.MemberInfo.scopes:type_name -> api.user.v1.org.ScopeInfo
 	23, // 7: api.user.v1.org.MembersRes.list:type_name -> api.user.v1.org.MemberInfo
 	1,  // 8: api.user.v1.org.SetRoleRes.scopes:type_name -> api.user.v1.org.ScopeRef
-	42, // 9: api.user.v1.org.JoinRequestsRes.list:type_name -> api.user.v1.org.JoinRequestInfo
-	49, // 10: api.user.v1.org.SquadListRes.list:type_name -> api.user.v1.org.SquadInfo
-	52, // 11: api.user.v1.org.SquadCreateRes.data:type_name -> api.user.v1.org.SquadData
-	59, // 12: api.user.v1.org.SquadMembersRes.list:type_name -> api.user.v1.org.SquadMemberInfo
-	1,  // 13: api.user.v1.org.ScopeListRes.list:type_name -> api.user.v1.org.ScopeRef
-	65, // 14: api.user.v1.org.ScopeSetReq.grants:type_name -> api.user.v1.org.ScopeGrant
-	3,  // 15: api.user.v1.org.Org.List:input_type -> api.user.v1.org.ListReq
-	5,  // 16: api.user.v1.org.Org.Discover:input_type -> api.user.v1.org.DiscoverReq
-	8,  // 17: api.user.v1.org.Org.Get:input_type -> api.user.v1.org.GetReq
-	10, // 18: api.user.v1.org.Org.Create:input_type -> api.user.v1.org.CreateReq
-	12, // 19: api.user.v1.org.Org.Update:input_type -> api.user.v1.org.UpdateReq
-	14, // 20: api.user.v1.org.Org.Delete:input_type -> api.user.v1.org.DeleteReq
-	16, // 21: api.user.v1.org.Org.Switch:input_type -> api.user.v1.org.SwitchReq
-	18, // 22: api.user.v1.org.Org.Join:input_type -> api.user.v1.org.JoinReq
-	20, // 23: api.user.v1.org.Org.Leave:input_type -> api.user.v1.org.LeaveReq
-	22, // 24: api.user.v1.org.Org.Members:input_type -> api.user.v1.org.MembersReq
-	25, // 25: api.user.v1.org.Org.SetRole:input_type -> api.user.v1.org.SetRoleReq
-	27, // 26: api.user.v1.org.Org.RemoveMember:input_type -> api.user.v1.org.RemoveMemberReq
-	29, // 27: api.user.v1.org.Org.AddMember:input_type -> api.user.v1.org.AddMemberReq
-	31, // 28: api.user.v1.org.Org.SetDisplayName:input_type -> api.user.v1.org.SetDisplayNameReq
-	33, // 29: api.user.v1.org.Org.MemberIds:input_type -> api.user.v1.org.MemberIdsReq
-	35, // 30: api.user.v1.org.Org.Invite:input_type -> api.user.v1.org.InviteReq
-	37, // 31: api.user.v1.org.Org.InvitePreview:input_type -> api.user.v1.org.InvitePreviewReq
-	39, // 32: api.user.v1.org.Org.InviteRotate:input_type -> api.user.v1.org.InviteRotateReq
-	41, // 33: api.user.v1.org.Org.JoinRequests:input_type -> api.user.v1.org.JoinRequestsReq
-	44, // 34: api.user.v1.org.Org.JoinReview:input_type -> api.user.v1.org.JoinReviewReq
-	46, // 35: api.user.v1.org.Org.SetSiteAdmin:input_type -> api.user.v1.org.SetSiteAdminReq
-	48, // 36: api.user.v1.org.Org.SquadList:input_type -> api.user.v1.org.SquadListReq
-	51, // 37: api.user.v1.org.Org.SquadCreate:input_type -> api.user.v1.org.SquadCreateReq
-	54, // 38: api.user.v1.org.Org.SquadUpdate:input_type -> api.user.v1.org.SquadUpdateReq
-	56, // 39: api.user.v1.org.Org.SquadDelete:input_type -> api.user.v1.org.SquadDeleteReq
-	58, // 40: api.user.v1.org.Org.SquadMembers:input_type -> api.user.v1.org.SquadMembersReq
-	61, // 41: api.user.v1.org.Org.SquadMemberSet:input_type -> api.user.v1.org.SquadMemberSetReq
-	63, // 42: api.user.v1.org.Org.ScopeList:input_type -> api.user.v1.org.ScopeListReq
-	66, // 43: api.user.v1.org.Org.ScopeSet:input_type -> api.user.v1.org.ScopeSetReq
-	4,  // 44: api.user.v1.org.Org.List:output_type -> api.user.v1.org.ListRes
-	7,  // 45: api.user.v1.org.Org.Discover:output_type -> api.user.v1.org.DiscoverRes
-	9,  // 46: api.user.v1.org.Org.Get:output_type -> api.user.v1.org.GetRes
-	11, // 47: api.user.v1.org.Org.Create:output_type -> api.user.v1.org.CreateRes
-	13, // 48: api.user.v1.org.Org.Update:output_type -> api.user.v1.org.UpdateRes
-	15, // 49: api.user.v1.org.Org.Delete:output_type -> api.user.v1.org.DeleteRes
-	17, // 50: api.user.v1.org.Org.Switch:output_type -> api.user.v1.org.SwitchRes
-	19, // 51: api.user.v1.org.Org.Join:output_type -> api.user.v1.org.JoinRes
-	21, // 52: api.user.v1.org.Org.Leave:output_type -> api.user.v1.org.LeaveRes
-	24, // 53: api.user.v1.org.Org.Members:output_type -> api.user.v1.org.MembersRes
-	26, // 54: api.user.v1.org.Org.SetRole:output_type -> api.user.v1.org.SetRoleRes
-	28, // 55: api.user.v1.org.Org.RemoveMember:output_type -> api.user.v1.org.RemoveMemberRes
-	30, // 56: api.user.v1.org.Org.AddMember:output_type -> api.user.v1.org.AddMemberRes
-	32, // 57: api.user.v1.org.Org.SetDisplayName:output_type -> api.user.v1.org.SetDisplayNameRes
-	34, // 58: api.user.v1.org.Org.MemberIds:output_type -> api.user.v1.org.MemberIdsRes
-	36, // 59: api.user.v1.org.Org.Invite:output_type -> api.user.v1.org.InviteRes
-	38, // 60: api.user.v1.org.Org.InvitePreview:output_type -> api.user.v1.org.InvitePreviewRes
-	40, // 61: api.user.v1.org.Org.InviteRotate:output_type -> api.user.v1.org.InviteRotateRes
-	43, // 62: api.user.v1.org.Org.JoinRequests:output_type -> api.user.v1.org.JoinRequestsRes
-	45, // 63: api.user.v1.org.Org.JoinReview:output_type -> api.user.v1.org.JoinReviewRes
-	47, // 64: api.user.v1.org.Org.SetSiteAdmin:output_type -> api.user.v1.org.SetSiteAdminRes
-	50, // 65: api.user.v1.org.Org.SquadList:output_type -> api.user.v1.org.SquadListRes
-	53, // 66: api.user.v1.org.Org.SquadCreate:output_type -> api.user.v1.org.SquadCreateRes
-	55, // 67: api.user.v1.org.Org.SquadUpdate:output_type -> api.user.v1.org.SquadUpdateRes
-	57, // 68: api.user.v1.org.Org.SquadDelete:output_type -> api.user.v1.org.SquadDeleteRes
-	60, // 69: api.user.v1.org.Org.SquadMembers:output_type -> api.user.v1.org.SquadMembersRes
-	62, // 70: api.user.v1.org.Org.SquadMemberSet:output_type -> api.user.v1.org.SquadMemberSetRes
-	64, // 71: api.user.v1.org.Org.ScopeList:output_type -> api.user.v1.org.ScopeListRes
-	67, // 72: api.user.v1.org.Org.ScopeSet:output_type -> api.user.v1.org.ScopeSetRes
-	44, // [44:73] is the sub-list for method output_type
-	15, // [15:44] is the sub-list for method input_type
-	15, // [15:15] is the sub-list for extension type_name
-	15, // [15:15] is the sub-list for extension extendee
-	0,  // [0:15] is the sub-list for field type_name
+	34, // 9: api.user.v1.org.InvitesRes.list:type_name -> api.user.v1.org.OrgInviteInfo
+	51, // 10: api.user.v1.org.JoinRequestsRes.list:type_name -> api.user.v1.org.JoinRequestInfo
+	58, // 11: api.user.v1.org.SquadListRes.list:type_name -> api.user.v1.org.SquadInfo
+	61, // 12: api.user.v1.org.SquadCreateRes.data:type_name -> api.user.v1.org.SquadData
+	68, // 13: api.user.v1.org.SquadMembersRes.list:type_name -> api.user.v1.org.SquadMemberInfo
+	1,  // 14: api.user.v1.org.ScopeListRes.list:type_name -> api.user.v1.org.ScopeRef
+	74, // 15: api.user.v1.org.ScopeSetReq.grants:type_name -> api.user.v1.org.ScopeGrant
+	3,  // 16: api.user.v1.org.Org.List:input_type -> api.user.v1.org.ListReq
+	5,  // 17: api.user.v1.org.Org.Discover:input_type -> api.user.v1.org.DiscoverReq
+	8,  // 18: api.user.v1.org.Org.Get:input_type -> api.user.v1.org.GetReq
+	10, // 19: api.user.v1.org.Org.Create:input_type -> api.user.v1.org.CreateReq
+	12, // 20: api.user.v1.org.Org.Update:input_type -> api.user.v1.org.UpdateReq
+	14, // 21: api.user.v1.org.Org.Delete:input_type -> api.user.v1.org.DeleteReq
+	16, // 22: api.user.v1.org.Org.Switch:input_type -> api.user.v1.org.SwitchReq
+	18, // 23: api.user.v1.org.Org.Join:input_type -> api.user.v1.org.JoinReq
+	20, // 24: api.user.v1.org.Org.Leave:input_type -> api.user.v1.org.LeaveReq
+	22, // 25: api.user.v1.org.Org.Members:input_type -> api.user.v1.org.MembersReq
+	25, // 26: api.user.v1.org.Org.SetRole:input_type -> api.user.v1.org.SetRoleReq
+	27, // 27: api.user.v1.org.Org.RemoveMember:input_type -> api.user.v1.org.RemoveMemberReq
+	29, // 28: api.user.v1.org.Org.AddMember:input_type -> api.user.v1.org.AddMemberReq
+	31, // 29: api.user.v1.org.Org.InviteUser:input_type -> api.user.v1.org.InviteUserReq
+	33, // 30: api.user.v1.org.Org.Invites:input_type -> api.user.v1.org.InvitesReq
+	36, // 31: api.user.v1.org.Org.InviteReview:input_type -> api.user.v1.org.InviteReviewReq
+	38, // 32: api.user.v1.org.Org.InviteCancel:input_type -> api.user.v1.org.InviteCancelReq
+	40, // 33: api.user.v1.org.Org.SetDisplayName:input_type -> api.user.v1.org.SetDisplayNameReq
+	42, // 34: api.user.v1.org.Org.MemberIds:input_type -> api.user.v1.org.MemberIdsReq
+	44, // 35: api.user.v1.org.Org.Invite:input_type -> api.user.v1.org.InviteReq
+	46, // 36: api.user.v1.org.Org.InvitePreview:input_type -> api.user.v1.org.InvitePreviewReq
+	48, // 37: api.user.v1.org.Org.InviteRotate:input_type -> api.user.v1.org.InviteRotateReq
+	50, // 38: api.user.v1.org.Org.JoinRequests:input_type -> api.user.v1.org.JoinRequestsReq
+	53, // 39: api.user.v1.org.Org.JoinReview:input_type -> api.user.v1.org.JoinReviewReq
+	55, // 40: api.user.v1.org.Org.SetSiteAdmin:input_type -> api.user.v1.org.SetSiteAdminReq
+	57, // 41: api.user.v1.org.Org.SquadList:input_type -> api.user.v1.org.SquadListReq
+	60, // 42: api.user.v1.org.Org.SquadCreate:input_type -> api.user.v1.org.SquadCreateReq
+	63, // 43: api.user.v1.org.Org.SquadUpdate:input_type -> api.user.v1.org.SquadUpdateReq
+	65, // 44: api.user.v1.org.Org.SquadDelete:input_type -> api.user.v1.org.SquadDeleteReq
+	67, // 45: api.user.v1.org.Org.SquadMembers:input_type -> api.user.v1.org.SquadMembersReq
+	70, // 46: api.user.v1.org.Org.SquadMemberSet:input_type -> api.user.v1.org.SquadMemberSetReq
+	72, // 47: api.user.v1.org.Org.ScopeList:input_type -> api.user.v1.org.ScopeListReq
+	75, // 48: api.user.v1.org.Org.ScopeSet:input_type -> api.user.v1.org.ScopeSetReq
+	4,  // 49: api.user.v1.org.Org.List:output_type -> api.user.v1.org.ListRes
+	7,  // 50: api.user.v1.org.Org.Discover:output_type -> api.user.v1.org.DiscoverRes
+	9,  // 51: api.user.v1.org.Org.Get:output_type -> api.user.v1.org.GetRes
+	11, // 52: api.user.v1.org.Org.Create:output_type -> api.user.v1.org.CreateRes
+	13, // 53: api.user.v1.org.Org.Update:output_type -> api.user.v1.org.UpdateRes
+	15, // 54: api.user.v1.org.Org.Delete:output_type -> api.user.v1.org.DeleteRes
+	17, // 55: api.user.v1.org.Org.Switch:output_type -> api.user.v1.org.SwitchRes
+	19, // 56: api.user.v1.org.Org.Join:output_type -> api.user.v1.org.JoinRes
+	21, // 57: api.user.v1.org.Org.Leave:output_type -> api.user.v1.org.LeaveRes
+	24, // 58: api.user.v1.org.Org.Members:output_type -> api.user.v1.org.MembersRes
+	26, // 59: api.user.v1.org.Org.SetRole:output_type -> api.user.v1.org.SetRoleRes
+	28, // 60: api.user.v1.org.Org.RemoveMember:output_type -> api.user.v1.org.RemoveMemberRes
+	30, // 61: api.user.v1.org.Org.AddMember:output_type -> api.user.v1.org.AddMemberRes
+	32, // 62: api.user.v1.org.Org.InviteUser:output_type -> api.user.v1.org.InviteUserRes
+	35, // 63: api.user.v1.org.Org.Invites:output_type -> api.user.v1.org.InvitesRes
+	37, // 64: api.user.v1.org.Org.InviteReview:output_type -> api.user.v1.org.InviteReviewRes
+	39, // 65: api.user.v1.org.Org.InviteCancel:output_type -> api.user.v1.org.InviteCancelRes
+	41, // 66: api.user.v1.org.Org.SetDisplayName:output_type -> api.user.v1.org.SetDisplayNameRes
+	43, // 67: api.user.v1.org.Org.MemberIds:output_type -> api.user.v1.org.MemberIdsRes
+	45, // 68: api.user.v1.org.Org.Invite:output_type -> api.user.v1.org.InviteRes
+	47, // 69: api.user.v1.org.Org.InvitePreview:output_type -> api.user.v1.org.InvitePreviewRes
+	49, // 70: api.user.v1.org.Org.InviteRotate:output_type -> api.user.v1.org.InviteRotateRes
+	52, // 71: api.user.v1.org.Org.JoinRequests:output_type -> api.user.v1.org.JoinRequestsRes
+	54, // 72: api.user.v1.org.Org.JoinReview:output_type -> api.user.v1.org.JoinReviewRes
+	56, // 73: api.user.v1.org.Org.SetSiteAdmin:output_type -> api.user.v1.org.SetSiteAdminRes
+	59, // 74: api.user.v1.org.Org.SquadList:output_type -> api.user.v1.org.SquadListRes
+	62, // 75: api.user.v1.org.Org.SquadCreate:output_type -> api.user.v1.org.SquadCreateRes
+	64, // 76: api.user.v1.org.Org.SquadUpdate:output_type -> api.user.v1.org.SquadUpdateRes
+	66, // 77: api.user.v1.org.Org.SquadDelete:output_type -> api.user.v1.org.SquadDeleteRes
+	69, // 78: api.user.v1.org.Org.SquadMembers:output_type -> api.user.v1.org.SquadMembersRes
+	71, // 79: api.user.v1.org.Org.SquadMemberSet:output_type -> api.user.v1.org.SquadMemberSetRes
+	73, // 80: api.user.v1.org.Org.ScopeList:output_type -> api.user.v1.org.ScopeListRes
+	76, // 81: api.user.v1.org.Org.ScopeSet:output_type -> api.user.v1.org.ScopeSetRes
+	49, // [49:82] is the sub-list for method output_type
+	16, // [16:49] is the sub-list for method input_type
+	16, // [16:16] is the sub-list for extension type_name
+	16, // [16:16] is the sub-list for extension extendee
+	0,  // [0:16] is the sub-list for field type_name
 }
 
 func init() { file_user_v1_org_org_proto_init() }
@@ -5102,7 +5751,7 @@ func file_user_v1_org_org_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_user_v1_org_org_proto_rawDesc), len(file_user_v1_org_org_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   68,
+			NumMessages:   77,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

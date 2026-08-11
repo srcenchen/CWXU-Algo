@@ -157,6 +157,7 @@ func migrateModels(db *gorm.DB) {
 		&model.Org{},
 		&model.OrgMember{},
 		&model.OrgJoinRequest{},
+		&model.OrgInvite{},
 		&model.Squad{},
 		&model.SquadMember{},
 		&model.OrgScopeGrant{},

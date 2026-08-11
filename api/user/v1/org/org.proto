@@ -55,6 +55,22 @@ service Org {
   rpc AddMember (AddMemberReq) returns (AddMemberRes) {
     option (google.api.http) = { post: "/v1/user/org/members/add", body: "*" };
   }
+  // 组织管理员邀请加入：需被邀请人同意后才成为成员（站管直接加人请用 AddMember）
+  rpc InviteUser (InviteUserReq) returns (InviteUserRes) {
+    option (google.api.http) = { post: "/v1/user/org/members/invite", body: "*" };
+  }
+  // 邀请列表：带 orgId（且有 org.member.add 权限）返回组织未决邀请；否则返回我收到的邀请
+  rpc Invites (InvitesReq) returns (InvitesRes) {
+    option (google.api.http) = { get: "/v1/user/org/invites" };
+  }
+  // 被邀请人接受/拒绝
+  rpc InviteReview (InviteReviewReq) returns (InviteReviewRes) {
+    option (google.api.http) = { post: "/v1/user/org/invites/review", body: "*" };
+  }
+  // 组织侧撤回未决邀请
+  rpc InviteCancel (InviteCancelReq) returns (InviteCancelRes) {
+    option (google.api.http) = { post: "/v1/user/org/invites/cancel", body: "*" };
+  }
   rpc SetDisplayName (SetDisplayNameReq) returns (SetDisplayNameRes) {
     option (google.api.http) = { post: "/v1/user/org/members/set-display-name", body: "*" };
   }
@@ -351,6 +367,62 @@ message AddMemberRes {
   int32 code = 1;
   string message = 2;
   int64 userId = 3;
+}
+
+message InviteUserReq {
+  int64 orgId = 1;
+  // 按 userId 或 username 搜索邀请
+  int64 userId = 2;
+  string username = 3;
+  string role = 4;
+  string orgDisplayName = 5;
+}
+message InviteUserRes {
+  int32 code = 1;
+  string message = 2;
+  int64 inviteId = 3;
+  int64 userId = 4;
+}
+
+message InvitesReq {
+  // 组织管理员查看本组织未决邀请时传；否则返回我收到的邀请
+  int64 orgId = 1;
+}
+message OrgInviteInfo {
+  int64 id = 1;
+  int64 orgId = 2;
+  string orgName = 3;
+  int64 userId = 4;
+  string username = 5;
+  string name = 6;
+  int64 inviterId = 7;
+  string inviterName = 8;
+  string role = 9;
+  string orgDisplayName = 10;
+  string status = 11;
+  int64 createdAt = 12;
+}
+message InvitesRes {
+  int32 code = 1;
+  string message = 2;
+  repeated OrgInviteInfo list = 3;
+}
+
+message InviteReviewReq {
+  int64 id = 1;
+  bool approve = 2;
+}
+message InviteReviewRes {
+  int32 code = 1;
+  string message = 2;
+}
+
+message InviteCancelReq {
+  int64 id = 1;
+}
+message InviteCancelRes {
+  int32 code = 1;
+  string message = 2;
 }
 
 message SetDisplayNameReq {

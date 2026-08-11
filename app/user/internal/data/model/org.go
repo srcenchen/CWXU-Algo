@@ -21,6 +21,11 @@ const (
 	JoinReqPending  = "pending"
 	JoinReqApproved = "approved"
 	JoinReqRejected = "rejected"
+
+	InvitePending  = "pending"
+	InviteAccepted = "accepted"
+	InviteRejected = "rejected"
+	InviteCancelled = "cancelled"
 )
 
 // 组织内角色等级：组织管理员 > 教练 > 组长 > 队长 > 成员
@@ -53,7 +58,7 @@ type Org struct {
 	InviteCode string `gorm:"size:32;uniqueIndex;comment:团队识别码"`
 
 	// 策略：开关可由组织管理员改；间隔仅站点管理员可写
-	EnableAISummary     bool `gorm:"default:true;comment:AI总结开关(网页)"`
+	EnableAISummary bool `gorm:"default:true;comment:AI总结开关(网页)"`
 	// EnableAIEmail 已废弃：日报邮件不再要求组织授权，仅保留字段兼容历史数据
 	EnableAIEmail       bool `gorm:"default:true;comment:AI日报邮件(组织授权,已废弃)"`
 	EnableAIWeeklyEmail bool `gorm:"default:true;comment:AI周报邮件(组织授权,staff)"`
@@ -138,27 +143,29 @@ func RoleNeedsScope(role string) (scopeType string, ok bool) {
 
 // CanAppointOrgRole 操作者能否把目标设为 newRole。
 // actorRole / targetCurrentRole / newRole 均为 org_members.role。
-// 队长及以下无任命权；组长及以上才可任命。
-// 组织管理员可任命本组织全部角色（含同级 org_admin），并可调整其他组织管理员
-// （最后一位 org_admin 的降权由业务层拦截）。站管在 service 层另开通道。
-// 其余角色：只能任命/改动严格低于自己的职务（教练不可动组织管理员/其他教练）。
-// 叠加领导职务：给已是组长的人再加队长时，目标与新职务等级均须 < 操作者。
+// 收紧规则（统一生效，组织管理员同样受限，站管在 service 层另开通道）：
+//   - 队长及以下无任命权（仅组长及以上可任命）
+//   - 可任命到自己同级职务（允许把下级提高到与自己同级）
+//   - 不可任命高于自己的职务
+//   - 不可动比自己高的人
+//   - 同级别目标：不可降级（只能保持同级）
 func CanAppointOrgRole(actorRole, targetCurrentRole, newRole string) bool {
 	ar := OrgRoleRank(actorRole)
 	// 仅组长及以上可任命
 	if ar < OrgRoleRankGroupLeader {
 		return false
 	}
-	// 组织管理员：本组织全角色可任命（含同级）
-	if actorRole == OrgRoleOrgAdmin {
-		return true
-	}
-	// 不能任命同级或更高职务
-	if OrgRoleRank(newRole) >= ar {
+	// 不能任命高于自己的职务
+	if OrgRoleRank(newRole) > ar {
 		return false
 	}
-	// 不能改同级或更高的人（教练不可动组织管理员/其他教练）
-	if OrgRoleRank(targetCurrentRole) >= ar {
+	tr := OrgRoleRank(targetCurrentRole)
+	// 不能动比自己高的人
+	if tr > ar {
+		return false
+	}
+	// 同级别：不能降级（只能保持同级）
+	if tr == ar && OrgRoleRank(newRole) < ar {
 		return false
 	}
 	return true
@@ -198,6 +205,22 @@ type OrgJoinRequest struct {
 	OrgDisplayName string `gorm:"size:64;comment:申请时填写的组织内名称"`
 	ReviewedBy     *uint  `gorm:"comment:审批人"`
 }
+
+// OrgInvite 组织管理员主动邀请（org.member.add 权限），需被邀请人同意后才成为成员。
+// 与 OrgJoinRequest 方向相反：JoinRequest 是用户主动申请加入；Invite 是组织拉人。
+type OrgInvite struct {
+	ID             uint `gorm:"primaryKey"`
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+	OrgID          uint   `gorm:"index:idx_org_invite_user;not null;comment:组织"`
+	UserID         uint   `gorm:"index:idx_org_invite_user;not null;comment:被邀请人"`
+	InviterID      uint   `gorm:"comment:邀请人"`
+	Status         string `gorm:"size:16;default:pending;comment:pending|accepted|rejected|cancelled"`
+	Role           string `gorm:"size:32;default:member;comment:入组角色"`
+	OrgDisplayName string `gorm:"size:64;comment:入组后组织内名称"`
+}
+
+func (OrgInvite) TableName() string { return "org_invites" }
 
 // PlanQuota 套餐配额模板
 // 表名须显式指定：GORM 默认 inflection 会把 PlanQuota 收成 plan_quota（非 plan_quotas）。

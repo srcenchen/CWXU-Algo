@@ -25,8 +25,12 @@ const OperationOrgDelete = "/api.user.v1.org.Org/Delete"
 const OperationOrgDiscover = "/api.user.v1.org.Org/Discover"
 const OperationOrgGet = "/api.user.v1.org.Org/Get"
 const OperationOrgInvite = "/api.user.v1.org.Org/Invite"
+const OperationOrgInviteCancel = "/api.user.v1.org.Org/InviteCancel"
 const OperationOrgInvitePreview = "/api.user.v1.org.Org/InvitePreview"
+const OperationOrgInviteReview = "/api.user.v1.org.Org/InviteReview"
 const OperationOrgInviteRotate = "/api.user.v1.org.Org/InviteRotate"
+const OperationOrgInviteUser = "/api.user.v1.org.Org/InviteUser"
+const OperationOrgInvites = "/api.user.v1.org.Org/Invites"
 const OperationOrgJoin = "/api.user.v1.org.Org/Join"
 const OperationOrgJoinRequests = "/api.user.v1.org.Org/JoinRequests"
 const OperationOrgJoinReview = "/api.user.v1.org.Org/JoinReview"
@@ -57,9 +61,17 @@ type OrgHTTPServer interface {
 	Discover(context.Context, *DiscoverReq) (*DiscoverRes, error)
 	Get(context.Context, *GetReq) (*GetRes, error)
 	Invite(context.Context, *InviteReq) (*InviteRes, error)
+	// InviteCancel 组织侧撤回未决邀请
+	InviteCancel(context.Context, *InviteCancelReq) (*InviteCancelRes, error)
 	// InvitePreview 公开：按识别码预览组织欢迎信息（不含敏感配置）
 	InvitePreview(context.Context, *InvitePreviewReq) (*InvitePreviewRes, error)
+	// InviteReview 被邀请人接受/拒绝
+	InviteReview(context.Context, *InviteReviewReq) (*InviteReviewRes, error)
 	InviteRotate(context.Context, *InviteRotateReq) (*InviteRotateRes, error)
+	// InviteUser 组织管理员邀请加入：需被邀请人同意后才成为成员（站管直接加人请用 AddMember）
+	InviteUser(context.Context, *InviteUserReq) (*InviteUserRes, error)
+	// Invites 邀请列表：带 orgId（且有 org.member.add 权限）返回组织未决邀请；否则返回我收到的邀请
+	Invites(context.Context, *InvitesReq) (*InvitesRes, error)
 	// Join 按团队识别码加入
 	Join(context.Context, *JoinReq) (*JoinRes, error)
 	JoinRequests(context.Context, *JoinRequestsReq) (*JoinRequestsRes, error)
@@ -106,6 +118,10 @@ func RegisterOrgHTTPServer(s *http.Server, srv OrgHTTPServer) {
 	r.POST("/v1/user/org/members/set-role", _Org_SetRole0_HTTP_Handler(srv))
 	r.POST("/v1/user/org/members/remove", _Org_RemoveMember0_HTTP_Handler(srv))
 	r.POST("/v1/user/org/members/add", _Org_AddMember0_HTTP_Handler(srv))
+	r.POST("/v1/user/org/members/invite", _Org_InviteUser0_HTTP_Handler(srv))
+	r.GET("/v1/user/org/invites", _Org_Invites0_HTTP_Handler(srv))
+	r.POST("/v1/user/org/invites/review", _Org_InviteReview0_HTTP_Handler(srv))
+	r.POST("/v1/user/org/invites/cancel", _Org_InviteCancel0_HTTP_Handler(srv))
 	r.POST("/v1/user/org/members/set-display-name", _Org_SetDisplayName0_HTTP_Handler(srv))
 	r.GET("/v1/user/org/member-ids", _Org_MemberIds0_HTTP_Handler(srv))
 	r.GET("/v1/user/org/invite", _Org_Invite0_HTTP_Handler(srv))
@@ -394,6 +410,91 @@ func _Org_AddMember0_HTTP_Handler(srv OrgHTTPServer) func(ctx http.Context) erro
 			return err
 		}
 		reply := out.(*AddMemberRes)
+		return ctx.Result(200, reply)
+	}
+}
+
+func _Org_InviteUser0_HTTP_Handler(srv OrgHTTPServer) func(ctx http.Context) error {
+	return func(ctx http.Context) error {
+		var in InviteUserReq
+		if err := ctx.Bind(&in); err != nil {
+			return err
+		}
+		if err := ctx.BindQuery(&in); err != nil {
+			return err
+		}
+		http.SetOperation(ctx, OperationOrgInviteUser)
+		h := ctx.Middleware(func(ctx context.Context, req interface{}) (interface{}, error) {
+			return srv.InviteUser(ctx, req.(*InviteUserReq))
+		})
+		out, err := h(ctx, &in)
+		if err != nil {
+			return err
+		}
+		reply := out.(*InviteUserRes)
+		return ctx.Result(200, reply)
+	}
+}
+
+func _Org_Invites0_HTTP_Handler(srv OrgHTTPServer) func(ctx http.Context) error {
+	return func(ctx http.Context) error {
+		var in InvitesReq
+		if err := ctx.BindQuery(&in); err != nil {
+			return err
+		}
+		http.SetOperation(ctx, OperationOrgInvites)
+		h := ctx.Middleware(func(ctx context.Context, req interface{}) (interface{}, error) {
+			return srv.Invites(ctx, req.(*InvitesReq))
+		})
+		out, err := h(ctx, &in)
+		if err != nil {
+			return err
+		}
+		reply := out.(*InvitesRes)
+		return ctx.Result(200, reply)
+	}
+}
+
+func _Org_InviteReview0_HTTP_Handler(srv OrgHTTPServer) func(ctx http.Context) error {
+	return func(ctx http.Context) error {
+		var in InviteReviewReq
+		if err := ctx.Bind(&in); err != nil {
+			return err
+		}
+		if err := ctx.BindQuery(&in); err != nil {
+			return err
+		}
+		http.SetOperation(ctx, OperationOrgInviteReview)
+		h := ctx.Middleware(func(ctx context.Context, req interface{}) (interface{}, error) {
+			return srv.InviteReview(ctx, req.(*InviteReviewReq))
+		})
+		out, err := h(ctx, &in)
+		if err != nil {
+			return err
+		}
+		reply := out.(*InviteReviewRes)
+		return ctx.Result(200, reply)
+	}
+}
+
+func _Org_InviteCancel0_HTTP_Handler(srv OrgHTTPServer) func(ctx http.Context) error {
+	return func(ctx http.Context) error {
+		var in InviteCancelReq
+		if err := ctx.Bind(&in); err != nil {
+			return err
+		}
+		if err := ctx.BindQuery(&in); err != nil {
+			return err
+		}
+		http.SetOperation(ctx, OperationOrgInviteCancel)
+		h := ctx.Middleware(func(ctx context.Context, req interface{}) (interface{}, error) {
+			return srv.InviteCancel(ctx, req.(*InviteCancelReq))
+		})
+		out, err := h(ctx, &in)
+		if err != nil {
+			return err
+		}
+		reply := out.(*InviteCancelRes)
 		return ctx.Result(200, reply)
 	}
 }
@@ -737,9 +838,17 @@ type OrgHTTPClient interface {
 	Discover(ctx context.Context, req *DiscoverReq, opts ...http.CallOption) (rsp *DiscoverRes, err error)
 	Get(ctx context.Context, req *GetReq, opts ...http.CallOption) (rsp *GetRes, err error)
 	Invite(ctx context.Context, req *InviteReq, opts ...http.CallOption) (rsp *InviteRes, err error)
+	// InviteCancel 组织侧撤回未决邀请
+	InviteCancel(ctx context.Context, req *InviteCancelReq, opts ...http.CallOption) (rsp *InviteCancelRes, err error)
 	// InvitePreview 公开：按识别码预览组织欢迎信息（不含敏感配置）
 	InvitePreview(ctx context.Context, req *InvitePreviewReq, opts ...http.CallOption) (rsp *InvitePreviewRes, err error)
+	// InviteReview 被邀请人接受/拒绝
+	InviteReview(ctx context.Context, req *InviteReviewReq, opts ...http.CallOption) (rsp *InviteReviewRes, err error)
 	InviteRotate(ctx context.Context, req *InviteRotateReq, opts ...http.CallOption) (rsp *InviteRotateRes, err error)
+	// InviteUser 组织管理员邀请加入：需被邀请人同意后才成为成员（站管直接加人请用 AddMember）
+	InviteUser(ctx context.Context, req *InviteUserReq, opts ...http.CallOption) (rsp *InviteUserRes, err error)
+	// Invites 邀请列表：带 orgId（且有 org.member.add 权限）返回组织未决邀请；否则返回我收到的邀请
+	Invites(ctx context.Context, req *InvitesReq, opts ...http.CallOption) (rsp *InvitesRes, err error)
 	// Join 按团队识别码加入
 	Join(ctx context.Context, req *JoinReq, opts ...http.CallOption) (rsp *JoinRes, err error)
 	JoinRequests(ctx context.Context, req *JoinRequestsReq, opts ...http.CallOption) (rsp *JoinRequestsRes, err error)
@@ -858,6 +967,20 @@ func (c *OrgHTTPClientImpl) Invite(ctx context.Context, in *InviteReq, opts ...h
 	return &out, nil
 }
 
+// InviteCancel 组织侧撤回未决邀请
+func (c *OrgHTTPClientImpl) InviteCancel(ctx context.Context, in *InviteCancelReq, opts ...http.CallOption) (*InviteCancelRes, error) {
+	var out InviteCancelRes
+	pattern := "/v1/user/org/invites/cancel"
+	path := binding.EncodeURL(pattern, in, false)
+	opts = append(opts, http.Operation(OperationOrgInviteCancel))
+	opts = append(opts, http.PathTemplate(pattern))
+	err := c.cc.Invoke(ctx, "POST", path, in, &out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
 // InvitePreview 公开：按识别码预览组织欢迎信息（不含敏感配置）
 func (c *OrgHTTPClientImpl) InvitePreview(ctx context.Context, in *InvitePreviewReq, opts ...http.CallOption) (*InvitePreviewRes, error) {
 	var out InvitePreviewRes
@@ -872,6 +995,20 @@ func (c *OrgHTTPClientImpl) InvitePreview(ctx context.Context, in *InvitePreview
 	return &out, nil
 }
 
+// InviteReview 被邀请人接受/拒绝
+func (c *OrgHTTPClientImpl) InviteReview(ctx context.Context, in *InviteReviewReq, opts ...http.CallOption) (*InviteReviewRes, error) {
+	var out InviteReviewRes
+	pattern := "/v1/user/org/invites/review"
+	path := binding.EncodeURL(pattern, in, false)
+	opts = append(opts, http.Operation(OperationOrgInviteReview))
+	opts = append(opts, http.PathTemplate(pattern))
+	err := c.cc.Invoke(ctx, "POST", path, in, &out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
 func (c *OrgHTTPClientImpl) InviteRotate(ctx context.Context, in *InviteRotateReq, opts ...http.CallOption) (*InviteRotateRes, error) {
 	var out InviteRotateRes
 	pattern := "/v1/user/org/invite/rotate"
@@ -879,6 +1016,34 @@ func (c *OrgHTTPClientImpl) InviteRotate(ctx context.Context, in *InviteRotateRe
 	opts = append(opts, http.Operation(OperationOrgInviteRotate))
 	opts = append(opts, http.PathTemplate(pattern))
 	err := c.cc.Invoke(ctx, "POST", path, in, &out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// InviteUser 组织管理员邀请加入：需被邀请人同意后才成为成员（站管直接加人请用 AddMember）
+func (c *OrgHTTPClientImpl) InviteUser(ctx context.Context, in *InviteUserReq, opts ...http.CallOption) (*InviteUserRes, error) {
+	var out InviteUserRes
+	pattern := "/v1/user/org/members/invite"
+	path := binding.EncodeURL(pattern, in, false)
+	opts = append(opts, http.Operation(OperationOrgInviteUser))
+	opts = append(opts, http.PathTemplate(pattern))
+	err := c.cc.Invoke(ctx, "POST", path, in, &out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// Invites 邀请列表：带 orgId（且有 org.member.add 权限）返回组织未决邀请；否则返回我收到的邀请
+func (c *OrgHTTPClientImpl) Invites(ctx context.Context, in *InvitesReq, opts ...http.CallOption) (*InvitesRes, error) {
+	var out InvitesRes
+	pattern := "/v1/user/org/invites"
+	path := binding.EncodeURL(pattern, in, true)
+	opts = append(opts, http.Operation(OperationOrgInvites))
+	opts = append(opts, http.PathTemplate(pattern))
+	err := c.cc.Invoke(ctx, "GET", path, nil, &out, opts...)
 	if err != nil {
 		return nil, err
 	}

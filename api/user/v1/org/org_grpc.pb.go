@@ -32,6 +32,10 @@ const (
 	Org_SetRole_FullMethodName        = "/api.user.v1.org.Org/SetRole"
 	Org_RemoveMember_FullMethodName   = "/api.user.v1.org.Org/RemoveMember"
 	Org_AddMember_FullMethodName      = "/api.user.v1.org.Org/AddMember"
+	Org_InviteUser_FullMethodName     = "/api.user.v1.org.Org/InviteUser"
+	Org_Invites_FullMethodName        = "/api.user.v1.org.Org/Invites"
+	Org_InviteReview_FullMethodName   = "/api.user.v1.org.Org/InviteReview"
+	Org_InviteCancel_FullMethodName   = "/api.user.v1.org.Org/InviteCancel"
 	Org_SetDisplayName_FullMethodName = "/api.user.v1.org.Org/SetDisplayName"
 	Org_MemberIds_FullMethodName      = "/api.user.v1.org.Org/MemberIds"
 	Org_Invite_FullMethodName         = "/api.user.v1.org.Org/Invite"
@@ -76,6 +80,14 @@ type OrgClient interface {
 	SetRole(ctx context.Context, in *SetRoleReq, opts ...grpc.CallOption) (*SetRoleRes, error)
 	RemoveMember(ctx context.Context, in *RemoveMemberReq, opts ...grpc.CallOption) (*RemoveMemberRes, error)
 	AddMember(ctx context.Context, in *AddMemberReq, opts ...grpc.CallOption) (*AddMemberRes, error)
+	// 组织管理员邀请加入：需被邀请人同意后才成为成员（站管直接加人请用 AddMember）
+	InviteUser(ctx context.Context, in *InviteUserReq, opts ...grpc.CallOption) (*InviteUserRes, error)
+	// 邀请列表：带 orgId（且有 org.member.add 权限）返回组织未决邀请；否则返回我收到的邀请
+	Invites(ctx context.Context, in *InvitesReq, opts ...grpc.CallOption) (*InvitesRes, error)
+	// 被邀请人接受/拒绝
+	InviteReview(ctx context.Context, in *InviteReviewReq, opts ...grpc.CallOption) (*InviteReviewRes, error)
+	// 组织侧撤回未决邀请
+	InviteCancel(ctx context.Context, in *InviteCancelReq, opts ...grpc.CallOption) (*InviteCancelRes, error)
 	SetDisplayName(ctx context.Context, in *SetDisplayNameReq, opts ...grpc.CallOption) (*SetDisplayNameRes, error)
 	// 组织成员 id 列表（可选按 groupId / squadId 过滤）
 	MemberIds(ctx context.Context, in *MemberIdsReq, opts ...grpc.CallOption) (*MemberIdsRes, error)
@@ -232,6 +244,46 @@ func (c *orgClient) AddMember(ctx context.Context, in *AddMemberReq, opts ...grp
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(AddMemberRes)
 	err := c.cc.Invoke(ctx, Org_AddMember_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *orgClient) InviteUser(ctx context.Context, in *InviteUserReq, opts ...grpc.CallOption) (*InviteUserRes, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(InviteUserRes)
+	err := c.cc.Invoke(ctx, Org_InviteUser_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *orgClient) Invites(ctx context.Context, in *InvitesReq, opts ...grpc.CallOption) (*InvitesRes, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(InvitesRes)
+	err := c.cc.Invoke(ctx, Org_Invites_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *orgClient) InviteReview(ctx context.Context, in *InviteReviewReq, opts ...grpc.CallOption) (*InviteReviewRes, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(InviteReviewRes)
+	err := c.cc.Invoke(ctx, Org_InviteReview_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *orgClient) InviteCancel(ctx context.Context, in *InviteCancelReq, opts ...grpc.CallOption) (*InviteCancelRes, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(InviteCancelRes)
+	err := c.cc.Invoke(ctx, Org_InviteCancel_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -424,6 +476,14 @@ type OrgServer interface {
 	SetRole(context.Context, *SetRoleReq) (*SetRoleRes, error)
 	RemoveMember(context.Context, *RemoveMemberReq) (*RemoveMemberRes, error)
 	AddMember(context.Context, *AddMemberReq) (*AddMemberRes, error)
+	// 组织管理员邀请加入：需被邀请人同意后才成为成员（站管直接加人请用 AddMember）
+	InviteUser(context.Context, *InviteUserReq) (*InviteUserRes, error)
+	// 邀请列表：带 orgId（且有 org.member.add 权限）返回组织未决邀请；否则返回我收到的邀请
+	Invites(context.Context, *InvitesReq) (*InvitesRes, error)
+	// 被邀请人接受/拒绝
+	InviteReview(context.Context, *InviteReviewReq) (*InviteReviewRes, error)
+	// 组织侧撤回未决邀请
+	InviteCancel(context.Context, *InviteCancelReq) (*InviteCancelRes, error)
 	SetDisplayName(context.Context, *SetDisplayNameReq) (*SetDisplayNameRes, error)
 	// 组织成员 id 列表（可选按 groupId / squadId 过滤）
 	MemberIds(context.Context, *MemberIdsReq) (*MemberIdsRes, error)
@@ -494,6 +554,18 @@ func (UnimplementedOrgServer) RemoveMember(context.Context, *RemoveMemberReq) (*
 }
 func (UnimplementedOrgServer) AddMember(context.Context, *AddMemberReq) (*AddMemberRes, error) {
 	return nil, status.Error(codes.Unimplemented, "method AddMember not implemented")
+}
+func (UnimplementedOrgServer) InviteUser(context.Context, *InviteUserReq) (*InviteUserRes, error) {
+	return nil, status.Error(codes.Unimplemented, "method InviteUser not implemented")
+}
+func (UnimplementedOrgServer) Invites(context.Context, *InvitesReq) (*InvitesRes, error) {
+	return nil, status.Error(codes.Unimplemented, "method Invites not implemented")
+}
+func (UnimplementedOrgServer) InviteReview(context.Context, *InviteReviewReq) (*InviteReviewRes, error) {
+	return nil, status.Error(codes.Unimplemented, "method InviteReview not implemented")
+}
+func (UnimplementedOrgServer) InviteCancel(context.Context, *InviteCancelReq) (*InviteCancelRes, error) {
+	return nil, status.Error(codes.Unimplemented, "method InviteCancel not implemented")
 }
 func (UnimplementedOrgServer) SetDisplayName(context.Context, *SetDisplayNameReq) (*SetDisplayNameRes, error) {
 	return nil, status.Error(codes.Unimplemented, "method SetDisplayName not implemented")
@@ -794,6 +866,78 @@ func _Org_AddMember_Handler(srv interface{}, ctx context.Context, dec func(inter
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(OrgServer).AddMember(ctx, req.(*AddMemberReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Org_InviteUser_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(InviteUserReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(OrgServer).InviteUser(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Org_InviteUser_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(OrgServer).InviteUser(ctx, req.(*InviteUserReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Org_Invites_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(InvitesReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(OrgServer).Invites(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Org_Invites_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(OrgServer).Invites(ctx, req.(*InvitesReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Org_InviteReview_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(InviteReviewReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(OrgServer).InviteReview(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Org_InviteReview_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(OrgServer).InviteReview(ctx, req.(*InviteReviewReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Org_InviteCancel_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(InviteCancelReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(OrgServer).InviteCancel(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Org_InviteCancel_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(OrgServer).InviteCancel(ctx, req.(*InviteCancelReq))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -1144,6 +1288,22 @@ var Org_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "AddMember",
 			Handler:    _Org_AddMember_Handler,
+		},
+		{
+			MethodName: "InviteUser",
+			Handler:    _Org_InviteUser_Handler,
+		},
+		{
+			MethodName: "Invites",
+			Handler:    _Org_Invites_Handler,
+		},
+		{
+			MethodName: "InviteReview",
+			Handler:    _Org_InviteReview_Handler,
+		},
+		{
+			MethodName: "InviteCancel",
+			Handler:    _Org_InviteCancel_Handler,
 		},
 		{
 			MethodName: "SetDisplayName",

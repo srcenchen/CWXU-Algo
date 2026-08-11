@@ -3715,6 +3715,63 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/api.user.v1.org.InviteRotateRes'
+    /v1/user/org/invites:
+        get:
+            tags:
+                - Org
+            description: 邀请列表：带 orgId（且有 org.member.add 权限）返回组织未决邀请；否则返回我收到的邀请
+            operationId: Org_Invites
+            parameters:
+                - name: orgId
+                  in: query
+                  description: 组织管理员查看本组织未决邀请时传；否则返回我收到的邀请
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.user.v1.org.InvitesRes'
+    /v1/user/org/invites/cancel:
+        post:
+            tags:
+                - Org
+            description: 组织侧撤回未决邀请
+            operationId: Org_InviteCancel
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/api.user.v1.org.InviteCancelReq'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.user.v1.org.InviteCancelRes'
+    /v1/user/org/invites/review:
+        post:
+            tags:
+                - Org
+            description: 被邀请人接受/拒绝
+            operationId: Org_InviteReview
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/api.user.v1.org.InviteReviewReq'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.user.v1.org.InviteReviewRes'
     /v1/user/org/join:
         post:
             tags:
@@ -3886,6 +3943,25 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/api.user.v1.org.AddMemberRes'
+    /v1/user/org/members/invite:
+        post:
+            tags:
+                - Org
+            description: 组织管理员邀请加入：需被邀请人同意后才成为成员（站管直接加人请用 AddMember）
+            operationId: Org_InviteUser
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/api.user.v1.org.InviteUserReq'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.user.v1.org.InviteUserRes'
     /v1/user/org/members/remove:
         post:
             tags:
@@ -5411,7 +5487,7 @@ paths:
         post:
             tags:
                 - Subscription
-            description: 站管（PermSiteUserSync）：人工赋予/更新订阅（重复调用覆盖，从 max(now, 当前到期) 起加 days）
+            description: 站管（PermSiteUserSync）：人工赋予/更新订阅（重复调用叠加，走与支付相同的档位叠加语义）
             operationId: Subscription_GrantSubscription
             requestBody:
                 content:
@@ -11071,6 +11147,19 @@ components:
                     type: string
                 data:
                     $ref: '#/components/schemas/api.user.v1.org.OrgInfo'
+        api.user.v1.org.InviteCancelReq:
+            type: object
+            properties:
+                id:
+                    type: string
+        api.user.v1.org.InviteCancelRes:
+            type: object
+            properties:
+                code:
+                    type: integer
+                    format: int32
+                message:
+                    type: string
         api.user.v1.org.InvitePreviewRes:
             type: object
             properties:
@@ -11105,6 +11194,21 @@ components:
                     type: string
                 orgId:
                     type: string
+        api.user.v1.org.InviteReviewReq:
+            type: object
+            properties:
+                id:
+                    type: string
+                approve:
+                    type: boolean
+        api.user.v1.org.InviteReviewRes:
+            type: object
+            properties:
+                code:
+                    type: integer
+                    format: int32
+                message:
+                    type: string
         api.user.v1.org.InviteRotateReq:
             type: object
             properties:
@@ -11120,6 +11224,44 @@ components:
                     type: string
                 inviteCode:
                     type: string
+        api.user.v1.org.InviteUserReq:
+            type: object
+            properties:
+                orgId:
+                    type: string
+                userId:
+                    type: string
+                    description: 按 userId 或 username 搜索邀请
+                username:
+                    type: string
+                role:
+                    type: string
+                orgDisplayName:
+                    type: string
+        api.user.v1.org.InviteUserRes:
+            type: object
+            properties:
+                code:
+                    type: integer
+                    format: int32
+                message:
+                    type: string
+                inviteId:
+                    type: string
+                userId:
+                    type: string
+        api.user.v1.org.InvitesRes:
+            type: object
+            properties:
+                code:
+                    type: integer
+                    format: int32
+                message:
+                    type: string
+                list:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/api.user.v1.org.OrgInviteInfo'
         api.user.v1.org.JoinReq:
             type: object
             properties:
@@ -11332,6 +11474,33 @@ components:
                 isCurrent:
                     type: boolean
             description: 组织详情（orgToMapWithSeats 的输出）
+        api.user.v1.org.OrgInviteInfo:
+            type: object
+            properties:
+                id:
+                    type: string
+                orgId:
+                    type: string
+                orgName:
+                    type: string
+                userId:
+                    type: string
+                username:
+                    type: string
+                name:
+                    type: string
+                inviterId:
+                    type: string
+                inviterName:
+                    type: string
+                role:
+                    type: string
+                orgDisplayName:
+                    type: string
+                status:
+                    type: string
+                createdAt:
+                    type: string
         api.user.v1.org.RemoveMemberReq:
             type: object
             properties:
@@ -12791,6 +12960,9 @@ components:
                 subTier:
                     type: string
                     description: C 端订阅档 plus|pro（过期返回空）
+                orgRole:
+                    type: string
+                    description: 目标在当前观众组织内的角色（member|captain|group_leader|coach|org_admin；非当前域成员为空）
             description: 社交用户项（域感知展示）
         api.user.v1.social.UnfollowReq:
             type: object
@@ -12810,6 +12982,10 @@ components:
             properties:
                 plan:
                     type: string
+                months:
+                    type: integer
+                    description: 购买月数（1–12，默认 1）；金额 = 套餐月价 × months，履约天数 = 套餐 days × months
+                    format: int32
         api.user.v1.subscription.CreateOrderRes:
             type: object
             properties:
@@ -12829,6 +13005,14 @@ components:
                 expireAt:
                     type: string
                     description: 订单失效时间（unix 秒）
+                months:
+                    type: integer
+                    description: 购买月数
+                    format: int32
+                days:
+                    type: integer
+                    description: 履约天数（套餐 days × months）
+                    format: int32
         api.user.v1.subscription.GetOrderRes:
             type: object
             properties:
@@ -12930,6 +13114,13 @@ components:
                     type: integer
                     description: 剩余天数（已过期按 0）
                     format: int32
+                pendingTier:
+                    type: string
+                    description: 排队档 plus|pro（当前档到期后自动生效；空=无排队）
+                pendingDaysLeft:
+                    type: integer
+                    description: 排队档剩余/购买天数
+                    format: int32
         api.user.v1.subscription.Plan:
             type: object
             properties:
@@ -13003,6 +13194,13 @@ components:
                 avatar:
                     type: string
                     description: 头像（已扩展为完整 URL；空=未设置）
+                pendingTier:
+                    type: string
+                    description: 排队档 plus|pro（空=无排队）
+                pendingDays:
+                    type: integer
+                    description: 排队档剩余/购买天数
+                    format: int32
         api.user.v1.subscription.UpdatePlansReq:
             type: object
             properties:

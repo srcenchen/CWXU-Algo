@@ -1347,7 +1347,8 @@ func (s *OrgService) MemberIds(ctx context.Context, req *orgpb.MemberIdsReq) (*o
 	}, nil
 }
 
-// AddMember 站点管理员搜索加入：按 userId 或 username
+// AddMember 站点管理员直接拉人（搜索加入）：按 userId 或 username。
+// 组织管理员的「加入」走 InviteUser（需被邀请人同意）。
 func (s *OrgService) AddMember(ctx context.Context, req *orgpb.AddMemberReq) (*orgpb.AddMemberRes, error) {
 	pd := auth.GetCurrentUser(ctx)
 	if pd == nil {
@@ -1357,9 +1358,9 @@ func (s *OrgService) AddMember(ctx context.Context, req *orgpb.AddMemberReq) (*o
 	if orgID == 0 {
 		return &orgpb.AddMemberRes{Code: 1, Message: "参数错误"}, nil
 	}
-	// 站点管理员可操作任意 org；组织内需 org.member.add 权限
-	if !verifyOrgPerm(ctx, s.db, pd.UserID, orgID, rbac.PermOrgMemberAdd) {
-		return &orgpb.AddMemberRes{Code: 1, Message: "权限不足"}, nil
+	// 仅站点管理员可绕过同意直接拉人；组织内请用邀请接口
+	if !auth.HasPerm(ctx, rbac.PermSiteOrgList) {
+		return &orgpb.AddMemberRes{Code: 1, Message: "仅站点管理员可直接加入成员"}, nil
 	}
 	uid := uint(req.UserId)
 	if uid == 0 && strings.TrimSpace(req.Username) != "" {
@@ -1404,6 +1405,220 @@ func (s *OrgService) AddMember(ctx context.Context, req *orgpb.AddMemberReq) (*o
 	// 管理员拉入 → 设为默认组织（下次打开自动进入；用户之后 switch 即记忆）
 	s.setDefaultOrg(uid, orgID)
 	return &orgpb.AddMemberRes{Code: 0, Message: "已加入组织", UserId: int64(uid)}, nil
+}
+
+// InviteUser 组织管理员邀请加入：只创建待决邀请并通知被邀请人，待其同意后才成为成员。
+// 与 AddMember（仅站点管理员直接拉人）区分开。
+func (s *OrgService) InviteUser(ctx context.Context, req *orgpb.InviteUserReq) (*orgpb.InviteUserRes, error) {
+	pd := auth.GetCurrentUser(ctx)
+	if pd == nil {
+		return &orgpb.InviteUserRes{Code: 1, Message: "请先登录"}, nil
+	}
+	orgID := uint(req.OrgId)
+	if orgID == 0 {
+		return &orgpb.InviteUserRes{Code: 1, Message: "参数错误"}, nil
+	}
+	if !verifyOrgPerm(ctx, s.db, pd.UserID, orgID, rbac.PermOrgMemberAdd) {
+		return &orgpb.InviteUserRes{Code: 1, Message: "权限不足"}, nil
+	}
+	uid := uint(req.UserId)
+	if uid == 0 && strings.TrimSpace(req.Username) != "" {
+		var u model.User
+		if s.db.Where("username = ?", strings.TrimSpace(req.Username)).First(&u).Error != nil {
+			if s.db.Where("name LIKE ?", "%"+strings.TrimSpace(req.Username)+"%").First(&u).Error != nil {
+				return &orgpb.InviteUserRes{Code: 1, Message: "用户不存在"}, nil
+			}
+		}
+		uid = u.ID
+	}
+	if uid == 0 {
+		return &orgpb.InviteUserRes{Code: 1, Message: "请提供 userId 或 username"}, nil
+	}
+	var org model.Org
+	if s.db.First(&org, orgID).Error != nil {
+		return &orgpb.InviteUserRes{Code: 1, Message: "组织不存在"}, nil
+	}
+	if s.isMemberDB(uid, orgID) {
+		return &orgpb.InviteUserRes{Code: 1, Message: "用户已在组织中"}, nil
+	}
+	var pending model.OrgInvite
+	if s.db.Where("org_id = ? AND user_id = ? AND status = ?", orgID, uid, model.InvitePending).
+		First(&pending).Error == nil {
+		return &orgpb.InviteUserRes{Code: 1, Message: "已发送邀请，等待对方同意"}, nil
+	}
+	role := req.Role
+	if !model.ValidOrgRole(role) {
+		role = model.OrgRoleMember
+	}
+	displayName := strings.TrimSpace(req.OrgDisplayName)
+	if displayName == "" {
+		var u model.User
+		if s.db.Select("name", "username").First(&u, uid).Error == nil {
+			displayName = strings.TrimSpace(u.Name)
+			if displayName == "" {
+				displayName = u.Username
+			}
+		}
+	}
+	invite := model.OrgInvite{
+		OrgID: orgID, UserID: uid, InviterID: pd.UserID,
+		Status: model.InvitePending, Role: role, OrgDisplayName: displayName,
+	}
+	if err := s.db.Create(&invite).Error; err != nil {
+		log.Errorf("org invite: %v", err)
+		return &orgpb.InviteUserRes{Code: 1, Message: "发送失败，请稍后重试"}, nil
+	}
+	_ = CreateNotification(s.db, model.Notification{
+		UserID:  uid,
+		Type:    model.NotifTypeOrgInvited,
+		Title:   "有组织邀请你加入",
+		Body:    "「" + s.orgName(orgID) + "」邀请你加入，去「我的组织」同意或拒绝。",
+		ActorID: pd.UserID,
+		RefType: "org_invite",
+		RefID:   invite.ID,
+	})
+	return &orgpb.InviteUserRes{
+		Code: 0, Message: "已发送邀请，等待对方同意",
+		InviteId: int64(invite.ID), UserId: int64(uid),
+	}, nil
+}
+
+// resolveInvitePerson 邀请单附带的用户名/昵称展示
+func resolveInvitePerson(db *gorm.DB, uid uint) (username, name string) {
+	var u model.User
+	if db.Select("username", "name").First(&u, uid).Error != nil {
+		return "", ""
+	}
+	name = strings.TrimSpace(u.Name)
+	if name == "" {
+		name = u.Username
+	}
+	return u.Username, name
+}
+
+// Invites 邀请列表：带 orgId（且有 org.member.add 权限）返回该组织未决邀请；
+// 否则返回我收到的邀请（含历史，最近在前）。
+func (s *OrgService) Invites(ctx context.Context, req *orgpb.InvitesReq) (*orgpb.InvitesRes, error) {
+	pd := auth.GetCurrentUser(ctx)
+	if pd == nil {
+		return &orgpb.InvitesRes{Code: 1, Message: "请先登录"}, nil
+	}
+	var list []model.OrgInvite
+	if req.OrgId > 0 {
+		orgID := uint(req.OrgId)
+		if !verifyOrgPerm(ctx, s.db, pd.UserID, orgID, rbac.PermOrgMemberAdd) {
+			return &orgpb.InvitesRes{Code: 1, Message: "权限不足"}, nil
+		}
+		if err := s.db.Where("org_id = ? AND status = ?", orgID, model.InvitePending).
+			Order("id DESC").Find(&list).Error; err != nil {
+			log.Errorf("org invites list: %v", err)
+			return &orgpb.InvitesRes{Code: 1, Message: "加载失败，请稍后重试"}, nil
+		}
+	} else {
+		if err := s.db.Where("user_id = ?", pd.UserID).
+			Order("id DESC").Limit(50).Find(&list).Error; err != nil {
+			log.Errorf("my invites list: %v", err)
+			return &orgpb.InvitesRes{Code: 1, Message: "加载失败，请稍后重试"}, nil
+		}
+	}
+	orgNames := map[uint]string{}
+	res := make([]*orgpb.OrgInviteInfo, 0, len(list))
+	for _, inv := range list {
+		orgName := orgNames[inv.OrgID]
+		if orgName == "" {
+			orgName = s.orgName(inv.OrgID)
+			orgNames[inv.OrgID] = orgName
+		}
+		username, name := resolveInvitePerson(s.db, inv.UserID)
+		_, inviterName := resolveInvitePerson(s.db, inv.InviterID)
+		res = append(res, &orgpb.OrgInviteInfo{
+			Id: int64(inv.ID), OrgId: int64(inv.OrgID), OrgName: orgName,
+			UserId: int64(inv.UserID), Username: username, Name: name,
+			InviterId: int64(inv.InviterID), InviterName: inviterName,
+			Role: inv.Role, OrgDisplayName: inv.OrgDisplayName,
+			Status: inv.Status, CreatedAt: inv.CreatedAt.Unix(),
+		})
+	}
+	return &orgpb.InvitesRes{Code: 0, Message: "success", List: res}, nil
+}
+
+// InviteReview 被邀请人接受/拒绝邀请
+func (s *OrgService) InviteReview(ctx context.Context, req *orgpb.InviteReviewReq) (*orgpb.InviteReviewRes, error) {
+	pd := auth.GetCurrentUser(ctx)
+	if pd == nil {
+		return &orgpb.InviteReviewRes{Code: 1, Message: "请先登录"}, nil
+	}
+	inviteID := uint(req.Id)
+	if inviteID == 0 {
+		return &orgpb.InviteReviewRes{Code: 1, Message: "参数错误"}, nil
+	}
+	var inv model.OrgInvite
+	if s.db.First(&inv, inviteID).Error != nil {
+		return &orgpb.InviteReviewRes{Code: 1, Message: "邀请不存在"}, nil
+	}
+	if inv.UserID != pd.UserID {
+		return &orgpb.InviteReviewRes{Code: 1, Message: "只能处理发给自己的邀请"}, nil
+	}
+	if inv.Status != model.InvitePending {
+		return &orgpb.InviteReviewRes{Code: 1, Message: "该邀请已处理"}, nil
+	}
+	if req.Approve {
+		if err := s.addOrgMemberAtomic(inv.OrgID, inv.UserID, inv.Role, inv.OrgDisplayName); err != nil {
+			log.Errorf("org invite accept: %v", err)
+			return &orgpb.InviteReviewRes{Code: 1, Message: err.Error()}, nil
+		}
+		s.setDefaultOrg(inv.UserID, inv.OrgID)
+		_ = s.db.Model(&inv).Update("status", model.InviteAccepted).Error
+		if inv.InviterID > 0 {
+			_ = CreateNotification(s.db, model.Notification{
+				UserID:  inv.InviterID,
+				Type:    model.NotifTypeOrgInviteAccepted,
+				Title:   "对方已同意加入组织",
+				Body:    "你邀请的用户已同意加入「" + s.orgName(inv.OrgID) + "」。",
+				ActorID: inv.UserID,
+				RefType: "org_invite",
+				RefID:   inv.ID,
+			})
+		}
+		return &orgpb.InviteReviewRes{Code: 0, Message: "已同意加入"}, nil
+	}
+	_ = s.db.Model(&inv).Update("status", model.InviteRejected).Error
+	if inv.InviterID > 0 {
+		_ = CreateNotification(s.db, model.Notification{
+			UserID:  inv.InviterID,
+			Type:    model.NotifTypeOrgInviteDeclined,
+			Title:   "对方拒绝了加入邀请",
+			Body:    "对方拒绝了加入「" + s.orgName(inv.OrgID) + "」的邀请。",
+			ActorID: inv.UserID,
+			RefType: "org_invite",
+			RefID:   inv.ID,
+		})
+	}
+	return &orgpb.InviteReviewRes{Code: 0, Message: "已拒绝邀请"}, nil
+}
+
+// InviteCancel 组织侧撤回未决邀请
+func (s *OrgService) InviteCancel(ctx context.Context, req *orgpb.InviteCancelReq) (*orgpb.InviteCancelRes, error) {
+	pd := auth.GetCurrentUser(ctx)
+	if pd == nil {
+		return &orgpb.InviteCancelRes{Code: 1, Message: "请先登录"}, nil
+	}
+	inviteID := uint(req.Id)
+	if inviteID == 0 {
+		return &orgpb.InviteCancelRes{Code: 1, Message: "参数错误"}, nil
+	}
+	var inv model.OrgInvite
+	if s.db.First(&inv, inviteID).Error != nil {
+		return &orgpb.InviteCancelRes{Code: 1, Message: "邀请不存在"}, nil
+	}
+	if !verifyOrgPerm(ctx, s.db, pd.UserID, inv.OrgID, rbac.PermOrgMemberAdd) {
+		return &orgpb.InviteCancelRes{Code: 1, Message: "权限不足"}, nil
+	}
+	if inv.Status != model.InvitePending {
+		return &orgpb.InviteCancelRes{Code: 1, Message: "该邀请已处理，无法撤回"}, nil
+	}
+	_ = s.db.Model(&inv).Update("status", model.InviteCancelled).Error
+	return &orgpb.InviteCancelRes{Code: 0, Message: "已撤回邀请"}, nil
 }
 
 // SetDisplayName 本人或组织/站点管理员修改组织内名称
@@ -1492,13 +1707,13 @@ func (s *OrgService) SetRole(ctx context.Context, req *orgpb.SetRoleReq) (*orgpb
 		// 卸任某一范围时，用 member 作目标档再验一次（允许卸下级领导职务）
 		if !req.RemoveScope {
 			return &orgpb.SetRoleRes{
-				Code: 1, Message: "无权任命该角色或修改该成员（组织管理员可任命全部；其余只能任命低于自己的角色）",
+				Code: 1, Message: "无权任命该角色或修改该成员（只能任命自己同级及以下，不能降级同级；站管可任命全部）",
 			}, nil
 		}
 		if !model.CanAppointOrgRole(actorRole, targetCurrent, model.OrgRoleCaptain) &&
 			!model.CanAppointOrgRole(actorRole, targetCurrent, model.OrgRoleGroupLeader) {
 			return &orgpb.SetRoleRes{
-				Code: 1, Message: "无权任命该角色或修改该成员（组织管理员可任命全部；其余只能任命低于自己的角色）",
+				Code: 1, Message: "无权任命该角色或修改该成员（只能任命自己同级及以下，不能降级同级；站管可任命全部）",
 			}, nil
 		}
 	}
@@ -1519,6 +1734,10 @@ func (s *OrgService) SetRole(ctx context.Context, req *orgpb.SetRoleReq) (*orgpb
 		}
 		if !inOrg {
 			return &orgpb.SetRoleRes{Code: 1, Message: "对方不在本组织"}, nil
+		}
+		// 收紧：卸任范围会重算降级目标，同级别及以上不可动（站管旁路）
+		if !isSite && model.OrgRoleRank(targetCurrent) >= model.OrgRoleRank(actorRole) {
+			return &orgpb.SetRoleRes{Code: 1, Message: "不能修改同级或更高级别的成员"}, nil
 		}
 		if st == model.ScopeTypeSquad {
 			var sq model.Squad
@@ -1567,10 +1786,6 @@ func (s *OrgService) SetRole(ctx context.Context, req *orgpb.SetRoleReq) (*orgpb
 				}
 			}
 		}
-		if !isSite && actorRole == model.OrgRoleGroupLeader && req.Role == model.OrgRoleGroupLeader {
-			return &orgpb.SetRoleRes{Code: 1, Message: "组长不能任命其他组长"}, nil
-		}
-
 		if !inOrg {
 			displayName := ""
 			var u model.User
@@ -1765,6 +1980,17 @@ func (s *OrgService) RemoveMember(ctx context.Context, req *orgpb.RemoveMemberRe
 			return &orgpb.RemoveMemberRes{Code: 1, Message: "不能移除最后一位组织管理员"}, nil
 		}
 	}
+	// 收紧：不允许移除同级别或更高级别的成员（站管旁路；高角色可移除低角色）
+	if !auth.VerifySiteAdmin(ctx) {
+		actorRole := model.OrgRoleMember
+		var actor model.OrgMember
+		if s.db.Where("org_id = ? AND user_id = ?", orgID, pd.UserID).First(&actor).Error == nil {
+			actorRole = actor.Role
+		}
+		if target.Role != "" && model.OrgRoleRank(target.Role) >= model.OrgRoleRank(actorRole) {
+			return &orgpb.RemoveMemberRes{Code: 1, Message: "不能移除同级或更高级别的成员"}, nil
+		}
+	}
 	if err := s.db.Where("org_id = ? AND user_id = ?", orgID, userID).Delete(&model.OrgMember{}).Error; err != nil {
 		log.Errorf("org remove member: %v", err)
 		return &orgpb.RemoveMemberRes{Code: 1, Message: "移除失败，请稍后重试"}, nil
@@ -1864,7 +2090,7 @@ func (s *OrgService) JoinRequests(ctx context.Context, req *orgpb.JoinRequestsRe
 		}
 		list = append(list, &orgpb.JoinRequestInfo{
 			Id: int64(r.ID), UserId: int64(r.UserID), Username: u.Username,
-			Name: display,
+			Name:           display,
 			OrgDisplayName: r.OrgDisplayName,
 			Status:         r.Status, CreatedAt: r.CreatedAt.Unix(),
 		})
