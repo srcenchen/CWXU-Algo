@@ -254,8 +254,10 @@ func (x *Plan) GetEnabled() bool {
 }
 
 type CreateOrderReq struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Plan          string                 `protobuf:"bytes,1,opt,name=plan,proto3" json:"plan,omitempty"` // plus|pro
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Plan  string                 `protobuf:"bytes,1,opt,name=plan,proto3" json:"plan,omitempty"` // plus|pro
+	// 购买月数（1–12，默认 1）；金额 = 套餐月价 × months，履约天数 = 套餐 days × months
+	Months        int32 `protobuf:"varint,2,opt,name=months,proto3" json:"months,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -297,6 +299,13 @@ func (x *CreateOrderReq) GetPlan() string {
 	return ""
 }
 
+func (x *CreateOrderReq) GetMonths() int32 {
+	if x != nil {
+		return x.Months
+	}
+	return 0
+}
+
 type CreateOrderRes struct {
 	state   protoimpl.MessageState `protogen:"open.v1"`
 	Code    int64                  `protobuf:"varint,1,opt,name=code,proto3" json:"code,omitempty"`
@@ -308,7 +317,11 @@ type CreateOrderRes struct {
 	// 应付金额（分）
 	AmountCents int64 `protobuf:"varint,5,opt,name=amountCents,proto3" json:"amountCents,omitempty"`
 	// 订单失效时间（unix 秒）
-	ExpireAt      int64 `protobuf:"varint,6,opt,name=expireAt,proto3" json:"expireAt,omitempty"`
+	ExpireAt int64 `protobuf:"varint,6,opt,name=expireAt,proto3" json:"expireAt,omitempty"`
+	// 购买月数
+	Months int32 `protobuf:"varint,7,opt,name=months,proto3" json:"months,omitempty"`
+	// 履约天数（套餐 days × months）
+	Days          int32 `protobuf:"varint,8,opt,name=days,proto3" json:"days,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -381,6 +394,20 @@ func (x *CreateOrderRes) GetAmountCents() int64 {
 func (x *CreateOrderRes) GetExpireAt() int64 {
 	if x != nil {
 		return x.ExpireAt
+	}
+	return 0
+}
+
+func (x *CreateOrderRes) GetMonths() int32 {
+	if x != nil {
+		return x.Months
+	}
+	return 0
+}
+
+func (x *CreateOrderRes) GetDays() int32 {
+	if x != nil {
+		return x.Days
 	}
 	return 0
 }
@@ -554,9 +581,13 @@ type MySubscriptionRes struct {
 	// payfm|manager
 	Source string `protobuf:"bytes,5,opt,name=source,proto3" json:"source,omitempty"`
 	// 剩余天数（已过期按 0）
-	DaysLeft      int32 `protobuf:"varint,6,opt,name=daysLeft,proto3" json:"daysLeft,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	DaysLeft int32 `protobuf:"varint,6,opt,name=daysLeft,proto3" json:"daysLeft,omitempty"`
+	// 排队档 plus|pro（当前档到期后自动生效；空=无排队）
+	PendingTier string `protobuf:"bytes,7,opt,name=pendingTier,proto3" json:"pendingTier,omitempty"`
+	// 排队档剩余/购买天数
+	PendingDaysLeft int32 `protobuf:"varint,8,opt,name=pendingDaysLeft,proto3" json:"pendingDaysLeft,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *MySubscriptionRes) Reset() {
@@ -627,6 +658,20 @@ func (x *MySubscriptionRes) GetSource() string {
 func (x *MySubscriptionRes) GetDaysLeft() int32 {
 	if x != nil {
 		return x.DaysLeft
+	}
+	return 0
+}
+
+func (x *MySubscriptionRes) GetPendingTier() string {
+	if x != nil {
+		return x.PendingTier
+	}
+	return ""
+}
+
+func (x *MySubscriptionRes) GetPendingDaysLeft() int32 {
+	if x != nil {
+		return x.PendingDaysLeft
 	}
 	return 0
 }
@@ -982,7 +1027,11 @@ type SubUser struct {
 	// payfm|manager
 	Source string `protobuf:"bytes,6,opt,name=source,proto3" json:"source,omitempty"`
 	// 头像（已扩展为完整 URL；空=未设置）
-	Avatar        string `protobuf:"bytes,7,opt,name=avatar,proto3" json:"avatar,omitempty"`
+	Avatar string `protobuf:"bytes,7,opt,name=avatar,proto3" json:"avatar,omitempty"`
+	// 排队档 plus|pro（空=无排队）
+	PendingTier string `protobuf:"bytes,8,opt,name=pendingTier,proto3" json:"pendingTier,omitempty"`
+	// 排队档剩余/购买天数
+	PendingDays   int32 `protobuf:"varint,9,opt,name=pendingDays,proto3" json:"pendingDays,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1064,6 +1113,20 @@ func (x *SubUser) GetAvatar() string {
 		return x.Avatar
 	}
 	return ""
+}
+
+func (x *SubUser) GetPendingTier() string {
+	if x != nil {
+		return x.PendingTier
+	}
+	return ""
+}
+
+func (x *SubUser) GetPendingDays() int32 {
+	if x != nil {
+		return x.PendingDays
+	}
+	return 0
 }
 
 type UpdatePlansReq struct {
@@ -1419,16 +1482,19 @@ const file_user_v1_subscription_subscription_proto_rawDesc = "" +
 	"\x12enableRegularDaily\x18\t \x01(\bR\x12enableRegularDaily\x12\x12\n" +
 	"\x04days\x18\n" +
 	" \x01(\x05R\x04days\x12\x18\n" +
-	"\aenabled\x18\v \x01(\bR\aenabled\"$\n" +
+	"\aenabled\x18\v \x01(\bR\aenabled\"<\n" +
 	"\x0eCreateOrderReq\x12\x12\n" +
-	"\x04plan\x18\x01 \x01(\tR\x04plan\"\xae\x01\n" +
+	"\x04plan\x18\x01 \x01(\tR\x04plan\x12\x16\n" +
+	"\x06months\x18\x02 \x01(\x05R\x06months\"\xda\x01\n" +
 	"\x0eCreateOrderRes\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\x03R\x04code\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12\x18\n" +
 	"\aorderNo\x18\x03 \x01(\tR\aorderNo\x12\x16\n" +
 	"\x06payUrl\x18\x04 \x01(\tR\x06payUrl\x12 \n" +
 	"\vamountCents\x18\x05 \x01(\x03R\vamountCents\x12\x1a\n" +
-	"\bexpireAt\x18\x06 \x01(\x03R\bexpireAt\"'\n" +
+	"\bexpireAt\x18\x06 \x01(\x03R\bexpireAt\x12\x16\n" +
+	"\x06months\x18\a \x01(\x05R\x06months\x12\x12\n" +
+	"\x04days\x18\b \x01(\x05R\x04days\"'\n" +
 	"\vGetOrderReq\x12\x18\n" +
 	"\aorderNo\x18\x01 \x01(\tR\aorderNo\"\x85\x01\n" +
 	"\vGetOrderRes\x12\x12\n" +
@@ -1437,14 +1503,16 @@ const file_user_v1_subscription_subscription_proto_rawDesc = "" +
 	"\aorderNo\x18\x03 \x01(\tR\aorderNo\x12\x16\n" +
 	"\x06status\x18\x04 \x01(\tR\x06status\x12\x16\n" +
 	"\x06paidAt\x18\x05 \x01(\x03R\x06paidAt\"\x13\n" +
-	"\x11MySubscriptionReq\"\xa5\x01\n" +
+	"\x11MySubscriptionReq\"\xf1\x01\n" +
 	"\x11MySubscriptionRes\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\x03R\x04code\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12\x12\n" +
 	"\x04tier\x18\x03 \x01(\tR\x04tier\x12\x1a\n" +
 	"\bexpireAt\x18\x04 \x01(\x03R\bexpireAt\x12\x16\n" +
 	"\x06source\x18\x05 \x01(\tR\x06source\x12\x1a\n" +
-	"\bdaysLeft\x18\x06 \x01(\x05R\bdaysLeft\"V\n" +
+	"\bdaysLeft\x18\x06 \x01(\x05R\bdaysLeft\x12 \n" +
+	"\vpendingTier\x18\a \x01(\tR\vpendingTier\x12(\n" +
+	"\x0fpendingDaysLeft\x18\b \x01(\x05R\x0fpendingDaysLeft\"V\n" +
 	"\x14GrantSubscriptionReq\x12\x16\n" +
 	"\x06userId\x18\x01 \x01(\x03R\x06userId\x12\x12\n" +
 	"\x04tier\x18\x02 \x01(\tR\x04tier\x12\x12\n" +
@@ -1465,7 +1533,7 @@ const file_user_v1_subscription_subscription_proto_rawDesc = "" +
 	"\x04code\x18\x01 \x01(\x03R\x04code\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x125\n" +
 	"\x04list\x18\x03 \x03(\v2!.api.user.v1.subscription.SubUserR\x04list\x12\x14\n" +
-	"\x05total\x18\x04 \x01(\x03R\x05total\"\xb1\x01\n" +
+	"\x05total\x18\x04 \x01(\x03R\x05total\"\xf5\x01\n" +
 	"\aSubUser\x12\x16\n" +
 	"\x06userId\x18\x01 \x01(\x03R\x06userId\x12\x1a\n" +
 	"\busername\x18\x02 \x01(\tR\busername\x12\x12\n" +
@@ -1473,7 +1541,9 @@ const file_user_v1_subscription_subscription_proto_rawDesc = "" +
 	"\x04tier\x18\x04 \x01(\tR\x04tier\x12\x1a\n" +
 	"\bexpireAt\x18\x05 \x01(\x03R\bexpireAt\x12\x16\n" +
 	"\x06source\x18\x06 \x01(\tR\x06source\x12\x16\n" +
-	"\x06avatar\x18\a \x01(\tR\x06avatar\"F\n" +
+	"\x06avatar\x18\a \x01(\tR\x06avatar\x12 \n" +
+	"\vpendingTier\x18\b \x01(\tR\vpendingTier\x12 \n" +
+	"\vpendingDays\x18\t \x01(\x05R\vpendingDays\"F\n" +
 	"\x0eUpdatePlansReq\x124\n" +
 	"\x05plans\x18\x01 \x03(\v2\x1e.api.user.v1.subscription.PlanR\x05plans\">\n" +
 	"\x0eUpdatePlansRes\x12\x12\n" +

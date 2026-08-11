@@ -42,6 +42,8 @@ type SubscriptionService struct {
 
 // NewSubscriptionService 创建订阅服务
 func NewSubscriptionService(d *data.Data, subDal *dal.SubscriptionDal, profileDal *dal.ProfileDal) *SubscriptionService {
+	// 后台到期提醒扫描（3 天 / 1 天各提醒一次 + 到期排队档晋升）
+	startSubscriptionReminderSweep(d)
 	return &SubscriptionService{data: d, subDal: subDal, profileDal: profileDal}
 }
 
@@ -98,6 +100,13 @@ func (s *SubscriptionService) CreateOrder(ctx context.Context, req *subscription
 	if plan != "plus" && plan != "pro" {
 		return &subscription.CreateOrderRes{Code: 1, Message: "请选择有效套餐（Plus / Pro）"}, nil
 	}
+	months := int(req.GetMonths())
+	if months < 1 {
+		months = 1 // 兼容未传 months 的调用方
+	}
+	if months > 12 {
+		return &subscription.CreateOrderRes{Code: 1, Message: "购买月数不能超过 12"}, nil
+	}
 	p, err := s.subDal.PlanByTier(ctx, plan)
 	if err != nil {
 		return &subscription.CreateOrderRes{Code: 1, Message: "套餐不存在"}, nil
@@ -109,13 +118,15 @@ func (s *SubscriptionService) CreateOrder(ctx context.Context, req *subscription
 	if err != nil {
 		return &subscription.CreateOrderRes{Code: 1, Message: err.Error()}, nil
 	}
+	days := p.Days * months
+	amountCents := p.PriceCents * int64(months)
 	orderNo := fmt.Sprintf("S%d", time.Now().UnixNano())
-	order, err := s.subDal.CreateOrder(ctx, orderNo, pd.UserID, plan, p.PriceCents)
+	order, err := s.subDal.CreateOrder(ctx, orderNo, pd.UserID, plan, months, amountCents)
 	if err != nil {
-		log.Errorf("CreateOrder 建单 user=%d plan=%s: %v", pd.UserID, plan, err)
+		log.Errorf("CreateOrder 建单 user=%d plan=%s months=%d: %v", pd.UserID, plan, months, err)
 		return &subscription.CreateOrderRes{Code: 1, Message: "下单失败，请稍后再试"}, nil
 	}
-	payURL, err := g.CreateOrder(ctx, orderNo, p.PriceCents, fmt.Sprintf("GoAlgo %s 会员（%d 天）", tierName(plan), p.Days))
+	payURL, err := g.CreateOrder(ctx, orderNo, amountCents, fmt.Sprintf("GoAlgo %s 会员（%d 个月）", tierName(plan), months))
 	if err != nil {
 		// 下单失败：关单并返回错误（支付FM侧可能未配置完整）
 		if _, cerr := s.subDal.MarkOrderClosed(ctx, order.ID); cerr != nil {
@@ -130,8 +141,10 @@ func (s *SubscriptionService) CreateOrder(ctx context.Context, req *subscription
 		Message:     "success",
 		OrderNo:     orderNo,
 		PayUrl:      payURL,
-		AmountCents: p.PriceCents,
+		AmountCents: amountCents,
 		ExpireAt:    expireAt,
+		Months:      int32(months),
+		Days:        int32(days),
 	}, nil
 }
 
@@ -166,13 +179,14 @@ func (s *SubscriptionService) GetOrder(ctx context.Context, req *subscription.Ge
 	}, nil
 }
 
-// MySubscription 登录：我的订阅状态（tier 空=未订阅；过期按未订阅）
+// MySubscription 登录：我的订阅状态（tier 空=未订阅；过期按未订阅）。
+// 读取时懒晋升：Pro 到期后自动续 Plus（pending 生效）。
 func (s *SubscriptionService) MySubscription(ctx context.Context, _ *subscription.MySubscriptionReq) (*subscription.MySubscriptionRes, error) {
 	pd := auth.GetCurrentUser(ctx)
 	if pd == nil || pd.UserID == 0 {
 		return &subscription.MySubscriptionRes{Code: 1, Message: "请先登录"}, nil
 	}
-	tier, expireAt, source := s.subDal.UserSubscription(ctx, int64(pd.UserID))
+	tier, expireAt, source, pendingTier, pendingDays := s.subDal.UserSubscription(ctx, int64(pd.UserID))
 	res := &subscription.MySubscriptionRes{Code: 0, Message: "success", Tier: tier, Source: source}
 	if tier != "" && expireAt != nil {
 		res.ExpireAt = expireAt.Unix()
@@ -181,6 +195,10 @@ func (s *SubscriptionService) MySubscription(ctx context.Context, _ *subscriptio
 			daysLeft = 0
 		}
 		res.DaysLeft = daysLeft
+	}
+	if pendingTier != "" {
+		res.PendingTier = pendingTier
+		res.PendingDaysLeft = int32(pendingDays)
 	}
 	return res, nil
 }
@@ -248,7 +266,13 @@ func (s *SubscriptionService) NotifyHTTP(w http.ResponseWriter, r *http.Request)
 		writeAck(false)
 		return
 	}
-	order, claimed, err := s.subDal.ClaimAndFulfillPaidOrder(r.Context(), ntf.OrderNo, ntf.PlatformOrderNo, ntf.PayTime, int64(order.UserID), order.Plan, plan.Days)
+	days := plan.Days * order.Months
+	if days < 1 {
+		log.Errorf("NotifyHTTP 天数非法 order=%s plan=%s months=%d", order.OrderNo, order.Plan, order.Months)
+		writeAck(false)
+		return
+	}
+	order, claimed, err := s.subDal.ClaimAndFulfillPaidOrder(r.Context(), ntf.OrderNo, ntf.PlatformOrderNo, ntf.PayTime, int64(order.UserID), order.Plan, days)
 	if err != nil {
 		log.Warnf("NotifyHTTP 订单处理失败 order=%s: %v", ntf.OrderNo, err)
 		writeAck(false)
@@ -259,11 +283,20 @@ func (s *SubscriptionService) NotifyHTTP(w http.ResponseWriter, r *http.Request)
 		writeAck(true)
 		return
 	}
-	log.Infof("NotifyHTTP 履约成功 order=%s user=%d plan=%s amount=%d", order.OrderNo, order.UserID, order.Plan, order.AmountCents)
+	log.Infof("NotifyHTTP 履约成功 order=%s user=%d plan=%s months=%d amount=%d", order.OrderNo, order.UserID, order.Plan, order.Months, order.AmountCents)
 	// 支付开通：同步个人题面爬取/AI 开关（套餐开启对应能力时自动开）
 	if err := s.profileDal.SyncProblemPipelineOverrides(r.Context(), int64(order.UserID)); err != nil {
 		log.Warnf("NotifyHTTP sync pipeline overrides user=%d: %v", order.UserID, err)
 	}
+	// 支付成功：发感谢信（异步；低频弱任务直接 goroutine + SMTP）
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Errorf("NotifyHTTP 感谢信 panic user=%d: %v", order.UserID, r)
+			}
+		}()
+		s.sendThankYouMail(context.Background(), uint(order.UserID), tierName(order.Plan), order.Months)
+	}()
 	writeAck(true)
 }
 
@@ -420,13 +453,15 @@ func (s *SubscriptionService) ListSubscriptions(ctx context.Context, req *subscr
 			expireAt = u.SubExpireAt.Unix()
 		}
 		res.List = append(res.List, &subscription.SubUser{
-			UserId:   int64(u.ID),
-			Username: u.Username,
-			Name:     u.Name,
-			Avatar:   expandAvatarBase(avatarBase, u.Avatar),
-			Tier:     u.SubTier,
-			ExpireAt: expireAt,
-			Source:   u.SubSource,
+			UserId:       int64(u.ID),
+			Username:     u.Username,
+			Name:         u.Name,
+			Avatar:       expandAvatarBase(avatarBase, u.Avatar),
+			Tier:         u.SubTier,
+			ExpireAt:     expireAt,
+			Source:       u.SubSource,
+			PendingTier:  u.SubPendingTier,
+			PendingDays:  int32(u.SubPendingDays),
 		})
 	}
 	return res, nil

@@ -48,7 +48,7 @@ type SubscriptionClient interface {
 	GetOrder(ctx context.Context, in *GetOrderReq, opts ...grpc.CallOption) (*GetOrderRes, error)
 	// 登录：我的订阅状态（tier/expireAt/source/剩余天数；tier 空=未订阅）
 	MySubscription(ctx context.Context, in *MySubscriptionReq, opts ...grpc.CallOption) (*MySubscriptionRes, error)
-	// 站管（PermSiteUserSync）：人工赋予/更新订阅（重复调用覆盖，从 max(now, 当前到期) 起加 days）
+	// 站管（PermSiteUserSync）：人工赋予/更新订阅（重复调用叠加，走与支付相同的档位叠加语义）
 	GrantSubscription(ctx context.Context, in *GrantSubscriptionReq, opts ...grpc.CallOption) (*GrantSubscriptionRes, error)
 	// 站管：取消订阅（立即回落免费；保留 AI 日报用户偏好）
 	RevokeSubscription(ctx context.Context, in *RevokeSubscriptionReq, opts ...grpc.CallOption) (*RevokeSubscriptionRes, error)
@@ -187,7 +187,7 @@ type SubscriptionServer interface {
 	GetOrder(context.Context, *GetOrderReq) (*GetOrderRes, error)
 	// 登录：我的订阅状态（tier/expireAt/source/剩余天数；tier 空=未订阅）
 	MySubscription(context.Context, *MySubscriptionReq) (*MySubscriptionRes, error)
-	// 站管（PermSiteUserSync）：人工赋予/更新订阅（重复调用覆盖，从 max(now, 当前到期) 起加 days）
+	// 站管（PermSiteUserSync）：人工赋予/更新订阅（重复调用叠加，走与支付相同的档位叠加语义）
 	GrantSubscription(context.Context, *GrantSubscriptionReq) (*GrantSubscriptionRes, error)
 	// 站管：取消订阅（立即回落免费；保留 AI 日报用户偏好）
 	RevokeSubscription(context.Context, *RevokeSubscriptionReq) (*RevokeSubscriptionRes, error)

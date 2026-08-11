@@ -52,6 +52,8 @@ type PaymentOrder struct {
 	UserID uint `gorm:"not null;index;comment:下单用户"`
 	// Plan 购买的套餐档
 	Plan string `gorm:"size:16;not null;comment:套餐档"`
+	// Months 购买月数（1–12）；履约天数 = 套餐 days × months
+	Months int `gorm:"default:1;comment:购买月数"`
 	// AmountCents 应付金额（分）
 	AmountCents int64 `gorm:"not null;comment:金额(分)"`
 	// Status pending|paid|closed

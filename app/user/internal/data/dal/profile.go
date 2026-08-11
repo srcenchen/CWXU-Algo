@@ -16,6 +16,7 @@ import (
 
 	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type ProfileDal struct {
@@ -1091,15 +1092,52 @@ func mergeRefreshQuota(override *int, planQuota int, subscribed bool) (quota int
 }
 
 // SubscriptionTier 用户当前订阅档：active = 有档位且未过期（nil 到期视为长期）。
+// 读取时懒晋升：当前档已过期且有排队档 → 自动切换（Pro 到期自动续 Plus）。
+// 热路径优化：常规情况无锁直读；仅当检测到「已过期且有待晋升的排队档」才走行锁事务晋升。
 func (d *ProfileDal) SubscriptionTier(ctx context.Context, userID int64) (tier string, active bool) {
 	if userID <= 0 || d == nil || d.db == nil {
 		return "", false
 	}
 	var u model.User
+	now := time.Now()
 	if err := d.db.WithContext(ctx).
-		Select("sub_tier, sub_expire_at").
+		Select("sub_tier, sub_expire_at, sub_pending_tier").
 		Where("id = ?", userID).
 		First(&u).Error; err != nil {
+		return "", false
+	}
+	tier = strings.TrimSpace(u.SubTier)
+	if tier == "" {
+		return "", false
+	}
+	// 常规：未过期（或长期）直接返回
+	if u.SubExpireAt == nil || u.SubExpireAt.After(now) {
+		return tier, true
+	}
+	// 已过期：无排队档 → 回落免费；有排队档 → 行锁晋升
+	if strings.TrimSpace(u.SubPendingTier) == "" {
+		return "", false
+	}
+	if err := d.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("id = ?", userID).
+			First(&u).Error; err != nil {
+			return err
+		}
+		if promoteInPlace(&u, now) {
+			// 晋升产生状态变化：写回（pending 清空、reminded 重置）
+			return tx.Model(&model.User{}).Where("id = ?", userID).Updates(map[string]interface{}{
+				"sub_tier":           u.SubTier,
+				"sub_expire_at":      u.SubExpireAt,
+				"sub_source":         u.SubSource,
+				"sub_pending_tier":   u.SubPendingTier,
+				"sub_pending_days":   u.SubPendingDays,
+				"sub_pending_source": u.SubPendingSource,
+				"sub_reminded":       u.SubReminded,
+			}).Error
+		}
+		return nil
+	}); err != nil {
 		return "", false
 	}
 	tier = strings.TrimSpace(u.SubTier)

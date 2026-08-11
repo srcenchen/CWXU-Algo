@@ -61,9 +61,17 @@ type User struct {
 	// SubTier 订阅档位：plus|pro；空=未订阅
 	SubTier string `gorm:"size:16;default:'';index;comment:订阅档 plus|pro"`
 	// SubExpireAt 订阅到期时间；nil=长期/未订阅（以 SubTier 为准）
-	SubExpireAt *time.Time `gorm:"comment:订阅到期"`
+	SubExpireAt *time.Time `gorm:"index;comment:订阅到期"`
 	// SubSource 订阅来源：payfm|manager
 	SubSource string `gorm:"size:16;default:'';comment:订阅来源 payfm|manager"`
+	// SubPendingTier 排队档位：当前档到期后生效（仅另一档可排队）；空=无排队
+	SubPendingTier string `gorm:"size:16;default:'';comment:排队档 plus|pro"`
+	// SubPendingDays 排队档剩余/购买天数（Pro 到期晋升时 sub_expire_at = now + 该值）
+	SubPendingDays int `gorm:"default:0;comment:排队档天数"`
+	// SubPendingSource 排队档来源：payfm|manager
+	SubPendingSource string `gorm:"size:16;default:'';comment:排队档来源 payfm|manager"`
+	// SubReminded 到期提醒标记：0=未提醒 3=已发3天提醒 1=已发1天提醒（续费/晋升后重置）
+	SubReminded int `gorm:"default:0;comment:到期提醒 0/3/1"`
 	// AIDailyEnabled 个人 AI 日报开关（仅 Pro 生效；默认关）
 	// column 显式指定：避免 NamingStrategy 把 AIDaily 拆成 a_i_daily → a_idaily_enabled
 	AIDailyEnabled bool `gorm:"column:ai_daily_enabled;default:false;comment:AI日报开关(Pro)"`

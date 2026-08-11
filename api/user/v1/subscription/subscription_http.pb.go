@@ -34,7 +34,7 @@ type SubscriptionHTTPServer interface {
 	CreateOrder(context.Context, *CreateOrderReq) (*CreateOrderRes, error)
 	// GetOrder 登录：查订单状态（前端回流轮询）
 	GetOrder(context.Context, *GetOrderReq) (*GetOrderRes, error)
-	// GrantSubscription 站管（PermSiteUserSync）：人工赋予/更新订阅（重复调用覆盖，从 max(now, 当前到期) 起加 days）
+	// GrantSubscription 站管（PermSiteUserSync）：人工赋予/更新订阅（重复调用叠加，走与支付相同的档位叠加语义）
 	GrantSubscription(context.Context, *GrantSubscriptionReq) (*GrantSubscriptionRes, error)
 	// ListPlans 公开：套餐列表（含价格与配额，前端对比表用）
 	ListPlans(context.Context, *ListPlansReq) (*ListPlansRes, error)
@@ -251,7 +251,7 @@ type SubscriptionHTTPClient interface {
 	CreateOrder(ctx context.Context, req *CreateOrderReq, opts ...http.CallOption) (rsp *CreateOrderRes, err error)
 	// GetOrder 登录：查订单状态（前端回流轮询）
 	GetOrder(ctx context.Context, req *GetOrderReq, opts ...http.CallOption) (rsp *GetOrderRes, err error)
-	// GrantSubscription 站管（PermSiteUserSync）：人工赋予/更新订阅（重复调用覆盖，从 max(now, 当前到期) 起加 days）
+	// GrantSubscription 站管（PermSiteUserSync）：人工赋予/更新订阅（重复调用叠加，走与支付相同的档位叠加语义）
 	GrantSubscription(ctx context.Context, req *GrantSubscriptionReq, opts ...http.CallOption) (rsp *GrantSubscriptionRes, err error)
 	// ListPlans 公开：套餐列表（含价格与配额，前端对比表用）
 	ListPlans(ctx context.Context, req *ListPlansReq, opts ...http.CallOption) (rsp *ListPlansRes, err error)
@@ -303,7 +303,7 @@ func (c *SubscriptionHTTPClientImpl) GetOrder(ctx context.Context, in *GetOrderR
 	return &out, nil
 }
 
-// GrantSubscription 站管（PermSiteUserSync）：人工赋予/更新订阅（重复调用覆盖，从 max(now, 当前到期) 起加 days）
+// GrantSubscription 站管（PermSiteUserSync）：人工赋予/更新订阅（重复调用叠加，走与支付相同的档位叠加语义）
 func (c *SubscriptionHTTPClientImpl) GrantSubscription(ctx context.Context, in *GrantSubscriptionReq, opts ...http.CallOption) (*GrantSubscriptionRes, error) {
 	var out GrantSubscriptionRes
 	pattern := "/v1/user/subscription/grant"

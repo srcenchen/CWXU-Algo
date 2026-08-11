@@ -36,7 +36,7 @@ service Subscription {
       get: "/v1/user/subscription/my"
     };
   }
-  // 站管（PermSiteUserSync）：人工赋予/更新订阅（重复调用覆盖，从 max(now, 当前到期) 起加 days）
+  // 站管（PermSiteUserSync）：人工赋予/更新订阅（重复调用叠加，走与支付相同的档位叠加语义）
   rpc GrantSubscription (GrantSubscriptionReq) returns (GrantSubscriptionRes) {
     option (google.api.http) = {
       post: "/v1/user/subscription/grant"
@@ -108,6 +108,8 @@ message Plan {
 
 message CreateOrderReq {
   string plan = 1; // plus|pro
+  // 购买月数（1–12，默认 1）；金额 = 套餐月价 × months，履约天数 = 套餐 days × months
+  int32 months = 2;
 }
 
 message CreateOrderRes {
@@ -121,6 +123,10 @@ message CreateOrderRes {
   int64 amountCents = 5;
   // 订单失效时间（unix 秒）
   int64 expireAt = 6;
+  // 购买月数
+  int32 months = 7;
+  // 履约天数（套餐 days × months）
+  int32 days = 8;
 }
 
 message GetOrderReq {
@@ -150,6 +156,10 @@ message MySubscriptionRes {
   string source = 5;
   // 剩余天数（已过期按 0）
   int32 daysLeft = 6;
+  // 排队档 plus|pro（当前档到期后自动生效；空=无排队）
+  string pendingTier = 7;
+  // 排队档剩余/购买天数
+  int32 pendingDaysLeft = 8;
 }
 
 message GrantSubscriptionReq {
@@ -200,6 +210,10 @@ message SubUser {
   string source = 6;
   // 头像（已扩展为完整 URL；空=未设置）
   string avatar = 7;
+  // 排队档 plus|pro（空=无排队）
+  string pendingTier = 8;
+  // 排队档剩余/购买天数
+  int32 pendingDays = 9;
 }
 
 message UpdatePlansReq {
