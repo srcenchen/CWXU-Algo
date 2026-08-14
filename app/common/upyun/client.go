@@ -120,6 +120,39 @@ func (c *Client) Put(objectKey string, data []byte, contentType string) error {
 	return nil
 }
 
+// Exists reports whether objectKey currently exists in UpYun storage.
+func (c *Client) Exists(objectKey string) (bool, error) {
+	if !c.Configured() {
+		return false, fmt.Errorf("upyun not configured")
+	}
+	key := "/" + strings.TrimPrefix(objectKey, "/")
+	uri := "/" + strings.Trim(c.cfg.Bucket, "/") + key
+	host := strings.TrimRight(c.cfg.APIHost, "/")
+	if host == "" {
+		host = defaultAPIHost
+	}
+	req, err := http.NewRequest(http.MethodHead, host+uri, nil)
+	if err != nil {
+		return false, err
+	}
+	date := time.Now().UTC().Format(http.TimeFormat)
+	req.Header.Set("Date", date)
+	req.Header.Set("Authorization", c.sign("HEAD", uri, date))
+	resp, err := c.hc.Do(req)
+	if err != nil {
+		return false, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		return false, nil
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return false, fmt.Errorf("upyun head %s: %s %s", key, resp.Status, strings.TrimSpace(string(body)))
+	}
+	return true, nil
+}
+
 // Delete removes an object. Missing object is treated as success.
 func (c *Client) Delete(objectKey string) error {
 	if !c.Configured() {

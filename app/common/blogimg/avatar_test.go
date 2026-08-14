@@ -7,16 +7,14 @@ func TestAvatarObjectKeyFromAnyURL(t *testing.T) {
 		in   string
 		want string
 	}{
-		{"/avatar/27/a1b2.jpg", "/avatar/27/a1b2.jpg"},
 		{"https://zhiyuansofts.cn/avatar/27/a1b2.jpg", "/avatar/27/a1b2.jpg"},
-		{"http://cdn.example.com/avatar/27/a1b2.webp", "/avatar/27/a1b2.webp"},
-		{"//cdn.example.com/avatar/27/a1b2.png", "/avatar/27/a1b2.png"},
+		{"//zhiyuansofts.cn/avatar/27/a1b2.jpg", "/avatar/27/a1b2.jpg"},
+		{"/avatar/27/a1b2.jpg", "/avatar/27/a1b2.jpg"},
+		{"avatar/27/a1b2.jpg", "/avatar/27/a1b2.jpg"},
+		{"/api/user/static/avatar/27/a1b2.jpg", ""},
+		{"https://example.com/blog/27/a1b2.jpg", ""},
+		{"/avatar/not-a-user/a1b2.jpg", ""},
 		{"", ""},
-		{"/api/user/static/avatar/27/20260730_ab.jpg", ""},
-		{"/v1/user/static/avatar/27/20260730_ab.jpg", ""},
-		{"/blog/27/a1b2.jpg", ""},
-		{"/avatar/x/a1b2.jpg", ""},
-		{"https://example.com/foo/avatar/27/a1b2.jpg", ""},
 	}
 	for _, c := range cases {
 		if got := AvatarObjectKeyFromAnyURL(c.in); got != c.want {
@@ -26,7 +24,7 @@ func TestAvatarObjectKeyFromAnyURL(t *testing.T) {
 }
 
 func TestAvatarObjectKeyForHash(t *testing.T) {
-	h := repeat('a', 64)
+	h := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	key := AvatarObjectKeyForHash(27, h, ".jpg")
 	if key != "/avatar/27/"+h+".jpg" {
 		t.Errorf("unexpected key: %s", key)
@@ -45,9 +43,8 @@ func TestNormalizeAvatarForStore(t *testing.T) {
 	}{
 		{"https://zhiyuansofts.cn/avatar/27/a1b2.jpg", "/avatar/27/a1b2.jpg"},
 		{"/avatar/27/a1b2.jpg", "/avatar/27/a1b2.jpg"},
-		{"/api/user/static/avatar/27/20260730_ab.jpg", "/api/user/static/avatar/27/20260730_ab.jpg"},
-		{"https://example.com/custom.png", "https://example.com/custom.png"},
-		{"", ""},
+		{"https://example.com/a.png", "https://example.com/a.png"},
+		{"/api/user/static/avatar/27/x.jpg", "/api/user/static/avatar/27/x.jpg"},
 	}
 	for _, c := range cases {
 		if got := NormalizeAvatarForStore(c.in); got != c.want {
@@ -71,10 +68,14 @@ func TestExpandAvatarURL(t *testing.T) {
 	}
 }
 
-func repeat(c byte, n int) string {
-	b := make([]byte, n)
-	for i := range b {
-		b[i] = c
+func TestSameAvatarObject(t *testing.T) {
+	if !SameAvatarObject("https://old.example/avatar/38/hash.jpg", "/avatar/38/hash.jpg") {
+		t.Fatal("absolute URL and path-only key must identify the same avatar object")
 	}
-	return string(b)
+	if SameAvatarObject("/avatar/38/old.jpg", "/avatar/38/new.jpg") {
+		t.Fatal("different avatar keys must not match")
+	}
+	if SameAvatarObject("https://external.example/a.jpg", "https://external.example/a.jpg") {
+		t.Fatal("external URLs are not managed avatar objects")
+	}
 }

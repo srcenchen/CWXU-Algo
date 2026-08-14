@@ -2,6 +2,7 @@ package blogimg
 
 import (
 	"net/url"
+	"strconv"
 	"strings"
 )
 
@@ -36,6 +37,31 @@ func AvatarObjectKeyFromAnyURL(avatar string) string {
 		return ""
 	}
 	return p
+}
+
+// AvatarObjectOwnerID returns the user id encoded by /avatar/{uid}/….
+func AvatarObjectOwnerID(avatar string) (uint, bool) {
+	key := AvatarObjectKeyFromAnyURL(avatar)
+	if key == "" {
+		return 0, false
+	}
+	parts := strings.Split(strings.TrimPrefix(key, "/"), "/")
+	if len(parts) < 3 {
+		return 0, false
+	}
+	id, err := strconv.ParseUint(parts[1], 10, 64)
+	if err != nil || id == 0 {
+		return 0, false
+	}
+	return uint(id), true
+}
+
+// SameAvatarObject reports whether two managed avatar references resolve to the same object key.
+// It handles legacy absolute URLs and canonical path-only values without treating external URLs as managed.
+func SameAvatarObject(a, b string) bool {
+	ka := AvatarObjectKeyFromAnyURL(a)
+	kb := AvatarObjectKeyFromAnyURL(b)
+	return ka != "" && kb != "" && ka == kb
 }
 
 func allDigits(s string) bool {

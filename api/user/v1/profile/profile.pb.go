@@ -457,8 +457,10 @@ type UpdateReq struct {
 	EmailCode string `protobuf:"bytes,7,opt,name=emailCode,proto3" json:"emailCode,omitempty"`
 	// AI 日报开关（仅 Pro 订阅 active 可开启；默认关）；省略=不改
 	AiDailyEnabled *bool `protobuf:"varint,8,opt,name=aiDailyEnabled,proto3,oneof" json:"aiDailyEnabled,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// 显式清空头像；avatar 空字符串本身仍表示「未传，不改」
+	ClearAvatar   bool `protobuf:"varint,9,opt,name=clearAvatar,proto3" json:"clearAvatar,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *UpdateReq) Reset() {
@@ -529,6 +531,13 @@ func (x *UpdateReq) GetEmailCode() string {
 func (x *UpdateReq) GetAiDailyEnabled() bool {
 	if x != nil && x.AiDailyEnabled != nil {
 		return *x.AiDailyEnabled
+	}
+	return false
+}
+
+func (x *UpdateReq) GetClearAvatar() bool {
+	if x != nil {
+		return x.ClearAvatar
 	}
 	return false
 }
@@ -3692,14 +3701,15 @@ const file_user_v1_profile_profile_proto_rawDesc = "" +
 	"\x11dailyRefreshQuota\x18\x1e \x01(\x05R\x11dailyRefreshQuota\x12@\n" +
 	"\x1bdailyRefreshQuotaOverridden\x18\x1f \x01(\bR\x1bdailyRefreshQuotaOverridden\x12\x18\n" +
 	"\asubTier\x18  \x01(\tR\asubTier\x12 \n" +
-	"\vsubExpireAt\x18! \x01(\x03R\vsubExpireAt\"\xc3\x01\n" +
+	"\vsubExpireAt\x18! \x01(\x03R\vsubExpireAt\"\xe5\x01\n" +
 	"\tUpdateReq\x12\x16\n" +
 	"\x06userId\x18\x01 \x01(\x04R\x06userId\x12\x12\n" +
 	"\x04name\x18\x03 \x01(\tR\x04name\x12\x14\n" +
 	"\x05email\x18\x04 \x01(\tR\x05email\x12\x16\n" +
 	"\x06avatar\x18\x06 \x01(\tR\x06avatar\x12\x1c\n" +
 	"\temailCode\x18\a \x01(\tR\temailCode\x12+\n" +
-	"\x0eaiDailyEnabled\x18\b \x01(\bH\x00R\x0eaiDailyEnabled\x88\x01\x01B\x11\n" +
+	"\x0eaiDailyEnabled\x18\b \x01(\bH\x00R\x0eaiDailyEnabled\x88\x01\x01\x12 \n" +
+	"\vclearAvatar\x18\t \x01(\bR\vclearAvatarB\x11\n" +
 	"\x0f_aiDailyEnabled\"9\n" +
 	"\tUpdateRes\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\x03R\x04code\x12\x18\n" +

@@ -9276,6 +9276,9 @@ components:
                 aiDailyEnabled:
                     type: boolean
                     description: AI 日报开关（仅 Pro 订阅 active 可开启；默认关）；省略=不改
+                clearAvatar:
+                    type: boolean
+                    description: 显式清空头像；avatar 空字符串本身仍表示「未传，不改」
         api.user.v1.UpdateRes:
             type: object
             properties:

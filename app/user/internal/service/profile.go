@@ -450,25 +450,30 @@ func (p *ProfileService) Update(ctx context.Context, req *profile.UpdateReq) (*p
 		}
 	}
 
-	// 昵称不再由此接口修改（请走组织内称呼）；仅更新头像 / 邮箱
-	// 头像入库规范化：又拍云 URL → path-only key（读时再按当前图床域名扩展）
-	// avatar 为空视为「未传，不改」，避免客户端漏传/空值把已有头像清空并删掉又拍云对象
+	// 昵称不再由此接口修改（请走组织内称呼）；仅更新头像 / 邮箱。
+	// avatar 省略时不改；clearAvatar=true 时显式清空；新头像必须是本人已上传且仍存在的本站对象。
 	oldAvatar := strings.TrimSpace(cur.Avatar)
-	newAvatar := oldAvatar
-	if strings.TrimSpace(req.Avatar) != "" {
-		newAvatar = normalizeAvatarForStore(req.Avatar)
+	newAvatar, avatarChanged, avatarErr := resolveAvatarChange(
+		uint(req.UserId),
+		oldAvatar,
+		req.Avatar,
+		req.GetClearAvatar(),
+		loadUpyunFromDB(p.db).Exists,
+	)
+	if avatarErr != nil {
+		return &profile.UpdateRes{Code: 8, Message: avatarErr.Error()}, nil
 	}
 	pro := model.User{
 		ID:    uint(req.UserId),
 		Email: newEmail,
 	}
-	if newAvatar != oldAvatar {
+	if avatarChanged {
 		pro.Avatar = newAvatar
 	}
 	if !emailChanged {
 		pro.Email = cur.Email
 	}
-	if err := p.profileDal.UpdateAvatarEmail(ctx, pro, emailChanged); err != nil {
+	if err := p.profileDal.UpdateAvatarEmail(ctx, pro, emailChanged, avatarChanged); err != nil {
 		return nil, errors.InternalServer("内部错误", err.Error())
 	}
 	// AI 日报开关（仅 Pro 订阅 active 可开；默认关；省略=不改）
@@ -484,8 +489,8 @@ func (p *ProfileService) Update(ctx context.Context, req *profile.UpdateReq) (*p
 			return nil, errors.InternalServer("内部错误", err.Error())
 		}
 	}
-	// 换头像后删除旧头像对象（又拍云对象 / 旧本地文件），尽力而为
-	deleteStaleAvatar(p.db, oldAvatar, newAvatar)
+	// 数据库引用成功切换后，才清理确认未再被引用且属于该用户的旧对象。
+	deleteStaleAvatar(p.db, uint(req.UserId), oldAvatar, newAvatar)
 	return &profile.UpdateRes{Code: 0, Message: "更新成功"}, nil
 }
 

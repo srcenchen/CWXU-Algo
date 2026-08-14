@@ -136,15 +136,15 @@ func TestListAdminImageAssetsFiltersCleanupCandidates(t *testing.T) {
 	_ = db.Create(&adminTestUser{ID: 2, Username: "bob", Name: "Bob"}).Error
 
 	oldOrphanID := createAdminAsset(t, db, adminTestAsset{
-		CreatedAt: now.Add(-13 * time.Hour), UserID: 1,
+		CreatedAt: now.Add(-13 * time.Hour), UpdatedAt: now.Add(-13 * time.Hour), UserID: 1,
 		ObjectKey: "/blog/1/orphan.webp", URL: "/blog/1/orphan.webp", Purpose: "content",
 	})
 	referencedID := createAdminAsset(t, db, adminTestAsset{
-		CreatedAt: now.Add(-48 * time.Hour), UserID: 1,
+		CreatedAt: now.Add(-48 * time.Hour), UpdatedAt: now.Add(-48 * time.Hour), UserID: 1,
 		ObjectKey: "/blog/1/shared.webp", URL: base + "/blog/1/shared.webp", Purpose: "content",
 	})
 	freshID := createAdminAsset(t, db, adminTestAsset{
-		CreatedAt: now.Add(-11 * time.Hour), UserID: 2,
+		CreatedAt: now.Add(-11 * time.Hour), UpdatedAt: now.Add(-11 * time.Hour), UserID: 2,
 		ObjectKey: "/blog/2/fresh.webp", URL: "/blog/2/fresh.webp", Purpose: "cover",
 	})
 	_ = db.Create(&articleRefRow{
@@ -181,7 +181,7 @@ func TestListAdminImageAssetsIncludesExactTwelveHourBoundary(t *testing.T) {
 	db := adminImageTestDB(t)
 	now := time.Date(2026, 7, 31, 12, 0, 0, 0, time.UTC)
 	id := createAdminAsset(t, db, adminTestAsset{
-		CreatedAt: now.Add(-AdminImageCleanupGracePeriod), UserID: 1,
+		CreatedAt: now.Add(-AdminImageCleanupGracePeriod), UpdatedAt: now.Add(-AdminImageCleanupGracePeriod), UserID: 1,
 		ObjectKey: "/blog/1/boundary.webp", URL: "/blog/1/boundary.webp",
 	})
 	result, err := ListAdminImageAssetsAt(db, "https://cdn.example.com", AdminImageListOptions{
@@ -237,7 +237,7 @@ func TestDeleteAdminImageRechecksCandidate(t *testing.T) {
 	db := adminImageTestDB(t)
 	now := time.Date(2026, 7, 31, 12, 0, 0, 0, time.UTC)
 	id := createAdminAsset(t, db, adminTestAsset{
-		CreatedAt: now.Add(-13 * time.Hour), UserID: 1,
+		CreatedAt: now.Add(-13 * time.Hour), UpdatedAt: now.Add(-13 * time.Hour), UserID: 1,
 		ObjectKey: "/blog/1/delete.webp", URL: "/blog/1/delete.webp",
 	})
 	deleter := &fakeDeleter{base: "https://cdn.example.com"}
@@ -259,7 +259,7 @@ func TestDeleteAdminImageRejectsNewReference(t *testing.T) {
 	db := adminImageTestDB(t)
 	now := time.Date(2026, 7, 31, 12, 0, 0, 0, time.UTC)
 	id := createAdminAsset(t, db, adminTestAsset{
-		CreatedAt: now.Add(-13 * time.Hour), UserID: 1,
+		CreatedAt: now.Add(-13 * time.Hour), UpdatedAt: now.Add(-13 * time.Hour), UserID: 1,
 		ObjectKey: "/blog/1/now-used.webp", URL: "/blog/1/now-used.webp",
 	})
 	preview, err := ListAdminImageAssetsAt(db, "https://cdn.example.com", AdminImageListOptions{Mode: "cleanup"}, now)
@@ -281,7 +281,7 @@ func TestDeleteAdminImagesSnapshotRejectsChangedCandidates(t *testing.T) {
 	db := adminImageTestDB(t)
 	now := time.Date(2026, 7, 31, 12, 0, 0, 0, time.UTC)
 	firstID := createAdminAsset(t, db, adminTestAsset{
-		CreatedAt: now.Add(-13 * time.Hour), UserID: 1,
+		CreatedAt: now.Add(-13 * time.Hour), UpdatedAt: now.Add(-13 * time.Hour), UserID: 1,
 		ObjectKey: "/blog/1/first.webp", URL: "/blog/1/first.webp",
 	})
 	preview, err := ListAdminImageAssetsAt(db, "https://cdn.example.com", AdminImageListOptions{Mode: "cleanup"}, now)
@@ -289,7 +289,7 @@ func TestDeleteAdminImagesSnapshotRejectsChangedCandidates(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = createAdminAsset(t, db, adminTestAsset{
-		CreatedAt: now.Add(-14 * time.Hour), UserID: 2,
+		CreatedAt: now.Add(-14 * time.Hour), UpdatedAt: now.Add(-14 * time.Hour), UserID: 2,
 		ObjectKey: "/blog/2/second.webp", URL: "/blog/2/second.webp",
 	})
 	deleter := &fakeDeleter{base: "https://cdn.example.com"}
@@ -306,11 +306,11 @@ func TestDeleteAdminImagesSnapshotDeletesAllInOneLock(t *testing.T) {
 	db := adminImageTestDB(t)
 	now := time.Date(2026, 7, 31, 12, 0, 0, 0, time.UTC)
 	idA := createAdminAsset(t, db, adminTestAsset{
-		CreatedAt: now.Add(-13 * time.Hour), UserID: 1,
+		CreatedAt: now.Add(-13 * time.Hour), UpdatedAt: now.Add(-13 * time.Hour), UserID: 1,
 		ObjectKey: "/blog/1/a.webp", URL: "/blog/1/a.webp",
 	})
 	idB := createAdminAsset(t, db, adminTestAsset{
-		CreatedAt: now.Add(-14 * time.Hour), UserID: 2,
+		CreatedAt: now.Add(-14 * time.Hour), UpdatedAt: now.Add(-14 * time.Hour), UserID: 2,
 		ObjectKey: "/blog/2/b.webp", URL: "/blog/2/b.webp",
 	})
 	preview, err := ListAdminImageAssetsAt(db, "https://cdn.example.com", AdminImageListOptions{Mode: "cleanup"}, now)
@@ -339,7 +339,7 @@ func TestDeleteAdminImageKeepsRowWhenRemoteDeleteFails(t *testing.T) {
 	db := adminImageTestDB(t)
 	now := time.Date(2026, 7, 31, 12, 0, 0, 0, time.UTC)
 	id := createAdminAsset(t, db, adminTestAsset{
-		CreatedAt: now.Add(-13 * time.Hour), UserID: 1,
+		CreatedAt: now.Add(-13 * time.Hour), UpdatedAt: now.Add(-13 * time.Hour), UserID: 1,
 		ObjectKey: "/blog/1/remote-fail.webp", URL: "/blog/1/remote-fail.webp",
 	})
 	deleted, err := DeleteAdminImageAt(db, &failingAdminDeleter{base: "https://cdn.example.com"}, id, now)

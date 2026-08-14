@@ -54,8 +54,9 @@ func (t *SummaryTask) Do(userId int64, typ string) SummaryEnqueueResult {
 			return SummaryEnqueueResult{Deduped: true}
 		}
 	}
-	if _, err := t.mq.QueueDeclare("summary", true, false, false, false, nil); err != nil {
-		log.Errorf("SummaryTask: QueueDeclare failed: %v", err)
+	queue := event.SummaryQueueForType(typ)
+	if _, err := t.mq.QueueDeclare(queue, true, false, false, false, nil); err != nil {
+		log.Errorf("SummaryTask: QueueDeclare %s failed: %v", queue, err)
 		t.clearPending(userId, typ)
 		return SummaryEnqueueResult{Failed: true}
 	}
@@ -66,12 +67,12 @@ func (t *SummaryTask) Do(userId int64, typ string) SummaryEnqueueResult {
 		t.clearPending(userId, typ)
 		return SummaryEnqueueResult{Failed: true}
 	}
-	if err := t.mq.Publish("", "summary", false, false, amqp.Publishing{
+	if err := t.mq.Publish("", queue, false, false, amqp.Publishing{
 		ContentType:  "application/json",
 		Body:         body,
 		DeliveryMode: amqp.Persistent,
 	}); err != nil {
-		log.Errorf("SummaryTask: Publish failed: %v", err)
+		log.Errorf("SummaryTask: Publish %s failed: %v", queue, err)
 		t.clearPending(userId, typ)
 		return SummaryEnqueueResult{Failed: true}
 	}

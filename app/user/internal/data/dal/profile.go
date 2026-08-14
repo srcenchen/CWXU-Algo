@@ -313,15 +313,20 @@ func InvalidateFollowingCacheRDB(ctx context.Context, rdb *redis.Client, userID 
 	_ = rdb.Del(ctx, followingCacheKey(userID)).Err()
 }
 
-// UpdateAvatarEmail 更新头像；emailChanged 时同时写邮箱。不再改 name（昵称走组织内称呼）。
-func (d *ProfileDal) UpdateAvatarEmail(ctx context.Context, profile model.User, emailChanged bool) error {
+// UpdateAvatarEmail 更新头像（avatarChanged=true 时允许显式清空）；emailChanged 时同时写邮箱。
+// 两个 changed 标志都为 false 时绝不触碰对应字段，防止请求省略值导致数据丢失。
+func (d *ProfileDal) UpdateAvatarEmail(ctx context.Context, profile model.User, emailChanged, avatarChanged bool) error {
 	cacheKey := fmt.Sprintf("user:%d:profile", profile.ID)
 	return data2.UpdateCacheDal(ctx, d.rdb, cacheKey, func() error {
-		updates := map[string]interface{}{
-			"avatar": profile.Avatar,
+		updates := map[string]interface{}{}
+		if avatarChanged {
+			updates["avatar"] = profile.Avatar
 		}
 		if emailChanged {
 			updates["email"] = strings.ToLower(strings.TrimSpace(profile.Email))
+		}
+		if len(updates) == 0 {
+			return nil
 		}
 		return d.db.WithContext(ctx).Model(&model.User{}).Where("id = ?", profile.ID).Updates(updates).Error
 	})
@@ -1348,19 +1353,19 @@ func (d *ProfileDal) GetSyncPolicies(ctx context.Context, userIDs []int64) ([]Us
 
 	// 个人邮件偏好 + 站管间隔覆盖 + 活跃/豁免 / 强制冻结 / 禁用 + 订阅
 	type pref struct {
-		ID                           int64     `gorm:"column:id"`
-		EmailEnabled                 bool      `gorm:"column:email_enabled"`
-		EmailWeeklyEnabled           bool      `gorm:"column:email_weekly_enabled"`
-		SpiderIntervalMinOverride    *int      `gorm:"column:spider_interval_min_override"`
-		AISummaryIntervalMinOverride *int      `gorm:"column:ai_summary_interval_min_override"`
-		IsSiteAdmin                  bool      `gorm:"column:is_site_admin"`
-		SyncExempt                   bool      `gorm:"column:sync_exempt"`
+		ID                           int64      `gorm:"column:id"`
+		EmailEnabled                 bool       `gorm:"column:email_enabled"`
+		EmailWeeklyEnabled           bool       `gorm:"column:email_weekly_enabled"`
+		SpiderIntervalMinOverride    *int       `gorm:"column:spider_interval_min_override"`
+		AISummaryIntervalMinOverride *int       `gorm:"column:ai_summary_interval_min_override"`
+		IsSiteAdmin                  bool       `gorm:"column:is_site_admin"`
+		SyncExempt                   bool       `gorm:"column:sync_exempt"`
 		LastLoginAt                  *time.Time `gorm:"column:last_login_at"`
-		AdminForceDormant            bool      `gorm:"column:admin_force_dormant"`
-		Disabled                     bool      `gorm:"column:disabled"`
-		SubTier                      string    `gorm:"column:sub_tier"`
+		AdminForceDormant            bool       `gorm:"column:admin_force_dormant"`
+		Disabled                     bool       `gorm:"column:disabled"`
+		SubTier                      string     `gorm:"column:sub_tier"`
 		SubExpireAt                  *time.Time `gorm:"column:sub_expire_at"`
-		AIDailyEnabled               bool      `gorm:"column:ai_daily_enabled"`
+		AIDailyEnabled               bool       `gorm:"column:ai_daily_enabled"`
 	}
 	var prefs []pref
 	_ = d.db.WithContext(ctx).Model(&model.User{}).

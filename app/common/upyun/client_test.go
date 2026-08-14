@@ -102,6 +102,36 @@ func TestPutAndDeleteAgainstFakeServer(t *testing.T) {
 	}
 }
 
+func TestExistsAgainstFakeServer(t *testing.T) {
+	var headPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodHead {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		headPath = r.URL.Path
+		if strings.HasSuffix(r.URL.Path, "/missing.jpg") {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	c := New(Config{Bucket: "bucket", Operator: "op", Password: "pw", APIHost: srv.URL, HTTPClient: srv.Client()})
+	exists, err := c.Exists("/avatar/120/present.jpg")
+	if err != nil || !exists {
+		t.Fatalf("present object: exists=%v err=%v", exists, err)
+	}
+	if headPath != "/bucket/avatar/120/present.jpg" {
+		t.Fatalf("head path %q", headPath)
+	}
+	exists, err = c.Exists("/avatar/120/missing.jpg")
+	if err != nil || exists {
+		t.Fatalf("missing object: exists=%v err=%v", exists, err)
+	}
+}
+
 func TestConfiguredFalse(t *testing.T) {
 	if New(Config{}).Configured() {
 		t.Fatal("empty should be false")

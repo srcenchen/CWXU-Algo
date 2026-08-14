@@ -295,11 +295,15 @@ func (lg *NewLuoGu) FetchSubmitLog(ctx context.Context, userId int64, username s
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	baseUrl := fmt.Sprintf("https://www.luogu.com.cn/record/list?user=%s&page=", username)
 	client, err := lg.getClient()
 	if err != nil {
 		return nil, err
 	}
+	uid, err := lg.resolveUID(client, username)
+	if err != nil {
+		return nil, fmt.Errorf("resolve luogu uid %q: %w", username, err)
+	}
+	baseUrl := lg.recordListBaseURL(uid)
 	req, _ := http.NewRequestWithContext(ctx, "GET", baseUrl+"1", nil)
 	resp, err := client.Do(req)
 	if err != nil {
@@ -313,6 +317,9 @@ func (lg *NewLuoGu) FetchSubmitLog(ctx context.Context, userId int64, username s
 		return nil, err
 	}
 	subs = inj.CurrentData.Records.Result
+	if err := validateLuoGuRecords(inj.CurrentData.Records.Count, subs); err != nil {
+		return nil, err
+	}
 	if needAll {
 		// 页间短歇 + 硬顶 200 页，避免无界翻页触发风控 / 占满 worker
 		perPage := inj.CurrentData.Records.PerPage
@@ -456,13 +463,24 @@ func truncateForErr(s string, n int) string {
 	return s[:n] + "..."
 }
 
+func validateLuoGuRecords(total int, records []Record) error {
+	if total > 0 && len(records) == 0 {
+		return fmt.Errorf("luogu records page empty while count=%d", total)
+	}
+	return nil
+}
+
 func (lg *NewLuoGu) resolveUID(client *http.Client, username string) (int64, error) {
+	return lg.resolveUIDFromEndpoint(client, username, "https://www.luogu.com.cn/api/user/search?keyword=")
+}
+
+func (lg *NewLuoGu) resolveUIDFromEndpoint(client *http.Client, username, endpoint string) (int64, error) {
+	username = strings.TrimSpace(username)
 	// 纯数字：直接当 uid
 	if n, err := strconv.ParseInt(username, 10, 64); err == nil && n > 0 {
 		return n, nil
 	}
-	api := "https://www.luogu.com.cn/api/user/search?keyword=" + url.QueryEscape(username)
-	resp, err := client.Get(api)
+	resp, err := client.Get(endpoint + url.QueryEscape(username))
 	if err != nil {
 		return 0, fmt.Errorf("luogu search 失败: %w", err)
 	}
@@ -489,6 +507,10 @@ func (lg *NewLuoGu) resolveUID(client *http.Client, username string) (int64, err
 		return out.Users[0].UID, nil
 	}
 	return 0, fmt.Errorf("luogu 未找到用户: %s", username)
+}
+
+func (lg *NewLuoGu) recordListBaseURL(uid int64) string {
+	return fmt.Sprintf("https://www.luogu.com.cn/record/list?user=%d&page=", uid)
 }
 
 func init() {

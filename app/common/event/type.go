@@ -1,8 +1,8 @@
 package event
 
 type SpiderEvent struct {
-	UserId  int64  `json:"user_id"`
-	NeedAll bool   `json:"need_all"`
+	UserId  int64 `json:"user_id"`
+	NeedAll bool  `json:"need_all"`
 	// Platform 必填：一条消息只抓一个平台（入队侧按绑定展开）
 	// 兼容旧消息：空则 consumer 侧仍可抓该用户全部绑定
 	Platform string `json:"platform,omitempty"`
@@ -13,6 +13,21 @@ type SummaryEvent struct {
 	Type   string `json:"type"`
 	// JobId 训练报告异步任务（Type=TrainingReport 时使用）
 	JobId string `json:"job_id,omitempty"`
+}
+
+const (
+	SummaryQueue     = "summary"
+	SummaryMailQueue = "summary_mail"
+)
+
+// SummaryQueueForType keeps scheduled email from waiting behind interactive AI summaries.
+func SummaryQueueForType(typ string) string {
+	switch typ {
+	case "PersonalLastDay", "PersonalDailyRule", "WeeklyStaff", "WeeklyReportForCoach":
+		return SummaryMailQueue
+	default:
+		return SummaryQueue
+	}
 }
 
 // ProblemFetchEvent 题面爬取任务（problem_fetch 队列）

@@ -253,7 +253,8 @@ func (s SummaryService) enqueueSummaryAsync(userId int64, typ string) {
 		log.Errorf("enqueueSummaryAsync: json.Marshal failed: %v", err)
 		return
 	}
-	s.rabbitMQ.PublishAsync("", "summary", false, false, amqp.Publishing{
+	queue := event.SummaryQueueForType(typ)
+	s.rabbitMQ.PublishAsync("", queue, false, false, amqp.Publishing{
 		ContentType:  "application/json",
 		Body:         body,
 		DeliveryMode: amqp.Persistent,
@@ -263,8 +264,10 @@ func (s SummaryService) enqueueSummaryAsync(userId int64, typ string) {
 func NewSummaryService(data *data.Data, rabbitMQ *event.RabbitMQ, uc *biz.SummaryUseCase) *SummaryService {
 	// 队列声明放启动期一次性做；失败仅告警（consumer 侧 DeclareOnMissing 兜底）
 	if rabbitMQ != nil {
-		if _, err := rabbitMQ.QueueDeclare("summary", true, false, false, false, nil); err != nil {
-			log.Warnf("NewSummaryService: QueueDeclare summary: %v", err)
+		for _, queue := range []string{event.SummaryQueue, event.SummaryMailQueue} {
+			if _, err := rabbitMQ.QueueDeclare(queue, true, false, false, false, nil); err != nil {
+				log.Warnf("NewSummaryService: QueueDeclare %s: %v", queue, err)
+			}
 		}
 	}
 	return &SummaryService{

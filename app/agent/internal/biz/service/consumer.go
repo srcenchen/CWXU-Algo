@@ -12,7 +12,7 @@ import (
 	"github.com/streadway/amqp"
 )
 
-// 2c4g：AI 摘要占 CPU/内存，单 worker 串行
+// 2c4g：交互总结与定时邮件各单 worker，避免日报排在 PersonalRecent 积压后面。
 const summaryConcurrency = 1
 
 type Consumer struct {
@@ -35,10 +35,23 @@ func (c *Consumer) Stop() {
 }
 
 func (c *Consumer) Consume() {
-	log.Infof("summary consumer 循环启动")
+	var wg sync.WaitGroup
+	for _, queue := range []string{event.SummaryQueue, event.SummaryMailQueue} {
+		queue := queue
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			c.consumeQueue(queue)
+		}()
+	}
+	wg.Wait()
+}
+
+func (c *Consumer) consumeQueue(queue string) {
+	log.Infof("summary consumer 循环启动 queue=%s", queue)
 	_ = mqconsume.Run(c.mq, mqconsume.Options{
-		Name:             "summary",
-		Queue:            "summary",
+		Name:             queue,
+		Queue:            queue,
 		Concurrency:      summaryConcurrency,
 		MaxRetry:         5,
 		DeclareOnMissing: true,
@@ -61,7 +74,6 @@ func (c *Consumer) Consume() {
 				runErr = c.summary.WeeklyStaff(msg.UserId)
 			default:
 				log.Errorf("RabbitMQ(Summary): 未知类型 %s", msg.Type)
-				// 未知类型：重试无意义，用 max retry 后 drop
 				return fmt.Errorf("unknown type %s", msg.Type)
 			}
 			if runErr != nil {
