@@ -48,7 +48,8 @@ func adminBlogImageServiceDB(t *testing.T) *gorm.DB {
 
 func adminBlogImageToken(t *testing.T, userID uint, isSiteAdmin bool) string {
 	t.Helper()
-	if err := _const.ConfigureJWTSecret("admin-blog-image-test-secret-32chars"); err != nil {
+	privPEM, pubPEM := genTestRSAKeys(t)
+	if err := _const.ConfigureJWTKeys(privPEM, pubPEM); err != nil {
 		t.Fatal(err)
 	}
 	claims := auth.JwtPayload{
@@ -59,7 +60,7 @@ func adminBlogImageToken(t *testing.T, userID uint, isSiteAdmin bool) string {
 		Username:    "tester",
 		IsSiteAdmin: isSiteAdmin,
 	}
-	token, err := jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString([]byte(_const.JWTSecret()))
+	token, err := jwt.NewWithClaims(jwt.SigningMethodRS256, claims).SignedString(_const.JWTPrivateKey())
 	if err != nil {
 		t.Fatal(err)
 	}

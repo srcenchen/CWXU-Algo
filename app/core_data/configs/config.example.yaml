@@ -9,6 +9,11 @@ server:
   reg_dsn: 192.168.1.7:8500
   amqp_dsn: amqp://cwxu-algo:cwxu-algo@192.168.1.7:5672/algo
   jwt_secret: ""
+  # RSA 公钥 PEM（验证；所有服务配置），生成方式见 user config.example.yaml；环境变量 CWXU_JWT_PUBLIC_KEY 可覆盖
+  jwt_public_key: |
+    -----BEGIN PUBLIC KEY-----
+    <RSA 公钥 PEM>
+    -----END PUBLIC KEY-----
   config_encryption_key: ""
 data:
   database:

@@ -63,7 +63,7 @@ func IssueJWT(db *gorm.DB, u *model.User) (string, error) {
 	// 默认可续期访问令牌；前端活跃时通过 refresh 从 DB 重签，滚动续期并同步权限。
 	now := time.Now()
 	expire := now.Add(JWTAccessTTL)
-	return jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+	return jwt.NewWithClaims(jwt.SigningMethodRS256, jwt.MapClaims{
 		"userId":             u.ID,
 		"username":           u.Username,
 		"name":               u.Name,
@@ -78,5 +78,5 @@ func IssueJWT(db *gorm.DB, u *model.User) (string, error) {
 		"iat":                now.Unix(),
 		"iss":                "goalgo",
 		"aud":                "goalgo-web",
-	}).SignedString([]byte(_const.JWTSecret()))
+	}).SignedString(_const.JWTPrivateKey())
 }

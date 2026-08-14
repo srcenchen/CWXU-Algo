@@ -22,7 +22,8 @@ import (
 
 func setupPasteTest(t *testing.T) (*PasteService, *gorm.DB) {
 	t.Helper()
-	if err := _const.ConfigureJWTSecret("paste-test-jwt-secret-0123456789abcdef"); err != nil {
+	privPEM, pubPEM := genTestRSAKeys(t)
+	if err := _const.ConfigureJWTKeys(privPEM, pubPEM); err != nil {
 		t.Fatal(err)
 	}
 	db, err := gorm.Open(sqlite.Open("file:paste_"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{
@@ -50,8 +51,8 @@ func pasteTestToken(t *testing.T, uid uint, isAdmin bool) string {
 	t.Helper()
 	pd := auth.JwtPayload{UserID: uid, IsSiteAdmin: isAdmin}
 	pd.ExpiresAt = jwt.NewNumericDate(time.Now().Add(time.Hour))
-	tok := jwt.NewWithClaims(jwt.SigningMethodHS256, pd)
-	s, err := tok.SignedString([]byte(_const.JWTSecret()))
+	tok := jwt.NewWithClaims(jwt.SigningMethodRS256, pd)
+	s, err := tok.SignedString(_const.JWTPrivateKey())
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -2,6 +2,9 @@ package jwt
 
 import (
 	"bytes"
+	"crypto/rsa"
+	"crypto/x509"
+	"encoding/pem"
 	"errors"
 	"io"
 	"net/http"
@@ -21,15 +24,29 @@ func init() {
 	middleware.Register("jwt", Middleware)
 }
 
-func jwtSecret(configValue string) ([]byte, error) {
-	v := strings.TrimSpace(os.Getenv("CWXU_JWT_SECRET"))
+// jwtPublicKey parses the RSA public key PEM used to verify product JWTs.
+// Env CWXU_JWT_PUBLIC_KEY wins over options.secret; PEM parse failure is fatal.
+func jwtPublicKey(configValue string) (*rsa.PublicKey, error) {
+	v := strings.TrimSpace(os.Getenv("CWXU_JWT_PUBLIC_KEY"))
 	if v == "" {
 		v = strings.TrimSpace(configValue)
 	}
-	if len(v) < 32 {
-		return nil, errors.New("jwt middleware options.secret must contain at least 32 characters")
+	if v == "" {
+		return nil, errors.New("jwt middleware options.secret must be an RSA public key PEM")
 	}
-	return []byte(v), nil
+	block, _ := pem.Decode([]byte(v))
+	if block == nil {
+		return nil, errors.New("jwt middleware options.secret is not valid PEM")
+	}
+	key, err := x509.ParsePKIXPublicKey(block.Bytes)
+	if err != nil {
+		return nil, errors.New("jwt middleware options.secret: parse public key: " + err.Error())
+	}
+	pub, ok := key.(*rsa.PublicKey)
+	if !ok {
+		return nil, errors.New("jwt middleware options.secret is not an RSA public key")
+	}
+	return pub, nil
 }
 
 // exact public path suffixes (after cleaning)
@@ -44,6 +61,9 @@ var publicExact = map[string]struct{}{
 	// 支付FM回调（GET query / POST form，签名验签由 user 服务完成）
 	"/v1/payment/notify": {},
 	"/api/payment/notify": {},
+	// 客户中心 webhook 回调（HMAC 验签由 user 服务完成，无 JWT）
+	"/v1/support/events": {},
+	"/api/support/events": {},
 	// Profile 公开读
 	"/v1/user/profile/get-by-id":       {},
 	"/v1/user/profile/get-by-username": {},
@@ -149,18 +169,18 @@ var publicExact = map[string]struct{}{
 	"/v1/core/problemset/unlock":     {},
 }
 
-func parseBearer(secret []byte, authHeader string) (tokenStr string, valid bool) {
+func parseBearer(pub *rsa.PublicKey, authHeader string) (tokenStr string, valid bool) {
 	tokenStr = strings.TrimPrefix(authHeader, "Bearer ")
 	if tokenStr == authHeader || tokenStr == "" {
 		return "", false
 	}
 	token, err := jwt.Parse(tokenStr, func(token *jwt.Token) (interface{}, error) {
-		if token.Method != jwt.SigningMethodHS256 {
+		if token.Method != jwt.SigningMethodRS256 {
 			return nil, jwt.ErrSignatureInvalid
 		}
-		return secret, nil
+		return pub, nil
 	},
-		jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}),
+		jwt.WithValidMethods([]string{jwt.SigningMethodRS256.Alg()}),
 		jwt.WithExpirationRequired(),
 		jwt.WithIssuer("goalgo"),
 		jwt.WithAudience("goalgo-web"),
@@ -179,7 +199,7 @@ func Middleware(c *config.Middleware) (middleware.Middleware, error) {
 			return nil, err
 		}
 	}
-	secret, err := jwtSecret(options.Secret)
+	pub, err := jwtPublicKey(options.Secret)
 	if err != nil {
 		return nil, err
 	}
@@ -213,7 +233,7 @@ func Middleware(c *config.Middleware) (middleware.Middleware, error) {
 				if strings.TrimSpace(authHeader) == "" {
 					return next.RoundTrip(request)
 				}
-				if _, ok := parseBearer(secret, authHeader); ok {
+				if _, ok := parseBearer(pub, authHeader); ok {
 					return next.RoundTrip(request)
 				}
 				request.Header.Del("Authorization")
@@ -224,7 +244,7 @@ func Middleware(c *config.Middleware) (middleware.Middleware, error) {
 			if strings.TrimSpace(authHeader) == "" {
 				return buildUnauthorizedResp("JWT Token not found"), nil
 			}
-			if _, ok := parseBearer(secret, authHeader); !ok {
+			if _, ok := parseBearer(pub, authHeader); !ok {
 				// 区分「没有 Bearer」与「非法/过期」
 				tokenStr := strings.TrimPrefix(authHeader, "Bearer ")
 				if tokenStr == authHeader || tokenStr == "" {

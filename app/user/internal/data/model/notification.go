@@ -28,6 +28,9 @@ const (
 	NotifTypeResourceReviewerRevoked   = "resource_reviewer_revoked"
 	NotifTypeImageUploadApproved       = "image_upload_approved"
 	NotifTypeImageUploadRejected       = "image_upload_rejected"
+	// 工单（客户中心 webhook 触发）
+	NotifTypeTicketReply         = "ticket_reply"
+	NotifTypeTicketStatusChanged = "ticket_status_changed"
 )
 
 // Notification 站内信（按接收用户存储）

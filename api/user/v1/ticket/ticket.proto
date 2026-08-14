@@ -1,0 +1,156 @@
+syntax = "proto3";
+
+package api.user.v1.ticket;
+
+import "google/api/annotations.proto";
+option go_package = "cwxu-algo/api/user/v1/ticket;ticket";
+option java_multiple_files = true;
+option java_package = "api.user.v1.ticket";
+
+// TicketService 工单服务（对接外部客户中心；数据不本地缓存，客户中心是唯一事实来源）
+// 实现位于 user/internal/service/ticket.go。
+// 路径前缀：/v1/user/tickets/*。全部接口需登录；未配置支持中心时返回
+// success:false + message「支持中心未配置，请稍后再试」。
+service TicketService {
+  // 当前活跃工单（无活跃工单 → success:true, ticket=nil，前端据此跳创建页）
+  rpc GetCurrent (GetCurrentReq) returns (GetCurrentRes) {
+    option (google.api.http) = {
+      get: "/v1/user/tickets/current"
+    };
+  }
+  // 工单列表（cursor 分页）
+  rpc List (ListTicketsReq) returns (ListTicketsRes) {
+    option (google.api.http) = {
+      get: "/v1/user/tickets"
+    };
+  }
+  // 工单详情
+  rpc Get (GetTicketReq) returns (GetTicketRes) {
+    option (google.api.http) = {
+      get: "/v1/user/tickets/{ticket_id}"
+    };
+  }
+  // 消息列表（增量：after_sequence 之后的 public 消息）
+  rpc GetMessages (GetMessagesReq) returns (GetMessagesRes) {
+    option (google.api.http) = {
+      get: "/v1/user/tickets/{ticket_id}/messages"
+    };
+  }
+  // 创建工单
+  rpc Create (CreateTicketReq) returns (CreateTicketRes) {
+    option (google.api.http) = {
+      post: "/v1/user/tickets"
+      body: "*"
+    };
+  }
+  // 补充消息
+  rpc CreateMessage (CreateMessageReq) returns (CreateMessageRes) {
+    option (google.api.http) = {
+      post: "/v1/user/tickets/{ticket_id}/messages"
+      body: "*"
+    };
+  }
+  // 用户修改工单状态（pending_agent|pending_customer → resolved|closed）
+  rpc PatchStatus (PatchStatusReq) returns (PatchStatusRes) {
+    option (google.api.http) = {
+      patch: "/v1/user/tickets/{ticket_id}/status"
+      body: "*"
+    };
+  }
+}
+
+// 工单（时间字段统一 unix 秒）
+message Ticket {
+  string id = 1;
+  int64 ticket_number = 2;
+  string title = 3;
+  string status = 4;
+  string priority = 5;
+  string awaiting_actor = 6;
+  int64 latest_message_at = 7;
+  int64 created_at = 8;
+  int64 updated_at = 9;
+}
+
+// 工单消息
+message TicketMessage {
+  string id = 1;
+  int64 sequence_no = 2;
+  string sender_type = 3;
+  string content_type = 4;
+  string content = 5;
+  int64 sent_at = 6;
+}
+
+message CreateTicketReq {
+  string title = 1;
+  string content = 2;
+}
+message CreateTicketRes {
+  bool success = 1;
+  string message = 2;
+  Ticket ticket = 3;
+  // message_info 命名避开 protobuf 保留关键字 message
+  TicketMessage message_info = 4;
+}
+
+message CreateMessageReq {
+  string ticket_id = 1;
+  string content = 2;
+}
+message CreateMessageRes {
+  bool success = 1;
+  string message = 2;
+  TicketMessage message_info = 3;
+}
+
+message PatchStatusReq {
+  string ticket_id = 1;
+  string status = 2;
+  string reason = 3;
+}
+message PatchStatusRes {
+  bool success = 1;
+  string message = 2;
+  Ticket ticket = 3;
+}
+
+message GetCurrentReq {}
+message GetCurrentRes {
+  bool success = 1;
+  string message = 2;
+  Ticket ticket = 3;
+}
+
+message GetTicketReq {
+  string ticket_id = 1;
+}
+message GetTicketRes {
+  bool success = 1;
+  string message = 2;
+  Ticket ticket = 3;
+}
+
+message ListTicketsReq {
+  string status = 1;
+  int64 limit = 2;
+  string cursor = 3;
+}
+message ListTicketsRes {
+  bool success = 1;
+  string message = 2;
+  repeated Ticket list = 3;
+  string next_cursor = 4;
+}
+
+message GetMessagesReq {
+  string ticket_id = 1;
+  int64 after_sequence = 2;
+  int64 limit = 3;
+}
+message GetMessagesRes {
+  bool success = 1;
+  string message = 2;
+  repeated TicketMessage list = 3;
+  int64 next_after_sequence = 4;
+}

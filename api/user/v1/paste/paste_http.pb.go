@@ -37,14 +37,14 @@ type PasteHTTPServer interface {
 
 func RegisterPasteHTTPServer(s *http.Server, srv PasteHTTPServer) {
 	r := s.Route("/")
-	r.POST("/v1/user/paste/create", _Paste_Create6_HTTP_Handler(srv))
-	r.GET("/v1/user/paste/get", _Paste_Get5_HTTP_Handler(srv))
+	r.POST("/v1/user/paste/create", _Paste_Create7_HTTP_Handler(srv))
+	r.GET("/v1/user/paste/get", _Paste_Get6_HTTP_Handler(srv))
 	r.GET("/v1/user/paste/mine", _Paste_Mine2_HTTP_Handler(srv))
 	r.POST("/v1/user/paste/delete", _Paste_Delete7_HTTP_Handler(srv))
 	r.GET("/v1/user/paste/admin-list", _Paste_AdminList0_HTTP_Handler(srv))
 }
 
-func _Paste_Create6_HTTP_Handler(srv PasteHTTPServer) func(ctx http.Context) error {
+func _Paste_Create7_HTTP_Handler(srv PasteHTTPServer) func(ctx http.Context) error {
 	return func(ctx http.Context) error {
 		var in CreateReq
 		if err := ctx.Bind(&in); err != nil {
@@ -66,7 +66,7 @@ func _Paste_Create6_HTTP_Handler(srv PasteHTTPServer) func(ctx http.Context) err
 	}
 }
 
-func _Paste_Get5_HTTP_Handler(srv PasteHTTPServer) func(ctx http.Context) error {
+func _Paste_Get6_HTTP_Handler(srv PasteHTTPServer) func(ctx http.Context) error {
 	return func(ctx http.Context) error {
 		var in GetReq
 		if err := ctx.BindQuery(&in); err != nil {

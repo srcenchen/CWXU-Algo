@@ -94,6 +94,12 @@ func parseJWTToken(ctx context.Context) string {
 	return auths[1]
 }
 
+// RawToken 返回当前请求的 Bearer token 原文（无则空串）。用于需要向第三方
+// 服务透传用户原始 JWT 的场景（如工单转发给客户中心验证）。
+func RawToken(ctx context.Context) string {
+	return parseJWTToken(ctx)
+}
+
 func parsePayload(ctx context.Context) *JwtPayload {
 	tokenString := parseJWTToken(ctx)
 	if tokenString == "" {
@@ -103,10 +109,10 @@ func parsePayload(ctx context.Context) *JwtPayload {
 		return pd
 	}
 	keyFunc := func(token *jwt.Token) (interface{}, error) {
-		if token.Method != jwt.SigningMethodHS256 {
+		if token.Method != jwt.SigningMethodRS256 {
 			return nil, jwt.ErrSignatureInvalid
 		}
-		return []byte(_const.JWTSecret()), nil
+		return _const.JWTPublicKey(), nil
 	}
 
 	// 优先严格校验 iss/aud；旧 token 可能无 iss/aud，再宽松解析一次
@@ -115,7 +121,7 @@ func parsePayload(ctx context.Context) *JwtPayload {
 		tokenString,
 		pd,
 		keyFunc,
-		jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}),
+		jwt.WithValidMethods([]string{jwt.SigningMethodRS256.Alg()}),
 		jwt.WithExpirationRequired(),
 		jwt.WithIssuer("goalgo"),
 		jwt.WithAudience("goalgo-web"),
@@ -126,7 +132,7 @@ func parsePayload(ctx context.Context) *JwtPayload {
 			tokenString,
 			pd,
 			keyFunc,
-			jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}),
+			jwt.WithValidMethods([]string{jwt.SigningMethodRS256.Alg()}),
 			jwt.WithExpirationRequired(),
 		)
 		if err != nil || !token.Valid || pd.UserID == 0 {
@@ -157,7 +163,7 @@ func parsePayload(ctx context.Context) *JwtPayload {
 }
 
 func parseMapClaims(tokenString string, keyFunc jwt.Keyfunc) (jwt.MapClaims, bool) {
-	token, err := jwt.Parse(tokenString, keyFunc, jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}), jwt.WithExpirationRequired())
+	token, err := jwt.Parse(tokenString, keyFunc, jwt.WithValidMethods([]string{jwt.SigningMethodRS256.Alg()}), jwt.WithExpirationRequired())
 	if err != nil || !token.Valid {
 		return nil, false
 	}

@@ -18,6 +18,7 @@ import (
 	backuppb "cwxu-algo/api/user/v1/site/backup"
 	"cwxu-algo/api/user/v1/social"
 	subscriptionpb "cwxu-algo/api/user/v1/subscription"
+	ticketpb "cwxu-algo/api/user/v1/ticket"
 	"cwxu-algo/app/common/conf"
 	_const "cwxu-algo/app/common/const"
 	"cwxu-algo/app/common/opsmetrics"
@@ -64,6 +65,8 @@ func NewWhiteListMatcher() selector.MatchFunc {
 		"/api.user.v1.paste.Paste/Get": "",
 		// 支付FM回调（原生路由；operation=路径；签名验签在服务内完成）
 		"/v1/payment/notify": "",
+		// 客户中心 webhook 回调（原生路由；HMAC 验签在服务内完成，无 JWT）
+		"/v1/support/events": "",
 		// 组织广场公开（仅名/logo/人数）；邀请链接预览公开
 		"/api.user.v1.org.Org/Discover":      "",
 		"/api.user.v1.org.Org/InvitePreview": "",
@@ -115,6 +118,7 @@ func NewHTTPServer(
 	blogService *service.BlogService,
 	seoService *service.SEOService,
 	subscriptionService *service.SubscriptionService,
+	ticketService *service.TicketService,
 	logger log.Logger,
 
 ) *http.Server {
@@ -125,10 +129,10 @@ func NewHTTPServer(
 			opsmetrics.Middleware(d.RDB, "user"),
 			authutil.CookieBearer(),
 			selector.Server(jwt.Server(func(token *jwt2.Token) (interface{}, error) {
-				if token.Method != jwt2.SigningMethodHS256 {
+				if token.Method != jwt2.SigningMethodRS256 {
 					return nil, jwt2.ErrSignatureInvalid
 				}
-				return []byte(_const.JWTSecret()), nil
+				return _const.JWTPublicKey(), nil
 			})).Match(NewWhiteListMatcher()).Build(),
 		),
 	}
@@ -160,7 +164,11 @@ func NewHTTPServer(
 	backuppb.RegisterBackupHTTPServer(srv, service.NewBackupService(d))
 	// C 端订阅（套餐/订单/站管管理）
 	subscriptionpb.RegisterSubscriptionHTTPServer(srv, subscriptionService)
+	// 工单（对接外部客户中心，全部需登录）
+	ticketpb.RegisterTicketServiceHTTPServer(srv, ticketService)
 	// 支付FM异步回调：GET query / POST form 原生 handler（不走 proto JSON）
 	srv.Handle("/v1/payment/notify", nethttp.HandlerFunc(subscriptionService.NotifyHTTP))
+	// 客户中心 webhook 回调：POST JSON 原生 handler（HMAC 验签 + 幂等 + 站内信）
+	srv.Handle("/v1/support/events", nethttp.HandlerFunc(ticketService.NotifyEventsHTTP))
 	return srv
 }

@@ -16,6 +16,7 @@ import (
 	"cwxu-algo/app/user/internal/service"
 	"github.com/go-kratos/kratos/v2"
 	"github.com/go-kratos/kratos/v2/log"
+	"gorm.io/gorm"
 )
 
 import (
@@ -25,7 +26,7 @@ import (
 // Injectors from wire.go:
 
 // wireApp init kratos application.
-func wireApp(confServer *conf.Server, confData *conf.Data, logger log.Logger, smtp *conf.SMTP) (*kratos.App, func(), error) {
+func wireApp(confServer *conf.Server, confData *conf.Data, logger log.Logger, smtp *conf.SMTP, supportCenter *conf.SupportCenter) (*kratos.App, func(), error) {
 	dataData, cleanup, err := data.NewData(confData)
 	if err != nil {
 		return nil, nil, err
@@ -50,9 +51,18 @@ func wireApp(confServer *conf.Server, confData *conf.Data, logger log.Logger, sm
 	notificationService := service.NewNotificationService(dataData)
 	blogService := service.NewBlogService(dataData)
 	seoService := service.NewSEOService(dataData)
-	httpServer := server.NewHTTPServer(confServer, dataData, authService, profileService, groupService, roleService, siteService, orgService, rbacService, pasteService, socialService, notificationService, blogService, seoService, subscriptionService, logger)
+	db := provideUserDB(dataData)
+	ticketService := service.NewTicketService(supportCenter, db)
+	httpServer := server.NewHTTPServer(confServer, dataData, authService, profileService, groupService, roleService, siteService, orgService, rbacService, pasteService, socialService, notificationService, blogService, seoService, subscriptionService, ticketService, logger)
 	app := newApp(logger, grpcServer, httpServer, register)
 	return app, func() {
 		cleanup()
 	}, nil
+}
+
+// wire.go:
+
+// provideUserDB 供需要直接访问 gorm.DB 的 provider（如工单服务）使用。
+func provideUserDB(d *data.Data) *gorm.DB {
+	return d.DB
 }

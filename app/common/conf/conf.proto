@@ -11,6 +11,7 @@ message Bootstrap {
   Agent agent = 3;
   SMTP smtp = 4;
   AiAnalyze ai_analyze = 5;
+  SupportCenter support_center = 6;
 }
 
 message Server {
@@ -30,6 +31,19 @@ message Server {
   string amqp_dsn = 4;
   string jwt_secret = 5;
   string config_encryption_key = 6;
+  // RSA 私钥 PEM（签发；仅 user/agent 服务配置）
+  string jwt_private_key = 7;
+  // RSA 公钥 PEM（验证；所有服务配置）
+  string jwt_public_key = 8;
+}
+
+// 客户中心（工单系统）对接配置
+message SupportCenter {
+  string base_url = 1;
+  string product_id = 2;
+  // 客户中心回调验签密钥（callback_secret），HMAC-SHA256
+  string sign_key = 3;
+  google.protobuf.Duration timeout = 4;
 }
 
 message Data {

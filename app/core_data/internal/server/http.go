@@ -91,10 +91,10 @@ func NewHTTPServer(c *conf.Server, logger log.Logger, d *data.Data, submitServic
 			opsmetrics.Middleware(d.RDB, "core"),
 			authutil.CookieBearer(),
 			selector.Server(jwt.Server(func(token *jwt2.Token) (interface{}, error) {
-				if token.Method != jwt2.SigningMethodHS256 {
+				if token.Method != jwt2.SigningMethodRS256 {
 					return nil, jwt2.ErrSignatureInvalid
 				}
-				return []byte(_const.JWTSecret()), nil
+				return _const.JWTPublicKey(), nil
 			})).Match(NewWhiteListMatcher()).Build(),
 		),
 	}

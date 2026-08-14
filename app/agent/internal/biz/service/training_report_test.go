@@ -2,6 +2,10 @@ package service
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
+	"encoding/pem"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -19,10 +23,40 @@ import (
 	"github.com/volcengine/volcengine-go-sdk/service/arkruntime/model"
 )
 
+// genTestRSAKeys 生成测试用 RSA 密钥对（PEM）。
+func genTestRSAKeys(t *testing.T) (privPEM, pubPEM string) {
+	t.Helper()
+	priv, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("generate rsa key: %v", err)
+	}
+	privPEM = string(pem.EncodeToMemory(&pem.Block{
+		Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(priv),
+	}))
+	pubDER, err := x509.MarshalPKIXPublicKey(&priv.PublicKey)
+	if err != nil {
+		t.Fatalf("marshal pubkey: %v", err)
+	}
+	pubPEM = string(pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: pubDER}))
+	return privPEM, pubPEM
+}
+
+// configureAgentTestJWTKeys 配置测试 RSA 密钥（IssueElevatedAgentToken 依赖）。
+func configureAgentTestJWTKeys(t *testing.T) {
+	t.Helper()
+	privPEM, pubPEM := genTestRSAKeys(t)
+	if err := _const.ConfigureJWTKeys(privPEM, pubPEM); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func parseMapClaimsTest(token string) (map[string]interface{}, error) {
 	parsed, err := jwt.Parse(token, func(t *jwt.Token) (interface{}, error) {
-		return []byte(_const.JWTSecret()), nil
-	}, jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}))
+		if t.Method != jwt.SigningMethodRS256 {
+			return nil, jwt.ErrSignatureInvalid
+		}
+		return _const.JWTPublicKey(), nil
+	}, jwt.WithValidMethods([]string{jwt.SigningMethodRS256.Alg()}))
 	if err != nil || parsed == nil {
 		return nil, fmt.Errorf("parse: %w", err)
 	}
@@ -404,8 +438,8 @@ func TestNonAI_EndToEndInProcess(t *testing.T) {
 }
 
 func TestElevatedAgentIdentity(t *testing.T) {
-	// 配置临时 JWT secret
-	_ = _const.ConfigureJWTSecret("test-secret-for-agent-identity-32b")
+	// 配置临时 RSA 密钥
+	configureAgentTestJWTKeys(t)
 	tok, err := IssueElevatedAgentToken(5)
 	if err != nil {
 		t.Fatal(err)
@@ -439,7 +473,7 @@ func TestElevatedAgentIdentity(t *testing.T) {
 }
 
 func TestDomainAgentTools_CarryElevatedAuth(t *testing.T) {
-	_ = _const.ConfigureJWTSecret("test-secret-for-agent-identity-32b")
+	configureAgentTestJWTKeys(t)
 	toolCtx, err := ContextWithElevatedAgent(context.Background(), 42)
 	if err != nil {
 		t.Fatal(err)

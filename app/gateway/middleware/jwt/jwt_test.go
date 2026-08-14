@@ -1,6 +1,10 @@
 package jwt
 
 import (
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
+	"encoding/pem"
 	"strings"
 	"testing"
 
@@ -18,17 +22,47 @@ func middlewareConfig(t *testing.T, value string) *config.Middleware {
 	return &config.Middleware{Name: "jwt", Options: options}
 }
 
+// testPubKeyPEM 生成测试 RSA 公钥 PEM。
+func testPubKeyPEM(t *testing.T) string {
+	t.Helper()
+	priv, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pubDER, err := x509.MarshalPKIXPublicKey(&priv.PublicKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: pubDER}))
+}
+
+// 有效 RSA 公钥 PEM 可从配置读取（env 空时 fallback options.secret）
 func TestMiddlewareReadsSecretFromConfig(t *testing.T) {
-	t.Setenv("CWXU_JWT_SECRET", "")
-	if _, err := Middleware(middlewareConfig(t, strings.Repeat("c", 32))); err != nil {
+	t.Setenv("CWXU_JWT_PUBLIC_KEY", "")
+	if _, err := Middleware(middlewareConfig(t, testPubKeyPEM(t))); err != nil {
 		t.Fatal(err)
 	}
 }
 
-func TestMiddlewareRejectsShortConfigSecret(t *testing.T) {
-	t.Setenv("CWXU_JWT_SECRET", "")
-	if _, err := Middleware(middlewareConfig(t, "short")); err == nil {
-		t.Fatal("expected short config secret to be rejected")
+// 非 PEM / 非公钥 / 空值必须被拒绝（fail closed）
+func TestMiddlewareRejectsInvalidConfigSecret(t *testing.T) {
+	t.Setenv("CWXU_JWT_PUBLIC_KEY", "")
+	if _, err := Middleware(middlewareConfig(t, strings.Repeat("c", 32))); err == nil {
+		t.Fatal("expected non-PEM config secret to be rejected")
+	}
+	if _, err := Middleware(middlewareConfig(t, "")); err == nil {
+		t.Fatal("expected empty config secret to be rejected")
+	}
+	// 私钥 PEM 不是公钥 → 拒绝
+	priv, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	privPEM := string(pem.EncodeToMemory(&pem.Block{
+		Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(priv),
+	}))
+	if _, err := Middleware(middlewareConfig(t, privPEM)); err == nil {
+		t.Fatal("expected private-key PEM to be rejected")
 	}
 }
 
@@ -57,6 +91,18 @@ func TestPaymentNotifyIsWhitelisted(t *testing.T) {
 	} {
 		if _, ok := publicExact[path]; !ok {
 			t.Errorf("payment notify path missing from JWT whitelist: %s", path)
+		}
+	}
+}
+
+// TestSupportEventsIsWhitelisted 客户中心 webhook 回调免 JWT（HMAC 验签在 user 服务内完成）
+func TestSupportEventsIsWhitelisted(t *testing.T) {
+	for _, path := range []string{
+		"/v1/support/events",
+		"/api/support/events",
+	} {
+		if _, ok := publicExact[path]; !ok {
+			t.Errorf("support events path missing from JWT whitelist: %s", path)
 		}
 	}
 }

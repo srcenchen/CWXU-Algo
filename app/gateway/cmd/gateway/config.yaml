@@ -5,7 +5,8 @@ middlewares:
   - name: jwt
     options:
       '@type': type.googleapis.com/gateway.middleware.jwt.v1.JWT
-      # 与 user/core_data/agent 的 server.jwt_secret 保持一致，至少 32 字符。
+      # RSA 公钥 PEM，与 user 服务 server.jwt_public_key 一致（openssl rsa -pubout 生成）。
+      # 可换行（YAML | 块）或单行以 \n 连接；环境变量 CWXU_JWT_PUBLIC_KEY 可覆盖。
       secret: ""
 endpoints:
   # 站点备份导入/导出下载：大文件传输走流式转发（不在网关缓冲、不占内存），
@@ -18,6 +19,12 @@ endpoints:
       - target: 'discovery:///user'
   # 支付FM回调：支付FM服务器直达 user 服务；回调为 GET query / POST form，需放宽超时
   - path: /v1/payment/*
+    timeout: 30s
+    protocol: HTTP
+    backends:
+      - target: 'discovery:///user'
+  # 客户中心 webhook 回调：客户中心直达 user 服务；需放宽超时
+  - path: /v1/support/events
     timeout: 30s
     protocol: HTTP
     backends:

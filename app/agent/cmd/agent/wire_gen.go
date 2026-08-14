@@ -8,10 +8,10 @@ package main
 
 import (
 	"cwxu-algo/app/agent/internal/agent"
-	service2 "cwxu-algo/app/agent/internal/biz/service"
+	"cwxu-algo/app/agent/internal/biz/service"
 	"cwxu-algo/app/agent/internal/data"
 	"cwxu-algo/app/agent/internal/server"
-	"cwxu-algo/app/agent/internal/service"
+	service2 "cwxu-algo/app/agent/internal/service"
 	"cwxu-algo/app/common/conf"
 	"cwxu-algo/app/common/discovery"
 	"cwxu-algo/app/common/event"
@@ -37,13 +37,13 @@ func wireApp(confServer *conf.Server, confData *conf.Data, logger log.Logger, sm
 		cleanup()
 		return nil, nil, err
 	}
-	register := discovery.NewConsulRegister(confServer)
 	client := data.NewDataRDB(dataData)
 	chat := agent.NewChat(confAgent, client)
-	summaryUseCase := service2.NewSummaryUseCase(chat, smtp, register, dataData)
-	summaryService := service.NewSummaryService(dataData, rabbitMQ, summaryUseCase)
+	register := discovery.NewConsulRegister(confServer)
+	summaryUseCase := service.NewSummaryUseCase(chat, smtp, register, dataData)
+	summaryService := service2.NewSummaryService(dataData, rabbitMQ, summaryUseCase)
 	httpServer := server.NewHTTPServer(confServer, logger, dataData, summaryService, summaryUseCase)
-	consumer := service2.NewConsumer(rabbitMQ, summaryUseCase)
+	consumer := service.NewConsumer(rabbitMQ, summaryUseCase)
 	app := newApp(logger, grpcServer, httpServer, register, consumer)
 	return app, func() {
 		cleanup2()

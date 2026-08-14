@@ -16,6 +16,9 @@ func Configure(server *conf.Server) error {
 	if err := _const.ConfigureJWTSecret(server.GetJwtSecret()); err != nil {
 		return err
 	}
+	if err := _const.ConfigureJWTKeys(server.GetJwtPrivateKey(), server.GetJwtPublicKey()); err != nil {
+		return err
+	}
 	if err := secretutil.ConfigureKey(server.GetConfigEncryptionKey()); err != nil {
 		return err
 	}

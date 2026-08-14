@@ -5578,6 +5578,158 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/api.user.v1.subscription.RevokeSubscriptionRes'
+    /v1/user/tickets:
+        get:
+            tags:
+                - TicketService
+            description: 工单列表（cursor 分页）
+            operationId: TicketService_List
+            parameters:
+                - name: status
+                  in: query
+                  schema:
+                    type: string
+                - name: limit
+                  in: query
+                  schema:
+                    type: string
+                - name: cursor
+                  in: query
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.user.v1.ticket.ListTicketsRes'
+        post:
+            tags:
+                - TicketService
+            description: 创建工单
+            operationId: TicketService_Create
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/api.user.v1.ticket.CreateTicketReq'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.user.v1.ticket.CreateTicketRes'
+    /v1/user/tickets/current:
+        get:
+            tags:
+                - TicketService
+            description: 当前活跃工单（无活跃工单 → success:true, ticket=nil，前端据此跳创建页）
+            operationId: TicketService_GetCurrent
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.user.v1.ticket.GetCurrentRes'
+    /v1/user/tickets/{ticketId}:
+        get:
+            tags:
+                - TicketService
+            description: 工单详情
+            operationId: TicketService_Get
+            parameters:
+                - name: ticketId
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.user.v1.ticket.GetTicketRes'
+    /v1/user/tickets/{ticketId}/messages:
+        get:
+            tags:
+                - TicketService
+            description: 消息列表（增量：after_sequence 之后的 public 消息）
+            operationId: TicketService_GetMessages
+            parameters:
+                - name: ticketId
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: afterSequence
+                  in: query
+                  schema:
+                    type: string
+                - name: limit
+                  in: query
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.user.v1.ticket.GetMessagesRes'
+        post:
+            tags:
+                - TicketService
+            description: 补充消息
+            operationId: TicketService_CreateMessage
+            parameters:
+                - name: ticketId
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/api.user.v1.ticket.CreateMessageReq'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.user.v1.ticket.CreateMessageRes'
+    /v1/user/tickets/{ticketId}/status:
+        patch:
+            tags:
+                - TicketService
+            description: 用户修改工单状态（pending_agent|pending_customer → resolved|closed）
+            operationId: TicketService_PatchStatus
+            parameters:
+                - name: ticketId
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/api.user.v1.ticket.PatchStatusReq'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.user.v1.ticket.PatchStatusRes'
 components:
     schemas:
         api.agent.v1.summary.GetSummaryReply:
@@ -13218,6 +13370,142 @@ components:
                     type: string
                 message:
                     type: string
+        api.user.v1.ticket.CreateMessageReq:
+            type: object
+            properties:
+                ticketId:
+                    type: string
+                content:
+                    type: string
+        api.user.v1.ticket.CreateMessageRes:
+            type: object
+            properties:
+                success:
+                    type: boolean
+                message:
+                    type: string
+                messageInfo:
+                    $ref: '#/components/schemas/api.user.v1.ticket.TicketMessage'
+        api.user.v1.ticket.CreateTicketReq:
+            type: object
+            properties:
+                title:
+                    type: string
+                content:
+                    type: string
+        api.user.v1.ticket.CreateTicketRes:
+            type: object
+            properties:
+                success:
+                    type: boolean
+                message:
+                    type: string
+                ticket:
+                    $ref: '#/components/schemas/api.user.v1.ticket.Ticket'
+                messageInfo:
+                    allOf:
+                        - $ref: '#/components/schemas/api.user.v1.ticket.TicketMessage'
+                    description: message_info 命名避开 protobuf 保留关键字 message
+        api.user.v1.ticket.GetCurrentRes:
+            type: object
+            properties:
+                success:
+                    type: boolean
+                message:
+                    type: string
+                ticket:
+                    $ref: '#/components/schemas/api.user.v1.ticket.Ticket'
+        api.user.v1.ticket.GetMessagesRes:
+            type: object
+            properties:
+                success:
+                    type: boolean
+                message:
+                    type: string
+                list:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/api.user.v1.ticket.TicketMessage'
+                nextAfterSequence:
+                    type: string
+        api.user.v1.ticket.GetTicketRes:
+            type: object
+            properties:
+                success:
+                    type: boolean
+                message:
+                    type: string
+                ticket:
+                    $ref: '#/components/schemas/api.user.v1.ticket.Ticket'
+        api.user.v1.ticket.ListTicketsRes:
+            type: object
+            properties:
+                success:
+                    type: boolean
+                message:
+                    type: string
+                list:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/api.user.v1.ticket.Ticket'
+                nextCursor:
+                    type: string
+        api.user.v1.ticket.PatchStatusReq:
+            type: object
+            properties:
+                ticketId:
+                    type: string
+                status:
+                    type: string
+                reason:
+                    type: string
+        api.user.v1.ticket.PatchStatusRes:
+            type: object
+            properties:
+                success:
+                    type: boolean
+                message:
+                    type: string
+                ticket:
+                    $ref: '#/components/schemas/api.user.v1.ticket.Ticket'
+        api.user.v1.ticket.Ticket:
+            type: object
+            properties:
+                id:
+                    type: string
+                ticketNumber:
+                    type: string
+                title:
+                    type: string
+                status:
+                    type: string
+                priority:
+                    type: string
+                awaitingActor:
+                    type: string
+                latestMessageAt:
+                    type: string
+                createdAt:
+                    type: string
+                updatedAt:
+                    type: string
+            description: 工单（时间字段统一 unix 秒）
+        api.user.v1.ticket.TicketMessage:
+            type: object
+            properties:
+                id:
+                    type: string
+                sequenceNo:
+                    type: string
+                senderType:
+                    type: string
+                contentType:
+                    type: string
+                content:
+                    type: string
+                sentAt:
+                    type: string
+            description: 工单消息
 tags:
     - name: Auth
       description: Auth 认证服务
@@ -13307,3 +13595,9 @@ tags:
          - 开通：支付FM在线支付（create-order → 支付链接跳转 → 回调履约）或站管人工赋予（grant）
          - 资格生效点：每日手动刷新配额、自动同步间隔、题面爬取/AI 分析、AI 日报、badge
     - name: Summary
+    - name: TicketService
+      description: |-
+        TicketService 工单服务（对接外部客户中心；数据不本地缓存，客户中心是唯一事实来源）
+         实现位于 user/internal/service/ticket.go。
+         路径前缀：/v1/user/tickets/*。全部接口需登录；未配置支持中心时返回
+         success:false + message「支持中心未配置，请稍后再试」。

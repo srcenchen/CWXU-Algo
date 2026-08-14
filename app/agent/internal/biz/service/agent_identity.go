@@ -22,9 +22,8 @@ const (
 
 // IssueElevatedAgentToken 签发站管级隐藏 Agent JWT（可带 org 上下文）。
 func IssueElevatedAgentToken(orgID uint) (string, error) {
-	secret := _const.JWTSecret()
-	if secret == "" {
-		return "", fmt.Errorf("JWT secret 未配置")
+	if _const.JWTPrivateKey() == nil {
+		return "", fmt.Errorf("JWT private key 未配置")
 	}
 	now := time.Now()
 	claims := jwt.MapClaims{
@@ -43,7 +42,7 @@ func IssueElevatedAgentToken(orgID uint) (string, error) {
 		"aud":         "goalgo-web",
 		"agent":       true,
 	}
-	return jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString([]byte(secret))
+	return jwt.NewWithClaims(jwt.SigningMethodRS256, claims).SignedString(_const.JWTPrivateKey())
 }
 
 // ContextWithElevatedAgent 将 Agent Bearer 注入 outgoing gRPC metadata 与本地可解析载荷。

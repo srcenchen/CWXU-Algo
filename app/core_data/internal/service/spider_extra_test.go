@@ -1,7 +1,11 @@
 package service
 
 import (
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
 	"encoding/json"
+	"encoding/pem"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -18,10 +22,29 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
+// genTestRSAKeys 生成测试用 RSA 密钥对（PEM）。
+func genTestRSAKeys(t *testing.T) (privPEM, pubPEM string) {
+	t.Helper()
+	priv, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("generate rsa key: %v", err)
+	}
+	privPEM = string(pem.EncodeToMemory(&pem.Block{
+		Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(priv),
+	}))
+	pubDER, err := x509.MarshalPKIXPublicKey(&priv.PublicKey)
+	if err != nil {
+		t.Fatalf("marshal pubkey: %v", err)
+	}
+	pubPEM = string(pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: pubDER}))
+	return privPEM, pubPEM
+}
+
 // spiderExtraAdminToken 签发站管 JWT（IsSiteAdmin=true 绕过细粒度权限位图）。
 func spiderExtraAdminToken(t *testing.T, userID uint, isSiteAdmin bool) string {
 	t.Helper()
-	if err := _const.ConfigureJWTSecret("spider-extra-test-secret-32chars"); err != nil {
+	privPEM, pubPEM := genTestRSAKeys(t)
+	if err := _const.ConfigureJWTKeys(privPEM, pubPEM); err != nil {
 		t.Fatal(err)
 	}
 	claims := auth.JwtPayload{
@@ -32,7 +55,7 @@ func spiderExtraAdminToken(t *testing.T, userID uint, isSiteAdmin bool) string {
 		Username:    "tester",
 		IsSiteAdmin: isSiteAdmin,
 	}
-	token, err := jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString([]byte(_const.JWTSecret()))
+	token, err := jwt.NewWithClaims(jwt.SigningMethodRS256, claims).SignedString(_const.JWTPrivateKey())
 	if err != nil {
 		t.Fatal(err)
 	}
