@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -508,7 +509,8 @@ func TestDomainAgentTools_CarryElevatedAuth(t *testing.T) {
 		if claims["isSiteAdmin"] != true {
 			t.Fatalf("tool[%d] not site admin: %v", i, claims["isSiteAdmin"])
 		}
-		if uid, ok := claims["userId"].(float64); !ok || uint(uid) != AgentHiddenUserID {
+		uid, ok := claims["userId"].(string)
+		if !ok || uid != strconv.FormatUint(uint64(AgentHiddenUserID), 10) {
 			t.Fatalf("tool[%d] userId want agent got %v", i, claims["userId"])
 		}
 	}

@@ -71,7 +71,9 @@ func storePayload(token string, pd *JwtPayload) {
 // JwtPayload JWT 载荷
 type JwtPayload struct {
 	jwt.RegisteredClaims
-	UserID             uint   `json:"userId"`
+	// userId 签发为字符串（客户中心 user_id_claim 要求 string）；,string 让主路径
+	// 严格校验（iss/aud）直接成功，不走 MapClaims 宽松兜底
+	UserID             uint   `json:"userId,string"`
 	Username           string `json:"username"`
 	Name               string `json:"name"`
 	Email              string `json:"email"`

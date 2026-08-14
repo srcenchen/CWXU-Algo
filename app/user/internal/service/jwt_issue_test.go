@@ -109,8 +109,13 @@ func TestIssueJWTRS256Roundtrip(t *testing.T) {
 	if parsed.Method != jwt.SigningMethodRS256 {
 		t.Fatalf("token method = %v, want RS256", parsed.Method)
 	}
-	if id := int(claims["userId"].(float64)); id != 42 {
-		t.Fatalf("userId = %d, want 42", id)
+	// 客户中心 user_id_claim 要求 string：userId claim 必须是字符串
+	uid, ok := claims["userId"].(string)
+	if !ok {
+		t.Fatalf("userId claim = %v (%T), want string", claims["userId"], claims["userId"])
+	}
+	if uid != "42" {
+		t.Fatalf("userId = %q, want \"42\"", uid)
 	}
 	if claims["username"] != "tester" || claims["iss"] != "goalgo" {
 		t.Fatalf("claims mismatch: %v", claims)

@@ -1,6 +1,7 @@
 package service
 
 import (
+	"strconv"
 	"time"
 
 	_const "cwxu-algo/app/common/const"
@@ -64,7 +65,8 @@ func IssueJWT(db *gorm.DB, u *model.User) (string, error) {
 	now := time.Now()
 	expire := now.Add(JWTAccessTTL)
 	return jwt.NewWithClaims(jwt.SigningMethodRS256, jwt.MapClaims{
-		"userId":             u.ID,
+		// userId 用字符串：客户中心 user_id_claim 类型要求 string
+		"userId":             strconv.FormatUint(uint64(u.ID), 10),
 		"username":           u.Username,
 		"name":               u.Name,
 		"roleId":             roleID,

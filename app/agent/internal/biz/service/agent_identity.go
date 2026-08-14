@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"time"
 
 	_const "cwxu-algo/app/common/const"
@@ -27,7 +28,8 @@ func IssueElevatedAgentToken(orgID uint) (string, error) {
 	}
 	now := time.Now()
 	claims := jwt.MapClaims{
-		"userId":      AgentHiddenUserID,
+		// userId 用字符串（与 user 签发一致，客户中心 user_id_claim 要求 string）
+		"userId":      strconv.FormatUint(uint64(AgentHiddenUserID), 10),
 		"username":    AgentHiddenUsername,
 		"name":        AgentHiddenName,
 		"roleId":      1,
