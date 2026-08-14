@@ -113,28 +113,6 @@ func TestCreateConflict40900(t *testing.T) {
 	}
 }
 
-// 404 + code 40400：GetCurrent 无活跃工单（service 层据此返回 success:true, ticket=nil）
-func TestGetCurrentNotFound40400(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusNotFound)
-		_, _ = w.Write([]byte(`{"code":40400,"message":"无活跃工单"}`))
-	}))
-	defer srv.Close()
-
-	c, err := New(newTestCfg(srv.URL, "pid", ""))
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = c.GetCurrent(context.Background(), "u-token")
-	ae, ok := err.(*APIError)
-	if !ok {
-		t.Fatalf("want *APIError, got %T: %v", err, err)
-	}
-	if ae.StatusCode != http.StatusNotFound || ae.Code != 40400 {
-		t.Fatalf("unexpected APIError: %+v", ae)
-	}
-}
-
 // 列表：query 参数透传，data.items 原样返回
 func TestListQueryParams(t *testing.T) {
 	var gotQuery string

@@ -143,27 +143,6 @@ func parseMessage(raw json.RawMessage) *ticketpb.TicketMessage {
 	}
 }
 
-// GetCurrent 当前活跃工单（无活跃工单 → success:true, ticket=nil，前端跳创建页）
-func (s *TicketService) GetCurrent(ctx context.Context, req *ticketpb.GetCurrentReq) (*ticketpb.GetCurrentRes, error) {
-	if ok, token := s.authAndClient(ctx); !ok {
-		return &ticketpb.GetCurrentRes{Success: false, Message: "请先登录"}, nil
-	} else if s.sc == nil {
-		return &ticketpb.GetCurrentRes{Success: false, Message: "支持中心未配置，请稍后再试"}, nil
-	} else if token == "" {
-		return &ticketpb.GetCurrentRes{Success: false, Message: "请先登录"}, nil
-	} else {
-		resp, err := s.sc.GetCurrent(ctx, token)
-		if err != nil {
-			if ae, ok := err.(*supportcenter.APIError); ok && ae.StatusCode == 404 {
-				// 无活跃工单（40400）→ success:true, ticket=nil
-				return &ticketpb.GetCurrentRes{Success: true, Message: "ok"}, nil
-			}
-			return &ticketpb.GetCurrentRes{Success: false, Message: errMessage(err)}, nil
-		}
-		return &ticketpb.GetCurrentRes{Success: true, Message: "ok", Ticket: parseTicket(resp.Data)}, nil
-	}
-}
-
 // List 工单列表（cursor 分页）
 func (s *TicketService) List(ctx context.Context, req *ticketpb.ListTicketsReq) (*ticketpb.ListTicketsRes, error) {
 	if ok, token := s.authAndClient(ctx); !ok {

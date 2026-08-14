@@ -12,12 +12,6 @@ option java_package = "api.user.v1.ticket";
 // 路径前缀：/v1/user/tickets/*。全部接口需登录；未配置支持中心时返回
 // success:false + message「支持中心未配置，请稍后再试」。
 service TicketService {
-  // 当前活跃工单（无活跃工单 → success:true, ticket=nil，前端据此跳创建页）
-  rpc GetCurrent (GetCurrentReq) returns (GetCurrentRes) {
-    option (google.api.http) = {
-      get: "/v1/user/tickets/current"
-    };
-  }
   // 工单列表（cursor 分页）
   rpc List (ListTicketsReq) returns (ListTicketsRes) {
     option (google.api.http) = {
@@ -110,13 +104,6 @@ message PatchStatusReq {
   string reason = 3;
 }
 message PatchStatusRes {
-  bool success = 1;
-  string message = 2;
-  Ticket ticket = 3;
-}
-
-message GetCurrentReq {}
-message GetCurrentRes {
   bool success = 1;
   string message = 2;
   Ticket ticket = 3;

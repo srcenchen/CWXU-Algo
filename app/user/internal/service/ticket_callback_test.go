@@ -183,6 +183,42 @@ func TestNotifyEventsStatusChanged(t *testing.T) {
 	}
 }
 
+// user_id_claim 配 username 时：external_user_id 为用户名，按 username 定位
+func TestNotifyEventsUsernameClaim(t *testing.T) {
+	s := newCallbackService(t)
+	body, _ := json.Marshal(map[string]any{
+		"event_id":      "evt-uname",
+		"event_type":    "ticket.message.created",
+		"event_version": "1.0",
+		"product_id":    testProductID,
+		"occurred_at":   time.Now().UTC().Format(time.RFC3339),
+		"data": map[string]any{
+			"ticket": map[string]any{
+				"id":                       "ticket-uuid-3",
+				"ticket_number":            10003,
+				"customer_external_user_id": "ticket-user",
+			},
+			"message": map[string]any{
+				"id": "msg-uuid-3", "sequence_no": 2, "sender_type": "support_agent",
+				"content_type": "text", "content": "用户名 claim 回复", "sent_at": time.Now().UTC().Format(time.RFC3339),
+			},
+		},
+	})
+	req := signedEvent(t, time.Now().Unix(), body, "evt-uname")
+	rec := httptest.NewRecorder()
+	s.NotifyEventsHTTP(rec, req)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204", rec.Code)
+	}
+	var ns []model.Notification
+	if err := s.db.Find(&ns).Error; err != nil || len(ns) != 1 {
+		t.Fatalf("notifications rows = %d err=%v", len(ns), err)
+	}
+	if ns[0].UserID != 5 {
+		t.Fatalf("notification user = %d, want 5", ns[0].UserID)
+	}
+}
+
 // 篡改 body（与签名时不一致）→ 403
 func TestNotifyEventsTamperedBody(t *testing.T) {
 	s := newCallbackService(t)

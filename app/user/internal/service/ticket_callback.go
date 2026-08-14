@@ -146,16 +146,25 @@ func (s *TicketService) NotifyEventsHTTP(w nethttp.ResponseWriter, r *nethttp.Re
 }
 
 // locateUser 按 customer_external_user_id 定位用户；找不到返回 0（不创建用户）。
+// 客户中心 user_id_claim 可配置为 userId（数字字符串）或 username（字符串），
+// 两种都兼容：先按数字 userId 查，失败再按 username 查。
 func (s *TicketService) locateUser(externalID string) uint {
-	uid, err := strconv.ParseUint(strings.TrimSpace(externalID), 10, 32)
-	if err != nil || uid == 0 {
+	id := strings.TrimSpace(externalID)
+	if id == "" {
+		return 0
+	}
+	if uid, err := strconv.ParseUint(id, 10, 32); err == nil && uid > 0 {
+		var u model.User
+		if err := s.db.Select("id").First(&u, uint(uid)).Error; err == nil {
+			return u.ID
+		}
 		return 0
 	}
 	var u model.User
-	if err := s.db.Select("id").First(&u, uint(uid)).Error; err != nil {
-		return 0
+	if err := s.db.Select("id").Where("username = ?", id).First(&u).Error; err == nil {
+		return u.ID
 	}
-	return u.ID
+	return 0
 }
 
 func (s *TicketService) writeNotify(userID uint, ntype, title, body string, ticketID string, ticketNumber int64) {

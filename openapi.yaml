@@ -5622,19 +5622,6 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/api.user.v1.ticket.CreateTicketRes'
-    /v1/user/tickets/current:
-        get:
-            tags:
-                - TicketService
-            description: 当前活跃工单（无活跃工单 → success:true, ticket=nil，前端据此跳创建页）
-            operationId: TicketService_GetCurrent
-            responses:
-                "200":
-                    description: OK
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/api.user.v1.ticket.GetCurrentRes'
     /v1/user/tickets/{ticketId}:
         get:
             tags:
@@ -13406,15 +13393,6 @@ components:
                     allOf:
                         - $ref: '#/components/schemas/api.user.v1.ticket.TicketMessage'
                     description: message_info 命名避开 protobuf 保留关键字 message
-        api.user.v1.ticket.GetCurrentRes:
-            type: object
-            properties:
-                success:
-                    type: boolean
-                message:
-                    type: string
-                ticket:
-                    $ref: '#/components/schemas/api.user.v1.ticket.Ticket'
         api.user.v1.ticket.GetMessagesRes:
             type: object
             properties:

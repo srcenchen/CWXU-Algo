@@ -160,11 +160,6 @@ func (c *Client) do(ctx context.Context, userToken, method, path string, body an
 	return &out, nil
 }
 
-// GetCurrent 当前活跃工单（无活跃工单时客户中心返回 404/40400 → *APIError）。
-func (c *Client) GetCurrent(ctx context.Context, userToken string) (*rawResp, error) {
-	return c.do(ctx, userToken, http.MethodGet, "/api/v1/tickets/current", nil, "")
-}
-
 // List 工单列表。
 func (c *Client) List(ctx context.Context, userToken, status string, limit int64, cursor string) (*rawResp, error) {
 	q := []string{}

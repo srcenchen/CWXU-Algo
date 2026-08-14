@@ -22,7 +22,6 @@ const _ = http.SupportPackageIsVersion1
 const OperationTicketServiceCreate = "/api.user.v1.ticket.TicketService/Create"
 const OperationTicketServiceCreateMessage = "/api.user.v1.ticket.TicketService/CreateMessage"
 const OperationTicketServiceGet = "/api.user.v1.ticket.TicketService/Get"
-const OperationTicketServiceGetCurrent = "/api.user.v1.ticket.TicketService/GetCurrent"
 const OperationTicketServiceGetMessages = "/api.user.v1.ticket.TicketService/GetMessages"
 const OperationTicketServiceList = "/api.user.v1.ticket.TicketService/List"
 const OperationTicketServicePatchStatus = "/api.user.v1.ticket.TicketService/PatchStatus"
@@ -34,8 +33,6 @@ type TicketServiceHTTPServer interface {
 	CreateMessage(context.Context, *CreateMessageReq) (*CreateMessageRes, error)
 	// Get 工单详情
 	Get(context.Context, *GetTicketReq) (*GetTicketRes, error)
-	// GetCurrent 当前活跃工单（无活跃工单 → success:true, ticket=nil，前端据此跳创建页）
-	GetCurrent(context.Context, *GetCurrentReq) (*GetCurrentRes, error)
 	// GetMessages 消息列表（增量：after_sequence 之后的 public 消息）
 	GetMessages(context.Context, *GetMessagesReq) (*GetMessagesRes, error)
 	// List 工单列表（cursor 分页）
@@ -46,32 +43,12 @@ type TicketServiceHTTPServer interface {
 
 func RegisterTicketServiceHTTPServer(s *http.Server, srv TicketServiceHTTPServer) {
 	r := s.Route("/")
-	r.GET("/v1/user/tickets/current", _TicketService_GetCurrent0_HTTP_Handler(srv))
 	r.GET("/v1/user/tickets", _TicketService_List7_HTTP_Handler(srv))
 	r.GET("/v1/user/tickets/{ticket_id}", _TicketService_Get5_HTTP_Handler(srv))
 	r.GET("/v1/user/tickets/{ticket_id}/messages", _TicketService_GetMessages0_HTTP_Handler(srv))
 	r.POST("/v1/user/tickets", _TicketService_Create6_HTTP_Handler(srv))
 	r.POST("/v1/user/tickets/{ticket_id}/messages", _TicketService_CreateMessage0_HTTP_Handler(srv))
 	r.PATCH("/v1/user/tickets/{ticket_id}/status", _TicketService_PatchStatus0_HTTP_Handler(srv))
-}
-
-func _TicketService_GetCurrent0_HTTP_Handler(srv TicketServiceHTTPServer) func(ctx http.Context) error {
-	return func(ctx http.Context) error {
-		var in GetCurrentReq
-		if err := ctx.BindQuery(&in); err != nil {
-			return err
-		}
-		http.SetOperation(ctx, OperationTicketServiceGetCurrent)
-		h := ctx.Middleware(func(ctx context.Context, req interface{}) (interface{}, error) {
-			return srv.GetCurrent(ctx, req.(*GetCurrentReq))
-		})
-		out, err := h(ctx, &in)
-		if err != nil {
-			return err
-		}
-		reply := out.(*GetCurrentRes)
-		return ctx.Result(200, reply)
-	}
 }
 
 func _TicketService_List7_HTTP_Handler(srv TicketServiceHTTPServer) func(ctx http.Context) error {
@@ -216,8 +193,6 @@ type TicketServiceHTTPClient interface {
 	CreateMessage(ctx context.Context, req *CreateMessageReq, opts ...http.CallOption) (rsp *CreateMessageRes, err error)
 	// Get 工单详情
 	Get(ctx context.Context, req *GetTicketReq, opts ...http.CallOption) (rsp *GetTicketRes, err error)
-	// GetCurrent 当前活跃工单（无活跃工单 → success:true, ticket=nil，前端据此跳创建页）
-	GetCurrent(ctx context.Context, req *GetCurrentReq, opts ...http.CallOption) (rsp *GetCurrentRes, err error)
 	// GetMessages 消息列表（增量：after_sequence 之后的 public 消息）
 	GetMessages(ctx context.Context, req *GetMessagesReq, opts ...http.CallOption) (rsp *GetMessagesRes, err error)
 	// List 工单列表（cursor 分页）
@@ -268,20 +243,6 @@ func (c *TicketServiceHTTPClientImpl) Get(ctx context.Context, in *GetTicketReq,
 	pattern := "/v1/user/tickets/{ticket_id}"
 	path := binding.EncodeURL(pattern, in, true)
 	opts = append(opts, http.Operation(OperationTicketServiceGet))
-	opts = append(opts, http.PathTemplate(pattern))
-	err := c.cc.Invoke(ctx, "GET", path, nil, &out, opts...)
-	if err != nil {
-		return nil, err
-	}
-	return &out, nil
-}
-
-// GetCurrent 当前活跃工单（无活跃工单 → success:true, ticket=nil，前端据此跳创建页）
-func (c *TicketServiceHTTPClientImpl) GetCurrent(ctx context.Context, in *GetCurrentReq, opts ...http.CallOption) (*GetCurrentRes, error) {
-	var out GetCurrentRes
-	pattern := "/v1/user/tickets/current"
-	path := binding.EncodeURL(pattern, in, true)
-	opts = append(opts, http.Operation(OperationTicketServiceGetCurrent))
 	opts = append(opts, http.PathTemplate(pattern))
 	err := c.cc.Invoke(ctx, "GET", path, nil, &out, opts...)
 	if err != nil {
