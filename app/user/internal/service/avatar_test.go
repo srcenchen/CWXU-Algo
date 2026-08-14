@@ -2,6 +2,8 @@ package service
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"cwxu-algo/app/user/internal/data/model"
@@ -129,6 +131,23 @@ func TestAvatarObjectReferencedDetectsCanonicalAndAbsoluteReferences(t *testing.
 	}
 }
 
+func TestDeleteStaleAvatarDoesNotDeleteLegacyLocalFile(t *testing.T) {
+	uploadDir := t.TempDir()
+	t.Setenv("CWXU_UPLOAD_DIR", uploadDir)
+	rel := filepath.Join("avatar", "27", "legacy.jpg")
+	abs := filepath.Join(uploadDir, rel)
+	if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(abs, []byte("avatar"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	deleteStaleAvatar(nil, 27, "/api/user/static/avatar/27/legacy.jpg", "/avatar/27/new.jpg")
+	if _, err := os.Stat(abs); err != nil {
+		t.Fatalf("legacy local avatar was deleted: %v", err)
+	}
+}
 func TestLocalAvatarRelPath(t *testing.T) {
 	cases := []struct {
 		in, want string

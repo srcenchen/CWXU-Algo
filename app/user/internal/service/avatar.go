@@ -3,7 +3,6 @@ package service
 import (
 	"fmt"
 	"net/url"
-	"os"
 	"path/filepath"
 	"strings"
 
@@ -128,7 +127,8 @@ func localAvatarRelPath(avatar string) string {
 	return ""
 }
 
-// deleteStaleAvatar 尽力删除已不再被任何用户引用的旧头像；失败仅记日志。
+// deleteStaleAvatar 仅清理已不再被任何用户引用的托管头像对象；失败仅记日志。
+// 遗留本地头像由显式迁移工具统一处理，资料更新路径绝不自动删除本地文件。
 func deleteStaleAvatar(db *gorm.DB, userID uint, oldAvatar, newAvatar string) {
 	oldAvatar = strings.TrimSpace(oldAvatar)
 	newAvatar = strings.TrimSpace(newAvatar)
@@ -151,8 +151,5 @@ func deleteStaleAvatar(db *gorm.DB, userID uint, oldAvatar, newAvatar string) {
 			log.Warnf("delete stale avatar %s: %v", key, err)
 		}
 		return
-	}
-	if rel := localAvatarRelPath(oldAvatar); rel != "" {
-		_ = os.Remove(filepath.Join(UploadDir(), rel))
 	}
 }
