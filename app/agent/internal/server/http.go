@@ -32,7 +32,7 @@ func NewHTTPServer(c *conf.Server, logger log.Logger, d *data.Data, summaryServi
 					return nil, jwt2.ErrSignatureInvalid
 				}
 				return _const.JWTPublicKey(), nil
-			}),
+			}, jwt.WithSigningMethod(jwt2.SigningMethodRS256)),
 		),
 	}
 	if c.Http.Network != "" {

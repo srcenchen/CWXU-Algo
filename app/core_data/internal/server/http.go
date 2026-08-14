@@ -95,7 +95,7 @@ func NewHTTPServer(c *conf.Server, logger log.Logger, d *data.Data, submitServic
 					return nil, jwt2.ErrSignatureInvalid
 				}
 				return _const.JWTPublicKey(), nil
-			})).Match(NewWhiteListMatcher()).Build(),
+			}, jwt.WithSigningMethod(jwt2.SigningMethodRS256))).Match(NewWhiteListMatcher()).Build(),
 		),
 	}
 	if c.Http.Network != "" {
