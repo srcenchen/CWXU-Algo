@@ -3,17 +3,16 @@ package service
 import (
 	"context"
 	"cwxu-algo/app/common/conf"
+	"cwxu-algo/app/common/openaiclient"
 	"cwxu-algo/app/common/sitesettings"
 	"cwxu-algo/app/core_data/internal/data/model"
 	"encoding/json"
 	"fmt"
-	"net/http"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/openai/openai-go/v3"
-	"github.com/openai/openai-go/v3/option"
 	"github.com/openai/openai-go/v3/shared"
 	"github.com/redis/go-redis/v9"
 )
@@ -46,7 +45,7 @@ func (t *ProblemTagger) reload(ctx context.Context) {
 	endpoint := strings.TrimSpace(c.Endpoint)
 	secret := strings.TrimSpace(c.Secret)
 	modelID := strings.TrimSpace(c.Model)
-	base := normalizeOpenAIBaseURL(endpoint)
+	base := openaiclient.NormalizeBaseURL(endpoint)
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if secret == t.secret && modelID == t.model && base == t.base && t.client != nil {
@@ -59,13 +58,7 @@ func (t *ProblemTagger) reload(ctx context.Context) {
 		t.client = nil
 		return
 	}
-	httpClient := &http.Client{Timeout: 10 * time.Minute}
-	cli := openai.NewClient(
-		option.WithAPIKey(secret),
-		option.WithBaseURL(base),
-		option.WithHTTPClient(httpClient),
-	)
-	t.client = &cli
+	t.client = openaiclient.NewClient(secret, base, 10*time.Minute)
 }
 
 // Ready 是否已配置可用
@@ -156,11 +149,11 @@ func (t *ProblemTagger) Analyze(ctx context.Context, title, contentMD string) (r
 		},
 	}
 
-	contentStr, err := streamChat(ctx, client, params)
+	contentStr, err := openaiclient.StreamCompletion(ctx, client, params)
 	if err != nil {
 		// 部分兼容网关不支持 response_format，降级重试
 		params.ResponseFormat = openai.ChatCompletionNewParamsResponseFormatUnion{}
-		contentStr, err = streamChat(ctx, client, params)
+		contentStr, err = openaiclient.StreamCompletion(ctx, client, params)
 		if err != nil {
 			return nil, fmt.Errorf("openai chat completion stream: %w", err)
 		}
@@ -180,26 +173,6 @@ func (t *ProblemTagger) Analyze(ctx context.Context, title, contentMD string) (r
 		result.ContentMD = strings.ReplaceAll(result.ContentMD, "$$$", "$")
 	}
 	return &result, nil
-}
-
-// streamChat 流式拉取完整 assistant content，避免网关 ~60s 非流式切断
-func streamChat(ctx context.Context, client *openai.Client, params openai.ChatCompletionNewParams) (string, error) {
-	stream := client.Chat.Completions.NewStreaming(ctx, params)
-	defer stream.Close()
-
-	acc := openai.ChatCompletionAccumulator{}
-	for stream.Next() {
-		if !acc.AddChunk(stream.Current()) {
-			return "", fmt.Errorf("AI stream chunk 累积失败")
-		}
-	}
-	if err := stream.Err(); err != nil {
-		return "", err
-	}
-	if len(acc.Choices) == 0 {
-		return "", fmt.Errorf("AI 返回空 choices")
-	}
-	return acc.Choices[0].Message.Content, nil
 }
 
 // normalizeChineseTags 去掉空白、过短、明显纯英文标签
@@ -244,29 +217,6 @@ func isASCIIWord(s string) bool {
 		}
 	}
 	return hasLetter
-}
-
-// normalizeOpenAIBaseURL 将配置 endpoint 规范为 openai-go 的 BaseURL（需含 /v1/ 前缀路径）。
-// SDK 会再拼 chat/completions → 最终 .../v1/chat/completions
-//
-// 支持:
-//   - https://api.openai.com/v1
-//   - http://host:8001/api        → http://host:8001/api/v1/
-//   - http://host/v1/chat/completions → http://host/v1/
-func normalizeOpenAIBaseURL(endpoint string) string {
-	ep := strings.TrimRight(strings.TrimSpace(endpoint), "/")
-	if strings.HasSuffix(ep, "/chat/completions") {
-		ep = strings.TrimSuffix(ep, "/chat/completions")
-		ep = strings.TrimRight(ep, "/")
-	}
-	if !strings.HasSuffix(ep, "/v1") {
-		if strings.HasSuffix(ep, "/api") {
-			ep = ep + "/v1"
-		} else {
-			ep = ep + "/v1"
-		}
-	}
-	return ep + "/"
 }
 
 func stripJSONFence(s string) string {
