@@ -337,10 +337,6 @@ func (p *ProfileService) GetList(ctx context.Context, req *profile.GetListReq) (
 		if spMin <= 0 {
 			spMin = 60
 		}
-		aiMin := int32(pol.AISummaryIntervalMin)
-		if aiMin <= 0 {
-			aiMin = 180
-		}
 		refreshQuota := int32(dal.DefaultRefreshQuota)
 		refreshQuotaOverridden := false
 		if v.DailyRefreshQuotaOverride != nil {
@@ -365,9 +361,7 @@ func (p *ProfileService) GetList(ctx context.Context, req *profile.GetListReq) (
 			ProblemFetchEnabled:         dal.EffectiveProblemPipeline(v.ProblemFetchEnabled, isNonPublic),
 			ProblemAiEnabled:            dal.EffectiveProblemPipeline(v.ProblemAIEnabled, isNonPublic),
 			SpiderIntervalMin:           spMin,
-			AiSummaryIntervalMin:        aiMin,
 			SpiderIntervalOverridden:    v.SpiderIntervalMinOverride != nil && *v.SpiderIntervalMinOverride > 0,
-			AiSummaryIntervalOverridden: v.AISummaryIntervalMinOverride != nil && *v.AISummaryIntervalMinOverride > 0,
 			DailyRefreshQuota:           refreshQuota,
 			DailyRefreshQuotaOverridden: refreshQuotaOverridden,
 			SubTier:                     activeSubTier(v),
@@ -708,18 +702,16 @@ func (p *ProfileService) GetSyncPolicies(ctx context.Context, req *profile.GetSy
 	res := &profile.GetSyncPoliciesRes{Policies: make([]*profile.UserSyncPolicy, 0, len(list))}
 	for _, v := range list {
 		res.Policies = append(res.Policies, &profile.UserSyncPolicy{
-			UserId:               v.UserID,
-			EnableSpider:         v.EnableSpider,
-			EnableAiSummary:      v.EnableAISummary,
-			EnableAiEmail:        v.EnableAIEmail,
-			EnableAiWeeklyEmail:  v.EnableAIWeeklyEmail,
-			IsOrgStaff:           v.IsOrgStaff,
-			EmailEnabled:         v.EmailEnabled,
-			EmailWeeklyEnabled:   v.EmailWeeklyEnabled,
-			SpiderIntervalMin:    int32(v.SpiderIntervalMin),
-			AiSummaryIntervalMin: int32(v.AISummaryIntervalMin),
-			SyncActive:           v.SyncActive,
-			AiDailyEmailEnabled:  v.AIDailyEmailEnabled,
+			UserId:              v.UserID,
+			EnableSpider:        v.EnableSpider,
+			EnableAiEmail:       v.EnableAIEmail,
+			EnableAiWeeklyEmail: v.EnableAIWeeklyEmail,
+			IsOrgStaff:          v.IsOrgStaff,
+			EmailEnabled:        v.EmailEnabled,
+			EmailWeeklyEnabled:  v.EmailWeeklyEnabled,
+			SpiderIntervalMin:   int32(v.SpiderIntervalMin),
+			SyncActive:          v.SyncActive,
+			AiDailyEmailEnabled: v.AIDailyEmailEnabled,
 		})
 	}
 	return res, nil
@@ -1091,7 +1083,7 @@ func (p *ProfileService) SetProblemPipeline(ctx context.Context, req *profile.Se
 	return &profile.SetProblemPipelineRes{Code: 0, Message: msg}, nil
 }
 
-// SetSyncIntervals 站点管理员设置个人爬取 / AI 总结间隔（优先级高于组织）
+// SetSyncIntervals 站点管理员设置个人爬取间隔（优先级高于组织）
 func (p *ProfileService) SetSyncIntervals(ctx context.Context, req *profile.SetSyncIntervalsReq) (*profile.SetSyncIntervalsRes, error) {
 	if !auth.HasPerm(ctx, rbac.PermSiteUserSync) {
 		return nil, errors.Forbidden("权限不足", "需要用户同步运维权限")
@@ -1099,12 +1091,12 @@ func (p *ProfileService) SetSyncIntervals(ctx context.Context, req *profile.SetS
 	if req.UserId <= 0 {
 		return nil, errors.BadRequest("参数错误", "用户ID无效")
 	}
-	if !req.SetSpider && !req.SetAi {
+	if !req.SetSpider {
 		return nil, errors.BadRequest("参数错误", "请至少指定一项间隔")
 	}
 	// 合法范围：5 分钟～7 天（与组织配置同量级）
 	const minM, maxM = 5, 7 * 24 * 60
-	var spiderPtr, aiPtr *int
+	var spiderPtr *int
 	if req.SetSpider {
 		v := int(req.SpiderIntervalMin)
 		if v < 0 {
@@ -1115,20 +1107,10 @@ func (p *ProfileService) SetSyncIntervals(ctx context.Context, req *profile.SetS
 		}
 		spiderPtr = &v
 	}
-	if req.SetAi {
-		v := int(req.AiSummaryIntervalMin)
-		if v < 0 {
-			return nil, errors.BadRequest("参数错误", "AI 总结间隔无效")
-		}
-		if v > 0 && (v < minM || v > maxM) {
-			return nil, errors.BadRequest("参数错误", fmt.Sprintf("AI 总结间隔须为 0（清除）或 %d–%d 分钟", minM, maxM))
-		}
-		aiPtr = &v
-	}
 	if _, err := p.profileDal.GetById(ctx, req.UserId); err != nil {
 		return nil, errors.BadRequest("参数错误", "用户不存在")
 	}
-	if err := p.profileDal.SetSyncIntervalOverrides(ctx, req.UserId, spiderPtr, aiPtr); err != nil {
+	if err := p.profileDal.SetSyncIntervalOverrides(ctx, req.UserId, spiderPtr); err != nil {
 		return nil, errors.InternalServer("内部错误", err.Error())
 	}
 	return &profile.SetSyncIntervalsRes{Code: 0, Message: "已更新个人同步间隔"}, nil

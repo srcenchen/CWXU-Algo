@@ -28,20 +28,18 @@ func seedGoAlgoFramework(db *gorm.DB) {
 	err := db.Where("slug = ?", model.PublicOrgSlug).First(&public).Error
 	if err == gorm.ErrRecordNotFound {
 		public = model.Org{
-			Name:                 model.PublicOrgName,
-			Slug:                 model.PublicOrgSlug,
-			Plan:                 "free",
-			SeatLimit:            50,
-			Status:               model.OrgStatusActive,
-			IsSystem:             true,
-			JoinMode:             model.OrgJoinAuto,
-			InviteCode:           "PUBLIC-" + randomInviteCode(),
-			EnableAISummary:      true,
-			EnableAIEmail:        true,
-			EnableSpider:         true,
-			SpiderIntervalMin:    60,
-			AISummaryIntervalMin: 180,
-			AIEmailSchedule:      "30 7 * * *",
+			Name:              model.PublicOrgName,
+			Slug:              model.PublicOrgSlug,
+			Plan:              "free",
+			SeatLimit:         50,
+			Status:            model.OrgStatusActive,
+			IsSystem:          true,
+			JoinMode:          model.OrgJoinAuto,
+			InviteCode:        "PUBLIC-" + randomInviteCode(),
+			EnableAIEmail:     true,
+			EnableSpider:      true,
+			SpiderIntervalMin: 60,
+			AIEmailSchedule:   "30 7 * * *",
 		}
 		if e := db.Create(&public).Error; e != nil {
 			log.Errorf("seed public org: %v", e)

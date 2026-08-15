@@ -23,25 +23,22 @@ import (
 // 与 profile SetSyncIntervals / 组织间隔配置一致
 const (
 	defaultSpiderIntervalMin = 180 // user 服务不可用时的兜底；与免费默认（无覆盖）一致
-	defaultAIIntervalMin     = 180
 	minSyncIntervalMin       = 5
 	maxSyncIntervalMin       = 7 * 24 * 60 // 10080
 )
 
 // UserSyncPolicy 与 user 服务 GetSyncPolicies 对齐
 type UserSyncPolicy struct {
-	UserID               int64
-	EnableSpider         bool
-	EnableAISummary      bool
-	EnableAIEmail        bool
-	EnableAIWeeklyEmail  bool
-	IsOrgStaff           bool
-	EmailEnabled         bool
-	EmailWeeklyEnabled   bool
-	SpiderIntervalMin    int
-	AISummaryIntervalMin int
-	SyncActive           bool
-	AIDailyEmailEnabled  bool
+	UserID              int64
+	EnableSpider        bool
+	EnableAIEmail       bool
+	EnableAIWeeklyEmail bool
+	IsOrgStaff          bool
+	EmailEnabled        bool
+	EmailWeeklyEnabled  bool
+	SpiderIntervalMin   int
+	SyncActive          bool
+	AIDailyEmailEnabled bool
 }
 
 type CronTask struct {
@@ -142,19 +139,17 @@ func (t *CronTask) fetchPolicies(userIds []int64) map[int64]UserSyncPolicy {
 	if len(userIds) == 0 {
 		return out
 	}
-	// 默认：无策略时仍允许按 60/180 跑（兼容 user 服务不可用）
+	// 默认：无策略时仍允许按 60 跑（兼容 user 服务不可用）
 	for _, uid := range userIds {
 		out[uid] = UserSyncPolicy{
-			UserID:               uid,
-			EnableSpider:         true,
-			EnableAISummary:      true,
-			EnableAIEmail:        false, // 策略服务不可用时不入队邮件
-			EnableAIWeeklyEmail:  false,
-			EmailEnabled:         false,
-			EmailWeeklyEnabled:   false,
-			SpiderIntervalMin:    defaultSpiderIntervalMin,
-			AISummaryIntervalMin: defaultAIIntervalMin,
-			SyncActive:           true,
+			UserID:              uid,
+			EnableSpider:        true,
+			EnableAIEmail:       false, // 策略服务不可用时不入队邮件
+			EnableAIWeeklyEmail: false,
+			EmailEnabled:        false,
+			EmailWeeklyEnabled:  false,
+			SpiderIntervalMin:   defaultSpiderIntervalMin,
+			SyncActive:          true,
 		}
 	}
 	if t.reg == nil {
@@ -181,18 +176,16 @@ func (t *CronTask) fetchPolicies(userIds []int64) map[int64]UserSyncPolicy {
 		}
 		for _, p := range res.GetPolicies() {
 			out[p.GetUserId()] = UserSyncPolicy{
-				UserID:               p.GetUserId(),
-				EnableSpider:         p.GetEnableSpider(),
-				EnableAISummary:      p.GetEnableAiSummary(),
-				EnableAIEmail:        p.GetEnableAiEmail(),
-				EnableAIWeeklyEmail:  p.GetEnableAiWeeklyEmail(),
-				IsOrgStaff:           p.GetIsOrgStaff(),
-				EmailEnabled:         p.GetEmailEnabled(),
-				EmailWeeklyEnabled:   p.GetEmailWeeklyEnabled(),
-				SpiderIntervalMin:    clampInterval(int(p.GetSpiderIntervalMin()), defaultSpiderIntervalMin),
-				AISummaryIntervalMin: clampInterval(int(p.GetAiSummaryIntervalMin()), defaultAIIntervalMin),
+				UserID:              p.GetUserId(),
+				EnableSpider:        p.GetEnableSpider(),
+				EnableAIEmail:       p.GetEnableAiEmail(),
+				EnableAIWeeklyEmail: p.GetEnableAiWeeklyEmail(),
+				IsOrgStaff:          p.GetIsOrgStaff(),
+				EmailEnabled:        p.GetEmailEnabled(),
+				EmailWeeklyEnabled:  p.GetEmailWeeklyEnabled(),
+				SpiderIntervalMin:   clampInterval(int(p.GetSpiderIntervalMin()), defaultSpiderIntervalMin),
 				// 旧 user 服务无该字段时默认 false；兼容：无字段时仍以开关为准（见 runUserProfilePrewarm）
-				SyncActive: p.GetSyncActive() || p.GetEnableSpider() || p.GetEnableAiSummary(),
+				SyncActive:          p.GetSyncActive() || p.GetEnableSpider(),
 				AIDailyEmailEnabled: p.GetAiDailyEmailEnabled(),
 			}
 		}
@@ -349,47 +342,6 @@ func (t *CronTask) runSpiderTick() {
 		len(userIds), len(seen), publishedUsers, publishedJobs, dedupUsers, failedUsers, skipped, disabled)
 }
 
-func (t *CronTask) runRecentSummaryTick() {
-	if loadgateSkipTick("summary_recent") {
-		return
-	}
-	if !t.tryCronLock("summary_recent", 4*time.Minute) {
-		return
-	}
-	userIds := t.getBoundUserIds()
-	policies := t.fetchPolicies(userIds)
-	var published, dedup, failed, skipped, disabled int
-	seen := make(map[int64]struct{}, len(userIds))
-	for _, uid := range userIds {
-		if _, ok := seen[uid]; ok {
-			continue
-		}
-		seen[uid] = struct{}{}
-		p := policies[uid]
-		if !p.EnableAISummary {
-			disabled++
-			continue
-		}
-		if !t.tryClaim("summary_recent", uid, p.AISummaryIntervalMin) {
-			skipped++
-			continue
-		}
-		res := t.summary.Do(uid, "PersonalRecent")
-		if !res.KeepClaim() {
-			t.releaseClaim("summary_recent", uid, p.AISummaryIntervalMin)
-			failed++
-			continue
-		}
-		if res.Published {
-			published++
-		} else {
-			dedup++
-		}
-	}
-	log.Infof("CronTask summary PersonalRecent: bound=%d unique=%d published=%d dedup=%d failed_release=%d interval_skip=%d disabled=%d",
-		len(userIds), len(seen), published, dedup, failed, skipped, disabled)
-}
-
 // dailySummaryType 日报 MQ 类型分流（纯函数，便于测试）：
 // AI 日报（Pro 订阅 + 套餐开启 + 个人开关）走 PersonalLastDay（调 LLM）；
 // 否则 PersonalDailyRule（规则模板常规日报，无 LLM 成本）。
@@ -481,7 +433,7 @@ func (t *CronTask) runUserProfilePrewarm(full bool) {
 	skipped := 0
 	for _, uid := range userIDs {
 		p := policies[uid]
-		if p.SyncActive || p.EnableSpider || p.EnableAISummary {
+		if p.SyncActive || p.EnableSpider {
 			active = append(active, uid)
 		} else {
 			skipped++
@@ -552,9 +504,6 @@ func (t *CronTask) Do() {
 	_, _ = c.AddFunc("30 7 * * *", func() {
 		t.runDailySummaryTick()
 	})
-	_, _ = c.AddFunc("*/5 * * * *", func() {
-		t.runRecentSummaryTick()
-	})
 	// 运维告警：OJ 大面积同步出错 / 资源长期占用过高（每 5 分钟检查）
 	_, _ = c.AddFunc("*/5 * * * *", func() {
 		t.runOpsAlertTick()
@@ -618,4 +567,3 @@ func (t *CronTask) Do() {
 	<-stopCh
 	log.Infof("CronTask stopped")
 }
-

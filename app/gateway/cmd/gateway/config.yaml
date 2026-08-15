@@ -80,8 +80,8 @@ endpoints:
                 value: ["application/json"]
             body: "eyJjb2RlIjogMSwgIm1lc3NhZ2UiOiAi5pyN5Yqh5pqC5pe25LiN5Y+v55So77yM6K+356iN5ZCO6YeN6K+VIn0="
   - path: /v1/agent/*
-    # agent 端点均为异步设计（GetRecentSummary 读缓存未命中才入队、训练报告为后台 job），
-    # LLM 调用不在请求路径上；10s 覆盖冷启动时 DB/队列读写即可。
+    # agent 端点均为异步设计（训练报告为后台 job），LLM 调用不在请求路径上；
+    # 10s 覆盖冷启动时 DB/队列读写即可。
     timeout: 10s
     protocol: HTTP
     backends:

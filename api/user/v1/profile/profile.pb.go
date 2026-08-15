@@ -925,20 +925,18 @@ func (x *SetProblemPipelineRes) GetMessage() string {
 }
 
 // SetSyncIntervalsReq 站点管理员设置个人定时间隔覆盖
-// spiderIntervalMin / aiSummaryIntervalMin：
+// spiderIntervalMin：
 //
-//	省略（setSpider/setAi=false）= 不改该项
+//	省略（setSpider=false）= 不改该项
 //	0 = 清除覆盖，回落组织 MIN
 //	>0 = 强制该分钟数（优先级最高）
 type SetSyncIntervalsReq struct {
-	state                protoimpl.MessageState `protogen:"open.v1"`
-	UserId               int64                  `protobuf:"varint,1,opt,name=userId,proto3" json:"userId,omitempty"`
-	SpiderIntervalMin    int32                  `protobuf:"varint,2,opt,name=spiderIntervalMin,proto3" json:"spiderIntervalMin,omitempty"`
-	AiSummaryIntervalMin int32                  `protobuf:"varint,3,opt,name=aiSummaryIntervalMin,proto3" json:"aiSummaryIntervalMin,omitempty"`
-	SetSpider            bool                   `protobuf:"varint,4,opt,name=setSpider,proto3" json:"setSpider,omitempty"`
-	SetAi                bool                   `protobuf:"varint,5,opt,name=setAi,proto3" json:"setAi,omitempty"`
-	unknownFields        protoimpl.UnknownFields
-	sizeCache            protoimpl.SizeCache
+	state             protoimpl.MessageState `protogen:"open.v1"`
+	UserId            int64                  `protobuf:"varint,1,opt,name=userId,proto3" json:"userId,omitempty"`
+	SpiderIntervalMin int32                  `protobuf:"varint,2,opt,name=spiderIntervalMin,proto3" json:"spiderIntervalMin,omitempty"`
+	SetSpider         bool                   `protobuf:"varint,4,opt,name=setSpider,proto3" json:"setSpider,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *SetSyncIntervalsReq) Reset() {
@@ -985,23 +983,9 @@ func (x *SetSyncIntervalsReq) GetSpiderIntervalMin() int32 {
 	return 0
 }
 
-func (x *SetSyncIntervalsReq) GetAiSummaryIntervalMin() int32 {
-	if x != nil {
-		return x.AiSummaryIntervalMin
-	}
-	return 0
-}
-
 func (x *SetSyncIntervalsReq) GetSetSpider() bool {
 	if x != nil {
 		return x.SetSpider
-	}
-	return false
-}
-
-func (x *SetSyncIntervalsReq) GetSetAi() bool {
-	if x != nil {
-		return x.SetAi
 	}
 	return false
 }
@@ -2520,17 +2504,15 @@ func (x *GetSyncPoliciesReq) GetUserIds() []int64 {
 }
 
 type UserSyncPolicy struct {
-	state                protoimpl.MessageState `protogen:"open.v1"`
-	UserId               int64                  `protobuf:"varint,1,opt,name=userId,proto3" json:"userId,omitempty"`
-	EnableSpider         bool                   `protobuf:"varint,2,opt,name=enableSpider,proto3" json:"enableSpider,omitempty"`
-	EnableAiSummary      bool                   `protobuf:"varint,3,opt,name=enableAiSummary,proto3" json:"enableAiSummary,omitempty"`
-	EnableAiEmail        bool                   `protobuf:"varint,4,opt,name=enableAiEmail,proto3" json:"enableAiEmail,omitempty"` // 组织授权日报
-	SpiderIntervalMin    int32                  `protobuf:"varint,5,opt,name=spiderIntervalMin,proto3" json:"spiderIntervalMin,omitempty"`
-	AiSummaryIntervalMin int32                  `protobuf:"varint,6,opt,name=aiSummaryIntervalMin,proto3" json:"aiSummaryIntervalMin,omitempty"`
-	EnableAiWeeklyEmail  bool                   `protobuf:"varint,7,opt,name=enableAiWeeklyEmail,proto3" json:"enableAiWeeklyEmail,omitempty"` // 组织授权周报且本人 staff
-	IsOrgStaff           bool                   `protobuf:"varint,8,opt,name=isOrgStaff,proto3" json:"isOrgStaff,omitempty"`
-	EmailEnabled         bool                   `protobuf:"varint,9,opt,name=emailEnabled,proto3" json:"emailEnabled,omitempty"`              // 个人日报偏好
-	EmailWeeklyEnabled   bool                   `protobuf:"varint,10,opt,name=emailWeeklyEnabled,proto3" json:"emailWeeklyEnabled,omitempty"` // 个人周报偏好
+	state               protoimpl.MessageState `protogen:"open.v1"`
+	UserId              int64                  `protobuf:"varint,1,opt,name=userId,proto3" json:"userId,omitempty"`
+	EnableSpider        bool                   `protobuf:"varint,2,opt,name=enableSpider,proto3" json:"enableSpider,omitempty"`
+	EnableAiEmail       bool                   `protobuf:"varint,4,opt,name=enableAiEmail,proto3" json:"enableAiEmail,omitempty"` // 组织授权日报
+	SpiderIntervalMin   int32                  `protobuf:"varint,5,opt,name=spiderIntervalMin,proto3" json:"spiderIntervalMin,omitempty"`
+	EnableAiWeeklyEmail bool                   `protobuf:"varint,7,opt,name=enableAiWeeklyEmail,proto3" json:"enableAiWeeklyEmail,omitempty"` // 组织授权周报且本人 staff
+	IsOrgStaff          bool                   `protobuf:"varint,8,opt,name=isOrgStaff,proto3" json:"isOrgStaff,omitempty"`
+	EmailEnabled        bool                   `protobuf:"varint,9,opt,name=emailEnabled,proto3" json:"emailEnabled,omitempty"`              // 个人日报偏好
+	EmailWeeklyEnabled  bool                   `protobuf:"varint,10,opt,name=emailWeeklyEnabled,proto3" json:"emailWeeklyEnabled,omitempty"` // 个人周报偏好
 	// 是否允许后台定时任务（非休眠或已豁免）
 	SyncActive bool `protobuf:"varint,11,opt,name=syncActive,proto3" json:"syncActive,omitempty"`
 	// 个人 AI 日报（Pro 订阅 active + 套餐开启 + 个人开关；默认关）
@@ -2583,13 +2565,6 @@ func (x *UserSyncPolicy) GetEnableSpider() bool {
 	return false
 }
 
-func (x *UserSyncPolicy) GetEnableAiSummary() bool {
-	if x != nil {
-		return x.EnableAiSummary
-	}
-	return false
-}
-
 func (x *UserSyncPolicy) GetEnableAiEmail() bool {
 	if x != nil {
 		return x.EnableAiEmail
@@ -2600,13 +2575,6 @@ func (x *UserSyncPolicy) GetEnableAiEmail() bool {
 func (x *UserSyncPolicy) GetSpiderIntervalMin() int32 {
 	if x != nil {
 		return x.SpiderIntervalMin
-	}
-	return 0
-}
-
-func (x *UserSyncPolicy) GetAiSummaryIntervalMin() int32 {
-	if x != nil {
-		return x.AiSummaryIntervalMin
 	}
 	return 0
 }
@@ -3244,12 +3212,10 @@ type GetListRes_List struct {
 	ProblemAiEnabled    bool `protobuf:"varint,17,opt,name=problemAiEnabled,proto3" json:"problemAiEnabled,omitempty"`
 	// 注册时间（unix 秒）
 	CreatedAt int64 `protobuf:"varint,18,opt,name=createdAt,proto3" json:"createdAt,omitempty"`
-	// 有效爬取 / AI 总结间隔（分钟；已应用站管个人覆盖，否则组织 MIN）
-	SpiderIntervalMin    int32 `protobuf:"varint,19,opt,name=spiderIntervalMin,proto3" json:"spiderIntervalMin,omitempty"`
-	AiSummaryIntervalMin int32 `protobuf:"varint,20,opt,name=aiSummaryIntervalMin,proto3" json:"aiSummaryIntervalMin,omitempty"`
+	// 有效爬取间隔（分钟；已应用站管个人覆盖，否则组织 MIN）
+	SpiderIntervalMin int32 `protobuf:"varint,19,opt,name=spiderIntervalMin,proto3" json:"spiderIntervalMin,omitempty"`
 	// 是否存在站点管理员个人覆盖（true=不走组织 MIN）
-	SpiderIntervalOverridden    bool `protobuf:"varint,21,opt,name=spiderIntervalOverridden,proto3" json:"spiderIntervalOverridden,omitempty"`
-	AiSummaryIntervalOverridden bool `protobuf:"varint,22,opt,name=aiSummaryIntervalOverridden,proto3" json:"aiSummaryIntervalOverridden,omitempty"`
+	SpiderIntervalOverridden bool `protobuf:"varint,21,opt,name=spiderIntervalOverridden,proto3" json:"spiderIntervalOverridden,omitempty"`
 	// 永不休眠（站管）
 	SyncExempt bool `protobuf:"varint,23,opt,name=syncExempt,proto3" json:"syncExempt,omitempty"`
 	// 最近活跃 unix 秒；0=未知
@@ -3434,23 +3400,9 @@ func (x *GetListRes_List) GetSpiderIntervalMin() int32 {
 	return 0
 }
 
-func (x *GetListRes_List) GetAiSummaryIntervalMin() int32 {
-	if x != nil {
-		return x.AiSummaryIntervalMin
-	}
-	return 0
-}
-
 func (x *GetListRes_List) GetSpiderIntervalOverridden() bool {
 	if x != nil {
 		return x.SpiderIntervalOverridden
-	}
-	return false
-}
-
-func (x *GetListRes_List) GetAiSummaryIntervalOverridden() bool {
-	if x != nil {
-		return x.AiSummaryIntervalOverridden
 	}
 	return false
 }
@@ -3655,7 +3607,8 @@ const file_user_v1_profile_profile_proto_rawDesc = "" +
 	"\x05scope\x18\x03 \x01(\tR\x05scope\x12\x18\n" +
 	"\akeyword\x18\x04 \x01(\tR\akeyword\x12 \n" +
 	"\vdormantOnly\x18\x05 \x01(\bR\vdormantOnly\x12\"\n" +
-	"\finactiveDays\x18\x06 \x01(\x05R\finactiveDays\"\x8b\v\n" +
+	"\finactiveDays\x18\x06 \x01(\x05R\finactiveDays\"\x95\n" +
+	"\n" +
 	"\n" +
 	"GetListRes\x120\n" +
 	"\x04list\x18\x01 \x03(\v2\x1c.api.user.v1.GetListRes.ListR\x04list\x12\x14\n" +
@@ -3663,7 +3616,7 @@ const file_user_v1_profile_profile_proto_rawDesc = "" +
 	"\bOrgBrief\x12\x14\n" +
 	"\x05orgId\x18\x01 \x01(\x04R\x05orgId\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x12\n" +
-	"\x04role\x18\x03 \x01(\tR\x04role\x1a\xea\t\n" +
+	"\x04role\x18\x03 \x01(\tR\x04role\x1a\xf4\b\n" +
 	"\x04List\x12\x16\n" +
 	"\x06userId\x18\x01 \x01(\x04R\x06userId\x12\x1a\n" +
 	"\busername\x18\x02 \x01(\tR\busername\x12\x12\n" +
@@ -3685,10 +3638,8 @@ const file_user_v1_profile_profile_proto_rawDesc = "" +
 	"\x13problemFetchEnabled\x18\x10 \x01(\bR\x13problemFetchEnabled\x12*\n" +
 	"\x10problemAiEnabled\x18\x11 \x01(\bR\x10problemAiEnabled\x12\x1c\n" +
 	"\tcreatedAt\x18\x12 \x01(\x03R\tcreatedAt\x12,\n" +
-	"\x11spiderIntervalMin\x18\x13 \x01(\x05R\x11spiderIntervalMin\x122\n" +
-	"\x14aiSummaryIntervalMin\x18\x14 \x01(\x05R\x14aiSummaryIntervalMin\x12:\n" +
-	"\x18spiderIntervalOverridden\x18\x15 \x01(\bR\x18spiderIntervalOverridden\x12@\n" +
-	"\x1baiSummaryIntervalOverridden\x18\x16 \x01(\bR\x1baiSummaryIntervalOverridden\x12\x1e\n" +
+	"\x11spiderIntervalMin\x18\x13 \x01(\x05R\x11spiderIntervalMin\x12:\n" +
+	"\x18spiderIntervalOverridden\x18\x15 \x01(\bR\x18spiderIntervalOverridden\x12\x1e\n" +
 	"\n" +
 	"syncExempt\x18\x17 \x01(\bR\n" +
 	"syncExempt\x12 \n" +
@@ -3733,13 +3684,11 @@ const file_user_v1_profile_profile_proto_rawDesc = "" +
 	"\x04kind\x18\x03 \x01(\tR\x04kind\"E\n" +
 	"\x15SetProblemPipelineRes\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\x03R\x04code\x12\x18\n" +
-	"\amessage\x18\x02 \x01(\tR\amessage\"\xc3\x01\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\"y\n" +
 	"\x13SetSyncIntervalsReq\x12\x16\n" +
 	"\x06userId\x18\x01 \x01(\x03R\x06userId\x12,\n" +
-	"\x11spiderIntervalMin\x18\x02 \x01(\x05R\x11spiderIntervalMin\x122\n" +
-	"\x14aiSummaryIntervalMin\x18\x03 \x01(\x05R\x14aiSummaryIntervalMin\x12\x1c\n" +
-	"\tsetSpider\x18\x04 \x01(\bR\tsetSpider\x12\x14\n" +
-	"\x05setAi\x18\x05 \x01(\bR\x05setAi\"C\n" +
+	"\x11spiderIntervalMin\x18\x02 \x01(\x05R\x11spiderIntervalMin\x12\x1c\n" +
+	"\tsetSpider\x18\x04 \x01(\bR\tsetSpider\"C\n" +
 	"\x13SetSyncIntervalsRes\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\x03R\x04code\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\"X\n" +
@@ -3825,14 +3774,12 @@ const file_user_v1_profile_profile_proto_rawDesc = "" +
 	"\x04code\x18\x01 \x01(\x03R\x04code\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\".\n" +
 	"\x12GetSyncPoliciesReq\x12\x18\n" +
-	"\auserIds\x18\x01 \x03(\x03R\auserIds\"\xf6\x03\n" +
+	"\auserIds\x18\x01 \x03(\x03R\auserIds\"\x98\x03\n" +
 	"\x0eUserSyncPolicy\x12\x16\n" +
 	"\x06userId\x18\x01 \x01(\x03R\x06userId\x12\"\n" +
-	"\fenableSpider\x18\x02 \x01(\bR\fenableSpider\x12(\n" +
-	"\x0fenableAiSummary\x18\x03 \x01(\bR\x0fenableAiSummary\x12$\n" +
+	"\fenableSpider\x18\x02 \x01(\bR\fenableSpider\x12$\n" +
 	"\renableAiEmail\x18\x04 \x01(\bR\renableAiEmail\x12,\n" +
-	"\x11spiderIntervalMin\x18\x05 \x01(\x05R\x11spiderIntervalMin\x122\n" +
-	"\x14aiSummaryIntervalMin\x18\x06 \x01(\x05R\x14aiSummaryIntervalMin\x120\n" +
+	"\x11spiderIntervalMin\x18\x05 \x01(\x05R\x11spiderIntervalMin\x120\n" +
 	"\x13enableAiWeeklyEmail\x18\a \x01(\bR\x13enableAiWeeklyEmail\x12\x1e\n" +
 	"\n" +
 	"isOrgStaff\x18\b \x01(\bR\n" +

@@ -1,7 +1,6 @@
 package service
 
 import (
-	"encoding/json"
 	"testing"
 	"time"
 )
@@ -40,14 +39,10 @@ func TestSumDayCounts(t *testing.T) {
 }
 
 func TestStripCodeFence(t *testing.T) {
-	in := "```json\n{\"msg\":[\"a\"],\"updateTime\":1}\n```"
+	in := "```html\n<p>hello</p>\n```"
 	out := stripCodeFence(in)
-	var p recentSummaryPayload
-	if err := json.Unmarshal([]byte(out), &p); err != nil {
-		t.Fatalf("parse failed: %v raw=%s", err, out)
-	}
-	if len(p.Msg) != 1 || p.UpdateTime != 1 {
-		t.Fatalf("unexpected payload %+v", p)
+	if out != "<p>hello</p>" {
+		t.Fatalf("unexpected output %q", out)
 	}
 }
 

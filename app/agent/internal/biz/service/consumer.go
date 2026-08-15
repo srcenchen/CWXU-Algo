@@ -12,7 +12,7 @@ import (
 	"github.com/streadway/amqp"
 )
 
-// 2c4g：交互总结与定时邮件各单 worker，避免日报排在 PersonalRecent 积压后面。
+// 定时邮件（日报/周报）：单 worker，避免并发打爆 SMTP 与 LLM。
 const summaryConcurrency = 1
 
 type Consumer struct {
@@ -35,16 +35,7 @@ func (c *Consumer) Stop() {
 }
 
 func (c *Consumer) Consume() {
-	var wg sync.WaitGroup
-	for _, queue := range []string{event.SummaryQueue, event.SummaryMailQueue} {
-		queue := queue
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			c.consumeQueue(queue)
-		}()
-	}
-	wg.Wait()
+	c.consumeQueue(event.SummaryMailQueue)
 }
 
 func (c *Consumer) consumeQueue(queue string) {
@@ -68,8 +59,6 @@ func (c *Consumer) consumeQueue(queue string) {
 				runErr = c.summary.PersonalLastDay(msg.UserId)
 			case "PersonalDailyRule":
 				runErr = c.summary.PersonalDailyRule(msg.UserId)
-			case "PersonalRecent":
-				runErr = c.summary.PersonalRecent(msg.UserId)
 			case "WeeklyStaff", "WeeklyReportForCoach":
 				runErr = c.summary.WeeklyStaff(msg.UserId)
 			default:

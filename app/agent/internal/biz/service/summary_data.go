@@ -71,15 +71,6 @@ type DailyReportData struct {
 	RecentContests []ContestBrief `json:"recentContests,omitempty"`
 }
 
-type RecentReportData struct {
-	UserID    int64                  `json:"userId"`
-	Name      string                 `json:"name"`
-	NowUnix   int64                  `json:"nowUnix"`
-	Submit    *statistic.SubmitCount `json:"submit"`
-	Ac        *statistic.AcCount     `json:"ac"`
-	Last7Days []DayCount             `json:"last7Days"`
-}
-
 type WeeklyReportData struct {
 	CoachUserID     int64       `json:"coachUserId"`
 	CoachName       string      `json:"coachName"`
@@ -300,25 +291,6 @@ func (uc *SummaryUseCase) fetchHeatmap(ctx context.Context, userId int64, start,
 		items = res.Data
 	}
 	return fillMissingDays(start, end, items), nil
-}
-
-func (uc *SummaryUseCase) fetchPeriod(ctx context.Context, userId int64) (*statistic.PeriodData, error) {
-	conn, err := uc.dialCoreData(ctx)
-	if err != nil {
-		return nil, err
-	}
-	cli := statistic.NewStatisticClient(conn)
-	res, err := cli.PeriodCount(ctx, &statistic.PeriodCountReq{UserId: userId})
-	if err != nil {
-		return nil, err
-	}
-	if res == nil || res.Data == nil {
-		return &statistic.PeriodData{
-			Submit: &statistic.SubmitCount{},
-			Ac:     &statistic.AcCount{},
-		}, nil
-	}
-	return res.Data, nil
 }
 
 func (uc *SummaryUseCase) fetchSubmitLogs(ctx context.Context, userId int64, endDate time.Time, limit int64) ([]SubmitItem, error) {
@@ -588,34 +560,6 @@ func (uc *SummaryUseCase) fetchUserRecentContests(ctx context.Context, userId in
 		})
 	}
 	return out
-}
-
-func (uc *SummaryUseCase) loadRecentReportData(ctx context.Context, userId int64) (*RecentReportData, error) {
-	profile := uc.userProfile(userId)
-	name := ""
-	if profile != nil {
-		name = profile.Name
-	}
-	period, err := uc.fetchPeriod(ctx, userId)
-	if err != nil {
-		return nil, fmt.Errorf("拉取周期统计失败: %w", err)
-	}
-	now := time.Now()
-	end := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
-	start := end.AddDate(0, 0, -6)
-	days, err := uc.fetchHeatmap(ctx, userId, start, end)
-	if err != nil {
-		log.Warnf("拉取近7天热力图失败 user=%d: %v", userId, err)
-		days = []DayCount{}
-	}
-	return &RecentReportData{
-		UserID:    userId,
-		Name:      name,
-		NowUnix:   now.Unix(),
-		Submit:    period.Submit,
-		Ac:        period.Ac,
-		Last7Days: days,
-	}, nil
 }
 
 func (uc *SummaryUseCase) loadWeeklyReportData(ctx context.Context, coachUserId int64) (*WeeklyReportData, error) {

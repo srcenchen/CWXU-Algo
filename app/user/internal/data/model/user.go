@@ -3,18 +3,18 @@ package model
 import "time"
 
 type User struct {
-	ID           uint `gorm:"primaryKey"`
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
-	Username     string `gorm:"size:64;not null;uniqueIndex;comment:用户名"`
-	Password     string `gorm:"size:255;not null;comment:bcrypt(客户端SHA256值)"`
-	Avatar       string `gorm:"comment:头像"`
-	Name         string `gorm:"comment:全局昵称(非真实姓名)"`
-	Email        string `gorm:"size:320;not null;uniqueIndex;comment:邮箱(统一小写)"`
-	GroupId      int64  `gorm:"comment:组id(兼容旧字段;组织内分组见 org_members.group_id)"`
-	Group        Group  `gorm:"foreignKey:GroupId;references:ID"`
-	RoleID       int    `gorm:"comment:角色ID兼容;default:0"` // 迁移后以 is_site_admin + org 为准
-	IsSiteAdmin  bool   `gorm:"default:false;comment:站点管理员"`
+	ID          uint `gorm:"primaryKey"`
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+	Username    string `gorm:"size:64;not null;uniqueIndex;comment:用户名"`
+	Password    string `gorm:"size:255;not null;comment:bcrypt(客户端SHA256值)"`
+	Avatar      string `gorm:"comment:头像"`
+	Name        string `gorm:"comment:全局昵称(非真实姓名)"`
+	Email       string `gorm:"size:320;not null;uniqueIndex;comment:邮箱(统一小写)"`
+	GroupId     int64  `gorm:"comment:组id(兼容旧字段;组织内分组见 org_members.group_id)"`
+	Group       Group  `gorm:"foreignKey:GroupId;references:ID"`
+	RoleID      int    `gorm:"comment:角色ID兼容;default:0"` // 迁移后以 is_site_admin + org 为准
+	IsSiteAdmin bool   `gorm:"default:false;comment:站点管理员"`
 	// IsResourceReviewer 已下线的「资源审核员」内置身份，存量已全部置 false。
 	// 列保留仅为可回滚；不再读写，内容审核权限改由站点自定义角色授予。
 	// Deprecated: 见 rbac_seed.go 的 rbac_drop_resource_reviewer_v1。
@@ -42,8 +42,6 @@ type User struct {
 	// —— 定时策略覆盖（站点管理员指定；null=回落组织 MIN；优先级最高）——
 	// SpiderIntervalMinOverride 爬取间隔（分钟）
 	SpiderIntervalMinOverride *int `gorm:"comment:爬取间隔覆盖分钟 null=组织MIN"`
-	// AISummaryIntervalMinOverride AI 总结间隔（分钟）
-	AISummaryIntervalMinOverride *int `gorm:"comment:AI总结间隔覆盖分钟 null=组织MIN"`
 	// DailyRefreshQuotaOverride 每日手动刷新做题记录次数覆盖（null=全局默认 2；0=禁止；>0=每日次数）
 	DailyRefreshQuotaOverride *int `gorm:"comment:每日手动刷新配额覆盖 null=默认2 0=禁止"`
 

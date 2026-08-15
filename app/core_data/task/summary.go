@@ -54,7 +54,7 @@ func (t *SummaryTask) Do(userId int64, typ string) SummaryEnqueueResult {
 			return SummaryEnqueueResult{Deduped: true}
 		}
 	}
-	queue := event.SummaryQueueForType(typ)
+	queue := event.SummaryMailQueue
 	if _, err := t.mq.QueueDeclare(queue, true, false, false, false, nil); err != nil {
 		log.Errorf("SummaryTask: QueueDeclare %s failed: %v", queue, err)
 		t.clearPending(userId, typ)

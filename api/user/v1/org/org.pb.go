@@ -24,29 +24,27 @@ const (
 
 // 组织详情（orgToMapWithSeats 的输出）
 type OrgInfo struct {
-	state                protoimpl.MessageState `protogen:"open.v1"`
-	Id                   int64                  `protobuf:"varint,1,opt,name=id,proto3" json:"id,omitempty"`
-	Name                 string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
-	Slug                 string                 `protobuf:"bytes,3,opt,name=slug,proto3" json:"slug,omitempty"`
-	Plan                 string                 `protobuf:"bytes,4,opt,name=plan,proto3" json:"plan,omitempty"`
-	SeatLimit            int32                  `protobuf:"varint,5,opt,name=seatLimit,proto3" json:"seatLimit,omitempty"`
-	Status               string                 `protobuf:"bytes,6,opt,name=status,proto3" json:"status,omitempty"`
-	IsSystem             bool                   `protobuf:"varint,7,opt,name=isSystem,proto3" json:"isSystem,omitempty"`
-	BrandTitle           string                 `protobuf:"bytes,8,opt,name=brandTitle,proto3" json:"brandTitle,omitempty"`
-	BrandLogo            string                 `protobuf:"bytes,9,opt,name=brandLogo,proto3" json:"brandLogo,omitempty"`
-	BrandFavicon         string                 `protobuf:"bytes,10,opt,name=brandFavicon,proto3" json:"brandFavicon,omitempty"`
-	JoinMode             string                 `protobuf:"bytes,11,opt,name=joinMode,proto3" json:"joinMode,omitempty"`
-	EnableAiSummary      bool                   `protobuf:"varint,12,opt,name=enableAiSummary,proto3" json:"enableAiSummary,omitempty"`
-	EnableAiEmail        bool                   `protobuf:"varint,13,opt,name=enableAiEmail,proto3" json:"enableAiEmail,omitempty"`
-	EnableAiWeeklyEmail  bool                   `protobuf:"varint,14,opt,name=enableAiWeeklyEmail,proto3" json:"enableAiWeeklyEmail,omitempty"`
-	EnableSpider         bool                   `protobuf:"varint,15,opt,name=enableSpider,proto3" json:"enableSpider,omitempty"`
-	SpiderIntervalMin    int32                  `protobuf:"varint,16,opt,name=spiderIntervalMin,proto3" json:"spiderIntervalMin,omitempty"`
-	AiSummaryIntervalMin int32                  `protobuf:"varint,17,opt,name=aiSummaryIntervalMin,proto3" json:"aiSummaryIntervalMin,omitempty"`
-	AiEmailSchedule      string                 `protobuf:"bytes,18,opt,name=aiEmailSchedule,proto3" json:"aiEmailSchedule,omitempty"`
-	ForceSync            bool                   `protobuf:"varint,19,opt,name=forceSync,proto3" json:"forceSync,omitempty"`
-	EnableFetchProblem   bool                   `protobuf:"varint,25,opt,name=enableFetchProblem,proto3" json:"enableFetchProblem,omitempty"`
-	EnableAiAnalyze      bool                   `protobuf:"varint,26,opt,name=enableAiAnalyze,proto3" json:"enableAiAnalyze,omitempty"`
-	MemberCount          int32                  `protobuf:"varint,20,opt,name=memberCount,proto3" json:"memberCount,omitempty"`
+	state               protoimpl.MessageState `protogen:"open.v1"`
+	Id                  int64                  `protobuf:"varint,1,opt,name=id,proto3" json:"id,omitempty"`
+	Name                string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	Slug                string                 `protobuf:"bytes,3,opt,name=slug,proto3" json:"slug,omitempty"`
+	Plan                string                 `protobuf:"bytes,4,opt,name=plan,proto3" json:"plan,omitempty"`
+	SeatLimit           int32                  `protobuf:"varint,5,opt,name=seatLimit,proto3" json:"seatLimit,omitempty"`
+	Status              string                 `protobuf:"bytes,6,opt,name=status,proto3" json:"status,omitempty"`
+	IsSystem            bool                   `protobuf:"varint,7,opt,name=isSystem,proto3" json:"isSystem,omitempty"`
+	BrandTitle          string                 `protobuf:"bytes,8,opt,name=brandTitle,proto3" json:"brandTitle,omitempty"`
+	BrandLogo           string                 `protobuf:"bytes,9,opt,name=brandLogo,proto3" json:"brandLogo,omitempty"`
+	BrandFavicon        string                 `protobuf:"bytes,10,opt,name=brandFavicon,proto3" json:"brandFavicon,omitempty"`
+	JoinMode            string                 `protobuf:"bytes,11,opt,name=joinMode,proto3" json:"joinMode,omitempty"`
+	EnableAiEmail       bool                   `protobuf:"varint,13,opt,name=enableAiEmail,proto3" json:"enableAiEmail,omitempty"`
+	EnableAiWeeklyEmail bool                   `protobuf:"varint,14,opt,name=enableAiWeeklyEmail,proto3" json:"enableAiWeeklyEmail,omitempty"`
+	EnableSpider        bool                   `protobuf:"varint,15,opt,name=enableSpider,proto3" json:"enableSpider,omitempty"`
+	SpiderIntervalMin   int32                  `protobuf:"varint,16,opt,name=spiderIntervalMin,proto3" json:"spiderIntervalMin,omitempty"`
+	AiEmailSchedule     string                 `protobuf:"bytes,18,opt,name=aiEmailSchedule,proto3" json:"aiEmailSchedule,omitempty"`
+	ForceSync           bool                   `protobuf:"varint,19,opt,name=forceSync,proto3" json:"forceSync,omitempty"`
+	EnableFetchProblem  bool                   `protobuf:"varint,25,opt,name=enableFetchProblem,proto3" json:"enableFetchProblem,omitempty"`
+	EnableAiAnalyze     bool                   `protobuf:"varint,26,opt,name=enableAiAnalyze,proto3" json:"enableAiAnalyze,omitempty"`
+	MemberCount         int32                  `protobuf:"varint,20,opt,name=memberCount,proto3" json:"memberCount,omitempty"`
 	// 仅具邀请查看权限时输出
 	InviteCode     string `protobuf:"bytes,21,opt,name=inviteCode,proto3" json:"inviteCode,omitempty"`
 	MyRole         string `protobuf:"bytes,22,opt,name=myRole,proto3" json:"myRole,omitempty"`
@@ -163,13 +161,6 @@ func (x *OrgInfo) GetJoinMode() string {
 	return ""
 }
 
-func (x *OrgInfo) GetEnableAiSummary() bool {
-	if x != nil {
-		return x.EnableAiSummary
-	}
-	return false
-}
-
 func (x *OrgInfo) GetEnableAiEmail() bool {
 	if x != nil {
 		return x.EnableAiEmail
@@ -194,13 +185,6 @@ func (x *OrgInfo) GetEnableSpider() bool {
 func (x *OrgInfo) GetSpiderIntervalMin() int32 {
 	if x != nil {
 		return x.SpiderIntervalMin
-	}
-	return 0
-}
-
-func (x *OrgInfo) GetAiSummaryIntervalMin() int32 {
-	if x != nil {
-		return x.AiSummaryIntervalMin
 	}
 	return 0
 }
@@ -978,27 +962,25 @@ func (x *CreateRes) GetData() *OrgInfo {
 }
 
 type UpdateReq struct {
-	state                protoimpl.MessageState `protogen:"open.v1"`
-	Id                   int64                  `protobuf:"varint,1,opt,name=id,proto3" json:"id,omitempty"`
-	Name                 *string                `protobuf:"bytes,2,opt,name=name,proto3,oneof" json:"name,omitempty"`
-	Status               *string                `protobuf:"bytes,3,opt,name=status,proto3,oneof" json:"status,omitempty"`
-	BrandTitle           *string                `protobuf:"bytes,4,opt,name=brandTitle,proto3,oneof" json:"brandTitle,omitempty"`
-	BrandLogo            *string                `protobuf:"bytes,5,opt,name=brandLogo,proto3,oneof" json:"brandLogo,omitempty"`
-	BrandFavicon         *string                `protobuf:"bytes,6,opt,name=brandFavicon,proto3,oneof" json:"brandFavicon,omitempty"`
-	JoinMode             *string                `protobuf:"bytes,7,opt,name=joinMode,proto3,oneof" json:"joinMode,omitempty"`
-	EnableAiSummary      *bool                  `protobuf:"varint,8,opt,name=enableAiSummary,proto3,oneof" json:"enableAiSummary,omitempty"`
-	EnableAiEmail        *bool                  `protobuf:"varint,9,opt,name=enableAiEmail,proto3,oneof" json:"enableAiEmail,omitempty"`
-	EnableAiWeeklyEmail  *bool                  `protobuf:"varint,10,opt,name=enableAiWeeklyEmail,proto3,oneof" json:"enableAiWeeklyEmail,omitempty"`
-	EnableSpider         *bool                  `protobuf:"varint,11,opt,name=enableSpider,proto3,oneof" json:"enableSpider,omitempty"`
-	SpiderIntervalMin    *int32                 `protobuf:"varint,12,opt,name=spiderIntervalMin,proto3,oneof" json:"spiderIntervalMin,omitempty"`
-	AiSummaryIntervalMin *int32                 `protobuf:"varint,13,opt,name=aiSummaryIntervalMin,proto3,oneof" json:"aiSummaryIntervalMin,omitempty"`
-	AiEmailSchedule      *string                `protobuf:"bytes,14,opt,name=aiEmailSchedule,proto3,oneof" json:"aiEmailSchedule,omitempty"`
-	SeatLimit            *int32                 `protobuf:"varint,15,opt,name=seatLimit,proto3,oneof" json:"seatLimit,omitempty"`
-	ForceSync            *bool                  `protobuf:"varint,16,opt,name=forceSync,proto3,oneof" json:"forceSync,omitempty"`
-	EnableFetchProblem   *bool                  `protobuf:"varint,17,opt,name=enableFetchProblem,proto3,oneof" json:"enableFetchProblem,omitempty"`
-	EnableAiAnalyze      *bool                  `protobuf:"varint,18,opt,name=enableAiAnalyze,proto3,oneof" json:"enableAiAnalyze,omitempty"`
-	unknownFields        protoimpl.UnknownFields
-	sizeCache            protoimpl.SizeCache
+	state               protoimpl.MessageState `protogen:"open.v1"`
+	Id                  int64                  `protobuf:"varint,1,opt,name=id,proto3" json:"id,omitempty"`
+	Name                *string                `protobuf:"bytes,2,opt,name=name,proto3,oneof" json:"name,omitempty"`
+	Status              *string                `protobuf:"bytes,3,opt,name=status,proto3,oneof" json:"status,omitempty"`
+	BrandTitle          *string                `protobuf:"bytes,4,opt,name=brandTitle,proto3,oneof" json:"brandTitle,omitempty"`
+	BrandLogo           *string                `protobuf:"bytes,5,opt,name=brandLogo,proto3,oneof" json:"brandLogo,omitempty"`
+	BrandFavicon        *string                `protobuf:"bytes,6,opt,name=brandFavicon,proto3,oneof" json:"brandFavicon,omitempty"`
+	JoinMode            *string                `protobuf:"bytes,7,opt,name=joinMode,proto3,oneof" json:"joinMode,omitempty"`
+	EnableAiEmail       *bool                  `protobuf:"varint,9,opt,name=enableAiEmail,proto3,oneof" json:"enableAiEmail,omitempty"`
+	EnableAiWeeklyEmail *bool                  `protobuf:"varint,10,opt,name=enableAiWeeklyEmail,proto3,oneof" json:"enableAiWeeklyEmail,omitempty"`
+	EnableSpider        *bool                  `protobuf:"varint,11,opt,name=enableSpider,proto3,oneof" json:"enableSpider,omitempty"`
+	SpiderIntervalMin   *int32                 `protobuf:"varint,12,opt,name=spiderIntervalMin,proto3,oneof" json:"spiderIntervalMin,omitempty"`
+	AiEmailSchedule     *string                `protobuf:"bytes,14,opt,name=aiEmailSchedule,proto3,oneof" json:"aiEmailSchedule,omitempty"`
+	SeatLimit           *int32                 `protobuf:"varint,15,opt,name=seatLimit,proto3,oneof" json:"seatLimit,omitempty"`
+	ForceSync           *bool                  `protobuf:"varint,16,opt,name=forceSync,proto3,oneof" json:"forceSync,omitempty"`
+	EnableFetchProblem  *bool                  `protobuf:"varint,17,opt,name=enableFetchProblem,proto3,oneof" json:"enableFetchProblem,omitempty"`
+	EnableAiAnalyze     *bool                  `protobuf:"varint,18,opt,name=enableAiAnalyze,proto3,oneof" json:"enableAiAnalyze,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
 }
 
 func (x *UpdateReq) Reset() {
@@ -1080,13 +1062,6 @@ func (x *UpdateReq) GetJoinMode() string {
 	return ""
 }
 
-func (x *UpdateReq) GetEnableAiSummary() bool {
-	if x != nil && x.EnableAiSummary != nil {
-		return *x.EnableAiSummary
-	}
-	return false
-}
-
 func (x *UpdateReq) GetEnableAiEmail() bool {
 	if x != nil && x.EnableAiEmail != nil {
 		return *x.EnableAiEmail
@@ -1111,13 +1086,6 @@ func (x *UpdateReq) GetEnableSpider() bool {
 func (x *UpdateReq) GetSpiderIntervalMin() int32 {
 	if x != nil && x.SpiderIntervalMin != nil {
 		return *x.SpiderIntervalMin
-	}
-	return 0
-}
-
-func (x *UpdateReq) GetAiSummaryIntervalMin() int32 {
-	if x != nil && x.AiSummaryIntervalMin != nil {
-		return *x.AiSummaryIntervalMin
 	}
 	return 0
 }
@@ -5106,7 +5074,7 @@ var File_user_v1_org_org_proto protoreflect.FileDescriptor
 
 const file_user_v1_org_org_proto_rawDesc = "" +
 	"\n" +
-	"\x15user/v1/org/org.proto\x12\x0fapi.user.v1.org\x1a\x1cgoogle/api/annotations.proto\"\xef\x06\n" +
+	"\x15user/v1/org/org.proto\x12\x0fapi.user.v1.org\x1a\x1cgoogle/api/annotations.proto\"\x91\x06\n" +
 	"\aOrgInfo\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\x03R\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x12\n" +
@@ -5121,13 +5089,11 @@ const file_user_v1_org_org_proto_rawDesc = "" +
 	"\tbrandLogo\x18\t \x01(\tR\tbrandLogo\x12\"\n" +
 	"\fbrandFavicon\x18\n" +
 	" \x01(\tR\fbrandFavicon\x12\x1a\n" +
-	"\bjoinMode\x18\v \x01(\tR\bjoinMode\x12(\n" +
-	"\x0fenableAiSummary\x18\f \x01(\bR\x0fenableAiSummary\x12$\n" +
+	"\bjoinMode\x18\v \x01(\tR\bjoinMode\x12$\n" +
 	"\renableAiEmail\x18\r \x01(\bR\renableAiEmail\x120\n" +
 	"\x13enableAiWeeklyEmail\x18\x0e \x01(\bR\x13enableAiWeeklyEmail\x12\"\n" +
 	"\fenableSpider\x18\x0f \x01(\bR\fenableSpider\x12,\n" +
-	"\x11spiderIntervalMin\x18\x10 \x01(\x05R\x11spiderIntervalMin\x122\n" +
-	"\x14aiSummaryIntervalMin\x18\x11 \x01(\x05R\x14aiSummaryIntervalMin\x12(\n" +
+	"\x11spiderIntervalMin\x18\x10 \x01(\x05R\x11spiderIntervalMin\x12(\n" +
 	"\x0faiEmailSchedule\x18\x12 \x01(\tR\x0faiEmailSchedule\x12\x1c\n" +
 	"\tforceSync\x18\x13 \x01(\bR\tforceSync\x12.\n" +
 	"\x12enableFetchProblem\x18\x19 \x01(\bR\x12enableFetchProblem\x12(\n" +
@@ -5189,7 +5155,7 @@ const file_user_v1_org_org_proto_rawDesc = "" +
 	"\tCreateRes\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\x05R\x04code\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12,\n" +
-	"\x04data\x18\x03 \x01(\v2\x18.api.user.v1.org.OrgInfoR\x04data\"\x8a\b\n" +
+	"\x04data\x18\x03 \x01(\v2\x18.api.user.v1.org.OrgInfoR\x04data\"\xf5\x06\n" +
 	"\tUpdateReq\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\x03R\x02id\x12\x17\n" +
 	"\x04name\x18\x02 \x01(\tH\x00R\x04name\x88\x01\x01\x12\x1b\n" +
@@ -5199,33 +5165,29 @@ const file_user_v1_org_org_proto_rawDesc = "" +
 	"brandTitle\x88\x01\x01\x12!\n" +
 	"\tbrandLogo\x18\x05 \x01(\tH\x03R\tbrandLogo\x88\x01\x01\x12'\n" +
 	"\fbrandFavicon\x18\x06 \x01(\tH\x04R\fbrandFavicon\x88\x01\x01\x12\x1f\n" +
-	"\bjoinMode\x18\a \x01(\tH\x05R\bjoinMode\x88\x01\x01\x12-\n" +
-	"\x0fenableAiSummary\x18\b \x01(\bH\x06R\x0fenableAiSummary\x88\x01\x01\x12)\n" +
-	"\renableAiEmail\x18\t \x01(\bH\aR\renableAiEmail\x88\x01\x01\x125\n" +
+	"\bjoinMode\x18\a \x01(\tH\x05R\bjoinMode\x88\x01\x01\x12)\n" +
+	"\renableAiEmail\x18\t \x01(\bH\x06R\renableAiEmail\x88\x01\x01\x125\n" +
 	"\x13enableAiWeeklyEmail\x18\n" +
-	" \x01(\bH\bR\x13enableAiWeeklyEmail\x88\x01\x01\x12'\n" +
-	"\fenableSpider\x18\v \x01(\bH\tR\fenableSpider\x88\x01\x01\x121\n" +
-	"\x11spiderIntervalMin\x18\f \x01(\x05H\n" +
-	"R\x11spiderIntervalMin\x88\x01\x01\x127\n" +
-	"\x14aiSummaryIntervalMin\x18\r \x01(\x05H\vR\x14aiSummaryIntervalMin\x88\x01\x01\x12-\n" +
-	"\x0faiEmailSchedule\x18\x0e \x01(\tH\fR\x0faiEmailSchedule\x88\x01\x01\x12!\n" +
-	"\tseatLimit\x18\x0f \x01(\x05H\rR\tseatLimit\x88\x01\x01\x12!\n" +
-	"\tforceSync\x18\x10 \x01(\bH\x0eR\tforceSync\x88\x01\x01\x123\n" +
-	"\x12enableFetchProblem\x18\x11 \x01(\bH\x0fR\x12enableFetchProblem\x88\x01\x01\x12-\n" +
-	"\x0fenableAiAnalyze\x18\x12 \x01(\bH\x10R\x0fenableAiAnalyze\x88\x01\x01B\a\n" +
+	" \x01(\bH\aR\x13enableAiWeeklyEmail\x88\x01\x01\x12'\n" +
+	"\fenableSpider\x18\v \x01(\bH\bR\fenableSpider\x88\x01\x01\x121\n" +
+	"\x11spiderIntervalMin\x18\f \x01(\x05H\tR\x11spiderIntervalMin\x88\x01\x01\x12-\n" +
+	"\x0faiEmailSchedule\x18\x0e \x01(\tH\n" +
+	"R\x0faiEmailSchedule\x88\x01\x01\x12!\n" +
+	"\tseatLimit\x18\x0f \x01(\x05H\vR\tseatLimit\x88\x01\x01\x12!\n" +
+	"\tforceSync\x18\x10 \x01(\bH\fR\tforceSync\x88\x01\x01\x123\n" +
+	"\x12enableFetchProblem\x18\x11 \x01(\bH\rR\x12enableFetchProblem\x88\x01\x01\x12-\n" +
+	"\x0fenableAiAnalyze\x18\x12 \x01(\bH\x0eR\x0fenableAiAnalyze\x88\x01\x01B\a\n" +
 	"\x05_nameB\t\n" +
 	"\a_statusB\r\n" +
 	"\v_brandTitleB\f\n" +
 	"\n" +
 	"_brandLogoB\x0f\n" +
 	"\r_brandFaviconB\v\n" +
-	"\t_joinModeB\x12\n" +
-	"\x10_enableAiSummaryB\x10\n" +
+	"\t_joinModeB\x10\n" +
 	"\x0e_enableAiEmailB\x16\n" +
 	"\x14_enableAiWeeklyEmailB\x0f\n" +
 	"\r_enableSpiderB\x14\n" +
-	"\x12_spiderIntervalMinB\x17\n" +
-	"\x15_aiSummaryIntervalMinB\x12\n" +
+	"\x12_spiderIntervalMinB\x12\n" +
 	"\x10_aiEmailScheduleB\f\n" +
 	"\n" +
 	"_seatLimitB\f\n" +

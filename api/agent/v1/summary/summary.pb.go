@@ -22,110 +22,6 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
-type GetSummaryRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	UserId        int64                  `protobuf:"varint,1,opt,name=userId,proto3" json:"userId,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *GetSummaryRequest) Reset() {
-	*x = GetSummaryRequest{}
-	mi := &file_agent_v1_summary_summary_proto_msgTypes[0]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *GetSummaryRequest) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*GetSummaryRequest) ProtoMessage() {}
-
-func (x *GetSummaryRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_v1_summary_summary_proto_msgTypes[0]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use GetSummaryRequest.ProtoReflect.Descriptor instead.
-func (*GetSummaryRequest) Descriptor() ([]byte, []int) {
-	return file_agent_v1_summary_summary_proto_rawDescGZIP(), []int{0}
-}
-
-func (x *GetSummaryRequest) GetUserId() int64 {
-	if x != nil {
-		return x.UserId
-	}
-	return 0
-}
-
-type GetSummaryReply struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Code          int64                  `protobuf:"varint,1,opt,name=code,proto3" json:"code,omitempty"`
-	Msg           string                 `protobuf:"bytes,2,opt,name=msg,proto3" json:"msg,omitempty"`
-	Resp          string                 `protobuf:"bytes,3,opt,name=resp,proto3" json:"resp,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *GetSummaryReply) Reset() {
-	*x = GetSummaryReply{}
-	mi := &file_agent_v1_summary_summary_proto_msgTypes[1]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *GetSummaryReply) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*GetSummaryReply) ProtoMessage() {}
-
-func (x *GetSummaryReply) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_v1_summary_summary_proto_msgTypes[1]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use GetSummaryReply.ProtoReflect.Descriptor instead.
-func (*GetSummaryReply) Descriptor() ([]byte, []int) {
-	return file_agent_v1_summary_summary_proto_rawDescGZIP(), []int{1}
-}
-
-func (x *GetSummaryReply) GetCode() int64 {
-	if x != nil {
-		return x.Code
-	}
-	return 0
-}
-
-func (x *GetSummaryReply) GetMsg() string {
-	if x != nil {
-		return x.Msg
-	}
-	return ""
-}
-
-func (x *GetSummaryReply) GetResp() string {
-	if x != nil {
-		return x.Resp
-	}
-	return ""
-}
-
 type StartTrainingReportRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// 分析起始日期 YYYY-MM-DD（含）
@@ -146,7 +42,7 @@ type StartTrainingReportRequest struct {
 
 func (x *StartTrainingReportRequest) Reset() {
 	*x = StartTrainingReportRequest{}
-	mi := &file_agent_v1_summary_summary_proto_msgTypes[2]
+	mi := &file_agent_v1_summary_summary_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -158,7 +54,7 @@ func (x *StartTrainingReportRequest) String() string {
 func (*StartTrainingReportRequest) ProtoMessage() {}
 
 func (x *StartTrainingReportRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_v1_summary_summary_proto_msgTypes[2]
+	mi := &file_agent_v1_summary_summary_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -171,7 +67,7 @@ func (x *StartTrainingReportRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StartTrainingReportRequest.ProtoReflect.Descriptor instead.
 func (*StartTrainingReportRequest) Descriptor() ([]byte, []int) {
-	return file_agent_v1_summary_summary_proto_rawDescGZIP(), []int{2}
+	return file_agent_v1_summary_summary_proto_rawDescGZIP(), []int{0}
 }
 
 func (x *StartTrainingReportRequest) GetStartDate() string {
@@ -227,7 +123,7 @@ type StartTrainingReportReply struct {
 
 func (x *StartTrainingReportReply) Reset() {
 	*x = StartTrainingReportReply{}
-	mi := &file_agent_v1_summary_summary_proto_msgTypes[3]
+	mi := &file_agent_v1_summary_summary_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -239,7 +135,7 @@ func (x *StartTrainingReportReply) String() string {
 func (*StartTrainingReportReply) ProtoMessage() {}
 
 func (x *StartTrainingReportReply) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_v1_summary_summary_proto_msgTypes[3]
+	mi := &file_agent_v1_summary_summary_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -252,7 +148,7 @@ func (x *StartTrainingReportReply) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StartTrainingReportReply.ProtoReflect.Descriptor instead.
 func (*StartTrainingReportReply) Descriptor() ([]byte, []int) {
-	return file_agent_v1_summary_summary_proto_rawDescGZIP(), []int{3}
+	return file_agent_v1_summary_summary_proto_rawDescGZIP(), []int{1}
 }
 
 func (x *StartTrainingReportReply) GetCode() int64 {
@@ -285,7 +181,7 @@ type GetTrainingReportJobRequest struct {
 
 func (x *GetTrainingReportJobRequest) Reset() {
 	*x = GetTrainingReportJobRequest{}
-	mi := &file_agent_v1_summary_summary_proto_msgTypes[4]
+	mi := &file_agent_v1_summary_summary_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -297,7 +193,7 @@ func (x *GetTrainingReportJobRequest) String() string {
 func (*GetTrainingReportJobRequest) ProtoMessage() {}
 
 func (x *GetTrainingReportJobRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_v1_summary_summary_proto_msgTypes[4]
+	mi := &file_agent_v1_summary_summary_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -310,7 +206,7 @@ func (x *GetTrainingReportJobRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetTrainingReportJobRequest.ProtoReflect.Descriptor instead.
 func (*GetTrainingReportJobRequest) Descriptor() ([]byte, []int) {
-	return file_agent_v1_summary_summary_proto_rawDescGZIP(), []int{4}
+	return file_agent_v1_summary_summary_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *GetTrainingReportJobRequest) GetJobId() string {
@@ -345,7 +241,7 @@ type TrainingReportJob struct {
 
 func (x *TrainingReportJob) Reset() {
 	*x = TrainingReportJob{}
-	mi := &file_agent_v1_summary_summary_proto_msgTypes[5]
+	mi := &file_agent_v1_summary_summary_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -357,7 +253,7 @@ func (x *TrainingReportJob) String() string {
 func (*TrainingReportJob) ProtoMessage() {}
 
 func (x *TrainingReportJob) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_v1_summary_summary_proto_msgTypes[5]
+	mi := &file_agent_v1_summary_summary_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -370,7 +266,7 @@ func (x *TrainingReportJob) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TrainingReportJob.ProtoReflect.Descriptor instead.
 func (*TrainingReportJob) Descriptor() ([]byte, []int) {
-	return file_agent_v1_summary_summary_proto_rawDescGZIP(), []int{5}
+	return file_agent_v1_summary_summary_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *TrainingReportJob) GetJobId() string {
@@ -503,7 +399,7 @@ type GetTrainingReportJobReply struct {
 
 func (x *GetTrainingReportJobReply) Reset() {
 	*x = GetTrainingReportJobReply{}
-	mi := &file_agent_v1_summary_summary_proto_msgTypes[6]
+	mi := &file_agent_v1_summary_summary_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -515,7 +411,7 @@ func (x *GetTrainingReportJobReply) String() string {
 func (*GetTrainingReportJobReply) ProtoMessage() {}
 
 func (x *GetTrainingReportJobReply) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_v1_summary_summary_proto_msgTypes[6]
+	mi := &file_agent_v1_summary_summary_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -528,7 +424,7 @@ func (x *GetTrainingReportJobReply) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetTrainingReportJobReply.ProtoReflect.Descriptor instead.
 func (*GetTrainingReportJobReply) Descriptor() ([]byte, []int) {
-	return file_agent_v1_summary_summary_proto_rawDescGZIP(), []int{6}
+	return file_agent_v1_summary_summary_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *GetTrainingReportJobReply) GetCode() int64 {
@@ -562,7 +458,7 @@ type ListTrainingReportJobsRequest struct {
 
 func (x *ListTrainingReportJobsRequest) Reset() {
 	*x = ListTrainingReportJobsRequest{}
-	mi := &file_agent_v1_summary_summary_proto_msgTypes[7]
+	mi := &file_agent_v1_summary_summary_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -574,7 +470,7 @@ func (x *ListTrainingReportJobsRequest) String() string {
 func (*ListTrainingReportJobsRequest) ProtoMessage() {}
 
 func (x *ListTrainingReportJobsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_v1_summary_summary_proto_msgTypes[7]
+	mi := &file_agent_v1_summary_summary_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -587,7 +483,7 @@ func (x *ListTrainingReportJobsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListTrainingReportJobsRequest.ProtoReflect.Descriptor instead.
 func (*ListTrainingReportJobsRequest) Descriptor() ([]byte, []int) {
-	return file_agent_v1_summary_summary_proto_rawDescGZIP(), []int{7}
+	return file_agent_v1_summary_summary_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *ListTrainingReportJobsRequest) GetOrgId() int64 {
@@ -615,7 +511,7 @@ type ListTrainingReportJobsReply struct {
 
 func (x *ListTrainingReportJobsReply) Reset() {
 	*x = ListTrainingReportJobsReply{}
-	mi := &file_agent_v1_summary_summary_proto_msgTypes[8]
+	mi := &file_agent_v1_summary_summary_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -627,7 +523,7 @@ func (x *ListTrainingReportJobsReply) String() string {
 func (*ListTrainingReportJobsReply) ProtoMessage() {}
 
 func (x *ListTrainingReportJobsReply) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_v1_summary_summary_proto_msgTypes[8]
+	mi := &file_agent_v1_summary_summary_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -640,7 +536,7 @@ func (x *ListTrainingReportJobsReply) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListTrainingReportJobsReply.ProtoReflect.Descriptor instead.
 func (*ListTrainingReportJobsReply) Descriptor() ([]byte, []int) {
-	return file_agent_v1_summary_summary_proto_rawDescGZIP(), []int{8}
+	return file_agent_v1_summary_summary_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *ListTrainingReportJobsReply) GetCode() int64 {
@@ -668,13 +564,7 @@ var File_agent_v1_summary_summary_proto protoreflect.FileDescriptor
 
 const file_agent_v1_summary_summary_proto_rawDesc = "" +
 	"\n" +
-	"\x1eagent/v1/summary/summary.proto\x12\x14api.agent.v1.summary\x1a\x1cgoogle/api/annotations.proto\"+\n" +
-	"\x11GetSummaryRequest\x12\x16\n" +
-	"\x06userId\x18\x01 \x01(\x03R\x06userId\"K\n" +
-	"\x0fGetSummaryReply\x12\x12\n" +
-	"\x04code\x18\x01 \x01(\x03R\x04code\x12\x10\n" +
-	"\x03msg\x18\x02 \x01(\tR\x03msg\x12\x12\n" +
-	"\x04resp\x18\x03 \x01(\tR\x04resp\"\xb4\x01\n" +
+	"\x1eagent/v1/summary/summary.proto\x12\x14api.agent.v1.summary\x1a\x1cgoogle/api/annotations.proto\"\xb4\x01\n" +
 	"\x1aStartTrainingReportRequest\x12\x1c\n" +
 	"\tstartDate\x18\x01 \x01(\tR\tstartDate\x12\x18\n" +
 	"\aendDate\x18\x02 \x01(\tR\aendDate\x12\x18\n" +
@@ -719,9 +609,8 @@ const file_agent_v1_summary_summary_proto_rawDesc = "" +
 	"\x1bListTrainingReportJobsReply\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\x03R\x04code\x12\x10\n" +
 	"\x03msg\x18\x02 \x01(\tR\x03msg\x12;\n" +
-	"\x04jobs\x18\x03 \x03(\v2'.api.agent.v1.summary.TrainingReportJobR\x04jobs2\x85\x05\n" +
-	"\aSummary\x12\x84\x01\n" +
-	"\x10GetRecentSummary\x12'.api.agent.v1.summary.GetSummaryRequest\x1a%.api.agent.v1.summary.GetSummaryReply\" \x82\xd3\xe4\x93\x02\x1a\x12\x18/v1/agent/summary/recent\x12\xa3\x01\n" +
+	"\x04jobs\x18\x03 \x03(\v2'.api.agent.v1.summary.TrainingReportJobR\x04jobs2\xfe\x03\n" +
+	"\aSummary\x12\xa3\x01\n" +
 	"\x13StartTrainingReport\x120.api.agent.v1.summary.StartTrainingReportRequest\x1a..api.agent.v1.summary.StartTrainingReportReply\"*\x82\xd3\xe4\x93\x02$:\x01*\"\x1f/v1/agent/training-report/start\x12\xa1\x01\n" +
 	"\x14GetTrainingReportJob\x121.api.agent.v1.summary.GetTrainingReportJobRequest\x1a/.api.agent.v1.summary.GetTrainingReportJobReply\"%\x82\xd3\xe4\x93\x02\x1f\x12\x1d/v1/agent/training-report/job\x12\xa8\x01\n" +
 	"\x16ListTrainingReportJobs\x123.api.agent.v1.summary.ListTrainingReportJobsRequest\x1a1.api.agent.v1.summary.ListTrainingReportJobsReply\"&\x82\xd3\xe4\x93\x02 \x12\x1e/v1/agent/training-report/jobsB@\n" +
@@ -739,31 +628,27 @@ func file_agent_v1_summary_summary_proto_rawDescGZIP() []byte {
 	return file_agent_v1_summary_summary_proto_rawDescData
 }
 
-var file_agent_v1_summary_summary_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
+var file_agent_v1_summary_summary_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
 var file_agent_v1_summary_summary_proto_goTypes = []any{
-	(*GetSummaryRequest)(nil),             // 0: api.agent.v1.summary.GetSummaryRequest
-	(*GetSummaryReply)(nil),               // 1: api.agent.v1.summary.GetSummaryReply
-	(*StartTrainingReportRequest)(nil),    // 2: api.agent.v1.summary.StartTrainingReportRequest
-	(*StartTrainingReportReply)(nil),      // 3: api.agent.v1.summary.StartTrainingReportReply
-	(*GetTrainingReportJobRequest)(nil),   // 4: api.agent.v1.summary.GetTrainingReportJobRequest
-	(*TrainingReportJob)(nil),             // 5: api.agent.v1.summary.TrainingReportJob
-	(*GetTrainingReportJobReply)(nil),     // 6: api.agent.v1.summary.GetTrainingReportJobReply
-	(*ListTrainingReportJobsRequest)(nil), // 7: api.agent.v1.summary.ListTrainingReportJobsRequest
-	(*ListTrainingReportJobsReply)(nil),   // 8: api.agent.v1.summary.ListTrainingReportJobsReply
+	(*StartTrainingReportRequest)(nil),    // 0: api.agent.v1.summary.StartTrainingReportRequest
+	(*StartTrainingReportReply)(nil),      // 1: api.agent.v1.summary.StartTrainingReportReply
+	(*GetTrainingReportJobRequest)(nil),   // 2: api.agent.v1.summary.GetTrainingReportJobRequest
+	(*TrainingReportJob)(nil),             // 3: api.agent.v1.summary.TrainingReportJob
+	(*GetTrainingReportJobReply)(nil),     // 4: api.agent.v1.summary.GetTrainingReportJobReply
+	(*ListTrainingReportJobsRequest)(nil), // 5: api.agent.v1.summary.ListTrainingReportJobsRequest
+	(*ListTrainingReportJobsReply)(nil),   // 6: api.agent.v1.summary.ListTrainingReportJobsReply
 }
 var file_agent_v1_summary_summary_proto_depIdxs = []int32{
-	5, // 0: api.agent.v1.summary.GetTrainingReportJobReply.job:type_name -> api.agent.v1.summary.TrainingReportJob
-	5, // 1: api.agent.v1.summary.ListTrainingReportJobsReply.jobs:type_name -> api.agent.v1.summary.TrainingReportJob
-	0, // 2: api.agent.v1.summary.Summary.GetRecentSummary:input_type -> api.agent.v1.summary.GetSummaryRequest
-	2, // 3: api.agent.v1.summary.Summary.StartTrainingReport:input_type -> api.agent.v1.summary.StartTrainingReportRequest
-	4, // 4: api.agent.v1.summary.Summary.GetTrainingReportJob:input_type -> api.agent.v1.summary.GetTrainingReportJobRequest
-	7, // 5: api.agent.v1.summary.Summary.ListTrainingReportJobs:input_type -> api.agent.v1.summary.ListTrainingReportJobsRequest
-	1, // 6: api.agent.v1.summary.Summary.GetRecentSummary:output_type -> api.agent.v1.summary.GetSummaryReply
-	3, // 7: api.agent.v1.summary.Summary.StartTrainingReport:output_type -> api.agent.v1.summary.StartTrainingReportReply
-	6, // 8: api.agent.v1.summary.Summary.GetTrainingReportJob:output_type -> api.agent.v1.summary.GetTrainingReportJobReply
-	8, // 9: api.agent.v1.summary.Summary.ListTrainingReportJobs:output_type -> api.agent.v1.summary.ListTrainingReportJobsReply
-	6, // [6:10] is the sub-list for method output_type
-	2, // [2:6] is the sub-list for method input_type
+	3, // 0: api.agent.v1.summary.GetTrainingReportJobReply.job:type_name -> api.agent.v1.summary.TrainingReportJob
+	3, // 1: api.agent.v1.summary.ListTrainingReportJobsReply.jobs:type_name -> api.agent.v1.summary.TrainingReportJob
+	0, // 2: api.agent.v1.summary.Summary.StartTrainingReport:input_type -> api.agent.v1.summary.StartTrainingReportRequest
+	2, // 3: api.agent.v1.summary.Summary.GetTrainingReportJob:input_type -> api.agent.v1.summary.GetTrainingReportJobRequest
+	5, // 4: api.agent.v1.summary.Summary.ListTrainingReportJobs:input_type -> api.agent.v1.summary.ListTrainingReportJobsRequest
+	1, // 5: api.agent.v1.summary.Summary.StartTrainingReport:output_type -> api.agent.v1.summary.StartTrainingReportReply
+	4, // 6: api.agent.v1.summary.Summary.GetTrainingReportJob:output_type -> api.agent.v1.summary.GetTrainingReportJobReply
+	6, // 7: api.agent.v1.summary.Summary.ListTrainingReportJobs:output_type -> api.agent.v1.summary.ListTrainingReportJobsReply
+	5, // [5:8] is the sub-list for method output_type
+	2, // [2:5] is the sub-list for method input_type
 	2, // [2:2] is the sub-list for extension type_name
 	2, // [2:2] is the sub-list for extension extendee
 	0, // [0:2] is the sub-list for field type_name
@@ -780,7 +665,7 @@ func file_agent_v1_summary_summary_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agent_v1_summary_summary_proto_rawDesc), len(file_agent_v1_summary_summary_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   9,
+			NumMessages:   7,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

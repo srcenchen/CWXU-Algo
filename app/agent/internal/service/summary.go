@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
@@ -19,39 +18,11 @@ import (
 	"github.com/go-kratos/kratos/v2/errors"
 	"github.com/go-kratos/kratos/v2/log"
 	khttp "github.com/go-kratos/kratos/v2/transport/http"
-	"github.com/redis/go-redis/v9"
-	"github.com/streadway/amqp"
 )
 
 type SummaryService struct {
-	rdb      *redis.Client
 	rabbitMQ *event.RabbitMQ
 	uc       *biz.SummaryUseCase
-}
-
-func (s SummaryService) GetRecentSummary(ctx context.Context, request *summary.GetSummaryRequest) (*summary.GetSummaryReply, error) {
-	if request.UserId <= 0 || !auth.VerifySelfOrAbove(ctx, uint(request.UserId)) {
-		return nil, errors.Forbidden("权限不足", "只能查看自己的 AI 总结")
-	}
-	key := fmt.Sprintf("agent:summary:%d:recent", request.UserId)
-	val, err := s.rdb.Get(ctx, key).Result()
-	if err == redis.Nil {
-		// HTTP 路径异步入队：不 QueueDeclare（启动时已声明）、不同步等 confirm
-		s.enqueueSummaryAsync(request.UserId, "PersonalRecent")
-		return &summary.GetSummaryReply{
-			Code: 1,
-			Msg:  "嘿嘿，稍等稍等，您的 AI 分析报告马上就好(1-2min)",
-			Resp: "",
-		}, nil
-	}
-	if err != nil {
-		return nil, errors.ServiceUnavailable("AI 总结暂不可用", "请稍后重试")
-	}
-	return &summary.GetSummaryReply{
-		Code: 0,
-		Msg:  "success",
-		Resp: val,
-	}, nil
 }
 
 func (s SummaryService) StartTrainingReport(ctx context.Context, req *summary.StartTrainingReportRequest) (*summary.StartTrainingReportReply, error) {
@@ -227,51 +198,14 @@ func RegisterTrainingReportDownload(srv *khttp.Server, uc *biz.SummaryUseCase) {
 	})
 }
 
-// summaryPendingTTL 与 core_data 侧 SummaryTask 保持一致的去重窗口
-const summaryPendingTTL = 20 * time.Minute
-
-func summaryPendingKey(userId int64, typ string) string {
-	return fmt.Sprintf("summary:pending:%s:%d", typ, userId)
-}
-
-// enqueueSummaryAsync HTTP 缓存 miss 路径的入队：Redis 去重后 PublishAsync，
-// 绝不阻塞 HTTP（QueueDeclare 已在 NewSummaryService 启动时做过一次）。
-func (s SummaryService) enqueueSummaryAsync(userId int64, typ string) {
-	if s.rabbitMQ == nil {
-		log.Errorf("enqueueSummaryAsync: mq not ready")
-		return
-	}
-	if s.rdb != nil {
-		ok, err := s.rdb.SetNX(context.Background(), summaryPendingKey(userId, typ), "1", summaryPendingTTL).Result()
-		if err == nil && !ok {
-			log.Debugf("enqueueSummaryAsync: dedup skip user=%d type=%s", userId, typ)
-			return
-		}
-	}
-	body, err := json.Marshal(event.SummaryEvent{UserId: userId, Type: typ})
-	if err != nil {
-		log.Errorf("enqueueSummaryAsync: json.Marshal failed: %v", err)
-		return
-	}
-	queue := event.SummaryQueueForType(typ)
-	s.rabbitMQ.PublishAsync("", queue, false, false, amqp.Publishing{
-		ContentType:  "application/json",
-		Body:         body,
-		DeliveryMode: amqp.Persistent,
-	})
-}
-
 func NewSummaryService(data *data.Data, rabbitMQ *event.RabbitMQ, uc *biz.SummaryUseCase) *SummaryService {
 	// 队列声明放启动期一次性做；失败仅告警（consumer 侧 DeclareOnMissing 兜底）
 	if rabbitMQ != nil {
-		for _, queue := range []string{event.SummaryQueue, event.SummaryMailQueue} {
-			if _, err := rabbitMQ.QueueDeclare(queue, true, false, false, false, nil); err != nil {
-				log.Warnf("NewSummaryService: QueueDeclare %s: %v", queue, err)
-			}
+		if _, err := rabbitMQ.QueueDeclare(event.SummaryMailQueue, true, false, false, false, nil); err != nil {
+			log.Warnf("NewSummaryService: QueueDeclare %s: %v", event.SummaryMailQueue, err)
 		}
 	}
 	return &SummaryService{
-		rdb:      data.RDB,
 		rabbitMQ: rabbitMQ,
 		uc:       uc,
 	}

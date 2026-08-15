@@ -45,25 +45,6 @@ yesterdayTagHits 为昨日涉及标签计数；recentContests 为昨日比赛（
 %s`, extra, string(b))
 }
 
-func recentSystemPrompt() string {
-	return `你是无锡学院算法协会监测平台内嵌的 AI 总结助手。
-要求：
-1. 风格：Acmer 校园口语、俏皮，可少量 Emoji。
-2. 页面空间很小：输出 7-8 条建议，每条约 20 字（不超过 40 字）。
-3. 数据约每 3 小时更新，数字请模糊表达（如 20+、10+），不要写精确到个位的断言。
-4. 只能依据给定数据，禁止编造。
-5. 只输出一个 JSON 对象，不要 Markdown，不要其它文字。格式：
-{"msg":["...","..."],"updateTime":<unix秒>}`
-}
-
-func recentUserPrompt(data *RecentReportData) string {
-	b, _ := json.MarshalIndent(data, "", "  ")
-	return fmt.Sprintf(`分析用户近期学习状态与提交时间分布，生成 JSON。
-updateTime 必须使用 nowUnix=%d。
-数据：
-%s`, data.NowUnix, string(b))
-}
-
 // weeklySystemPrompt 兼容旧名：实际走 trainingReport compact
 func weeklySystemPrompt() string {
 	return trainingReportSystemPrompt(DetailModeCompact)

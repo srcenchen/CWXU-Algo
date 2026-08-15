@@ -143,12 +143,10 @@ message OrgInfo {
   string brandLogo = 9;
   string brandFavicon = 10;
   string joinMode = 11;
-  bool enableAiSummary = 12;
   bool enableAiEmail = 13;
   bool enableAiWeeklyEmail = 14;
   bool enableSpider = 15;
   int32 spiderIntervalMin = 16;
-  int32 aiSummaryIntervalMin = 17;
   string aiEmailSchedule = 18;
   bool forceSync = 19;
   bool enableFetchProblem = 25;
@@ -246,12 +244,10 @@ message UpdateReq {
   optional string brandLogo = 5;
   optional string brandFavicon = 6;
   optional string joinMode = 7;
-  optional bool enableAiSummary = 8;
   optional bool enableAiEmail = 9;
   optional bool enableAiWeeklyEmail = 10;
   optional bool enableSpider = 11;
   optional int32 spiderIntervalMin = 12;
-  optional int32 aiSummaryIntervalMin = 13;
   optional string aiEmailSchedule = 14;
   optional int32 seatLimit = 15;
   optional bool forceSync = 16;

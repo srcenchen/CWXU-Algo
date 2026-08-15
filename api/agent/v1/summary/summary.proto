@@ -8,12 +8,6 @@ option java_multiple_files = true;
 option java_package = "api.agent.v1.summary";
 
 service Summary {
-  rpc GetRecentSummary (GetSummaryRequest) returns (GetSummaryReply) {
-    option (google.api.http) = {
-      get: "/v1/agent/summary/recent"
-    };
-  }
-
   // StartTrainingReport 组织训练报告（异步）
   rpc StartTrainingReport (StartTrainingReportRequest) returns (StartTrainingReportReply) {
     option (google.api.http) = {
@@ -35,16 +29,6 @@ service Summary {
       get: "/v1/agent/training-report/jobs"
     };
   }
-}
-
-message GetSummaryRequest {
-  int64 userId = 1;
-}
-
-message GetSummaryReply {
-  int64 code = 1;
-  string msg = 2;
-  string resp = 3;
 }
 
 message StartTrainingReportRequest {

@@ -6,23 +6,6 @@ info:
     title: ""
     version: 0.0.1
 paths:
-    /v1/agent/summary/recent:
-        get:
-            tags:
-                - Summary
-            operationId: Summary_GetRecentSummary
-            parameters:
-                - name: userId
-                  in: query
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: OK
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/api.agent.v1.summary.GetSummaryReply'
     /v1/agent/training-report/job:
         get:
             tags:
@@ -5751,15 +5734,6 @@ paths:
                                 $ref: '#/components/schemas/api.user.v1.ticket.PatchStatusRes'
 components:
     schemas:
-        api.agent.v1.summary.GetSummaryReply:
-            type: object
-            properties:
-                code:
-                    type: string
-                msg:
-                    type: string
-                resp:
-                    type: string
         api.agent.v1.summary.GetTrainingReportJobReply:
             type: object
             properties:
@@ -9084,16 +9058,11 @@ components:
                     description: 注册时间（unix 秒）
                 spiderIntervalMin:
                     type: integer
-                    description: 有效爬取 / AI 总结间隔（分钟；已应用站管个人覆盖，否则组织 MIN）
-                    format: int32
-                aiSummaryIntervalMin:
-                    type: integer
+                    description: 有效爬取间隔（分钟；已应用站管个人覆盖，否则组织 MIN）
                     format: int32
                 spiderIntervalOverridden:
                     type: boolean
                     description: 是否存在站点管理员个人覆盖（true=不走组织 MIN）
-                aiSummaryIntervalOverridden:
-                    type: boolean
                 syncExempt:
                     type: boolean
                     description: 永不休眠（站管）
@@ -9409,17 +9378,12 @@ components:
                 spiderIntervalMin:
                     type: integer
                     format: int32
-                aiSummaryIntervalMin:
-                    type: integer
-                    format: int32
                 setSpider:
-                    type: boolean
-                setAi:
                     type: boolean
             description: |-
                 SetSyncIntervalsReq 站点管理员设置个人定时间隔覆盖
-                 spiderIntervalMin / aiSummaryIntervalMin：
-                   省略（setSpider/setAi=false）= 不改该项
+                 spiderIntervalMin：
+                   省略（setSpider=false）= 不改该项
                    0 = 清除覆盖，回落组织 MIN
                    >0 = 强制该分钟数（优先级最高）
         api.user.v1.SetSyncIntervalsRes:
@@ -9464,14 +9428,9 @@ components:
                     type: string
                 enableSpider:
                     type: boolean
-                enableAiSummary:
-                    type: boolean
                 enableAiEmail:
                     type: boolean
                 spiderIntervalMin:
-                    type: integer
-                    format: int32
-                aiSummaryIntervalMin:
                     type: integer
                     format: int32
                 enableAiWeeklyEmail:
@@ -11613,8 +11572,6 @@ components:
                     type: string
                 joinMode:
                     type: string
-                enableAiSummary:
-                    type: boolean
                 enableAiEmail:
                     type: boolean
                 enableAiWeeklyEmail:
@@ -11622,9 +11579,6 @@ components:
                 enableSpider:
                     type: boolean
                 spiderIntervalMin:
-                    type: integer
-                    format: int32
-                aiSummaryIntervalMin:
                     type: integer
                     format: int32
                 aiEmailSchedule:
@@ -11990,8 +11944,6 @@ components:
                     type: string
                 joinMode:
                     type: string
-                enableAiSummary:
-                    type: boolean
                 enableAiEmail:
                     type: boolean
                 enableAiWeeklyEmail:
@@ -11999,9 +11951,6 @@ components:
                 enableSpider:
                     type: boolean
                 spiderIntervalMin:
-                    type: integer
-                    format: int32
-                aiSummaryIntervalMin:
                     type: integer
                     format: int32
                 aiEmailSchedule:

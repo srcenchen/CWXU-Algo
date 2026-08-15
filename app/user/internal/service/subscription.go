@@ -372,8 +372,7 @@ func resolveAiAnalyzeStatus(proActive bool, proQuota int, orgUnlimited bool) (so
 
 // orgAiAnalyzeUnlimited 用户所属非公共域 active 组织是否开通题面 AI 分析：
 // 任一组织 enable_ai_analyze=true → 组织成员 AI 分析无限（组织优先，个人配额不参与）。
-// 与 core_data 流水线资格（getNonPublicOrgUserIDsByFeature("ai")）及前端 OrgsManage 开关一致，
-// 不用 enable_ai_summary（那是「AI 总结（网页）」开关）。
+// 与 core_data 流水线资格（getNonPublicOrgUserIDsByFeature("ai")）及前端 OrgsManage 开关一致。
 func (s *SubscriptionService) orgAiAnalyzeUnlimited(ctx context.Context, userID int64) bool {
 	var n int64
 	err := s.data.DB.WithContext(ctx).
@@ -453,15 +452,15 @@ func (s *SubscriptionService) ListSubscriptions(ctx context.Context, req *subscr
 			expireAt = u.SubExpireAt.Unix()
 		}
 		res.List = append(res.List, &subscription.SubUser{
-			UserId:       int64(u.ID),
-			Username:     u.Username,
-			Name:         u.Name,
-			Avatar:       expandAvatarBase(avatarBase, u.Avatar),
-			Tier:         u.SubTier,
-			ExpireAt:     expireAt,
-			Source:       u.SubSource,
-			PendingTier:  u.SubPendingTier,
-			PendingDays:  int32(u.SubPendingDays),
+			UserId:      int64(u.ID),
+			Username:    u.Username,
+			Name:        u.Name,
+			Avatar:      expandAvatarBase(avatarBase, u.Avatar),
+			Tier:        u.SubTier,
+			ExpireAt:    expireAt,
+			Source:      u.SubSource,
+			PendingTier: u.SubPendingTier,
+			PendingDays: int32(u.SubPendingDays),
 		})
 	}
 	return res, nil

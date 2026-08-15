@@ -1274,7 +1274,7 @@ type GetAiAnalyzeQuotaRes struct {
 	// 月配额：>0 为硬上限；0=无配额（不能触发 AI 分析）。
 	// Pro 订阅取套餐 aiAnalyzeMonth；无组织免费用户返回 0。
 	QuotaPerMonth int32 `protobuf:"varint,1,opt,name=quotaPerMonth,proto3" json:"quotaPerMonth,omitempty"`
-	// 组织开通 AI 分析（orgs.enable_ai_summary=true）：无限配额。
+	// 组织开通 AI 分析（orgs.enable_ai_analyze=true）：无限配额。
 	// 组织成员优先消耗组织配额，不受 quotaPerMonth 数字限制。
 	Unlimited     bool `protobuf:"varint,2,opt,name=unlimited,proto3" json:"unlimited,omitempty"`
 	unknownFields protoimpl.UnknownFields

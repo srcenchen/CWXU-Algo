@@ -22,9 +22,9 @@ const (
 	JoinReqApproved = "approved"
 	JoinReqRejected = "rejected"
 
-	InvitePending  = "pending"
-	InviteAccepted = "accepted"
-	InviteRejected = "rejected"
+	InvitePending   = "pending"
+	InviteAccepted  = "accepted"
+	InviteRejected  = "rejected"
 	InviteCancelled = "cancelled"
 )
 
@@ -58,15 +58,13 @@ type Org struct {
 	InviteCode string `gorm:"size:32;uniqueIndex;comment:团队识别码"`
 
 	// 策略：开关可由组织管理员改；间隔仅站点管理员可写
-	EnableAISummary bool `gorm:"default:true;comment:AI总结开关(网页)"`
 	// EnableAIEmail 已废弃：日报邮件不再要求组织授权，仅保留字段兼容历史数据
 	EnableAIEmail       bool `gorm:"default:true;comment:AI日报邮件(组织授权,已废弃)"`
 	EnableAIWeeklyEmail bool `gorm:"default:true;comment:AI周报邮件(组织授权,staff)"`
 	EnableSpider        bool `gorm:"default:true;comment:爬虫定时开关"`
 
-	SpiderIntervalMin    int    `gorm:"default:60;comment:爬虫间隔分钟(站点写)"`
-	AISummaryIntervalMin int    `gorm:"default:180;comment:AI总结间隔分钟(站点写)"`
-	AIEmailSchedule      string `gorm:"size:64;default:30 7 * * *;comment:邮件 cron(站点写)"`
+	SpiderIntervalMin int    `gorm:"default:60;comment:爬虫间隔分钟(站点写)"`
+	AIEmailSchedule   string `gorm:"size:64;default:30 7 * * *;comment:邮件 cron(站点写)"`
 
 	DailySyncLimit int `gorm:"default:0;comment:组织日同步上限 0=未启用"`
 

@@ -146,48 +146,6 @@ func (uc *SummaryUseCase) PersonalDailyRule(userId int64) error {
 	return nil
 }
 
-func (uc *SummaryUseCase) PersonalRecent(userId int64) error {
-	// 网页 AI 总结，与邮件开关无关
-	lockKey := fmt.Sprintf("agent:lock:summary:recent:%d", userId)
-	if !uc.tryAcquireLock(context.Background(), lockKey, 3*time.Minute) {
-		log.Infof("用户 %d 近期总结生成进行中，跳过", userId)
-		return nil
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
-	defer cancel()
-
-	data, err := uc.loadRecentReportData(ctx, userId)
-	if err != nil {
-		return err
-	}
-
-	msgs := []agent.Message{
-		{Role: "system", Content: recentSystemPrompt()},
-		{Role: "user", Content: recentUserPrompt(data)},
-	}
-	raw, err := uc.chat.Complete(ctx, msgs)
-	if err != nil {
-		return fmt.Errorf("生成近期总结失败: %w", err)
-	}
-	if err := uc.saveRecentSummary(ctx, userId, raw); err != nil {
-		// 重试一次：强调只输出 JSON
-		retryMsgs := append(msgs, agent.Message{
-			Role:    "user",
-			Content: "上一次输出无法解析。请只输出合法 JSON：{\"msg\":[...],\"updateTime\":" + fmt.Sprintf("%d", data.NowUnix) + "}，不要其它文字。",
-		})
-		raw2, err2 := uc.chat.Complete(ctx, retryMsgs)
-		if err2 != nil {
-			return fmt.Errorf("近期总结校验失败: %v; 重试失败: %w", err, err2)
-		}
-		if err3 := uc.saveRecentSummary(ctx, userId, raw2); err3 != nil {
-			return fmt.Errorf("近期总结校验失败: %v; 重试仍失败: %w", err, err3)
-		}
-	}
-	log.Infof("用户 %d 近期总结已生成", userId)
-	return nil
-}
-
 // WeeklyStaff 组织教练/队长/组织管理员周报 = 上周训练报告（共享训练报告管道）
 // 同组织同周期只生成一份文档，其余 staff 复用后各自发邮件。
 func (uc *SummaryUseCase) WeeklyStaff(userId int64) error {

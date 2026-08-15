@@ -19,13 +19,11 @@ var _ = binding.EncodeURL
 
 const _ = http.SupportPackageIsVersion1
 
-const OperationSummaryGetRecentSummary = "/api.agent.v1.summary.Summary/GetRecentSummary"
 const OperationSummaryGetTrainingReportJob = "/api.agent.v1.summary.Summary/GetTrainingReportJob"
 const OperationSummaryListTrainingReportJobs = "/api.agent.v1.summary.Summary/ListTrainingReportJobs"
 const OperationSummaryStartTrainingReport = "/api.agent.v1.summary.Summary/StartTrainingReport"
 
 type SummaryHTTPServer interface {
-	GetRecentSummary(context.Context, *GetSummaryRequest) (*GetSummaryReply, error)
 	// GetTrainingReportJob GetTrainingReportJob 查询任务状态
 	GetTrainingReportJob(context.Context, *GetTrainingReportJobRequest) (*GetTrainingReportJobReply, error)
 	// ListTrainingReportJobs ListTrainingReportJobs 当前组织最近任务
@@ -36,29 +34,9 @@ type SummaryHTTPServer interface {
 
 func RegisterSummaryHTTPServer(s *http.Server, srv SummaryHTTPServer) {
 	r := s.Route("/")
-	r.GET("/v1/agent/summary/recent", _Summary_GetRecentSummary0_HTTP_Handler(srv))
 	r.POST("/v1/agent/training-report/start", _Summary_StartTrainingReport0_HTTP_Handler(srv))
 	r.GET("/v1/agent/training-report/job", _Summary_GetTrainingReportJob0_HTTP_Handler(srv))
 	r.GET("/v1/agent/training-report/jobs", _Summary_ListTrainingReportJobs0_HTTP_Handler(srv))
-}
-
-func _Summary_GetRecentSummary0_HTTP_Handler(srv SummaryHTTPServer) func(ctx http.Context) error {
-	return func(ctx http.Context) error {
-		var in GetSummaryRequest
-		if err := ctx.BindQuery(&in); err != nil {
-			return err
-		}
-		http.SetOperation(ctx, OperationSummaryGetRecentSummary)
-		h := ctx.Middleware(func(ctx context.Context, req interface{}) (interface{}, error) {
-			return srv.GetRecentSummary(ctx, req.(*GetSummaryRequest))
-		})
-		out, err := h(ctx, &in)
-		if err != nil {
-			return err
-		}
-		reply := out.(*GetSummaryReply)
-		return ctx.Result(200, reply)
-	}
 }
 
 func _Summary_StartTrainingReport0_HTTP_Handler(srv SummaryHTTPServer) func(ctx http.Context) error {
@@ -122,7 +100,6 @@ func _Summary_ListTrainingReportJobs0_HTTP_Handler(srv SummaryHTTPServer) func(c
 }
 
 type SummaryHTTPClient interface {
-	GetRecentSummary(ctx context.Context, req *GetSummaryRequest, opts ...http.CallOption) (rsp *GetSummaryReply, err error)
 	// GetTrainingReportJob GetTrainingReportJob 查询任务状态
 	GetTrainingReportJob(ctx context.Context, req *GetTrainingReportJobRequest, opts ...http.CallOption) (rsp *GetTrainingReportJobReply, err error)
 	// ListTrainingReportJobs ListTrainingReportJobs 当前组织最近任务
@@ -137,19 +114,6 @@ type SummaryHTTPClientImpl struct {
 
 func NewSummaryHTTPClient(client *http.Client) SummaryHTTPClient {
 	return &SummaryHTTPClientImpl{client}
-}
-
-func (c *SummaryHTTPClientImpl) GetRecentSummary(ctx context.Context, in *GetSummaryRequest, opts ...http.CallOption) (*GetSummaryReply, error) {
-	var out GetSummaryReply
-	pattern := "/v1/agent/summary/recent"
-	path := binding.EncodeURL(pattern, in, true)
-	opts = append(opts, http.Operation(OperationSummaryGetRecentSummary))
-	opts = append(opts, http.PathTemplate(pattern))
-	err := c.cc.Invoke(ctx, "GET", path, nil, &out, opts...)
-	if err != nil {
-		return nil, err
-	}
-	return &out, nil
 }
 
 // GetTrainingReportJob GetTrainingReportJob 查询任务状态

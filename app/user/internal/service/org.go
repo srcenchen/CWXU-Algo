@@ -140,28 +140,26 @@ func seatFullMessage(db *gorm.DB, o *model.Org) string {
 
 func (s *OrgService) toOrgInfo(o *model.Org, includeInvite bool) *orgpb.OrgInfo {
 	info := &orgpb.OrgInfo{
-		Id:                   int64(o.ID),
-		Name:                 o.Name,
-		Slug:                 o.Slug,
-		Plan:                 o.Plan,
-		SeatLimit:            int32(effectiveSeatLimit(o.SeatLimit)),
-		Status:               o.Status,
-		IsSystem:             o.IsSystem,
-		BrandTitle:           o.BrandTitle,
-		BrandLogo:            o.BrandLogo,
-		BrandFavicon:         o.BrandFavicon,
-		JoinMode:             o.JoinMode,
-		EnableAiSummary:      o.EnableAISummary,
-		EnableAiEmail:        o.EnableAIEmail,
-		EnableAiWeeklyEmail:  o.EnableAIWeeklyEmail,
-		EnableSpider:         o.EnableSpider,
-		SpiderIntervalMin:    int32(o.SpiderIntervalMin),
-		AiSummaryIntervalMin: int32(o.AISummaryIntervalMin),
-		AiEmailSchedule:      o.AIEmailSchedule,
-		ForceSync:            o.ForceSync,
-		EnableFetchProblem:   o.EnableFetchProblem,
-		EnableAiAnalyze:      o.EnableAiAnalyze,
-		MemberCount:          int32(countOrgSeats(s.db, o)),
+		Id:                  int64(o.ID),
+		Name:                o.Name,
+		Slug:                o.Slug,
+		Plan:                o.Plan,
+		SeatLimit:           int32(effectiveSeatLimit(o.SeatLimit)),
+		Status:              o.Status,
+		IsSystem:            o.IsSystem,
+		BrandTitle:          o.BrandTitle,
+		BrandLogo:           o.BrandLogo,
+		BrandFavicon:        o.BrandFavicon,
+		JoinMode:            o.JoinMode,
+		EnableAiEmail:       o.EnableAIEmail,
+		EnableAiWeeklyEmail: o.EnableAIWeeklyEmail,
+		EnableSpider:        o.EnableSpider,
+		SpiderIntervalMin:   int32(o.SpiderIntervalMin),
+		AiEmailSchedule:     o.AIEmailSchedule,
+		ForceSync:           o.ForceSync,
+		EnableFetchProblem:  o.EnableFetchProblem,
+		EnableAiAnalyze:     o.EnableAiAnalyze,
+		MemberCount:         int32(countOrgSeats(s.db, o)),
 	}
 	if includeInvite {
 		info.InviteCode = o.InviteCode
@@ -653,23 +651,21 @@ func (s *OrgService) Create(ctx context.Context, req *orgpb.CreateReq) (*orgpb.C
 		seatLimit = int(*req.SeatLimit)
 	}
 	o := model.Org{
-		Name:                 name,
-		Slug:                 slug,
-		Plan:                 "team",
-		SeatLimit:            seatLimit,
-		Status:               model.OrgStatusActive,
-		IsSystem:             false,
-		JoinMode:             joinMode,
-		InviteCode:           newInviteCode(),
-		EnableAISummary:      true,
-		EnableAIEmail:        true,
-		EnableAIWeeklyEmail:  true,
-		EnableSpider:         true,
-		EnableFetchProblem:   true,
-		EnableAiAnalyze:      true,
-		SpiderIntervalMin:    60,
-		AISummaryIntervalMin: 180,
-		AIEmailSchedule:      "30 7 * * *",
+		Name:                name,
+		Slug:                slug,
+		Plan:                "team",
+		SeatLimit:           seatLimit,
+		Status:              model.OrgStatusActive,
+		IsSystem:            false,
+		JoinMode:            joinMode,
+		InviteCode:          newInviteCode(),
+		EnableAIEmail:       true,
+		EnableAIWeeklyEmail: true,
+		EnableSpider:        true,
+		EnableFetchProblem:  true,
+		EnableAiAnalyze:     true,
+		SpiderIntervalMin:   60,
+		AIEmailSchedule:     "30 7 * * *",
 	}
 	adminUID := uint(req.AdminUserId)
 	if adminUID == 0 {
@@ -843,9 +839,6 @@ func (s *OrgService) Update(ctx context.Context, req *orgpb.UpdateReq) (*orgpb.U
 		}
 	}
 	if canToggle {
-		if req.EnableAiSummary != nil {
-			updates["enable_ai_summary"] = *req.EnableAiSummary
-		}
 		if req.EnableAiEmail != nil {
 			updates["enable_ai_email"] = *req.EnableAiEmail
 		}
@@ -874,15 +867,6 @@ func (s *OrgService) Update(ctx context.Context, req *orgpb.UpdateReq) (*orgpb.U
 				}, nil
 			}
 			updates["spider_interval_min"] = v
-		}
-		if req.AiSummaryIntervalMin != nil {
-			v := int(*req.AiSummaryIntervalMin)
-			if v < minM || v > maxM {
-				return &orgpb.UpdateRes{
-					Code: 1, Message: fmt.Sprintf("AI 总结间隔须为 %d–%d 分钟", minM, maxM),
-				}, nil
-			}
-			updates["ai_summary_interval_min"] = v
 		}
 		if req.AiEmailSchedule != nil && strings.TrimSpace(*req.AiEmailSchedule) != "" {
 			updates["ai_email_schedule"] = strings.TrimSpace(*req.AiEmailSchedule)

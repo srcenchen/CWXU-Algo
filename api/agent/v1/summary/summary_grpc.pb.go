@@ -19,7 +19,6 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	Summary_GetRecentSummary_FullMethodName       = "/api.agent.v1.summary.Summary/GetRecentSummary"
 	Summary_StartTrainingReport_FullMethodName    = "/api.agent.v1.summary.Summary/StartTrainingReport"
 	Summary_GetTrainingReportJob_FullMethodName   = "/api.agent.v1.summary.Summary/GetTrainingReportJob"
 	Summary_ListTrainingReportJobs_FullMethodName = "/api.agent.v1.summary.Summary/ListTrainingReportJobs"
@@ -29,7 +28,6 @@ const (
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type SummaryClient interface {
-	GetRecentSummary(ctx context.Context, in *GetSummaryRequest, opts ...grpc.CallOption) (*GetSummaryReply, error)
 	// StartTrainingReport 组织训练报告（异步）
 	StartTrainingReport(ctx context.Context, in *StartTrainingReportRequest, opts ...grpc.CallOption) (*StartTrainingReportReply, error)
 	// GetTrainingReportJob 查询任务状态
@@ -44,16 +42,6 @@ type summaryClient struct {
 
 func NewSummaryClient(cc grpc.ClientConnInterface) SummaryClient {
 	return &summaryClient{cc}
-}
-
-func (c *summaryClient) GetRecentSummary(ctx context.Context, in *GetSummaryRequest, opts ...grpc.CallOption) (*GetSummaryReply, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(GetSummaryReply)
-	err := c.cc.Invoke(ctx, Summary_GetRecentSummary_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
 }
 
 func (c *summaryClient) StartTrainingReport(ctx context.Context, in *StartTrainingReportRequest, opts ...grpc.CallOption) (*StartTrainingReportReply, error) {
@@ -90,7 +78,6 @@ func (c *summaryClient) ListTrainingReportJobs(ctx context.Context, in *ListTrai
 // All implementations must embed UnimplementedSummaryServer
 // for forward compatibility.
 type SummaryServer interface {
-	GetRecentSummary(context.Context, *GetSummaryRequest) (*GetSummaryReply, error)
 	// StartTrainingReport 组织训练报告（异步）
 	StartTrainingReport(context.Context, *StartTrainingReportRequest) (*StartTrainingReportReply, error)
 	// GetTrainingReportJob 查询任务状态
@@ -107,9 +94,6 @@ type SummaryServer interface {
 // pointer dereference when methods are called.
 type UnimplementedSummaryServer struct{}
 
-func (UnimplementedSummaryServer) GetRecentSummary(context.Context, *GetSummaryRequest) (*GetSummaryReply, error) {
-	return nil, status.Error(codes.Unimplemented, "method GetRecentSummary not implemented")
-}
 func (UnimplementedSummaryServer) StartTrainingReport(context.Context, *StartTrainingReportRequest) (*StartTrainingReportReply, error) {
 	return nil, status.Error(codes.Unimplemented, "method StartTrainingReport not implemented")
 }
@@ -138,24 +122,6 @@ func RegisterSummaryServer(s grpc.ServiceRegistrar, srv SummaryServer) {
 		t.testEmbeddedByValue()
 	}
 	s.RegisterService(&Summary_ServiceDesc, srv)
-}
-
-func _Summary_GetRecentSummary_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(GetSummaryRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(SummaryServer).GetRecentSummary(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: Summary_GetRecentSummary_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(SummaryServer).GetRecentSummary(ctx, req.(*GetSummaryRequest))
-	}
-	return interceptor(ctx, in, info, handler)
 }
 
 func _Summary_StartTrainingReport_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
@@ -219,10 +185,6 @@ var Summary_ServiceDesc = grpc.ServiceDesc{
 	ServiceName: "api.agent.v1.summary.Summary",
 	HandlerType: (*SummaryServer)(nil),
 	Methods: []grpc.MethodDesc{
-		{
-			MethodName: "GetRecentSummary",
-			Handler:    _Summary_GetRecentSummary_Handler,
-		},
 		{
 			MethodName: "StartTrainingReport",
 			Handler:    _Summary_StartTrainingReport_Handler,

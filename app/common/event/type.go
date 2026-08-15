@@ -16,19 +16,8 @@ type SummaryEvent struct {
 }
 
 const (
-	SummaryQueue     = "summary"
 	SummaryMailQueue = "summary_mail"
 )
-
-// SummaryQueueForType keeps scheduled email from waiting behind interactive AI summaries.
-func SummaryQueueForType(typ string) string {
-	switch typ {
-	case "PersonalLastDay", "PersonalDailyRule", "WeeklyStaff", "WeeklyReportForCoach":
-		return SummaryMailQueue
-	default:
-		return SummaryQueue
-	}
-}
 
 // ProblemFetchEvent 题面爬取任务（problem_fetch 队列）
 type ProblemFetchEvent struct {

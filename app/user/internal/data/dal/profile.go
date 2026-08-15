@@ -408,7 +408,7 @@ func (d *ProfileDal) GetList(ctx context.Context, pageSize, pageNum int64, keywo
 	err := q.
 		Select("id", "username", "name", "group_id", "avatar", "role_id", "is_site_admin",
 			"problem_fetch_enabled", "problem_ai_enabled",
-			"spider_interval_min_override", "ai_summary_interval_min_override",
+			"spider_interval_min_override",
 			"daily_refresh_quota_override",
 			"email_enabled", "email_weekly_enabled", "created_at",
 			"sync_exempt", "last_login_at", "admin_force_dormant", "disabled",
@@ -872,12 +872,12 @@ func (d *ProfileDal) SetProblemPipeline(ctx context.Context, userID int64, kind 
 }
 
 // SetSyncIntervalOverrides 站点管理员设置/清除个人定时间隔覆盖。
-// spider/ai：nil=不改该项；指针 0 或负=清除覆盖；>0=强制分钟数。
-func (d *ProfileDal) SetSyncIntervalOverrides(ctx context.Context, userID int64, spider *int, ai *int) error {
+// spider：nil=不改该项；指针 0 或负=清除覆盖；>0=强制分钟数。
+func (d *ProfileDal) SetSyncIntervalOverrides(ctx context.Context, userID int64, spider *int) error {
 	if userID <= 0 {
 		return fmt.Errorf("invalid user id")
 	}
-	if spider == nil && ai == nil {
+	if spider == nil {
 		return nil
 	}
 	updates := map[string]interface{}{}
@@ -886,13 +886,6 @@ func (d *ProfileDal) SetSyncIntervalOverrides(ctx context.Context, userID int64,
 			updates["spider_interval_min_override"] = nil
 		} else {
 			updates["spider_interval_min_override"] = *spider
-		}
-	}
-	if ai != nil {
-		if *ai <= 0 {
-			updates["ai_summary_interval_min_override"] = nil
-		} else {
-			updates["ai_summary_interval_min_override"] = *ai
 		}
 	}
 	cacheKey := fmt.Sprintf("user:%d:profile", userID)
@@ -1237,17 +1230,15 @@ func mergeSpiderInterval(orgMin, overrideMin, subIntervalMin int, subscribed boo
 
 // UserSyncPolicy 一人多组织聚合后的定时策略
 type UserSyncPolicy struct {
-	UserID               int64
-	EnableSpider         bool
-	EnableAISummary      bool
-	EnableAIEmail        bool // 组织授权日报（任一）
-	EnableAIWeeklyEmail  bool // 组织授权周报且本人为 staff
-	IsOrgStaff           bool // coach/group_leader/captain/org_admin 任一
-	EmailEnabled         bool // 个人日报偏好
-	EmailWeeklyEnabled   bool // 个人周报偏好
-	SpiderIntervalMin    int
-	AISummaryIntervalMin int
-	SyncActive           bool // 非休眠或已豁免，允许后台定时
+	UserID              int64
+	EnableSpider        bool
+	EnableAIEmail       bool // 组织授权日报（任一）
+	EnableAIWeeklyEmail bool // 组织授权周报且本人为 staff
+	IsOrgStaff          bool // coach/group_leader/captain/org_admin 任一
+	EmailEnabled        bool // 个人日报偏好
+	EmailWeeklyEnabled  bool // 个人周报偏好
+	SpiderIntervalMin   int
+	SyncActive          bool // 非休眠或已豁免，允许后台定时
 	// AIDailyEmailEnabled 个人 AI 日报：Pro 订阅 active + 套餐开启 + 个人开关（默认关）
 	AIDailyEmailEnabled bool
 }
@@ -1272,16 +1263,14 @@ func (d *ProfileDal) GetSyncPolicies(ctx context.Context, userIDs []int64) ([]Us
 	now := time.Now()
 
 	type row struct {
-		UserID               int64
-		Role                 string
-		Plan                 string
-		ForceSync            bool
-		EnableSpider         bool
-		EnableAISummary      bool
-		EnableAIEmail        bool
-		EnableAIWeeklyEmail  bool
-		SpiderIntervalMin    int
-		AISummaryIntervalMin int
+		UserID              int64
+		Role                string
+		Plan                string
+		ForceSync           bool
+		EnableSpider        bool
+		EnableAIEmail       bool
+		EnableAIWeeklyEmail bool
+		SpiderIntervalMin   int
 	}
 	var rows []row
 	err := d.db.WithContext(ctx).
@@ -1289,11 +1278,9 @@ func (d *ProfileDal) GetSyncPolicies(ctx context.Context, userIDs []int64) ([]Us
 		Select(`m.user_id AS user_id, m.role AS role,
 			o.plan AS plan, o.force_sync AS force_sync,
 			o.enable_spider AS enable_spider,
-			o.enable_ai_summary AS enable_ai_summary,
 			o.enable_ai_email AS enable_ai_email,
 			o.enable_ai_weekly_email AS enable_ai_weekly_email,
-			o.spider_interval_min AS spider_interval_min,
-			o.ai_summary_interval_min AS ai_summary_interval_min`).
+			o.spider_interval_min AS spider_interval_min`).
 		Joins("JOIN orgs o ON o.id = m.org_id").
 		Where("m.user_id IN ? AND o.status = ?", userIDs, model.OrgStatusActive).
 		Scan(&rows).Error
@@ -1303,20 +1290,18 @@ func (d *ProfileDal) GetSyncPolicies(ctx context.Context, userIDs []int64) ([]Us
 
 	type acc struct {
 		spiderOn  bool
-		aiOn      bool
 		emailOn   bool
 		weeklyOn  bool
 		staff     bool
 		forceSync bool
 		paidPlan  bool
 		spiderMin int
-		aiMin     int
 	}
 	byUser := make(map[int64]*acc)
 	for _, r := range rows {
 		a := byUser[r.UserID]
 		if a == nil {
-			a = &acc{spiderMin: 0, aiMin: 0}
+			a = &acc{spiderMin: 0}
 			byUser[r.UserID] = a
 		}
 		isStaff := model.IsOrgStaffRole(r.Role)
@@ -1336,13 +1321,6 @@ func (d *ProfileDal) GetSyncPolicies(ctx context.Context, userIDs []int64) ([]Us
 				a.spiderMin = iv
 			}
 		}
-		if r.EnableAISummary {
-			a.aiOn = true
-			iv := clampSyncInterval(r.AISummaryIntervalMin, 180)
-			if a.aiMin == 0 || iv < a.aiMin {
-				a.aiMin = iv
-			}
-		}
 		if r.EnableAIEmail {
 			a.emailOn = true
 		}
@@ -1353,24 +1331,23 @@ func (d *ProfileDal) GetSyncPolicies(ctx context.Context, userIDs []int64) ([]Us
 
 	// 个人邮件偏好 + 站管间隔覆盖 + 活跃/豁免 / 强制冻结 / 禁用 + 订阅
 	type pref struct {
-		ID                           int64      `gorm:"column:id"`
-		EmailEnabled                 bool       `gorm:"column:email_enabled"`
-		EmailWeeklyEnabled           bool       `gorm:"column:email_weekly_enabled"`
-		SpiderIntervalMinOverride    *int       `gorm:"column:spider_interval_min_override"`
-		AISummaryIntervalMinOverride *int       `gorm:"column:ai_summary_interval_min_override"`
-		IsSiteAdmin                  bool       `gorm:"column:is_site_admin"`
-		SyncExempt                   bool       `gorm:"column:sync_exempt"`
-		LastLoginAt                  *time.Time `gorm:"column:last_login_at"`
-		AdminForceDormant            bool       `gorm:"column:admin_force_dormant"`
-		Disabled                     bool       `gorm:"column:disabled"`
-		SubTier                      string     `gorm:"column:sub_tier"`
-		SubExpireAt                  *time.Time `gorm:"column:sub_expire_at"`
-		AIDailyEnabled               bool       `gorm:"column:ai_daily_enabled"`
+		ID                        int64      `gorm:"column:id"`
+		EmailEnabled              bool       `gorm:"column:email_enabled"`
+		EmailWeeklyEnabled        bool       `gorm:"column:email_weekly_enabled"`
+		SpiderIntervalMinOverride *int       `gorm:"column:spider_interval_min_override"`
+		IsSiteAdmin               bool       `gorm:"column:is_site_admin"`
+		SyncExempt                bool       `gorm:"column:sync_exempt"`
+		LastLoginAt               *time.Time `gorm:"column:last_login_at"`
+		AdminForceDormant         bool       `gorm:"column:admin_force_dormant"`
+		Disabled                  bool       `gorm:"column:disabled"`
+		SubTier                   string     `gorm:"column:sub_tier"`
+		SubExpireAt               *time.Time `gorm:"column:sub_expire_at"`
+		AIDailyEnabled            bool       `gorm:"column:ai_daily_enabled"`
 	}
 	var prefs []pref
 	_ = d.db.WithContext(ctx).Model(&model.User{}).
 		Select(`id, email_enabled, email_weekly_enabled,
-			spider_interval_min_override, ai_summary_interval_min_override,
+			spider_interval_min_override,
 			is_site_admin, sync_exempt, last_login_at, admin_force_dormant, disabled,
 			sub_tier, sub_expire_at, ai_daily_enabled`).
 		Where("id IN ?", userIDs).
@@ -1404,19 +1381,11 @@ func (d *ProfileDal) GetSyncPolicies(ctx context.Context, userIDs []int64) ([]Us
 	for _, uid := range userIDs {
 		a := byUser[uid]
 		pr := prefMap[uid]
-		// 爬取间隔 = min(站管覆盖, 组织 MIN, 订阅档)；无任何候选 → 默认 180（与免费默认一致）
-		ai := 180
-		spiderOn, aiOn, emailOn, weeklyOn, staff := false, false, false, false, false
+		spiderOn, emailOn, weeklyOn, staff := false, false, false, false
 		forceSync, paidPlan := false, false
 		if a != nil {
-			if a.aiMin > 0 {
-				ai = a.aiMin
-			}
-			spiderOn, aiOn, emailOn, weeklyOn = a.spiderOn, a.aiOn, a.emailOn, a.weeklyOn
+			spiderOn, emailOn, weeklyOn = a.spiderOn, a.emailOn, a.weeklyOn
 			staff, forceSync, paidPlan = a.staff, a.forceSync, a.paidPlan
-		}
-		if pr.AISummaryIntervalMinOverride != nil && *pr.AISummaryIntervalMinOverride > 0 {
-			ai = clampSyncInterval(*pr.AISummaryIntervalMinOverride, 180)
 		}
 		// 订阅档：active 且套餐间隔>0 参与 min 合并
 		subTier := ""
@@ -1448,22 +1417,20 @@ func (d *ProfileDal) GetSyncPolicies(ctx context.Context, userIDs []int64) ([]Us
 		// AI 日报：仅 Pro 订阅 active + 套餐开启 + 个人开关
 		aiDaily := subTier == "pro" && pr.AIDailyEnabled && subPlan[subTier] != nil && subPlan[subTier].EnableAiDaily
 		if dormant {
-			spiderOn, aiOn, emailOn, weeklyOn, aiDaily = false, false, false, false, false
+			spiderOn, emailOn, weeklyOn, aiDaily = false, false, false, false
 		}
 
 		out = append(out, UserSyncPolicy{
-			UserID:               uid,
-			EnableSpider:         spiderOn,
-			EnableAISummary:      aiOn,
-			EnableAIEmail:        emailOn,
-			EnableAIWeeklyEmail:  weeklyOn,
-			IsOrgStaff:           staff,
-			EmailEnabled:         pr.EmailEnabled,
-			EmailWeeklyEnabled:   pr.EmailWeeklyEnabled,
-			SpiderIntervalMin:    sp,
-			AISummaryIntervalMin: ai,
-			SyncActive:           syncActive,
-			AIDailyEmailEnabled:  aiDaily,
+			UserID:              uid,
+			EnableSpider:        spiderOn,
+			EnableAIEmail:       emailOn,
+			EnableAIWeeklyEmail: weeklyOn,
+			IsOrgStaff:          staff,
+			EmailEnabled:        pr.EmailEnabled,
+			EmailWeeklyEnabled:  pr.EmailWeeklyEnabled,
+			SpiderIntervalMin:   sp,
+			SyncActive:          syncActive,
+			AIDailyEmailEnabled: aiDaily,
 		})
 	}
 	return out, nil
@@ -1630,7 +1597,7 @@ func (d *ProfileDal) GetListByOrg(ctx context.Context, orgID uint, pageSize, pag
 		Select(`u.id, u.username, u.name, COALESCE(m.group_id, 0) AS group_id, u.avatar, u.role_id, u.is_site_admin,
 			u.email_enabled, u.email_weekly_enabled,
 			u.problem_fetch_enabled, u.problem_ai_enabled,
-			u.spider_interval_min_override, u.ai_summary_interval_min_override,
+			u.spider_interval_min_override,
 			u.daily_refresh_quota_override, u.created_at,
 			u.sync_exempt, u.last_login_at, u.admin_force_dormant, u.disabled,
 			u.sub_tier, u.sub_expire_at`).

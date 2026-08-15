@@ -257,12 +257,10 @@ message GetListRes {
     bool problemAiEnabled = 17;
     // 注册时间（unix 秒）
     int64 createdAt = 18;
-    // 有效爬取 / AI 总结间隔（分钟；已应用站管个人覆盖，否则组织 MIN）
+    // 有效爬取间隔（分钟；已应用站管个人覆盖，否则组织 MIN）
     int32 spiderIntervalMin = 19;
-    int32 aiSummaryIntervalMin = 20;
     // 是否存在站点管理员个人覆盖（true=不走组织 MIN）
     bool spiderIntervalOverridden = 21;
-    bool aiSummaryIntervalOverridden = 22;
     // 永不休眠（站管）
     bool syncExempt = 23;
     // 最近活跃 unix 秒；0=未知
@@ -345,16 +343,14 @@ message SetProblemPipelineRes {
 }
 
 // SetSyncIntervalsReq 站点管理员设置个人定时间隔覆盖
-// spiderIntervalMin / aiSummaryIntervalMin：
-//   省略（setSpider/setAi=false）= 不改该项
+// spiderIntervalMin：
+//   省略（setSpider=false）= 不改该项
 //   0 = 清除覆盖，回落组织 MIN
 //   >0 = 强制该分钟数（优先级最高）
 message SetSyncIntervalsReq {
   int64 userId = 1;
   int32 spiderIntervalMin = 2;
-  int32 aiSummaryIntervalMin = 3;
   bool setSpider = 4;
-  bool setAi = 5;
 }
 
 message SetSyncIntervalsRes {
@@ -531,10 +527,8 @@ message GetSyncPoliciesReq {
 message UserSyncPolicy {
   int64 userId = 1;
   bool enableSpider = 2;
-  bool enableAiSummary = 3;
   bool enableAiEmail = 4;          // 组织授权日报
   int32 spiderIntervalMin = 5;
-  int32 aiSummaryIntervalMin = 6;
   bool enableAiWeeklyEmail = 7;    // 组织授权周报且本人 staff
   bool isOrgStaff = 8;
   bool emailEnabled = 9;           // 个人日报偏好
