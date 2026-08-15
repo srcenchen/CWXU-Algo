@@ -29,6 +29,12 @@ endpoints:
     protocol: HTTP
     backends:
       - target: 'discovery:///user'
+  # 支持中心智能问答需等待 LLM 完整生成；必须放在通用 /v1/user/* 之前。
+  - path: /v1/user/tickets/ai/answer
+    timeout: 500s
+    protocol: HTTP
+    backends:
+      - target: 'discovery:///user'
   - path: /v1/user/*
     timeout: 5s
     protocol: HTTP

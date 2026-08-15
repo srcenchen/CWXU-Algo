@@ -71,8 +71,7 @@ func New(cfg *conf.SupportCenter) (*Client, error) {
 		productID: productID,
 		signKey:   []byte(strings.TrimSpace(cfg.GetSignKey())),
 		hc:        &http.Client{Timeout: timeout},
-		// 智能问答走百炼 LLM，生成耗时可达数秒～十数秒，不能套用普通工单短超时
-		aiHC: &http.Client{Timeout: 60 * time.Second},
+		aiHC:      &http.Client{Timeout: timeout},
 	}, nil
 }
 

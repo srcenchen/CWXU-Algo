@@ -268,3 +268,16 @@ func TestAiAnswerSlowUpstream(t *testing.T) {
 		t.Fatalf("answer = %q", d.Answer)
 	}
 }
+
+func TestAiAnswerUsesConfiguredTimeout(t *testing.T) {
+	cfg := newTestCfg("https://support.example.com", "pid", "")
+	cfg.Timeout = durationpb.New(500 * time.Second)
+
+	c, err := New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.aiHC.Timeout != 500*time.Second {
+		t.Fatalf("AiAnswer timeout = %v, want 500s", c.aiHC.Timeout)
+	}
+}
