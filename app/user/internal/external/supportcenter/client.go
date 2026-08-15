@@ -46,6 +46,7 @@ type Client struct {
 	productID string
 	signKey   []byte // 回调验签密钥（callback_secret），本轮客户端只透传、不参与请求签名
 	hc        *http.Client
+	aiHC      *http.Client // 智能问答专用：LLM 生成耗时远超普通工单操作，需更长超时
 }
 
 // New 创建客户端；base_url / product_id 任一为空返回错误（调用方按「支持中心未配置」处理）。
@@ -70,6 +71,8 @@ func New(cfg *conf.SupportCenter) (*Client, error) {
 		productID: productID,
 		signKey:   []byte(strings.TrimSpace(cfg.GetSignKey())),
 		hc:        &http.Client{Timeout: timeout},
+		// 智能问答走百炼 LLM，生成耗时可达数秒～十数秒，不能套用普通工单短超时
+		aiHC: &http.Client{Timeout: 60 * time.Second},
 	}, nil
 }
 
@@ -90,8 +93,9 @@ func (c *Client) ProductID() string {
 }
 
 // do 发送请求：透传用户 JWT，注入 X-Product-ID，写操作带 Idempotency-Key。
-// 非 2xx 或 code != 0 返回 *APIError。
-func (c *Client) do(ctx context.Context, userToken, method, path string, body any, idemKey string) (*rawResp, error) {
+// 非 2xx 或 code != 0 返回 *APIError。hc 由调用方选择：普通操作用默认短超时，
+// 智能问答用专用长超时客户端（LLM 生成耗时远超普通工单操作）。
+func (c *Client) doWith(ctx context.Context, hc *http.Client, userToken, method, path string, body any, idemKey string) (*rawResp, error) {
 	if c == nil || c.baseURL == "" {
 		return nil, fmt.Errorf("支持中心未配置")
 	}
@@ -119,7 +123,7 @@ func (c *Client) do(ctx context.Context, userToken, method, path string, body an
 		req.Header.Set("Idempotency-Key", idemKey)
 	}
 
-	resp, err := c.hc.Do(req)
+	resp, err := hc.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("support center 请求失败: %w", err)
 	}
@@ -160,14 +164,20 @@ func (c *Client) do(ctx context.Context, userToken, method, path string, body an
 	return &out, nil
 }
 
+// do 默认超时客户端发送请求。
+func (c *Client) do(ctx context.Context, userToken, method, path string, body any, idemKey string) (*rawResp, error) {
+	return c.doWith(ctx, c.hc, userToken, method, path, body, idemKey)
+}
+
 // GetCurrent 当前活跃工单（无活跃工单时客户中心返回 404/40400 → *APIError）。
 func (c *Client) GetCurrent(ctx context.Context, userToken string) (*rawResp, error) {
 	return c.do(ctx, userToken, http.MethodGet, "/api/v1/tickets/current", nil, "")
 }
 
 // AiAnswer 智能问答（不创建工单、不持久化对话；不要求 Idempotency-Key）。
+// 走专用长超时客户端：LLM 生成耗时可达数秒～十数秒，不能套用普通工单短超时。
 func (c *Client) AiAnswer(ctx context.Context, userToken, question string) (*rawResp, error) {
-	return c.do(ctx, userToken, http.MethodPost, "/api/v1/tickets/ai/answer",
+	return c.doWith(ctx, c.aiHC, userToken, http.MethodPost, "/api/v1/tickets/ai/answer",
 		map[string]string{"question": question}, "")
 }
 

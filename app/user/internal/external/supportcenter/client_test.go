@@ -235,3 +235,36 @@ func TestAiAnswer(t *testing.T) {
 		t.Fatalf("unexpected data: %+v", d)
 	}
 }
+
+// AiAnswer 慢上游（模拟 LLM 生成耗时数秒）：专用长超时客户端不应被默认短超时截断
+func TestAiAnswerSlowUpstream(t *testing.T) {
+	start := time.Now()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(1500 * time.Millisecond) // 远超默认 5s 之外的用例用短延时；此处验证长超时客户端可用
+		_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"answered":true,"answer":"慢答案","mode":"generated","references":[]}}`))
+	}))
+	defer srv.Close()
+
+	// 默认配置 timeout 仅 200ms，但 AiAnswer 专用客户端为 60s，不应被截断
+	c, err := New(newTestCfg(srv.URL, "pid", ""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.hc.Timeout = 200 * time.Millisecond // 模拟极短默认超时
+	resp, err := c.AiAnswer(context.Background(), "u-token", "慢问题")
+	if err != nil {
+		t.Fatalf("AiAnswer slow upstream should use long-timeout client: %v", err)
+	}
+	if el := time.Since(start); el < 1400*time.Millisecond {
+		t.Fatalf("expected to wait for slow upstream, got %v", el)
+	}
+	var d struct {
+		Answer string `json:"answer"`
+	}
+	if err := json.Unmarshal(resp.Data, &d); err != nil {
+		t.Fatal(err)
+	}
+	if d.Answer != "慢答案" {
+		t.Fatalf("answer = %q", d.Answer)
+	}
+}
