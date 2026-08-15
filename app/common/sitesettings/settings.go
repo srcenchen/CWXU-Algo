@@ -30,8 +30,11 @@ type Runtime struct {
 	SMTPUsername      string `json:"smtpUsername"`
 	SMTPPassword      string `json:"smtpPassword"`
 	SMTPFrom          string `json:"smtpFrom"`
-	AgentModel        string `json:"agentModel"`
-	AgentSecret       string `json:"agentSecret"`
+	AgentModel    string `json:"agentModel"`
+	AgentSecret   string `json:"agentSecret"`
+	AgentEndpoint string `json:"agentEndpoint"`
+	// ConfigVersion 配置乐观版本（与 site_configs.config_version 一致）
+	ConfigVersion int64 `json:"configVersion"`
 	AiAnalyzeEndpoint string `json:"aiAnalyzeEndpoint"`
 	AiAnalyzeModel    string `json:"aiAnalyzeModel"`
 	AiAnalyzeSecret   string `json:"aiAnalyzeSecret"`
@@ -75,6 +78,8 @@ type Row struct {
 	SMTPFrom          string `gorm:"column:smtp_from"`
 	AgentModel        string `gorm:"column:agent_model"`
 	AgentSecret       string `gorm:"column:agent_secret"`
+	AgentEndpoint     string `gorm:"column:agent_endpoint"`
+	ConfigVersion     int64  `gorm:"column:config_version"`
 	AiAnalyzeEndpoint string `gorm:"column:ai_analyze_endpoint"`
 	AiAnalyzeModel    string `gorm:"column:ai_analyze_model"`
 	AiAnalyzeSecret   string `gorm:"column:ai_analyze_secret"`
@@ -135,6 +140,8 @@ func (r *Row) ToRuntime() *Runtime {
 		SMTPFrom:          strings.TrimSpace(r.SMTPFrom),
 		AgentModel:        strings.TrimSpace(r.AgentModel),
 		AgentSecret:       decrypt(r.AgentSecret),
+		AgentEndpoint:     strings.TrimSpace(r.AgentEndpoint),
+		ConfigVersion:     r.ConfigVersion,
 		AiAnalyzeEndpoint: strings.TrimSpace(r.AiAnalyzeEndpoint),
 		AiAnalyzeModel:    strings.TrimSpace(r.AiAnalyzeModel),
 		AiAnalyzeSecret:   decrypt(r.AiAnalyzeSecret),
@@ -186,6 +193,19 @@ func (rt *Runtime) HasSMTP() bool {
 	return rt != nil && strings.TrimSpace(rt.SMTPHost) != ""
 }
 
+// publishCASScript 仅在"新版本 >= 当前版本"时才写入，防止并发请求按相反顺序发布时旧快照覆盖新配置。
+const publishCASScript = `
+local cur = redis.call('GET', KEYS[1])
+local newVer = tonumber(ARGV[2])
+if cur then
+  local ok, parsed = pcall(cjson.decode, cur)
+  if ok and parsed and parsed.configVersion and tonumber(parsed.configVersion) > newVer then
+    return 0
+  end
+end
+redis.call('SET', KEYS[1], ARGV[1], 'EX', ARGV[3])
+return 1`
+
 // PublishRedis 写入 Redis 缓存（user 服务启动 / 管理员更新 / 定时刷新的显式发布）。
 // 空配置也会写入，以便管理员清空 SMTP 后立即生效。
 // 注意：core_data/agent 的 Load 自动回填路径不得对「空 Runtime」调用本函数（见 Load）。
@@ -197,7 +217,7 @@ func PublishRedis(ctx context.Context, rdb *redis.Client, rt *Runtime) error {
 	if err != nil {
 		return err
 	}
-	return rdb.Set(ctx, RedisKey, b, RedisTTL).Err()
+	return rdb.Eval(ctx, publishCASScript, []string{RedisKey}, b, rt.ConfigVersion, int(RedisTTL.Seconds())).Err()
 }
 
 // worthCaching 空 Runtime 不得回写 Redis（agent/core_data 误用错误库时会制造毒缓存）
@@ -212,6 +232,9 @@ func (rt *Runtime) worthCaching() bool {
 		return true
 	}
 	if strings.TrimSpace(rt.AgentModel) != "" || strings.TrimSpace(rt.AgentSecret) != "" {
+		return true
+	}
+	if strings.TrimSpace(rt.AgentEndpoint) != "" {
 		return true
 	}
 	if strings.TrimSpace(rt.OjLuoguUsername) != "" || strings.TrimSpace(rt.OjQojUsername) != "" {
@@ -303,7 +326,7 @@ func (rt *Runtime) AgentConf() *conf.Agent {
 	if rt == nil {
 		return &conf.Agent{}
 	}
-	return &conf.Agent{Model: rt.AgentModel, Secret: rt.AgentSecret}
+	return &conf.Agent{Model: rt.AgentModel, Secret: rt.AgentSecret, Endpoint: rt.AgentEndpoint}
 }
 
 func (rt *Runtime) AiAnalyzeConf() *conf.AiAnalyze {
@@ -354,12 +377,8 @@ func (rt *Runtime) MergeFallback(smtp *conf.SMTP, agent *conf.Agent, ai *conf.Ai
 		}
 	}
 	if agent != nil {
-		if rt.AgentModel == "" {
-			rt.AgentModel = agent.Model
-		}
-		if rt.AgentSecret == "" {
-			rt.AgentSecret = agent.Secret
-		}
+		// Agent 配置只认站点配置（database/Redis），不再用 YAML 兜底。
+		_ = agent
 	}
 	if ai != nil {
 		if rt.AiAnalyzeEndpoint == "" {

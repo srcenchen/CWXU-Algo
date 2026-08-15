@@ -18,6 +18,33 @@ func TestRuntimeWorthCaching(t *testing.T) {
 	if !(&Runtime{AgentModel: "gpt"}).worthCaching() {
 		t.Fatal("agent model should be cacheable")
 	}
+	if !(&Runtime{AgentEndpoint: "https://api.openai.com/v1"}).worthCaching() {
+		t.Fatal("agent endpoint should be cacheable")
+	}
+}
+
+func TestValidateEndpoint(t *testing.T) {
+	if err := ValidateEndpoint("https://api.openai.com/v1"); err != nil {
+		t.Fatalf("valid endpoint rejected: %v", err)
+	}
+	if err := ValidateEndpoint("http://host:8001/api"); err != nil {
+		t.Fatalf("http endpoint rejected: %v", err)
+	}
+	if err := ValidateEndpoint(""); err != nil {
+		t.Fatalf("empty endpoint should pass: %v", err)
+	}
+	if err := ValidateEndpoint("ftp://x/v1"); err == nil {
+		t.Fatal("ftp scheme should be rejected")
+	}
+	if err := ValidateEndpoint("https://u:p@host/v1"); err == nil {
+		t.Fatal("userinfo should be rejected")
+	}
+	if err := ValidateEndpoint("https://host/v1?k=v"); err == nil {
+		t.Fatal("query should be rejected")
+	}
+	if err := ValidateEndpoint("not-a-url"); err == nil {
+		t.Fatal("invalid url should be rejected")
+	}
 }
 
 func TestHasSMTP(t *testing.T) {
