@@ -16,9 +16,13 @@ type SiteConfig struct {
 	SMTPUsername string `gorm:"size:256;column:smtp_username"`
 	SMTPPassword string `gorm:"size:512;column:smtp_password"`
 	SMTPFrom     string `gorm:"size:256;column:smtp_from"`
-	// Agent（火山 Ark / 日报周报）
+	// Agent（OpenAI 兼容 / 日报周报）
 	AgentModel  string `gorm:"size:128;column:agent_model"`
 	AgentSecret string `gorm:"size:512;column:agent_secret"`
+	// AgentEndpoint OpenAI 兼容服务地址（非敏感）
+	AgentEndpoint string `gorm:"size:512;column:agent_endpoint"`
+	// ConfigVersion 乐观并发版本（每次更新 +1）
+	ConfigVersion int64 `gorm:"column:config_version;default:0;comment:配置版本"`
 	// 题库 AI 分析（OpenAI 兼容）
 	AiAnalyzeEndpoint string `gorm:"size:512;column:ai_analyze_endpoint"`
 	AiAnalyzeModel    string `gorm:"size:128;column:ai_analyze_model"`
