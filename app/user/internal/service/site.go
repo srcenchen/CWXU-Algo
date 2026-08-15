@@ -178,7 +178,9 @@ func rowToRuntime(row *model.SiteConfig) *sitesettings.Runtime {
 		SMTPPassword:      decrypt(row.SMTPPassword),
 		SMTPFrom:          strings.TrimSpace(row.SMTPFrom),
 		AgentModel:        strings.TrimSpace(row.AgentModel),
+		AgentEndpoint:     strings.TrimSpace(row.AgentEndpoint),
 		AgentSecret:       decrypt(row.AgentSecret),
+		ConfigVersion:     row.ConfigVersion,
 		AiAnalyzeEndpoint: strings.TrimSpace(row.AiAnalyzeEndpoint),
 		AiAnalyzeModel:    strings.TrimSpace(row.AiAnalyzeModel),
 		AiAnalyzeSecret:   decrypt(row.AiAnalyzeSecret),
@@ -243,8 +245,10 @@ func (s *SiteService) GetAdminConfig(ctx context.Context, _ *site.GetAdminConfig
 		SmtpPasswordSet:        strings.TrimSpace(rt.SMTPPassword) != "",
 		SmtpFrom:               rt.SMTPFrom,
 		AgentModel:             rt.AgentModel,
+		AgentEndpoint:          rt.AgentEndpoint,
 		AgentSecretMasked:      sitesettings.MaskSecret(rt.AgentSecret),
 		AgentSecretSet:         strings.TrimSpace(rt.AgentSecret) != "",
+		ConfigVersion:          rt.ConfigVersion,
 		AiAnalyzeEndpoint:      rt.AiAnalyzeEndpoint,
 		AiAnalyzeModel:         rt.AiAnalyzeModel,
 		AiAnalyzeSecretMasked:  sitesettings.MaskSecret(rt.AiAnalyzeSecret),
@@ -298,6 +302,14 @@ func decryptSiteSecret(value string) string {
 	return plain
 }
 
+func encryptSiteSecret(value string) (string, error) {
+	enc, err := secretutil.Encrypt(value)
+	if err != nil {
+		return "", err
+	}
+	return enc, nil
+}
+
 func (s *SiteService) UpdateConfig(ctx context.Context, req *site.UpdateConfigReq) (*site.UpdateConfigRes, error) {
 	if !auth.HasPerm(ctx, rbac.PermSiteConfigWrite) {
 		return &site.UpdateConfigRes{Code: 1, Message: "需要修改站点配置权限"}, nil
@@ -307,121 +319,40 @@ func (s *SiteService) UpdateConfig(ctx context.Context, req *site.UpdateConfigRe
 		return nil, errors.InternalServer("site config", "服务暂时不可用")
 	}
 
-	// 管理端表单整页保存：非密钥字段直接覆盖
-	title := strings.TrimSpace(req.SiteTitle)
-	if title == "" {
-		title = row.SiteTitle
-		if title == "" {
-			title = "GoAlgo"
-		}
+	section := normalizeSection(req.GetSection())
+	if !validSections[section] {
+		return &site.UpdateConfigRes{Code: 1, Message: "未知配置分区"}, nil
 	}
-	port := int(req.SmtpPort)
-	if port <= 0 {
-		port = 465
-	}
-	updates := map[string]interface{}{
-		"site_title":          title,
-		"site_logo":           strings.TrimSpace(req.SiteLogo),
-		"favicon":             strings.TrimSpace(req.Favicon),
-		"footer_icp":          strings.TrimSpace(req.FooterIcp),
-		"smtp_host":           strings.TrimSpace(req.SmtpHost),
-		"smtp_port":           port,
-		"smtp_username":       strings.TrimSpace(req.SmtpUsername),
-		"smtp_from":           strings.TrimSpace(req.SmtpFrom),
-		"agent_model":         strings.TrimSpace(req.AgentModel),
-		"ai_analyze_endpoint": strings.TrimSpace(req.AiAnalyzeEndpoint),
-		"ai_analyze_model":    strings.TrimSpace(req.AiAnalyzeModel),
-	}
-	if req.SetInactiveDays {
-		updates["inactive_days"] = dormancy.ClampInactiveDays(int(req.InactiveDays))
-	}
-	// 审核/举报邮件收件人：整页保存时始终覆盖（允许清空）
-	updates["admin_notify_emails"] = strings.TrimSpace(req.AdminNotifyEmails)
-	// 运维告警邮件收件人：整页保存时始终覆盖（允许清空）
-	updates["ops_notify_emails"] = strings.TrimSpace(req.OpsNotifyEmails)
-	// 运维磁盘统计目录：始终覆盖保存（可清空=默认 /data）
-	updates["data_disk_path"] = strings.TrimSpace(req.DataDiskPath)
-	// 又拍云：整页保存非密钥字段
-	updates["upyun_bucket"] = strings.TrimSpace(req.UpyunBucket)
-	updates["upyun_operator"] = strings.TrimSpace(req.UpyunOperator)
-	updates["upyun_domain"] = strings.TrimSpace(req.UpyunDomain)
-	updates["upyun_scheme"] = strings.TrimSpace(req.UpyunScheme)
-	updates["oj_luogu_username"] = strings.TrimSpace(req.OjLuoguUsername)
-	updates["oj_qoj_username"] = strings.TrimSpace(req.OjQojUsername)
-	// 支付FM：接口根地址/商户号/支付方式始终覆盖保存
-	updates["payfm_api_base"] = strings.TrimSpace(req.PayfmApiBase)
-	updates["payfm_merchant_no"] = strings.TrimSpace(req.PayfmMerchantNo)
-	updates["payfm_pay_type"] = strings.TrimSpace(req.PayfmPayType)
 
-	if req.ClearSmtpPassword {
-		updates["smtp_password"] = ""
-	} else if isRealSecret(req.SmtpPassword) {
-		encrypted, encryptErr := secretutil.Encrypt(req.SmtpPassword)
-		if encryptErr != nil {
-			log.Errorf("encrypt smtp password: %v", encryptErr)
-			return &site.UpdateConfigRes{Code: 1, Message: "服务器尚未配置配置加密密钥"}, nil
-		}
-		updates["smtp_password"] = encrypted
+	updates, err := buildSectionUpdates(section, row, req)
+	if err != nil {
+		return &site.UpdateConfigRes{Code: 1, Message: err.Error()}, nil
 	}
-	if req.ClearAgentSecret {
-		updates["agent_secret"] = ""
-	} else if isRealSecret(req.AgentSecret) {
-		encrypted, encryptErr := secretutil.Encrypt(req.AgentSecret)
-		if encryptErr != nil {
-			log.Errorf("encrypt agent secret: %v", encryptErr)
-			return &site.UpdateConfigRes{Code: 1, Message: "服务器尚未配置配置加密密钥"}, nil
-		}
-		updates["agent_secret"] = encrypted
+
+	// 版本乐观锁：>0 时校验，不匹配返回冲突
+	if req.GetExpectedConfigVersion() > 0 && row.ConfigVersion != req.GetExpectedConfigVersion() {
+		return &site.UpdateConfigRes{Code: 409, Message: "配置已被其他管理员修改，请刷新后重试"}, nil
 	}
-	if req.ClearAiAnalyzeSecret {
-		updates["ai_analyze_secret"] = ""
-	} else if isRealSecret(req.AiAnalyzeSecret) {
-		encrypted, encryptErr := secretutil.Encrypt(req.AiAnalyzeSecret)
-		if encryptErr != nil {
-			log.Errorf("encrypt ai secret: %v", encryptErr)
-			return &site.UpdateConfigRes{Code: 1, Message: "服务器尚未配置配置加密密钥"}, nil
+	updates["config_version"] = row.ConfigVersion + 1
+
+	// 状态重置：Agent 配置实际变化时重置 agent；AI 分析配置变化时重置 ai_analyze
+	if isSection(section, "ai") {
+		agentChanged := strings.TrimSpace(req.AgentEndpoint) != strings.TrimSpace(row.AgentEndpoint) ||
+			strings.TrimSpace(req.AgentModel) != strings.TrimSpace(row.AgentModel) ||
+			req.ClearAgentSecret || isRealSecret(req.AgentSecret)
+		if agentChanged {
+			updates["agent_status"] = sitesettings.StatusUnchecked
+			updates["agent_status_at"] = 0
+			updates["agent_err_msg"] = ""
 		}
-		updates["ai_analyze_secret"] = encrypted
-	}
-	if req.ClearUpyunPassword {
-		updates["upyun_password"] = ""
-	} else if isRealSecret(req.UpyunPassword) {
-		encrypted, encryptErr := secretutil.Encrypt(req.UpyunPassword)
-		if encryptErr != nil {
-			log.Errorf("encrypt upyun password: %v", encryptErr)
-			return &site.UpdateConfigRes{Code: 1, Message: "服务器尚未配置配置加密密钥"}, nil
+		aiChanged := strings.TrimSpace(req.AiAnalyzeEndpoint) != strings.TrimSpace(row.AiAnalyzeEndpoint) ||
+			strings.TrimSpace(req.AiAnalyzeModel) != strings.TrimSpace(row.AiAnalyzeModel) ||
+			req.ClearAiAnalyzeSecret || isRealSecret(req.AiAnalyzeSecret)
+		if aiChanged {
+			updates["ai_analyze_status"] = sitesettings.StatusUnchecked
+			updates["ai_analyze_status_at"] = 0
+			updates["ai_analyze_err_msg"] = ""
 		}
-		updates["upyun_password"] = encrypted
-	}
-	if req.ClearOjLuoguPassword {
-		updates["oj_luogu_password"] = ""
-	} else if isRealSecret(req.OjLuoguPassword) {
-		encrypted, encryptErr := secretutil.Encrypt(req.OjLuoguPassword)
-		if encryptErr != nil {
-			log.Errorf("encrypt oj luogu password: %v", encryptErr)
-			return &site.UpdateConfigRes{Code: 1, Message: "服务器尚未配置配置加密密钥"}, nil
-		}
-		updates["oj_luogu_password"] = encrypted
-	}
-	if req.ClearOjQojPassword {
-		updates["oj_qoj_password"] = ""
-	} else if isRealSecret(req.OjQojPassword) {
-		encrypted, encryptErr := secretutil.Encrypt(req.OjQojPassword)
-		if encryptErr != nil {
-			log.Errorf("encrypt oj qoj password: %v", encryptErr)
-			return &site.UpdateConfigRes{Code: 1, Message: "服务器尚未配置配置加密密钥"}, nil
-		}
-		updates["oj_qoj_password"] = encrypted
-	}
-	if req.ClearPayfmSecret {
-		updates["payfm_secret"] = ""
-	} else if isRealSecret(req.PayfmSecret) {
-		encrypted, encryptErr := secretutil.Encrypt(req.PayfmSecret)
-		if encryptErr != nil {
-			log.Errorf("encrypt payfm secret: %v", encryptErr)
-			return &site.UpdateConfigRes{Code: 1, Message: "服务器尚未配置配置加密密钥"}, nil
-		}
-		updates["payfm_secret"] = encrypted
 	}
 
 	if e := s.data.DB.WithContext(ctx).Model(&model.SiteConfig{}).Where("id = ?", 1).Updates(updates).Error; e != nil {
