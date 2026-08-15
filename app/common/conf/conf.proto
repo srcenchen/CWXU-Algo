@@ -65,6 +65,7 @@ message Data {
 message Agent {
   string model = 1;
   string secret = 2;
+  string endpoint = 3;
 }
 
 message SMTP {
