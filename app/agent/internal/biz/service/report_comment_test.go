@@ -1,6 +1,7 @@
 package service
 
 import (
+	"errors"
 	"strings"
 	"testing"
 )
@@ -128,5 +129,49 @@ func TestBarChartSVG_OutputsSVG(t *testing.T) {
 	svg := BarChartSVG([]string{"08-01", "08-02"}, []int64{1, 5}, "#171717")
 	if !strings.HasPrefix(svg, "<svg") || !strings.Contains(svg, "viewBox") {
 		t.Fatal("bad svg: " + svg)
+	}
+}
+
+func TestLineChartSVG_HasYAxisAndHandlesSinglePoint(t *testing.T) {
+	svg := LineChartSVG(
+		[]string{"08-15"},
+		[][]int64{{3}, {2}},
+		[]string{"提交", "AC"},
+		[]string{"#171717", "#f97316"},
+	)
+	for _, want := range []string{`data-axis="y"`, `data-series="提交"`, `data-series="AC"`, ">0</text>"} {
+		if !strings.Contains(svg, want) {
+			t.Errorf("missing %q in %s", want, svg)
+		}
+	}
+	if strings.Contains(svg, "NaN") || strings.Contains(svg, "Inf") {
+		t.Fatalf("invalid single-point coordinates: %s", svg)
+	}
+}
+
+func TestLineChartSVG_KeepsEdgeLabelsInsidePlot(t *testing.T) {
+	svg := LineChartSVG(
+		[]string{"08-09", "08-15"},
+		[][]int64{{12, 7}, {5, 4}},
+		[]string{"提交", "AC"},
+		[]string{"#171717", "#f97316"},
+	)
+	for _, want := range []string{`data-point-edge="first" cx="38.0"`, `data-point-edge="last" cx="532.0"`, `data-value-label="top"`, `y="22.0" text-anchor="middle"`} {
+		if !strings.Contains(svg, want) {
+			t.Errorf("missing safe chart geometry %q in %s", want, svg)
+		}
+	}
+}
+
+func TestDailyACTrend_FallsBackToAlignedZeros(t *testing.T) {
+	days := []DayCount{{Date: "2026-08-14", Count: 3}, {Date: "2026-08-15", Count: 5}}
+	got := dailyACTrend(days, nil, errors.New("rpc unavailable"))
+	if len(got) != len(days) {
+		t.Fatalf("got %d days, want %d", len(got), len(days))
+	}
+	for i := range got {
+		if got[i].Date != days[i].Date || got[i].Count != 0 {
+			t.Fatalf("day %d = %+v, want date %s count 0", i, got[i], days[i].Date)
+		}
 	}
 }

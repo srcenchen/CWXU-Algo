@@ -94,43 +94,80 @@ func LineChartSVG(labels []string, series [][]int64, names []string, colors []st
 			}
 		}
 	}
-	plotW := svgWidth - svgPadLft - svgPadRgt
-	plotH := svgHeight - svgPadTop - svgPadBot
-	step := plotW / float64(n-1)
+	const (
+		linePadTop   = 30.0
+		linePadLeft  = 38.0
+		linePadRight = 28.0
+	)
+	plotW := svgWidth - linePadLeft - linePadRight
+	plotH := svgHeight - linePadTop - svgPadBot
+	step := 0.0
+	if n > 1 {
+		step = plotW / float64(n-1)
+	}
+	tickStep := (maxV + 3) / 4
+	chartMax := tickStep * 4
 	point := func(i int, v int64) (float64, float64) {
-		x := svgPadLft + step*float64(i)
-		y := svgPadTop + plotH - float64(v)/float64(maxV)*plotH
+		x := linePadLeft + step*float64(i)
+		if n == 1 {
+			x = linePadLeft + plotW/2
+		}
+		y := linePadTop + plotH - float64(v)/float64(chartMax)*plotH
 		return x, y
 	}
 
 	var b strings.Builder
 	svgShell(&b)
-	// 横向网格线
-	for g := 1; g <= 4; g++ {
-		gy := svgPadTop + plotH*float64(g)/4
-		fmt.Fprintf(&b, `<line x1="%.1f" y1="%.1f" x2="%.1f" y2="%.1f" stroke="#f0f0f0" stroke-width="1"/>`, svgPadLft, gy, svgWidth-svgPadRgt, gy)
+	// Y 轴刻度与横向网格线。
+	for g := 0; g <= 4; g++ {
+		gy := linePadTop + plotH*float64(g)/4
+		value := chartMax - int64(g)*tickStep
+		fmt.Fprintf(&b, `<line x1="%.1f" y1="%.1f" x2="%.1f" y2="%.1f" stroke="#f0f0f0" stroke-width="1"/>`, linePadLeft, gy, svgWidth-linePadRight, gy)
+		fmt.Fprintf(&b, `<text x="%.1f" y="%.1f" text-anchor="end" font-size="10" fill="#737373">%d</text>`, linePadLeft-7, gy+3.5, value)
 	}
+	fmt.Fprintf(&b, `<line data-axis="y" x1="%.1f" y1="%.1f" x2="%.1f" y2="%.1f" stroke="#a3a3a3" stroke-width="1"/>`, linePadLeft, linePadTop, linePadLeft, linePadTop+plotH)
+	fmt.Fprintf(&b, `<line data-axis="x" x1="%.1f" y1="%.1f" x2="%.1f" y2="%.1f" stroke="#a3a3a3" stroke-width="1"/>`, linePadLeft, linePadTop+plotH, svgWidth-linePadRight, linePadTop+plotH)
 	for si, s := range series {
 		col := "#171717"
 		if si < len(colors) && colors[si] != "" {
 			col = colors[si]
 		}
 		// 折线
-		pts := make([]string, 0, len(s))
+		pts := make([]string, 0, n)
 		for i, v := range s {
+			if i >= n {
+				break
+			}
 			if v < 0 {
 				v = 0
 			}
 			x, y := point(i, v)
 			pts = append(pts, fmt.Sprintf("%.1f,%.1f", x, y))
 		}
-		fmt.Fprintf(&b, `<polyline points="%s" fill="none" stroke="%s" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`, strings.Join(pts, " "), col)
+		name := ""
+		if si < len(names) {
+			name = names[si]
+		}
+		fmt.Fprintf(&b, `<polyline data-series="%s" points="%s" fill="none" stroke="%s" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`, html.EscapeString(name), strings.Join(pts, " "), col)
 		// 数据点 + 值
 		for i, v := range s {
+			if i >= n {
+				break
+			}
 			x, y := point(i, v)
-			fmt.Fprintf(&b, `<circle cx="%.1f" cy="%.1f" r="3" fill="%s"/>`, x, y, col)
+			edge := ""
+			if i == 0 {
+				edge = ` data-point-edge="first"`
+			} else if i == n-1 {
+				edge = ` data-point-edge="last"`
+			}
+			fmt.Fprintf(&b, `<circle%s cx="%.1f" cy="%.1f" r="3" fill="%s"/>`, edge, x, y, col)
 			if v > 0 {
-				fmt.Fprintf(&b, `<text x="%.1f" y="%.1f" text-anchor="middle" font-size="10" fill="#0a0a0a">%d</text>`, x, y-8, v)
+				position := ""
+				if v == chartMax {
+					position = ` data-value-label="top"`
+				}
+				fmt.Fprintf(&b, `<text%s x="%.1f" y="%.1f" text-anchor="middle" font-size="10" fill="#0a0a0a">%d</text>`, position, x, y-8, v)
 			}
 		}
 	}

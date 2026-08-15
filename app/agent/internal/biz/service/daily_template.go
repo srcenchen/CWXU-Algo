@@ -70,25 +70,18 @@ func renderDailyHTML(data *DailyReportData, brand string, comment AIReportCommen
 			return
 		}
 		labels := make([]string, 0, len(data.Last7Days))
-		values := make([]int64, 0, len(data.Last7Days))
-		for _, d := range data.Last7Days {
+		subSeries := make([]int64, 0, len(data.Last7Days))
+		acSeries := make([]int64, 0, len(data.Last7Days))
+		for i, d := range data.Last7Days {
 			labels = append(labels, shortDate(d.Date))
-			values = append(values, d.Count)
+			subSeries = append(subSeries, d.Count)
+			ac := int64(0)
+			if i < len(data.Last7DaysAC) {
+				ac = data.Last7DaysAC[i].Count
+			}
+			acSeries = append(acSeries, ac)
 		}
-		b.WriteString(BarChartSVG(labels, values, "#171717"))
-		b.WriteString(`<div style="height:8px;"></div>`)
-		b.WriteString(mail.DataTableOpen())
-		b.WriteString(`<tr>`)
-		b.WriteString(mail.TH("日期", "left"))
-		b.WriteString(mail.TH("提交", "right"))
-		b.WriteString(`</tr>`)
-		for _, d := range data.Last7Days {
-			b.WriteString(`<tr>`)
-			b.WriteString(mail.TD(html.EscapeString(d.Date), "left"))
-			b.WriteString(mail.TD(fmt.Sprintf("%d", d.Count), "right"))
-			b.WriteString(`</tr>`)
-		}
-		b.WriteString(`</table>`)
+		b.WriteString(LineChartSVG(labels, [][]int64{subSeries, acSeries}, []string{"提交", "AC"}, []string{"#171717", "#f97316"}))
 	})
 
 	// 昨日明细
@@ -105,16 +98,20 @@ func renderDailyHTML(data *DailyReportData, brand string, comment AIReportCommen
 			b.WriteString(`</p>`)
 			return
 		}
-		b.WriteString(mail.DataTableOpen())
+		b.WriteString(`<div style="width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch;">`)
+		b.WriteString(`<table cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;font-size:13px;width:100%;min-width:760px;">`)
 		b.WriteString(`<tr>`)
 		b.WriteString(mail.TH("题目", "left"))
 		b.WriteString(mail.TH("平台", "left"))
 		b.WriteString(mail.TH("结果", "left"))
+		b.WriteString(mail.TH("提交时间", "left"))
+		b.WriteString(mail.TH("题目标签", "left"))
+		b.WriteString(mail.TH("难度", "left"))
 		b.WriteString(`</tr>`)
 		capN := 20
 		for i, log := range data.YesterdayLogs {
 			if i >= capN {
-				b.WriteString(`<tr><td colspan="3" style="padding:8px;color:`)
+				b.WriteString(`<tr><td colspan="6" style="padding:8px;color:`)
 				b.WriteString(mail.ColorMutedFg)
 				b.WriteString(`;font-size:12px;">…共 `)
 				b.WriteString(fmt.Sprintf("%d", len(data.YesterdayLogs)))
@@ -130,13 +127,28 @@ func renderDailyHTML(data *DailyReportData, brand string, comment AIReportCommen
 			if title == "" {
 				title = "—"
 			}
+			timeText := strings.TrimSpace(log.Time)
+			if timeText == "" {
+				timeText = "—"
+			}
+			tags := "—"
+			if len(log.Tags) > 0 {
+				tags = strings.Join(log.Tags, "、")
+			}
+			difficulty := strings.TrimSpace(log.Difficulty)
+			if difficulty == "" {
+				difficulty = "—"
+			}
 			b.WriteString(`<tr>`)
 			b.WriteString(mail.TD(html.EscapeString(title), "left"))
 			b.WriteString(mail.TD(html.EscapeString(log.Platform), "left"))
 			b.WriteString(mail.TD(html.EscapeString(log.Status), "left"))
+			b.WriteString(mail.TD(html.EscapeString(timeText), "left"))
+			b.WriteString(mail.TD(html.EscapeString(tags), "left"))
+			b.WriteString(mail.TD(html.EscapeString(difficulty), "left"))
 			b.WriteString(`</tr>`)
 		}
-		b.WriteString(`</table>`)
+		b.WriteString(`</table></div>`)
 	})
 
 	// 标签

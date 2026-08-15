@@ -957,6 +957,18 @@ func TestRenderRuleTemplate_CompactAndFull(t *testing.T) {
 	}
 }
 
+func TestRenderRuleTemplate_TrendUsesChartOnly(t *testing.T) {
+	html := RenderRuleTemplateHTML(fixtureTrainingData(), "GoAlgo", DetailModeCompact)
+	for _, want := range []string{`data-axis="y"`, `data-series="提交"`, `data-series="AC"`} {
+		if !strings.Contains(html, want) {
+			t.Errorf("missing trend chart marker %q", want)
+		}
+	}
+	if strings.Contains(html, `>日期</th>`) {
+		t.Error("weekly trend should not include the old date table")
+	}
+}
+
 func TestDomainAgentTools_HasNewTools(t *testing.T) {
 	var dummyReg registry.Registrar
 	regPtr := &dummyReg

@@ -61,6 +61,7 @@ type DailyReportData struct {
 	YesterdayCount   int64        `json:"yesterdayCount"`
 	ConsecutiveZeros int          `json:"consecutiveZeroDays"`
 	Last7Days        []DayCount   `json:"last7Days"`
+	Last7DaysAC      []DayCount   `json:"last7DaysAc,omitempty"`
 	YesterdayLogs    []SubmitItem `json:"yesterdayLogs"`
 	// 用户标签画像（预取；亦可 function call problem_tags）
 	TagRadar []TagACBrief `json:"tagRadar,omitempty"`
@@ -266,6 +267,17 @@ func consecutiveZeroFromEnd(days []DayCount) int {
 		}
 	}
 	return n
+}
+
+func dailyACTrend(days, acDays []DayCount, err error) []DayCount {
+	if err == nil {
+		return acDays
+	}
+	fallback := make([]DayCount, len(days))
+	for i, day := range days {
+		fallback[i] = DayCount{Date: day.Date}
+	}
+	return fallback
 }
 
 func (uc *SummaryUseCase) fetchHeatmap(ctx context.Context, userId int64, start, end time.Time) ([]DayCount, error) {
@@ -490,6 +502,11 @@ func (uc *SummaryUseCase) loadDailyReportData(ctx context.Context, userId int64)
 	if err != nil {
 		return nil, fmt.Errorf("拉取热力图失败: %w", err)
 	}
+	acDays, acErr := uc.fetchHeatmapUser(ctx, userId, start7, yesterday, true)
+	if acErr != nil {
+		log.Warnf("拉取近 7 日 AC 热力图失败 user=%d: %v", userId, acErr)
+	}
+	acDays = dailyACTrend(days, acDays, acErr)
 	yCount := int64(0)
 	if len(days) > 0 {
 		yCount = days[len(days)-1].Count
@@ -511,6 +528,7 @@ func (uc *SummaryUseCase) loadDailyReportData(ctx context.Context, userId int64)
 		YesterdayCount:   yCount,
 		ConsecutiveZeros: consecutiveZeroFromEnd(days),
 		Last7Days:        days,
+		Last7DaysAC:      acDays,
 		YesterdayLogs:    logs,
 		TagRadar:         radar,
 		YesterdayTagHits: aggregateTagHits(logs),

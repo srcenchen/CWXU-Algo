@@ -122,18 +122,6 @@ func renderTemplateHTML(data *TrainingReportData, brand string, mode []string, c
 			acSeries = append(acSeries, ac)
 		}
 		b.WriteString(LineChartSVG(labels, [][]int64{subSeries, acSeries}, []string{"提交", "AC"}, []string{"#171717", "#f97316"}))
-		b.WriteString(`<div style="height:8px;"></div>`)
-		b.WriteString(`<table width="100%" cellpadding="6" cellspacing="0" border="0" style="border-collapse:collapse;font-size:13px;">`)
-		b.WriteString(`<tr style="background:#f5f5f5;"><th align="left" style="border-bottom:1px solid #e5e5e5;">日期</th><th align="right" style="border-bottom:1px solid #e5e5e5;">提交</th><th align="right" style="border-bottom:1px solid #e5e5e5;">AC</th></tr>`)
-		for i, d := range data.DailyTrend {
-			ac := int64(0)
-			if i < len(data.DailyACTrend) {
-				ac = data.DailyACTrend[i].Count
-			}
-			fmt.Fprintf(&b, `<tr><td style="border-bottom:1px solid #e5e5e5;">%s</td><td align="right" style="border-bottom:1px solid #e5e5e5;">%d</td><td align="right" style="border-bottom:1px solid #e5e5e5;">%d</td></tr>`,
-				html.EscapeString(d.Date), d.Count, ac)
-		}
-		b.WriteString(`</table>`)
 	}
 	sectionEnd(&b)
 

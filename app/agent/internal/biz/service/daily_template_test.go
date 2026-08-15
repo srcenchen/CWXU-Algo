@@ -12,8 +12,9 @@ func TestRenderDailyRuleHTML_HasLayout(t *testing.T) {
 		YesterdayCount:   3,
 		ConsecutiveZeros: 0,
 		Last7Days:        []DayCount{{Date: "2026-07-22", Count: 3}},
+		Last7DaysAC:      []DayCount{{Date: "2026-07-22", Count: 2}},
 		YesterdayLogs: []SubmitItem{
-			{Platform: "CF", Title: "A+B", Status: "AC"},
+			{Platform: "CF", Title: "A+B", Status: "AC", Time: "21:36", Tags: []string{"DP", "贪心"}, Difficulty: "1200"},
 		},
 		YesterdayTagHits: map[string]int{"DP": 2},
 	}
@@ -22,6 +23,14 @@ func TestRenderDailyRuleHTML_HasLayout(t *testing.T) {
 		if !strings.Contains(html, want) {
 			t.Fatalf("missing %q", want)
 		}
+	}
+	for _, want := range []string{`data-series="提交"`, `data-series="AC"`, `data-axis="y"`, `overflow-x:auto`, `min-width:760px`, "提交时间", "题目标签", "难度", "21:36", "DP、贪心", "1200"} {
+		if !strings.Contains(html, want) {
+			t.Errorf("missing daily chart/detail %q", want)
+		}
+	}
+	if strings.Contains(html, ">日期</th>") {
+		t.Error("daily trend should not include the old date table")
 	}
 }
 
