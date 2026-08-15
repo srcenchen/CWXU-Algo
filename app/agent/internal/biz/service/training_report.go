@@ -9,14 +9,10 @@ import (
 	"strings"
 	"time"
 
-	agenttool "cwxu-algo/app/agent/internal/agent/tool"
-	"cwxu-algo/app/agent/internal/agent/tool/core_data"
+	agent "cwxu-algo/app/agent/internal/agent"
 	"cwxu-algo/app/common/mail"
 
 	"github.com/go-kratos/kratos/v2/log"
-	"github.com/go-kratos/kratos/v2/registry"
-	"github.com/volcengine/volcengine-go-sdk/service/arkruntime/model"
-	"github.com/volcengine/volcengine-go-sdk/volcengine"
 )
 
 // 训练报告并发控制：AI + 数据聚合都很重（2c4g），全进程最多同时跑 2 个任务；
@@ -262,19 +258,9 @@ func (uc *SummaryUseCase) generateTrainingReportAI(ctx context.Context, data *Tr
 		return "", fmt.Errorf("chat 未初始化")
 	}
 	// 预置 JSON 已含全量统计：LLM 只输出评价文案参数，数字由模板渲染（防幻觉/格式乱）
-	msgs := []*model.ChatCompletionMessage{
-		{
-			Role: model.ChatMessageRoleSystem,
-			Content: &model.ChatCompletionMessageContent{
-				StringValue: volcengine.String(trainingReportSystemPrompt(mode)),
-			},
-		},
-		{
-			Role: model.ChatMessageRoleUser,
-			Content: &model.ChatCompletionMessageContent{
-				StringValue: volcengine.String(trainingReportUserPrompt(data, mode)),
-			},
-		},
+	msgs := []agent.Message{
+		{Role: "system", Content: trainingReportSystemPrompt(mode)},
+		{Role: "user", Content: trainingReportUserPrompt(data, mode)},
 	}
 
 	raw, err := uc.chat.Complete(ctx, msgs)
@@ -288,11 +274,9 @@ func (uc *SummaryUseCase) generateTrainingReportAI(ctx context.Context, data *Tr
 	log.Warnf("training report AI output invalid: %v; retry strict", cerr)
 
 	// 严格重试：强调只输出 JSON
-	retryMsgs := append(msgs, &model.ChatCompletionMessage{
-		Role: model.ChatMessageRoleUser,
-		Content: &model.ChatCompletionMessageContent{
-			StringValue: volcengine.String("【重试】上次输出无法解析（" + cerr.Error() + "）。只输出 JSON 对象 {\"headline\":\"...\",\"highlights\":[],\"issues\":[],\"suggestions\":[]}，不要任何其它文字。"),
-		},
+	retryMsgs := append(msgs, agent.Message{
+		Role:    "user",
+		Content: "【重试】上次输出无法解析（" + cerr.Error() + "）。只输出 JSON 对象 {\"headline\":\"...\",\"highlights\":[],\"issues\":[],\"suggestions\":[]}，不要任何其它文字。",
 	})
 	raw2, err2 := uc.chat.Complete(ctx, retryMsgs)
 	if err2 != nil {
@@ -412,65 +396,6 @@ func (uc *SummaryUseCase) GenerateTrainingReportSync(ctx context.Context, p Star
 	}
 	html = stripCodeFence(html)
 	return html, data, nil
-}
-
-// DomainAgentTools 训练/周报 AI 可用的域数据工具集。
-// toolCtx 必须是 ContextWithElevatedAgent 结果，Bearer 会注入每个工具的 gRPC 调用。
-func DomainAgentTools(reg *registry.Registrar, orgID uint, toolCtx context.Context) []agenttool.AgentToolFactory {
-	if reg == nil {
-		return nil
-	}
-	_ = orgID // org 已写入 elevated JWT claims
-	ctx := toolCtx
-	return []agenttool.AgentToolFactory{
-		core_data.NewStatisticPeriod(reg, ctx),
-		core_data.NewSubmitCnt(reg, ctx),
-		core_data.NewSubmitLog(reg, ctx),
-		core_data.NewGetProfileById(reg, ctx),
-		core_data.NewRankTool(reg, ctx),
-		core_data.NewHeatmapTool(reg, ctx),
-		core_data.NewOrgMembersTool(reg, ctx),
-		core_data.NewGroupMembersTool(reg, ctx),
-		core_data.NewLastSubmitTool(reg, ctx),
-		core_data.NewPeriodACTool(reg, ctx),
-		core_data.NewProblemTagsTool(reg, ctx),
-		// 组织博客 / 提交动态 / 比赛（列表·排行·详细榜）
-		core_data.NewOrgBlogsTool(reg, ctx),
-		core_data.NewOrgSubmitFeedTool(reg, ctx),
-		core_data.NewContestListTool(reg, ctx),
-		core_data.NewContestRankingTool(reg, ctx),
-		core_data.NewContestBoardTool(reg, ctx),
-		core_data.NewContestHistoryTool(reg, ctx),
-	}
-}
-
-// DailyAgentTools 个人日报 AI 工具：标签 + 提交 + 热力 + 个人比赛。
-func DailyAgentTools(reg *registry.Registrar, toolCtx context.Context) []agenttool.AgentToolFactory {
-	if reg == nil {
-		return nil
-	}
-	ctx := toolCtx
-	return []agenttool.AgentToolFactory{
-		core_data.NewProblemTagsTool(reg, ctx),
-		core_data.NewSubmitLog(reg, ctx),
-		core_data.NewHeatmapTool(reg, ctx),
-		core_data.NewPeriodACTool(reg, ctx),
-		core_data.NewContestHistoryTool(reg, ctx),
-		core_data.NewContestListTool(reg, ctx),
-		core_data.NewContestRankingTool(reg, ctx),
-	}
-}
-
-// ToolAuthContexts 取出工具携带的 elevated context（测试用）
-func ToolAuthContexts(tools []agenttool.AgentToolFactory) []context.Context {
-	out := make([]context.Context, 0, len(tools))
-	for _, t := range tools {
-		type authC interface{ AuthContext() context.Context }
-		if a, ok := t.(authC); ok {
-			out = append(out, a.AuthContext())
-		}
-	}
-	return out
 }
 
 // ResolveArtifactAbs 校验并返回可读 HTML 文件

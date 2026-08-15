@@ -1,4 +1,4 @@
-package core_data
+package svcdata
 
 import (
 	"context"

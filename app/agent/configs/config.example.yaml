@@ -30,9 +30,7 @@ data:
     write_timeout: 0.2s
 
 # 业务配置请在站点设置 /admin/site 配置；以下仅作兜底（Redis 无数据时）
-agent:
-  model: glm-4-7-251222
-  secret: your-ark-api-key
+# Agent（日报/周报 OpenAI 兼容）配置只认站点设置，不在此兜底。
 
 smtp:
   host: smtp.163.com

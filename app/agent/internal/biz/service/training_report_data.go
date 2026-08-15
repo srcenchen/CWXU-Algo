@@ -12,7 +12,7 @@ import (
 	"cwxu-algo/api/core/v1/statistic"
 	"cwxu-algo/api/core/v1/submit_log"
 	profile2 "cwxu-algo/api/user/v1/profile"
-	"cwxu-algo/app/agent/internal/agent/tool/core_data"
+	"cwxu-algo/app/agent/internal/agent/svcdata"
 
 	"github.com/go-kratos/kratos/v2/log"
 	"golang.org/x/sync/errgroup"
@@ -209,14 +209,14 @@ func (uc *SummaryUseCase) dialUserCtx(_ context.Context) (*grpc2.ClientConn, err
 	if uc == nil || uc.reg == nil {
 		return nil, fmt.Errorf("service discovery 未配置")
 	}
-	return core_data.SharedGRPCConn(uc.reg, "user")
+	return svcdata.SharedGRPCConn(uc.reg, "user")
 }
 
 func (uc *SummaryUseCase) dialCoreCtx(_ context.Context) (*grpc2.ClientConn, error) {
 	if uc == nil || uc.reg == nil {
 		return nil, fmt.Errorf("service discovery 未配置")
 	}
-	return core_data.SharedGRPCConn(uc.reg, "core-data")
+	return svcdata.SharedGRPCConn(uc.reg, "core-data")
 }
 
 // resolveMemberIDs 组织成员（排除教练），可选按组过滤。

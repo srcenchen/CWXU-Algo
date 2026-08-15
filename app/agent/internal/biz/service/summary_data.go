@@ -12,7 +12,7 @@ import (
 	"cwxu-algo/api/core/v1/statistic"
 	"cwxu-algo/api/core/v1/submit_log"
 	profile2 "cwxu-algo/api/user/v1/profile"
-	"cwxu-algo/app/agent/internal/agent/tool/core_data"
+	"cwxu-algo/app/agent/internal/agent/svcdata"
 	"cwxu-algo/app/common/utils"
 	"cwxu-algo/app/common/utils/auth"
 
@@ -99,11 +99,11 @@ type WeeklyReportData struct {
 // dialUser / dialCoreData 返回按服务名缓存的共享长连接（调用方不得 Close）。
 // 鉴权 metadata 由每次 RPC 的 ctx 携带，与连接无关。
 func (uc *SummaryUseCase) dialUser(_ context.Context) (*grpc2.ClientConn, error) {
-	return core_data.SharedGRPCConn(uc.reg, "user")
+	return svcdata.SharedGRPCConn(uc.reg, "user")
 }
 
 func (uc *SummaryUseCase) dialCoreData(_ context.Context) (*grpc2.ClientConn, error) {
-	return core_data.SharedGRPCConn(uc.reg, "core-data")
+	return svcdata.SharedGRPCConn(uc.reg, "core-data")
 }
 
 func (uc *SummaryUseCase) userRPC() (*grpc2.ClientConn, error) {

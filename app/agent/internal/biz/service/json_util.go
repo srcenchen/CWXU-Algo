@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"strings"
 
-	"cwxu-algo/app/agent/internal/agent/tool/core_data"
+	"cwxu-algo/app/agent/internal/agent/svcdata"
 
 	"github.com/go-kratos/kratos/v2/registry"
 )
@@ -34,7 +34,7 @@ func httpDiscoveryGet(ctx context.Context, reg *registry.Registrar, service, pat
 		ctx = context.Background()
 	}
 	// 复用共享长连接客户端，避免每次调用 NewClient+Close
-	client, err := core_data.SharedHTTPClient(reg, service)
+	client, err := svcdata.SharedHTTPClient(reg, service)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -45,7 +45,7 @@ func httpDiscoveryGet(ctx context.Context, reg *registry.Registrar, service, pat
 	if err != nil {
 		return nil, 0, err
 	}
-	if tok := core_data.BearerFromContext(ctx); tok != "" {
+	if tok := svcdata.BearerFromContext(ctx); tok != "" {
 		req.Header.Set("Authorization", "Bearer "+tok)
 	}
 	res, err := client.Do(req)

@@ -9,19 +9,16 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
 
-	"cwxu-algo/app/agent/internal/agent/tool/core_data"
+	"cwxu-algo/app/agent/internal/agent/svcdata"
 	_const "cwxu-algo/app/common/const"
 
 	"github.com/alicebob/miniredis/v2"
-	"github.com/go-kratos/kratos/v2/registry"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/redis/go-redis/v9"
-	"github.com/volcengine/volcengine-go-sdk/service/arkruntime/model"
 )
 
 // genTestRSAKeys 生成测试用 RSA 密钥对（PEM）。
@@ -462,167 +459,14 @@ func TestElevatedAgentIdentity(t *testing.T) {
 		t.Fatal("nil ctx")
 	}
 	// 必须可从 outgoing metadata 取出 Bearer
-	if !core_data.HasElevatedAuth(ctx) {
+	if !svcdata.HasElevatedAuth(ctx) {
 		t.Fatal("elevated ctx missing Bearer metadata")
 	}
-	if core_data.BearerFromContext(ctx) != tok {
+	if svcdata.BearerFromContext(ctx) != tok {
 		// ContextWithElevatedAgent issues a new token; just require non-empty matching claims
-		if core_data.BearerFromContext(ctx) == "" {
+		if svcdata.BearerFromContext(ctx) == "" {
 			t.Fatal("empty bearer in elevated ctx")
 		}
-	}
-}
-
-func TestDomainAgentTools_CarryElevatedAuth(t *testing.T) {
-	configureAgentTestJWTKeys(t)
-	toolCtx, err := ContextWithElevatedAgent(context.Background(), 42)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// non-nil registrar pointer (tools only dial when AiInterface runs)
-	var dummyReg registry.Registrar
-	regPtr := &dummyReg
-	tools := DomainAgentTools(regPtr, 42, toolCtx)
-	if len(tools) < 6 {
-		t.Fatalf("expected multiple tools, got %d", len(tools))
-	}
-	authCtxs := ToolAuthContexts(tools)
-	if len(authCtxs) < 6 {
-		t.Fatalf("tools missing AuthContext: %d", len(authCtxs))
-	}
-	for i, c := range authCtxs {
-		if !core_data.HasElevatedAuth(c) {
-			t.Fatalf("tool[%d] missing elevated Bearer on RPC context", i)
-		}
-		bearer := core_data.BearerFromContext(c)
-		// 解析 JWT：orgId=42, isSiteAdmin, agent user
-		claims, err := parseTestJWT(bearer)
-		if err != nil {
-			t.Fatalf("tool[%d] jwt: %v", i, err)
-		}
-		if claims["orgId"] != float64(42) && claims["orgId"] != int64(42) && claims["orgId"] != 42 {
-			// MapClaims numbers are float64
-			if v, ok := claims["orgId"].(float64); !ok || int(v) != 42 {
-				t.Fatalf("tool[%d] orgId want 42 got %v", i, claims["orgId"])
-			}
-		}
-		if claims["isSiteAdmin"] != true {
-			t.Fatalf("tool[%d] not site admin: %v", i, claims["isSiteAdmin"])
-		}
-		uid, ok := claims["userId"].(string)
-		if !ok || uid != strconv.FormatUint(uint64(AgentHiddenUserID), 10) {
-			t.Fatalf("tool[%d] userId want agent got %v", i, claims["userId"])
-		}
-	}
-	// AiInterface 在无 discovery 时诚实失败（不 panic），且走了带 auth 的 dial 路径
-	msg := core_data.NewRankTool(nil, toolCtx).AiInterface(`{"startDate":"2026-07-01","endDate":"2026-07-07"}`)
-	if msg == "" || (!strings.Contains(msg, "连接") && !strings.Contains(msg, "失败") && !strings.Contains(msg, "registry")) {
-		// nil reg → registry 未配置
-		if !strings.Contains(msg, "registry") && !strings.Contains(msg, "连接") && !strings.Contains(msg, "失败") {
-			t.Fatalf("unexpected: %s", msg)
-		}
-	}
-	// Description 覆盖面
-	names := map[string]bool{}
-	for _, tfac := range tools {
-		d := tfac.Description()
-		if d != nil && d.Function != nil {
-			names[d.Function.Name] = true
-		}
-	}
-	for _, n := range []string{"statistic_period", "submit_cnt", "submit_log", "rank", "heatmap", "org_members", "last_submit_times", "problem_tags", "org_blogs", "org_submit_feed", "contest_list", "contest_ranking", "contest_board", "contest_history"} {
-		if !names[n] {
-			t.Errorf("missing tool %s", n)
-		}
-	}
-}
-
-func TestDailyAgentTools_HasProblemTags(t *testing.T) {
-	var dummyReg registry.Registrar
-	regPtr := &dummyReg
-	tools := DailyAgentTools(regPtr, context.Background())
-	if len(tools) < 1 {
-		t.Fatal("expected daily tools")
-	}
-	found := false
-	for _, tfac := range tools {
-		d := tfac.Description()
-		if d != nil && d.Function != nil && d.Function.Name == "problem_tags" {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Fatal("daily tools missing problem_tags")
-	}
-}
-
-func TestProblemTagsTool_Description(t *testing.T) {
-	d := core_data.NewProblemTagsTool(nil).Description()
-	if d == nil || d.Function == nil || d.Function.Name != "problem_tags" {
-		t.Fatalf("bad desc: %+v", d)
-	}
-	// 无 registry 时 AiInterface 诚实失败
-	msg := core_data.NewProblemTagsTool(nil).AiInterface(`{"action":"list"}`)
-	if msg == "" || (!strings.Contains(msg, "registry") && !strings.Contains(msg, "连接") && !strings.Contains(msg, "失败")) {
-		t.Fatalf("unexpected: %s", msg)
-	}
-	bad := core_data.NewProblemTagsTool(nil).AiInterface(`{"action":"nope"}`)
-	if !strings.Contains(bad, "action") {
-		// 参数会先连 registry；action 校验在连接后
-		_ = bad
-	}
-}
-
-func parseTestJWT(token string) (map[string]interface{}, error) {
-	parts := strings.Split(token, ".")
-	if len(parts) < 2 {
-		return nil, fmt.Errorf("bad jwt")
-	}
-	// use jwt library via Issue path verification: re-parse with secret
-	// simple: decode claims with golang-jwt
-	return parseMapClaimsTest(token)
-}
-
-func TestDomainAgentTools_Registry(t *testing.T) {
-	// reg nil → empty
-	if tools := DomainAgentTools(nil, 1, context.Background()); tools != nil && len(tools) > 0 {
-		t.Fatal("expected no tools without reg")
-	}
-	names := map[string]bool{}
-	descs := []*model.Tool{
-		core_data.NewStatisticPeriod(nil).Description(),
-		core_data.NewSubmitCnt(nil).Description(),
-		core_data.NewSubmitLog(nil).Description(),
-		core_data.NewGetProfileById(nil).Description(),
-		core_data.NewRankTool(nil).Description(),
-		core_data.NewHeatmapTool(nil).Description(),
-		core_data.NewOrgMembersTool(nil).Description(),
-		core_data.NewGroupMembersTool(nil).Description(),
-		core_data.NewLastSubmitTool(nil).Description(),
-		core_data.NewPeriodACTool(nil).Description(),
-	}
-	for _, d := range descs {
-		if d == nil || d.Function == nil || d.Function.Name == "" {
-			t.Fatal("tool missing description")
-		}
-		names[d.Function.Name] = true
-	}
-	required := []string{"statistic_period", "submit_cnt", "submit_log", "rank", "heatmap", "org_members", "last_submit_times"}
-	for _, n := range required {
-		if !names[n] {
-			t.Errorf("missing tool %s", n)
-		}
-	}
-	msg := core_data.NewRankTool(nil).AiInterface(`{bad`)
-	if msg != "参数错误" {
-		if !strings.Contains(msg, "参数") && !strings.Contains(msg, "连接") && !strings.Contains(msg, "失败") && !strings.Contains(msg, "registry") {
-			t.Fatalf("unexpected tool msg: %s", msg)
-		}
-	}
-	msg2 := core_data.NewHeatmapTool(nil).AiInterface(`{"userId":1,"startDate":"2026-07-01","endDate":"2026-07-07"}`)
-	if msg2 == "" {
-		t.Fatal("empty tool result")
 	}
 }
 
@@ -966,42 +810,6 @@ func TestRenderRuleTemplate_TrendUsesChartOnly(t *testing.T) {
 	}
 	if strings.Contains(html, `>日期</th>`) {
 		t.Error("weekly trend should not include the old date table")
-	}
-}
-
-func TestDomainAgentTools_HasNewTools(t *testing.T) {
-	var dummyReg registry.Registrar
-	regPtr := &dummyReg
-	tools := DomainAgentTools(regPtr, 1, context.Background())
-	names := map[string]bool{}
-	for _, tfac := range tools {
-		d := tfac.Description()
-		if d != nil && d.Function != nil {
-			names[d.Function.Name] = true
-		}
-	}
-	for _, n := range []string{"org_blogs", "org_submit_feed", "contest_list", "contest_ranking", "contest_board", "contest_history", "problem_tags", "rank"} {
-		if !names[n] {
-			t.Errorf("missing tool %s", n)
-		}
-	}
-}
-
-func TestDailyAgentTools_HasContest(t *testing.T) {
-	var dummyReg registry.Registrar
-	regPtr := &dummyReg
-	tools := DailyAgentTools(regPtr, context.Background())
-	names := map[string]bool{}
-	for _, tfac := range tools {
-		d := tfac.Description()
-		if d != nil && d.Function != nil {
-			names[d.Function.Name] = true
-		}
-	}
-	for _, n := range []string{"contest_history", "contest_list", "contest_ranking", "problem_tags"} {
-		if !names[n] {
-			t.Errorf("daily missing %s", n)
-		}
 	}
 }
 

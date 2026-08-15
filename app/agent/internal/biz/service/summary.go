@@ -18,8 +18,6 @@ import (
 	"github.com/go-kratos/kratos/v2/log"
 	"github.com/go-kratos/kratos/v2/registry"
 	"github.com/redis/go-redis/v9"
-	"github.com/volcengine/volcengine-go-sdk/service/arkruntime/model"
-	"github.com/volcengine/volcengine-go-sdk/volcengine"
 )
 
 type SummaryUseCase struct {
@@ -74,19 +72,9 @@ func (uc *SummaryUseCase) PersonalLastDay(userId int64) error {
 		return err
 	}
 
-	msgs := []*model.ChatCompletionMessage{
-		{
-			Role: model.ChatMessageRoleSystem,
-			Content: &model.ChatCompletionMessageContent{
-				StringValue: volcengine.String(dailySystemPrompt(data.Name)),
-			},
-		},
-		{
-			Role: model.ChatMessageRoleUser,
-			Content: &model.ChatCompletionMessageContent{
-				StringValue: volcengine.String(dailyUserPrompt(data)),
-			},
-		},
+	msgs := []agent.Message{
+		{Role: "system", Content: dailySystemPrompt(data.Name)},
+		{Role: "user", Content: dailyUserPrompt(data)},
 	}
 	brand := uc.brandTitle(ctx)
 	// LLM 只输出评价文案参数，HTML 由统一模板渲染（数字全来自数据层，防幻觉/格式乱）
@@ -174,19 +162,9 @@ func (uc *SummaryUseCase) PersonalRecent(userId int64) error {
 		return err
 	}
 
-	msgs := []*model.ChatCompletionMessage{
-		{
-			Role: model.ChatMessageRoleSystem,
-			Content: &model.ChatCompletionMessageContent{
-				StringValue: volcengine.String(recentSystemPrompt()),
-			},
-		},
-		{
-			Role: model.ChatMessageRoleUser,
-			Content: &model.ChatCompletionMessageContent{
-				StringValue: volcengine.String(recentUserPrompt(data)),
-			},
-		},
+	msgs := []agent.Message{
+		{Role: "system", Content: recentSystemPrompt()},
+		{Role: "user", Content: recentUserPrompt(data)},
 	}
 	raw, err := uc.chat.Complete(ctx, msgs)
 	if err != nil {
@@ -194,11 +172,9 @@ func (uc *SummaryUseCase) PersonalRecent(userId int64) error {
 	}
 	if err := uc.saveRecentSummary(ctx, userId, raw); err != nil {
 		// 重试一次：强调只输出 JSON
-		retryMsgs := append(msgs, &model.ChatCompletionMessage{
-			Role: model.ChatMessageRoleUser,
-			Content: &model.ChatCompletionMessageContent{
-				StringValue: volcengine.String("上一次输出无法解析。请只输出合法 JSON：{\"msg\":[...],\"updateTime\":" + fmt.Sprintf("%d", data.NowUnix) + "}，不要其它文字。"),
-			},
+		retryMsgs := append(msgs, agent.Message{
+			Role:    "user",
+			Content: "上一次输出无法解析。请只输出合法 JSON：{\"msg\":[...],\"updateTime\":" + fmt.Sprintf("%d", data.NowUnix) + "}，不要其它文字。",
 		})
 		raw2, err2 := uc.chat.Complete(ctx, retryMsgs)
 		if err2 != nil {
