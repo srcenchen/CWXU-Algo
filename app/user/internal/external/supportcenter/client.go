@@ -160,6 +160,17 @@ func (c *Client) do(ctx context.Context, userToken, method, path string, body an
 	return &out, nil
 }
 
+// GetCurrent 当前活跃工单（无活跃工单时客户中心返回 404/40400 → *APIError）。
+func (c *Client) GetCurrent(ctx context.Context, userToken string) (*rawResp, error) {
+	return c.do(ctx, userToken, http.MethodGet, "/api/v1/tickets/current", nil, "")
+}
+
+// AiAnswer 智能问答（不创建工单、不持久化对话；不要求 Idempotency-Key）。
+func (c *Client) AiAnswer(ctx context.Context, userToken, question string) (*rawResp, error) {
+	return c.do(ctx, userToken, http.MethodPost, "/api/v1/tickets/ai/answer",
+		map[string]string{"question": question}, "")
+}
+
 // List 工单列表。
 func (c *Client) List(ctx context.Context, userToken, status string, limit int64, cursor string) (*rawResp, error) {
 	q := []string{}

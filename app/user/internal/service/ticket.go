@@ -143,6 +143,73 @@ func parseMessage(raw json.RawMessage) *ticketpb.TicketMessage {
 	}
 }
 
+// GetCurrent 当前活跃工单（无活跃工单 → success:true, ticket=nil，前端进入 QA 问答）
+func (s *TicketService) GetCurrent(ctx context.Context, req *ticketpb.GetCurrentReq) (*ticketpb.GetCurrentRes, error) {
+	if ok, token := s.authAndClient(ctx); !ok {
+		return &ticketpb.GetCurrentRes{Success: false, Message: "请先登录"}, nil
+	} else if s.sc == nil {
+		return &ticketpb.GetCurrentRes{Success: false, Message: "支持中心未配置，请稍后再试"}, nil
+	} else if token == "" {
+		return &ticketpb.GetCurrentRes{Success: false, Message: "请先登录"}, nil
+	} else {
+		resp, err := s.sc.GetCurrent(ctx, token)
+		if err != nil {
+			if ae, ok := err.(*supportcenter.APIError); ok && ae.StatusCode == 404 {
+				// 无活跃工单（40400）→ success:true, ticket=nil
+				return &ticketpb.GetCurrentRes{Success: true, Message: "ok"}, nil
+			}
+			return &ticketpb.GetCurrentRes{Success: false, Message: errMessage(err)}, nil
+		}
+		return &ticketpb.GetCurrentRes{Success: true, Message: "ok", Ticket: parseTicket(resp.Data)}, nil
+	}
+}
+
+// AiAnswer 智能问答（透传；不创建工单、不持久化 QA 对话）。
+func (s *TicketService) AiAnswer(ctx context.Context, req *ticketpb.AiAnswerReq) (*ticketpb.AiAnswerRes, error) {
+	if ok, token := s.authAndClient(ctx); !ok {
+		return &ticketpb.AiAnswerRes{Success: false, Message: "请先登录"}, nil
+	} else if s.sc == nil {
+		return &ticketpb.AiAnswerRes{Success: false, Message: "支持中心未配置，请稍后再试"}, nil
+	} else if token == "" {
+		return &ticketpb.AiAnswerRes{Success: false, Message: "请先登录"}, nil
+	} else {
+		question := strings.TrimSpace(req.GetQuestion())
+		if question == "" || len([]rune(question)) > 2000 {
+			return &ticketpb.AiAnswerRes{Success: false, Message: "问题不能为空且不能超过 2000 个字符"}, nil
+		}
+		resp, err := s.sc.AiAnswer(ctx, token, question)
+		if err != nil {
+			return &ticketpb.AiAnswerRes{Success: false, Message: errMessage(err)}, nil
+		}
+		var d struct {
+			Answered   bool   `json:"answered"`
+			Answer     string `json:"answer"`
+			Mode       string `json:"mode"`
+			References []struct {
+				ArticleID string  `json:"article_id"`
+				Title     string  `json:"title"`
+				Question  string  `json:"question"`
+				Content   string  `json:"content"`
+				Score     float64 `json:"score"`
+			} `json:"references"`
+		}
+		if err := json.Unmarshal(resp.Data, &d); err != nil {
+			return &ticketpb.AiAnswerRes{Success: false, Message: "客户中心响应异常"}, nil
+		}
+		out := &ticketpb.AiAnswerRes{Success: true, Message: "ok", Answered: d.Answered, Answer: d.Answer, Mode: d.Mode}
+		for _, r := range d.References {
+			out.References = append(out.References, &ticketpb.AiAnswerReference{
+				ArticleId: r.ArticleID,
+				Title:     r.Title,
+				Question:  r.Question,
+				Content:   r.Content,
+				Score:     r.Score,
+			})
+		}
+		return out, nil
+	}
+}
+
 // List 工单列表（cursor 分页）
 func (s *TicketService) List(ctx context.Context, req *ticketpb.ListTicketsReq) (*ticketpb.ListTicketsRes, error) {
 	if ok, token := s.authAndClient(ctx); !ok {
@@ -236,6 +303,12 @@ func (s *TicketService) Create(ctx context.Context, req *ticketpb.CreateTicketRe
 		content := strings.TrimSpace(req.GetContent())
 		if title == "" || content == "" {
 			return &ticketpb.CreateTicketRes{Success: false, Message: "标题与内容不能为空"}, nil
+		}
+		if len([]rune(title)) > 500 {
+			return &ticketpb.CreateTicketRes{Success: false, Message: "标题不能超过 500 个字符"}, nil
+		}
+		if len([]rune(content)) > 10000 {
+			return &ticketpb.CreateTicketRes{Success: false, Message: "内容不能超过 10000 个字符"}, nil
 		}
 		resp, err := s.sc.Create(ctx, token, title, content)
 		if err != nil {

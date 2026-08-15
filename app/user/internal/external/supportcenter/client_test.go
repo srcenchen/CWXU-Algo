@@ -155,3 +155,83 @@ func TestNetworkError(t *testing.T) {
 		t.Fatal("network error should surface")
 	}
 }
+
+// GetCurrent：路径 /current，无活跃工单时上游 404 → *APIError
+func TestGetCurrent(t *testing.T) {
+	var gotPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		if r.Method != http.MethodGet {
+			t.Errorf("method = %s", r.Method)
+		}
+		if r.Header.Get("Idempotency-Key") != "" {
+			t.Error("GET should not carry Idempotency-Key")
+		}
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"code":40400,"message":"无活跃工单","data":{}}`))
+	}))
+	defer srv.Close()
+
+	c, err := New(newTestCfg(srv.URL, "pid", ""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = c.GetCurrent(context.Background(), "u-token")
+	if gotPath != "/api/v1/tickets/current" {
+		t.Fatalf("path = %q", gotPath)
+	}
+	ae, ok := err.(*APIError)
+	if !ok {
+		t.Fatalf("want *APIError, got %T: %v", err, err)
+	}
+	if ae.StatusCode != http.StatusNotFound || ae.Code != 40400 {
+		t.Fatalf("unexpected APIError: %+v", ae)
+	}
+}
+
+// AiAnswer：POST /ai/answer，body 带 question，不带 Idempotency-Key；响应透传
+func TestAiAnswer(t *testing.T) {
+	var gotPath, gotBody string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		if r.Method != http.MethodPost {
+			t.Errorf("method = %s", r.Method)
+		}
+		if r.Header.Get("Idempotency-Key") != "" {
+			t.Error("AI answer should not carry Idempotency-Key")
+		}
+		buf := make([]byte, 1024)
+		n, _ := r.Body.Read(buf)
+		gotBody = string(buf[:n])
+		_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"answered":true,"answer":"请先确认网络可用。","mode":"generated","references":[{"article_id":"a1","title":"排查指南","content":"步骤一…","score":0.92}]}}`))
+	}))
+	defer srv.Close()
+
+	c, err := New(newTestCfg(srv.URL, "pid", ""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := c.AiAnswer(context.Background(), "u-token", "登录失败怎么办")
+	if err != nil {
+		t.Fatalf("AiAnswer: %v", err)
+	}
+	if gotPath != "/api/v1/tickets/ai/answer" {
+		t.Fatalf("path = %q", gotPath)
+	}
+	if !strings.Contains(gotBody, "登录失败怎么办") {
+		t.Fatalf("body = %q", gotBody)
+	}
+	var d struct {
+		Answered bool `json:"answered"`
+		References []struct {
+			ArticleID string `json:"article_id"`
+			Title     string `json:"title"`
+		} `json:"references"`
+	}
+	if err := json.Unmarshal(resp.Data, &d); err != nil {
+		t.Fatal(err)
+	}
+	if !d.Answered || len(d.References) != 1 || d.References[0].Title != "排查指南" {
+		t.Fatalf("unexpected data: %+v", d)
+	}
+}

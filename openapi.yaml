@@ -5622,6 +5622,38 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/api.user.v1.ticket.CreateTicketRes'
+    /v1/user/tickets/ai/answer:
+        post:
+            tags:
+                - TicketService
+            description: 智能问答（不创建工单、不持久化对话；不要求 Idempotency-Key）
+            operationId: TicketService_AiAnswer
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/api.user.v1.ticket.AiAnswerReq'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.user.v1.ticket.AiAnswerRes'
+    /v1/user/tickets/current:
+        get:
+            tags:
+                - TicketService
+            description: 当前活跃工单（无活跃工单 → 客户中心 404 → success:true, ticket=nil）
+            operationId: TicketService_GetCurrent
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.user.v1.ticket.GetCurrentRes'
     /v1/user/tickets/{ticketId}:
         get:
             tags:
@@ -13357,6 +13389,43 @@ components:
                     type: string
                 message:
                     type: string
+        api.user.v1.ticket.AiAnswerReference:
+            type: object
+            properties:
+                articleId:
+                    type: string
+                title:
+                    type: string
+                question:
+                    type: string
+                content:
+                    type: string
+                score:
+                    type: number
+                    format: double
+            description: 智能问答引用（已审核知识）
+        api.user.v1.ticket.AiAnswerReq:
+            type: object
+            properties:
+                question:
+                    type: string
+        api.user.v1.ticket.AiAnswerRes:
+            type: object
+            properties:
+                success:
+                    type: boolean
+                message:
+                    type: string
+                answered:
+                    type: boolean
+                answer:
+                    type: string
+                mode:
+                    type: string
+                references:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/api.user.v1.ticket.AiAnswerReference'
         api.user.v1.ticket.CreateMessageReq:
             type: object
             properties:
@@ -13393,6 +13462,15 @@ components:
                     allOf:
                         - $ref: '#/components/schemas/api.user.v1.ticket.TicketMessage'
                     description: message_info 命名避开 protobuf 保留关键字 message
+        api.user.v1.ticket.GetCurrentRes:
+            type: object
+            properties:
+                success:
+                    type: boolean
+                message:
+                    type: string
+                ticket:
+                    $ref: '#/components/schemas/api.user.v1.ticket.Ticket'
         api.user.v1.ticket.GetMessagesRes:
             type: object
             properties:

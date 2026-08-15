@@ -19,6 +19,8 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
+	TicketService_GetCurrent_FullMethodName    = "/api.user.v1.ticket.TicketService/GetCurrent"
+	TicketService_AiAnswer_FullMethodName      = "/api.user.v1.ticket.TicketService/AiAnswer"
 	TicketService_List_FullMethodName          = "/api.user.v1.ticket.TicketService/List"
 	TicketService_Get_FullMethodName           = "/api.user.v1.ticket.TicketService/Get"
 	TicketService_GetMessages_FullMethodName   = "/api.user.v1.ticket.TicketService/GetMessages"
@@ -36,6 +38,10 @@ const (
 // 路径前缀：/v1/user/tickets/*。全部接口需登录；未配置支持中心时返回
 // success:false + message「支持中心未配置，请稍后再试」。
 type TicketServiceClient interface {
+	// 当前活跃工单（无活跃工单 → 客户中心 404 → success:true, ticket=nil）
+	GetCurrent(ctx context.Context, in *GetCurrentReq, opts ...grpc.CallOption) (*GetCurrentRes, error)
+	// 智能问答（不创建工单、不持久化对话；不要求 Idempotency-Key）
+	AiAnswer(ctx context.Context, in *AiAnswerReq, opts ...grpc.CallOption) (*AiAnswerRes, error)
 	// 工单列表（cursor 分页）
 	List(ctx context.Context, in *ListTicketsReq, opts ...grpc.CallOption) (*ListTicketsRes, error)
 	// 工单详情
@@ -56,6 +62,26 @@ type ticketServiceClient struct {
 
 func NewTicketServiceClient(cc grpc.ClientConnInterface) TicketServiceClient {
 	return &ticketServiceClient{cc}
+}
+
+func (c *ticketServiceClient) GetCurrent(ctx context.Context, in *GetCurrentReq, opts ...grpc.CallOption) (*GetCurrentRes, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetCurrentRes)
+	err := c.cc.Invoke(ctx, TicketService_GetCurrent_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *ticketServiceClient) AiAnswer(ctx context.Context, in *AiAnswerReq, opts ...grpc.CallOption) (*AiAnswerRes, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AiAnswerRes)
+	err := c.cc.Invoke(ctx, TicketService_AiAnswer_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func (c *ticketServiceClient) List(ctx context.Context, in *ListTicketsReq, opts ...grpc.CallOption) (*ListTicketsRes, error) {
@@ -127,6 +153,10 @@ func (c *ticketServiceClient) PatchStatus(ctx context.Context, in *PatchStatusRe
 // 路径前缀：/v1/user/tickets/*。全部接口需登录；未配置支持中心时返回
 // success:false + message「支持中心未配置，请稍后再试」。
 type TicketServiceServer interface {
+	// 当前活跃工单（无活跃工单 → 客户中心 404 → success:true, ticket=nil）
+	GetCurrent(context.Context, *GetCurrentReq) (*GetCurrentRes, error)
+	// 智能问答（不创建工单、不持久化对话；不要求 Idempotency-Key）
+	AiAnswer(context.Context, *AiAnswerReq) (*AiAnswerRes, error)
 	// 工单列表（cursor 分页）
 	List(context.Context, *ListTicketsReq) (*ListTicketsRes, error)
 	// 工单详情
@@ -149,6 +179,12 @@ type TicketServiceServer interface {
 // pointer dereference when methods are called.
 type UnimplementedTicketServiceServer struct{}
 
+func (UnimplementedTicketServiceServer) GetCurrent(context.Context, *GetCurrentReq) (*GetCurrentRes, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetCurrent not implemented")
+}
+func (UnimplementedTicketServiceServer) AiAnswer(context.Context, *AiAnswerReq) (*AiAnswerRes, error) {
+	return nil, status.Error(codes.Unimplemented, "method AiAnswer not implemented")
+}
 func (UnimplementedTicketServiceServer) List(context.Context, *ListTicketsReq) (*ListTicketsRes, error) {
 	return nil, status.Error(codes.Unimplemented, "method List not implemented")
 }
@@ -186,6 +222,42 @@ func RegisterTicketServiceServer(s grpc.ServiceRegistrar, srv TicketServiceServe
 		t.testEmbeddedByValue()
 	}
 	s.RegisterService(&TicketService_ServiceDesc, srv)
+}
+
+func _TicketService_GetCurrent_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetCurrentReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TicketServiceServer).GetCurrent(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TicketService_GetCurrent_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TicketServiceServer).GetCurrent(ctx, req.(*GetCurrentReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _TicketService_AiAnswer_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AiAnswerReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TicketServiceServer).AiAnswer(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TicketService_AiAnswer_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TicketServiceServer).AiAnswer(ctx, req.(*AiAnswerReq))
+	}
+	return interceptor(ctx, in, info, handler)
 }
 
 func _TicketService_List_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
@@ -303,6 +375,14 @@ var TicketService_ServiceDesc = grpc.ServiceDesc{
 	ServiceName: "api.user.v1.ticket.TicketService",
 	HandlerType: (*TicketServiceServer)(nil),
 	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "GetCurrent",
+			Handler:    _TicketService_GetCurrent_Handler,
+		},
+		{
+			MethodName: "AiAnswer",
+			Handler:    _TicketService_AiAnswer_Handler,
+		},
 		{
 			MethodName: "List",
 			Handler:    _TicketService_List_Handler,

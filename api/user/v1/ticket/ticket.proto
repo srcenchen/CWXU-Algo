@@ -12,6 +12,19 @@ option java_package = "api.user.v1.ticket";
 // 路径前缀：/v1/user/tickets/*。全部接口需登录；未配置支持中心时返回
 // success:false + message「支持中心未配置，请稍后再试」。
 service TicketService {
+  // 当前活跃工单（无活跃工单 → 客户中心 404 → success:true, ticket=nil）
+  rpc GetCurrent (GetCurrentReq) returns (GetCurrentRes) {
+    option (google.api.http) = {
+      get: "/v1/user/tickets/current"
+    };
+  }
+  // 智能问答（不创建工单、不持久化对话；不要求 Idempotency-Key）
+  rpc AiAnswer (AiAnswerReq) returns (AiAnswerRes) {
+    option (google.api.http) = {
+      post: "/v1/user/tickets/ai/answer"
+      body: "*"
+    };
+  }
   // 工单列表（cursor 分页）
   rpc List (ListTicketsReq) returns (ListTicketsRes) {
     option (google.api.http) = {
@@ -74,6 +87,36 @@ message TicketMessage {
   string content_type = 4;
   string content = 5;
   int64 sent_at = 6;
+}
+
+message GetCurrentReq {}
+
+message GetCurrentRes {
+  bool success = 1;
+  string message = 2;
+  Ticket ticket = 3;
+}
+
+message AiAnswerReq {
+  string question = 1;
+}
+
+// 智能问答引用（已审核知识）
+message AiAnswerReference {
+  string article_id = 1;
+  string title = 2;
+  string question = 3;
+  string content = 4;
+  double score = 5;
+}
+
+message AiAnswerRes {
+  bool success = 1;
+  string message = 2;
+  bool answered = 3;
+  string answer = 4;
+  string mode = 5;
+  repeated AiAnswerReference references = 6;
 }
 
 message CreateTicketReq {
