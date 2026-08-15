@@ -12704,6 +12704,12 @@ components:
                 payfmNotifyUrl:
                     type: string
                     description: 回调地址（展示用；下单时带给支付FM）
+                agentEndpoint:
+                    type: string
+                    description: Agent OpenAI 兼容服务地址（非敏感）
+                configVersion:
+                    type: string
+                    description: 配置乐观并发版本（每次更新 +1；0=旧数据）
         api.user.v1.site.GetConfigRes:
             type: object
             properties:
@@ -12844,6 +12850,15 @@ components:
                 payfmPayType:
                     type: string
                     description: 支付方式（如 aloop=支付宝轮循池；空=默认 aloop）
+                section:
+                    type: string
+                    description: 保存分区：basic | email | ai | upyun | oj | payment | all（空=all）
+                agentEndpoint:
+                    type: string
+                    description: Agent OpenAI 兼容服务地址（非敏感）
+                expectedConfigVersion:
+                    type: string
+                    description: 期望的 config_version；>0 时校验，不匹配返回冲突；0=兼容旧客户端
         api.user.v1.site.UpdateConfigRes:
             type: object
             properties:

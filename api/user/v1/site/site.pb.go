@@ -264,8 +264,12 @@ type GetAdminConfigRes struct {
 	PayfmPayType string `protobuf:"bytes,55,opt,name=payfm_pay_type,json=payfmPayType,proto3" json:"payfm_pay_type,omitempty"`
 	// 回调地址（展示用；下单时带给支付FM）
 	PayfmNotifyUrl string `protobuf:"bytes,56,opt,name=payfm_notify_url,json=payfmNotifyUrl,proto3" json:"payfm_notify_url,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// Agent OpenAI 兼容服务地址（非敏感）
+	AgentEndpoint string `protobuf:"bytes,57,opt,name=agent_endpoint,json=agentEndpoint,proto3" json:"agent_endpoint,omitempty"`
+	// 配置乐观并发版本（每次更新 +1；0=旧数据）
+	ConfigVersion int64 `protobuf:"varint,58,opt,name=config_version,json=configVersion,proto3" json:"config_version,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *GetAdminConfigRes) Reset() {
@@ -690,6 +694,20 @@ func (x *GetAdminConfigRes) GetPayfmNotifyUrl() string {
 	return ""
 }
 
+func (x *GetAdminConfigRes) GetAgentEndpoint() string {
+	if x != nil {
+		return x.AgentEndpoint
+	}
+	return ""
+}
+
+func (x *GetAdminConfigRes) GetConfigVersion() int64 {
+	if x != nil {
+		return x.ConfigVersion
+	}
+	return 0
+}
+
 type UpdateConfigReq struct {
 	state     protoimpl.MessageState `protogen:"open.v1"`
 	SiteTitle string                 `protobuf:"bytes,1,opt,name=site_title,json=siteTitle,proto3" json:"site_title,omitempty"`
@@ -743,9 +761,15 @@ type UpdateConfigReq struct {
 	PayfmSecret      string `protobuf:"bytes,37,opt,name=payfm_secret,json=payfmSecret,proto3" json:"payfm_secret,omitempty"`
 	ClearPayfmSecret bool   `protobuf:"varint,38,opt,name=clear_payfm_secret,json=clearPayfmSecret,proto3" json:"clear_payfm_secret,omitempty"`
 	// 支付方式（如 aloop=支付宝轮循池；空=默认 aloop）
-	PayfmPayType  string `protobuf:"bytes,39,opt,name=payfm_pay_type,json=payfmPayType,proto3" json:"payfm_pay_type,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	PayfmPayType string `protobuf:"bytes,39,opt,name=payfm_pay_type,json=payfmPayType,proto3" json:"payfm_pay_type,omitempty"`
+	// 保存分区：basic | email | ai | upyun | oj | payment | all（空=all）
+	Section string `protobuf:"bytes,40,opt,name=section,proto3" json:"section,omitempty"`
+	// Agent OpenAI 兼容服务地址（非敏感）
+	AgentEndpoint string `protobuf:"bytes,41,opt,name=agent_endpoint,json=agentEndpoint,proto3" json:"agent_endpoint,omitempty"`
+	// 期望的 config_version；>0 时校验，不匹配返回冲突；0=兼容旧客户端
+	ExpectedConfigVersion int64 `protobuf:"varint,42,opt,name=expected_config_version,json=expectedConfigVersion,proto3" json:"expected_config_version,omitempty"`
+	unknownFields         protoimpl.UnknownFields
+	sizeCache             protoimpl.SizeCache
 }
 
 func (x *UpdateConfigReq) Reset() {
@@ -1049,6 +1073,27 @@ func (x *UpdateConfigReq) GetPayfmPayType() string {
 		return x.PayfmPayType
 	}
 	return ""
+}
+
+func (x *UpdateConfigReq) GetSection() string {
+	if x != nil {
+		return x.Section
+	}
+	return ""
+}
+
+func (x *UpdateConfigReq) GetAgentEndpoint() string {
+	if x != nil {
+		return x.AgentEndpoint
+	}
+	return ""
+}
+
+func (x *UpdateConfigReq) GetExpectedConfigVersion() int64 {
+	if x != nil {
+		return x.ExpectedConfigVersion
+	}
+	return 0
 }
 
 type UpdateConfigRes struct {
@@ -2114,7 +2159,7 @@ const file_user_v1_site_site_proto_rawDesc = "" +
 	"\n" +
 	"footer_icp\x18\x06 \x01(\tR\tfooterIcp\x12)\n" +
 	"\x10payfm_configured\x18\a \x01(\bR\x0fpayfmConfigured\"\x13\n" +
-	"\x11GetAdminConfigReq\"\xdc\x11\n" +
+	"\x11GetAdminConfigReq\"\xaa\x12\n" +
 	"\x11GetAdminConfigRes\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\x03R\x04code\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12\x1d\n" +
@@ -2177,7 +2222,9 @@ const file_user_v1_site_site_proto_rawDesc = "" +
 	"\x13payfm_secret_masked\x185 \x01(\tR\x11payfmSecretMasked\x12(\n" +
 	"\x10payfm_secret_set\x186 \x01(\bR\x0epayfmSecretSet\x12$\n" +
 	"\x0epayfm_pay_type\x187 \x01(\tR\fpayfmPayType\x12(\n" +
-	"\x10payfm_notify_url\x188 \x01(\tR\x0epayfmNotifyUrl\"\x9d\f\n" +
+	"\x10payfm_notify_url\x188 \x01(\tR\x0epayfmNotifyUrl\x12%\n" +
+	"\x0eagent_endpoint\x189 \x01(\tR\ragentEndpoint\x12%\n" +
+	"\x0econfig_version\x18: \x01(\x03R\rconfigVersion\"\x96\r\n" +
 	"\x0fUpdateConfigReq\x12\x1d\n" +
 	"\n" +
 	"site_title\x18\x01 \x01(\tR\tsiteTitle\x12\x1b\n" +
@@ -2221,7 +2268,10 @@ const file_user_v1_site_site_proto_rawDesc = "" +
 	"\x11payfm_merchant_no\x18$ \x01(\tR\x0fpayfmMerchantNo\x12!\n" +
 	"\fpayfm_secret\x18% \x01(\tR\vpayfmSecret\x12,\n" +
 	"\x12clear_payfm_secret\x18& \x01(\bR\x10clearPayfmSecret\x12$\n" +
-	"\x0epayfm_pay_type\x18' \x01(\tR\fpayfmPayType\"\xb4\x01\n" +
+	"\x0epayfm_pay_type\x18' \x01(\tR\fpayfmPayType\x12\x18\n" +
+	"\asection\x18( \x01(\tR\asection\x12%\n" +
+	"\x0eagent_endpoint\x18) \x01(\tR\ragentEndpoint\x126\n" +
+	"\x17expected_config_version\x18* \x01(\x03R\x15expectedConfigVersion\"\xb4\x01\n" +
 	"\x0fUpdateConfigRes\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\x03R\x04code\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12\x1d\n" +

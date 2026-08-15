@@ -146,6 +146,10 @@ message GetAdminConfigRes {
   string payfm_pay_type = 55;
   // 回调地址（展示用；下单时带给支付FM）
   string payfm_notify_url = 56;
+  // Agent OpenAI 兼容服务地址（非敏感）
+  string agent_endpoint = 57;
+  // 配置乐观并发版本（每次更新 +1；0=旧数据）
+  int64 config_version = 58;
 }
 
 message UpdateConfigReq {
@@ -201,6 +205,12 @@ message UpdateConfigReq {
   bool clear_payfm_secret = 38;
   // 支付方式（如 aloop=支付宝轮循池；空=默认 aloop）
   string payfm_pay_type = 39;
+  // 保存分区：basic | email | ai | upyun | oj | payment | all（空=all）
+  string section = 40;
+  // Agent OpenAI 兼容服务地址（非敏感）
+  string agent_endpoint = 41;
+  // 期望的 config_version；>0 时校验，不匹配返回冲突；0=兼容旧客户端
+  int64 expected_config_version = 42;
 }
 
 message UpdateConfigRes {
