@@ -447,3 +447,10 @@ func TestCloseFileTreatsAlreadyClosedAsSuccess(t *testing.T) {
 		t.Fatalf("closeFile on an already closed file: %v", err)
 	}
 }
+
+func TestNormalizeCloseErrorTreatsRuntimeAlreadyClosedAsSuccess(t *testing.T) {
+	err := &os.PathError{Op: "close", Path: "/tmp/archive", Err: errors.New("file already closed")}
+	if got := normalizeCloseError(err); got != nil {
+		t.Fatalf("normalizeCloseError: %v", got)
+	}
+}

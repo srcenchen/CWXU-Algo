@@ -384,8 +384,15 @@ func commandDSN(dsn, database string) (string, string, error) {
 }
 
 func closeFile(file *os.File) error {
-	err := file.Close()
+	return normalizeCloseError(file.Close())
+}
+
+func normalizeCloseError(err error) error {
 	if errors.Is(err, os.ErrClosed) {
+		return nil
+	}
+	var pathErr *os.PathError
+	if errors.As(err, &pathErr) && pathErr.Op == "close" && pathErr.Err != nil && pathErr.Err.Error() == "file already closed" {
 		return nil
 	}
 	return err
