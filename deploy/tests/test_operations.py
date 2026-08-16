@@ -101,6 +101,9 @@ class WorkflowTests(unittest.TestCase):
         self.assertIn("release-manifest", workflow)
         self.assertEqual(workflow.count("provenance: false"), 5)
         self.assertEqual(workflow.count("sbom: false"), 5)
+        for service in ("frontend", "gateway", "user", "core-data", "agent"):
+            self.assertIn(f":{service}-latest", workflow)
+            self.assertIn(f":{service}-sha-", workflow)
 
     def test_production_is_tag_only_approved_serial_self_hosted_deploy(self):
         workflow = read(".github/workflows/production.yml")
