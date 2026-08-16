@@ -98,6 +98,14 @@ class OperationalScriptTests(unittest.TestCase):
         self.assertIn("rollbackFiles", runtime)
         self.assertIn("release.previous.env", runtime)
 
+    def test_uninstall_deletes_all_and_asks_images(self):
+        main = read("cmd/goalgo-ops/main.go")
+        self.assertIn('"uninstall"', main)
+        runtime = read("cmd/goalgo-ops/runtime.go")
+        self.assertIn("RemoveAll", runtime)
+        self.assertIn('"down"', runtime)
+        self.assertIn("registry.cn-hangzhou.aliyuncs.com/sanenchen/goalgo:", runtime)
+
     def test_shell_scripts_parse(self):
         scripts = sorted((DEPLOY / "scripts").glob("*.sh"))
         result = subprocess.run(["sh", "-n", *map(str, scripts)], capture_output=True, text=True)

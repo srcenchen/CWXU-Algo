@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"errors"
+	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,6 +12,7 @@ import (
 
 	"cwxu-algo/internal/opscompose"
 	"cwxu-algo/internal/opsdata"
+	"cwxu-algo/internal/opsexec"
 	"cwxu-algo/internal/opsprogress"
 	"cwxu-algo/internal/opsprompt"
 	"cwxu-algo/internal/opsrelease"
@@ -157,4 +160,90 @@ func sameDigests(a, b map[string]string) bool {
 		}
 	}
 	return true
+}
+
+// runtimeUninstall 彻底删除：容器（compose down -v）→ root 目录（配置/密钥/数据）→ ~/.ops.data.json →
+// 询问是否删除 goalgo 镜像。--yes 跳过确认并删除镜像。
+func runtimeUninstall(ctx context.Context, compose *opscompose.Compose, args []string) int {
+	var yes bool
+	flags := flag.NewFlagSet("uninstall", flag.ContinueOnError)
+	flags.BoolVar(&yes, "yes", false, "跳过确认并删除 goalgo 镜像")
+	if err := flags.Parse(args); err != nil {
+		return fail("卸载", err)
+	}
+	if compose.Root.IsProtectedInstall() && !opsroot.IsPrivileged() {
+		return fail("卸载", errors.New("卸载受保护安装需要 root 权限"))
+	}
+	prompt := opsprompt.New()
+	if !yes {
+		if !prompt.TTY {
+			return fail("卸载", fmt.Errorf("破坏性操作，请在终端确认或使用 --yes"))
+		}
+		confirmed, err := prompt.Confirm(fmt.Sprintf("将彻底删除 %s 下全部配置、密钥与数据（含数据库），继续？", compose.Root.Path), false)
+		if err != nil {
+			return fail("卸载", err)
+		}
+		if !confirmed {
+			fmt.Fprintln(os.Stdout, "已取消")
+			return 0
+		}
+	}
+	if _, err := os.Stat(compose.Root.Join("compose.yaml")); err == nil {
+		opsprogress.Note(os.Stderr, "停止并删除容器")
+		if _, err := compose.Command(ctx, "down", "-v"); err != nil {
+			return fail("卸载", err)
+		}
+	}
+	opsprogress.Note(os.Stderr, "删除配置、密钥与数据目录")
+	if err := os.RemoveAll(compose.Root.Path); err != nil {
+		return fail("卸载", err)
+	}
+	if dataPath := opsdata.Path(); fileExists(dataPath) {
+		if err := os.Remove(dataPath); err != nil {
+			return fail("卸载", err)
+		}
+	}
+	removeImages := yes
+	if !yes {
+		var err error
+		removeImages, err = prompt.Confirm("删除 registry.cn-hangzhou.aliyuncs.com/sanenchen/goalgo:* 镜像？", false)
+		if err != nil {
+			return fail("卸载", err)
+		}
+	}
+	if removeImages {
+		if err := removeGoalgoImages(ctx, compose.Run); err != nil {
+			return fail("卸载", err)
+		}
+	}
+	opsprogress.Done(os.Stderr, "卸载完成")
+	return 0
+}
+
+func removeGoalgoImages(ctx context.Context, runner opsexec.Command) error {
+	output, err := runner.CombinedOutput(ctx, "docker", "images", "--format", "{{.Repository}}:{{.Tag}}")
+	if err != nil {
+		return err
+	}
+	var refs []string
+	for _, line := range strings.Split(strings.TrimSpace(output), "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "registry.cn-hangzhou.aliyuncs.com/sanenchen/goalgo:") {
+			refs = append(refs, line)
+		} else if strings.HasPrefix(line, "goalgo-") {
+			refs = append(refs, line)
+		}
+	}
+	if len(refs) == 0 {
+		return nil
+	}
+	if _, err := runner.CombinedOutput(ctx, "docker", append([]string{"rmi", "-f"}, refs...)...); err != nil {
+		return err
+	}
+	return nil
+}
+
+func fileExists(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && !info.IsDir()
 }
