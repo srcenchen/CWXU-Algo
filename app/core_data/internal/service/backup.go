@@ -3,6 +3,8 @@ package service
 import (
 	"context"
 	"errors"
+	"os"
+	"strings"
 
 	backuppb "cwxu-algo/api/core/v1/backup"
 	"cwxu-algo/app/common/rbac"
@@ -61,6 +63,26 @@ func (s *BackupService) Status(ctx context.Context, _ *backuppb.GetBackupStatusR
 		return nil, kerrors.Forbidden("BACKUP_PERMISSION_DENIED", "site backup permission required")
 	}
 	return &backuppb.GetBackupStatusReply{Status: backupStatusProto(s.manager.Status())}, nil
+}
+
+// DownloadKey 返回备份加密密钥（32 原始字节）。
+// 路径取自 CWXU_BACKUP_ENCRYPTION_KEY_FILE，与备份任务一致；需 site.backup.manage 权限。
+func (s *BackupService) DownloadKey(ctx context.Context, _ *backuppb.DownloadBackupKeyRequest) (*backuppb.DownloadBackupKeyReply, error) {
+	if !s.authorized(ctx) {
+		return nil, kerrors.Forbidden("BACKUP_PERMISSION_DENIED", "site backup permission required")
+	}
+	path := strings.TrimSpace(os.Getenv("CWXU_BACKUP_ENCRYPTION_KEY_FILE"))
+	if path == "" {
+		return nil, kerrors.ServiceUnavailable("BACKUP_KEY_UNCONFIGURED", "backup encryption key is not configured")
+	}
+	key, err := os.ReadFile(path)
+	if err != nil {
+		return nil, kerrors.InternalServer("BACKUP_KEY_READ_FAILED", "read backup encryption key: "+err.Error())
+	}
+	if len(key) != 32 {
+		return nil, kerrors.InternalServer("BACKUP_KEY_INVALID", "backup encryption key must be exactly 32 bytes")
+	}
+	return &backuppb.DownloadBackupKeyReply{Key: key}, nil
 }
 
 func backupStatusProto(status backupcoord.Status) *backuppb.BackupStatus {

@@ -2,7 +2,7 @@
 // versions:
 // - protoc-gen-go-http v2.9.2
 // - protoc             v5.29.3
-// source: core/v1/backup/backup.proto
+// source: api/core/v1/backup/backup.proto
 
 package backup
 
@@ -19,10 +19,12 @@ var _ = binding.EncodeURL
 
 const _ = http.SupportPackageIsVersion1
 
+const OperationBackupDownloadKey = "/api.core.v1.backup.Backup/DownloadKey"
 const OperationBackupRun = "/api.core.v1.backup.Backup/Run"
 const OperationBackupStatus = "/api.core.v1.backup.Backup/Status"
 
 type BackupHTTPServer interface {
+	DownloadKey(context.Context, *DownloadBackupKeyRequest) (*DownloadBackupKeyReply, error)
 	Run(context.Context, *RunBackupRequest) (*RunBackupReply, error)
 	Status(context.Context, *GetBackupStatusRequest) (*GetBackupStatusReply, error)
 }
@@ -31,6 +33,7 @@ func RegisterBackupHTTPServer(s *http.Server, srv BackupHTTPServer) {
 	r := s.Route("/")
 	r.POST("/v1/core/backup/run", _Backup_Run0_HTTP_Handler(srv))
 	r.GET("/v1/core/backup/status", _Backup_Status0_HTTP_Handler(srv))
+	r.GET("/v1/core/backup/key", _Backup_DownloadKey0_HTTP_Handler(srv))
 }
 
 func _Backup_Run0_HTTP_Handler(srv BackupHTTPServer) func(ctx http.Context) error {
@@ -74,7 +77,27 @@ func _Backup_Status0_HTTP_Handler(srv BackupHTTPServer) func(ctx http.Context) e
 	}
 }
 
+func _Backup_DownloadKey0_HTTP_Handler(srv BackupHTTPServer) func(ctx http.Context) error {
+	return func(ctx http.Context) error {
+		var in DownloadBackupKeyRequest
+		if err := ctx.BindQuery(&in); err != nil {
+			return err
+		}
+		http.SetOperation(ctx, OperationBackupDownloadKey)
+		h := ctx.Middleware(func(ctx context.Context, req interface{}) (interface{}, error) {
+			return srv.DownloadKey(ctx, req.(*DownloadBackupKeyRequest))
+		})
+		out, err := h(ctx, &in)
+		if err != nil {
+			return err
+		}
+		reply := out.(*DownloadBackupKeyReply)
+		return ctx.Result(200, reply)
+	}
+}
+
 type BackupHTTPClient interface {
+	DownloadKey(ctx context.Context, req *DownloadBackupKeyRequest, opts ...http.CallOption) (rsp *DownloadBackupKeyReply, err error)
 	Run(ctx context.Context, req *RunBackupRequest, opts ...http.CallOption) (rsp *RunBackupReply, err error)
 	Status(ctx context.Context, req *GetBackupStatusRequest, opts ...http.CallOption) (rsp *GetBackupStatusReply, err error)
 }
@@ -85,6 +108,19 @@ type BackupHTTPClientImpl struct {
 
 func NewBackupHTTPClient(client *http.Client) BackupHTTPClient {
 	return &BackupHTTPClientImpl{client}
+}
+
+func (c *BackupHTTPClientImpl) DownloadKey(ctx context.Context, in *DownloadBackupKeyRequest, opts ...http.CallOption) (*DownloadBackupKeyReply, error) {
+	var out DownloadBackupKeyReply
+	pattern := "/v1/core/backup/key"
+	path := binding.EncodeURL(pattern, in, true)
+	opts = append(opts, http.Operation(OperationBackupDownloadKey))
+	opts = append(opts, http.PathTemplate(pattern))
+	err := c.cc.Invoke(ctx, "GET", path, nil, &out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
 }
 
 func (c *BackupHTTPClientImpl) Run(ctx context.Context, in *RunBackupRequest, opts ...http.CallOption) (*RunBackupReply, error) {

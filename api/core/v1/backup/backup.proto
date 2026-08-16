@@ -18,6 +18,9 @@ service Backup {
   rpc Status (GetBackupStatusRequest) returns (GetBackupStatusReply) {
     option (google.api.http) = {get: "/v1/core/backup/status"};
   }
+  rpc DownloadKey (DownloadBackupKeyRequest) returns (DownloadBackupKeyReply) {
+    option (google.api.http) = {get: "/v1/core/backup/key"};
+  }
 }
 
 message RunBackupRequest {}
@@ -31,6 +34,13 @@ message GetBackupStatusRequest {}
 
 message GetBackupStatusReply {
   BackupStatus status = 1;
+}
+
+message DownloadBackupKeyRequest {}
+
+message DownloadBackupKeyReply {
+  // 32 字节原始 AES 密钥；JSON 传输时按 protobuf 约定为 base64。
+  bytes key = 1;
 }
 
 message BackupStatus {

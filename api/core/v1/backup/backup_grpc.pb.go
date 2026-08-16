@@ -2,7 +2,7 @@
 // versions:
 // - protoc-gen-go-grpc v1.6.2
 // - protoc             v5.29.3
-// source: core/v1/backup/backup.proto
+// source: api/core/v1/backup/backup.proto
 
 package backup
 
@@ -19,8 +19,9 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	Backup_Run_FullMethodName    = "/api.core.v1.backup.Backup/Run"
-	Backup_Status_FullMethodName = "/api.core.v1.backup.Backup/Status"
+	Backup_Run_FullMethodName         = "/api.core.v1.backup.Backup/Run"
+	Backup_Status_FullMethodName      = "/api.core.v1.backup.Backup/Status"
+	Backup_DownloadKey_FullMethodName = "/api.core.v1.backup.Backup/DownloadKey"
 )
 
 // BackupClient is the client API for Backup service.
@@ -29,6 +30,7 @@ const (
 type BackupClient interface {
 	Run(ctx context.Context, in *RunBackupRequest, opts ...grpc.CallOption) (*RunBackupReply, error)
 	Status(ctx context.Context, in *GetBackupStatusRequest, opts ...grpc.CallOption) (*GetBackupStatusReply, error)
+	DownloadKey(ctx context.Context, in *DownloadBackupKeyRequest, opts ...grpc.CallOption) (*DownloadBackupKeyReply, error)
 }
 
 type backupClient struct {
@@ -59,12 +61,23 @@ func (c *backupClient) Status(ctx context.Context, in *GetBackupStatusRequest, o
 	return out, nil
 }
 
+func (c *backupClient) DownloadKey(ctx context.Context, in *DownloadBackupKeyRequest, opts ...grpc.CallOption) (*DownloadBackupKeyReply, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(DownloadBackupKeyReply)
+	err := c.cc.Invoke(ctx, Backup_DownloadKey_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // BackupServer is the server API for Backup service.
 // All implementations must embed UnimplementedBackupServer
 // for forward compatibility.
 type BackupServer interface {
 	Run(context.Context, *RunBackupRequest) (*RunBackupReply, error)
 	Status(context.Context, *GetBackupStatusRequest) (*GetBackupStatusReply, error)
+	DownloadKey(context.Context, *DownloadBackupKeyRequest) (*DownloadBackupKeyReply, error)
 	mustEmbedUnimplementedBackupServer()
 }
 
@@ -80,6 +93,9 @@ func (UnimplementedBackupServer) Run(context.Context, *RunBackupRequest) (*RunBa
 }
 func (UnimplementedBackupServer) Status(context.Context, *GetBackupStatusRequest) (*GetBackupStatusReply, error) {
 	return nil, status.Error(codes.Unimplemented, "method Status not implemented")
+}
+func (UnimplementedBackupServer) DownloadKey(context.Context, *DownloadBackupKeyRequest) (*DownloadBackupKeyReply, error) {
+	return nil, status.Error(codes.Unimplemented, "method DownloadKey not implemented")
 }
 func (UnimplementedBackupServer) mustEmbedUnimplementedBackupServer() {}
 func (UnimplementedBackupServer) testEmbeddedByValue()                {}
@@ -138,6 +154,24 @@ func _Backup_Status_Handler(srv interface{}, ctx context.Context, dec func(inter
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Backup_DownloadKey_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DownloadBackupKeyRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(BackupServer).DownloadKey(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Backup_DownloadKey_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(BackupServer).DownloadKey(ctx, req.(*DownloadBackupKeyRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Backup_ServiceDesc is the grpc.ServiceDesc for Backup service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -153,7 +187,11 @@ var Backup_ServiceDesc = grpc.ServiceDesc{
 			MethodName: "Status",
 			Handler:    _Backup_Status_Handler,
 		},
+		{
+			MethodName: "DownloadKey",
+			Handler:    _Backup_DownloadKey_Handler,
+		},
 	},
 	Streams:  []grpc.StreamDesc{},
-	Metadata: "core/v1/backup/backup.proto",
+	Metadata: "api/core/v1/backup/backup.proto",
 }

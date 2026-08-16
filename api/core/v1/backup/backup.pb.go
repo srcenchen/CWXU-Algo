@@ -2,7 +2,7 @@
 // versions:
 // 	protoc-gen-go v1.36.11
 // 	protoc        v5.29.3
-// source: core/v1/backup/backup.proto
+// source: api/core/v1/backup/backup.proto
 
 package backup
 
@@ -30,7 +30,7 @@ type RunBackupRequest struct {
 
 func (x *RunBackupRequest) Reset() {
 	*x = RunBackupRequest{}
-	mi := &file_core_v1_backup_backup_proto_msgTypes[0]
+	mi := &file_api_core_v1_backup_backup_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -42,7 +42,7 @@ func (x *RunBackupRequest) String() string {
 func (*RunBackupRequest) ProtoMessage() {}
 
 func (x *RunBackupRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_core_v1_backup_backup_proto_msgTypes[0]
+	mi := &file_api_core_v1_backup_backup_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -55,7 +55,7 @@ func (x *RunBackupRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RunBackupRequest.ProtoReflect.Descriptor instead.
 func (*RunBackupRequest) Descriptor() ([]byte, []int) {
-	return file_core_v1_backup_backup_proto_rawDescGZIP(), []int{0}
+	return file_api_core_v1_backup_backup_proto_rawDescGZIP(), []int{0}
 }
 
 type RunBackupReply struct {
@@ -68,7 +68,7 @@ type RunBackupReply struct {
 
 func (x *RunBackupReply) Reset() {
 	*x = RunBackupReply{}
-	mi := &file_core_v1_backup_backup_proto_msgTypes[1]
+	mi := &file_api_core_v1_backup_backup_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -80,7 +80,7 @@ func (x *RunBackupReply) String() string {
 func (*RunBackupReply) ProtoMessage() {}
 
 func (x *RunBackupReply) ProtoReflect() protoreflect.Message {
-	mi := &file_core_v1_backup_backup_proto_msgTypes[1]
+	mi := &file_api_core_v1_backup_backup_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -93,7 +93,7 @@ func (x *RunBackupReply) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RunBackupReply.ProtoReflect.Descriptor instead.
 func (*RunBackupReply) Descriptor() ([]byte, []int) {
-	return file_core_v1_backup_backup_proto_rawDescGZIP(), []int{1}
+	return file_api_core_v1_backup_backup_proto_rawDescGZIP(), []int{1}
 }
 
 func (x *RunBackupReply) GetAccepted() bool {
@@ -118,7 +118,7 @@ type GetBackupStatusRequest struct {
 
 func (x *GetBackupStatusRequest) Reset() {
 	*x = GetBackupStatusRequest{}
-	mi := &file_core_v1_backup_backup_proto_msgTypes[2]
+	mi := &file_api_core_v1_backup_backup_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -130,7 +130,7 @@ func (x *GetBackupStatusRequest) String() string {
 func (*GetBackupStatusRequest) ProtoMessage() {}
 
 func (x *GetBackupStatusRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_core_v1_backup_backup_proto_msgTypes[2]
+	mi := &file_api_core_v1_backup_backup_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -143,7 +143,7 @@ func (x *GetBackupStatusRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetBackupStatusRequest.ProtoReflect.Descriptor instead.
 func (*GetBackupStatusRequest) Descriptor() ([]byte, []int) {
-	return file_core_v1_backup_backup_proto_rawDescGZIP(), []int{2}
+	return file_api_core_v1_backup_backup_proto_rawDescGZIP(), []int{2}
 }
 
 type GetBackupStatusReply struct {
@@ -155,7 +155,7 @@ type GetBackupStatusReply struct {
 
 func (x *GetBackupStatusReply) Reset() {
 	*x = GetBackupStatusReply{}
-	mi := &file_core_v1_backup_backup_proto_msgTypes[3]
+	mi := &file_api_core_v1_backup_backup_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -167,7 +167,7 @@ func (x *GetBackupStatusReply) String() string {
 func (*GetBackupStatusReply) ProtoMessage() {}
 
 func (x *GetBackupStatusReply) ProtoReflect() protoreflect.Message {
-	mi := &file_core_v1_backup_backup_proto_msgTypes[3]
+	mi := &file_api_core_v1_backup_backup_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -180,12 +180,93 @@ func (x *GetBackupStatusReply) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetBackupStatusReply.ProtoReflect.Descriptor instead.
 func (*GetBackupStatusReply) Descriptor() ([]byte, []int) {
-	return file_core_v1_backup_backup_proto_rawDescGZIP(), []int{3}
+	return file_api_core_v1_backup_backup_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *GetBackupStatusReply) GetStatus() *BackupStatus {
 	if x != nil {
 		return x.Status
+	}
+	return nil
+}
+
+type DownloadBackupKeyRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DownloadBackupKeyRequest) Reset() {
+	*x = DownloadBackupKeyRequest{}
+	mi := &file_api_core_v1_backup_backup_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DownloadBackupKeyRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DownloadBackupKeyRequest) ProtoMessage() {}
+
+func (x *DownloadBackupKeyRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_api_core_v1_backup_backup_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DownloadBackupKeyRequest.ProtoReflect.Descriptor instead.
+func (*DownloadBackupKeyRequest) Descriptor() ([]byte, []int) {
+	return file_api_core_v1_backup_backup_proto_rawDescGZIP(), []int{4}
+}
+
+type DownloadBackupKeyReply struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// 32 字节原始 AES 密钥；JSON 传输时按 protobuf 约定为 base64。
+	Key           []byte `protobuf:"bytes,1,opt,name=key,proto3" json:"key,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DownloadBackupKeyReply) Reset() {
+	*x = DownloadBackupKeyReply{}
+	mi := &file_api_core_v1_backup_backup_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DownloadBackupKeyReply) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DownloadBackupKeyReply) ProtoMessage() {}
+
+func (x *DownloadBackupKeyReply) ProtoReflect() protoreflect.Message {
+	mi := &file_api_core_v1_backup_backup_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DownloadBackupKeyReply.ProtoReflect.Descriptor instead.
+func (*DownloadBackupKeyReply) Descriptor() ([]byte, []int) {
+	return file_api_core_v1_backup_backup_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *DownloadBackupKeyReply) GetKey() []byte {
+	if x != nil {
+		return x.Key
 	}
 	return nil
 }
@@ -210,7 +291,7 @@ type BackupStatus struct {
 
 func (x *BackupStatus) Reset() {
 	*x = BackupStatus{}
-	mi := &file_core_v1_backup_backup_proto_msgTypes[4]
+	mi := &file_api_core_v1_backup_backup_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -222,7 +303,7 @@ func (x *BackupStatus) String() string {
 func (*BackupStatus) ProtoMessage() {}
 
 func (x *BackupStatus) ProtoReflect() protoreflect.Message {
-	mi := &file_core_v1_backup_backup_proto_msgTypes[4]
+	mi := &file_api_core_v1_backup_backup_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -235,7 +316,7 @@ func (x *BackupStatus) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BackupStatus.ProtoReflect.Descriptor instead.
 func (*BackupStatus) Descriptor() ([]byte, []int) {
-	return file_core_v1_backup_backup_proto_rawDescGZIP(), []int{4}
+	return file_api_core_v1_backup_backup_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *BackupStatus) GetEnabled() bool {
@@ -322,18 +403,21 @@ func (x *BackupStatus) GetDatabaseCount() int32 {
 	return 0
 }
 
-var File_core_v1_backup_backup_proto protoreflect.FileDescriptor
+var File_api_core_v1_backup_backup_proto protoreflect.FileDescriptor
 
-const file_core_v1_backup_backup_proto_rawDesc = "" +
+const file_api_core_v1_backup_backup_proto_rawDesc = "" +
 	"\n" +
-	"\x1bcore/v1/backup/backup.proto\x12\x12api.core.v1.backup\x1a\x1cgoogle/api/annotations.proto\"\x12\n" +
+	"\x1fapi/core/v1/backup/backup.proto\x12\x12api.core.v1.backup\x1a\x1cgoogle/api/annotations.proto\"\x12\n" +
 	"\x10RunBackupRequest\"f\n" +
 	"\x0eRunBackupReply\x12\x1a\n" +
 	"\baccepted\x18\x01 \x01(\bR\baccepted\x128\n" +
 	"\x06status\x18\x02 \x01(\v2 .api.core.v1.backup.BackupStatusR\x06status\"\x18\n" +
 	"\x16GetBackupStatusRequest\"P\n" +
 	"\x14GetBackupStatusReply\x128\n" +
-	"\x06status\x18\x01 \x01(\v2 .api.core.v1.backup.BackupStatusR\x06status\"\xe3\x02\n" +
+	"\x06status\x18\x01 \x01(\v2 .api.core.v1.backup.BackupStatusR\x06status\"\x1a\n" +
+	"\x18DownloadBackupKeyRequest\"*\n" +
+	"\x16DownloadBackupKeyReply\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\fR\x03key\"\xe3\x02\n" +
 	"\fBackupStatus\x12\x18\n" +
 	"\aenabled\x18\x01 \x01(\bR\aenabled\x12\x16\n" +
 	"\x06status\x18\x02 \x01(\tR\x06status\x12\x18\n" +
@@ -350,66 +434,71 @@ const file_core_v1_backup_backup_proto_rawDesc = "" +
 	"\farchive_size\x18\n" +
 	" \x01(\x03R\varchiveSize\x12\x16\n" +
 	"\x06sha256\x18\v \x01(\tR\x06sha256\x12%\n" +
-	"\x0edatabase_count\x18\f \x01(\x05R\rdatabaseCount2\xf9\x01\n" +
+	"\x0edatabase_count\x18\f \x01(\x05R\rdatabaseCount2\x80\x03\n" +
 	"\x06Backup\x12o\n" +
 	"\x03Run\x12$.api.core.v1.backup.RunBackupRequest\x1a\".api.core.v1.backup.RunBackupReply\"\x1e\x82\xd3\xe4\x93\x02\x18:\x01*\"\x13/v1/core/backup/run\x12~\n" +
-	"\x06Status\x12*.api.core.v1.backup.GetBackupStatusRequest\x1a(.api.core.v1.backup.GetBackupStatusReply\"\x1e\x82\xd3\xe4\x93\x02\x18\x12\x16/v1/core/backup/statusB;\n" +
+	"\x06Status\x12*.api.core.v1.backup.GetBackupStatusRequest\x1a(.api.core.v1.backup.GetBackupStatusReply\"\x1e\x82\xd3\xe4\x93\x02\x18\x12\x16/v1/core/backup/status\x12\x84\x01\n" +
+	"\vDownloadKey\x12,.api.core.v1.backup.DownloadBackupKeyRequest\x1a*.api.core.v1.backup.DownloadBackupKeyReply\"\x1b\x82\xd3\xe4\x93\x02\x15\x12\x13/v1/core/backup/keyB;\n" +
 	"\x12api.core.v1.backupP\x01Z#cwxu-algo/api/core/v1/backup;backupb\x06proto3"
 
 var (
-	file_core_v1_backup_backup_proto_rawDescOnce sync.Once
-	file_core_v1_backup_backup_proto_rawDescData []byte
+	file_api_core_v1_backup_backup_proto_rawDescOnce sync.Once
+	file_api_core_v1_backup_backup_proto_rawDescData []byte
 )
 
-func file_core_v1_backup_backup_proto_rawDescGZIP() []byte {
-	file_core_v1_backup_backup_proto_rawDescOnce.Do(func() {
-		file_core_v1_backup_backup_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_core_v1_backup_backup_proto_rawDesc), len(file_core_v1_backup_backup_proto_rawDesc)))
+func file_api_core_v1_backup_backup_proto_rawDescGZIP() []byte {
+	file_api_core_v1_backup_backup_proto_rawDescOnce.Do(func() {
+		file_api_core_v1_backup_backup_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_api_core_v1_backup_backup_proto_rawDesc), len(file_api_core_v1_backup_backup_proto_rawDesc)))
 	})
-	return file_core_v1_backup_backup_proto_rawDescData
+	return file_api_core_v1_backup_backup_proto_rawDescData
 }
 
-var file_core_v1_backup_backup_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
-var file_core_v1_backup_backup_proto_goTypes = []any{
-	(*RunBackupRequest)(nil),       // 0: api.core.v1.backup.RunBackupRequest
-	(*RunBackupReply)(nil),         // 1: api.core.v1.backup.RunBackupReply
-	(*GetBackupStatusRequest)(nil), // 2: api.core.v1.backup.GetBackupStatusRequest
-	(*GetBackupStatusReply)(nil),   // 3: api.core.v1.backup.GetBackupStatusReply
-	(*BackupStatus)(nil),           // 4: api.core.v1.backup.BackupStatus
+var file_api_core_v1_backup_backup_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
+var file_api_core_v1_backup_backup_proto_goTypes = []any{
+	(*RunBackupRequest)(nil),         // 0: api.core.v1.backup.RunBackupRequest
+	(*RunBackupReply)(nil),           // 1: api.core.v1.backup.RunBackupReply
+	(*GetBackupStatusRequest)(nil),   // 2: api.core.v1.backup.GetBackupStatusRequest
+	(*GetBackupStatusReply)(nil),     // 3: api.core.v1.backup.GetBackupStatusReply
+	(*DownloadBackupKeyRequest)(nil), // 4: api.core.v1.backup.DownloadBackupKeyRequest
+	(*DownloadBackupKeyReply)(nil),   // 5: api.core.v1.backup.DownloadBackupKeyReply
+	(*BackupStatus)(nil),             // 6: api.core.v1.backup.BackupStatus
 }
-var file_core_v1_backup_backup_proto_depIdxs = []int32{
-	4, // 0: api.core.v1.backup.RunBackupReply.status:type_name -> api.core.v1.backup.BackupStatus
-	4, // 1: api.core.v1.backup.GetBackupStatusReply.status:type_name -> api.core.v1.backup.BackupStatus
+var file_api_core_v1_backup_backup_proto_depIdxs = []int32{
+	6, // 0: api.core.v1.backup.RunBackupReply.status:type_name -> api.core.v1.backup.BackupStatus
+	6, // 1: api.core.v1.backup.GetBackupStatusReply.status:type_name -> api.core.v1.backup.BackupStatus
 	0, // 2: api.core.v1.backup.Backup.Run:input_type -> api.core.v1.backup.RunBackupRequest
 	2, // 3: api.core.v1.backup.Backup.Status:input_type -> api.core.v1.backup.GetBackupStatusRequest
-	1, // 4: api.core.v1.backup.Backup.Run:output_type -> api.core.v1.backup.RunBackupReply
-	3, // 5: api.core.v1.backup.Backup.Status:output_type -> api.core.v1.backup.GetBackupStatusReply
-	4, // [4:6] is the sub-list for method output_type
-	2, // [2:4] is the sub-list for method input_type
+	4, // 4: api.core.v1.backup.Backup.DownloadKey:input_type -> api.core.v1.backup.DownloadBackupKeyRequest
+	1, // 5: api.core.v1.backup.Backup.Run:output_type -> api.core.v1.backup.RunBackupReply
+	3, // 6: api.core.v1.backup.Backup.Status:output_type -> api.core.v1.backup.GetBackupStatusReply
+	5, // 7: api.core.v1.backup.Backup.DownloadKey:output_type -> api.core.v1.backup.DownloadBackupKeyReply
+	5, // [5:8] is the sub-list for method output_type
+	2, // [2:5] is the sub-list for method input_type
 	2, // [2:2] is the sub-list for extension type_name
 	2, // [2:2] is the sub-list for extension extendee
 	0, // [0:2] is the sub-list for field type_name
 }
 
-func init() { file_core_v1_backup_backup_proto_init() }
-func file_core_v1_backup_backup_proto_init() {
-	if File_core_v1_backup_backup_proto != nil {
+func init() { file_api_core_v1_backup_backup_proto_init() }
+func file_api_core_v1_backup_backup_proto_init() {
+	if File_api_core_v1_backup_backup_proto != nil {
 		return
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
-			RawDescriptor: unsafe.Slice(unsafe.StringData(file_core_v1_backup_backup_proto_rawDesc), len(file_core_v1_backup_backup_proto_rawDesc)),
+			RawDescriptor: unsafe.Slice(unsafe.StringData(file_api_core_v1_backup_backup_proto_rawDesc), len(file_api_core_v1_backup_backup_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   5,
+			NumMessages:   7,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
-		GoTypes:           file_core_v1_backup_backup_proto_goTypes,
-		DependencyIndexes: file_core_v1_backup_backup_proto_depIdxs,
-		MessageInfos:      file_core_v1_backup_backup_proto_msgTypes,
+		GoTypes:           file_api_core_v1_backup_backup_proto_goTypes,
+		DependencyIndexes: file_api_core_v1_backup_backup_proto_depIdxs,
+		MessageInfos:      file_api_core_v1_backup_backup_proto_msgTypes,
 	}.Build()
-	File_core_v1_backup_backup_proto = out.File
-	file_core_v1_backup_backup_proto_goTypes = nil
-	file_core_v1_backup_backup_proto_depIdxs = nil
+	File_api_core_v1_backup_backup_proto = out.File
+	file_api_core_v1_backup_backup_proto_goTypes = nil
+	file_api_core_v1_backup_backup_proto_depIdxs = nil
 }
