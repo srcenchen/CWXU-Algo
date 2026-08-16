@@ -897,7 +897,8 @@ git add cmd/goalgo-ops/init.go cmd/goalgo-ops/main.go internal/opsinstall/instal
 def test_install_uses_progress_and_creates_admin(self):
     main = read("cmd/goalgo-ops/main.go")
     self.assertIn("opsprogress", main)
-    self.assertIn("MarkAdminCreated", main)
+    self.assertIn("AdminCreated", main)
+    self.assertIn("opsadmin.Bootstrap", main)
     self.assertIn("ResolveLatest", main)
 ```
 
