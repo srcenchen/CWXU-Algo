@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -21,15 +22,25 @@ import (
 
 const confirmToken = "RESTORE"
 
-// requireBackupTools 检查宿主机备份/恢复必需命令，缺失时给出安装提示。
+// requireBackupTools 检查宿主机备份/恢复必需命令：zstd 存在，pg_restore 存在且版本 >=18（备份由 PG18 生成）。
 func requireBackupTools(ctx context.Context, runner opsexec.Command) error {
-	for _, tool := range []string{"pg_restore", "zstd"} {
-		if err := opsexec.RequireCommand(ctx, runner, tool); err != nil {
-			return fmt.Errorf("缺少 %s：请安装（apt install -y postgresql-client zstd）", tool)
-		}
+	if err := opsexec.RequireCommand(ctx, runner, "zstd"); err != nil {
+		return fmt.Errorf("缺少 zstd：请安装（apt install -y zstd）")
+	}
+	if err := opsexec.RequireCommand(ctx, runner, "pg_restore"); err != nil {
+		return fmt.Errorf("缺少 pg_restore：请安装（apt install -y postgresql-client-18）")
+	}
+	output, err := runner.CombinedOutput(ctx, "pg_restore", "--version")
+	if err != nil {
+		return fmt.Errorf("pg_restore --version：%w", err)
+	}
+	if !pgRestoreVersion18.MatchString(output) {
+		return fmt.Errorf("pg_restore 版本过低：备份由 PostgreSQL 18 生成，请安装 postgresql-client-18（当前 %s）", strings.TrimSpace(output))
 	}
 	return nil
 }
+
+var pgRestoreVersion18 = regexp.MustCompile(`\(PostgreSQL\) 18\.`)
 
 func cmdRestore(args []string, runner opsexec.Command) int {
 	var rootPath, archive, keyFile string

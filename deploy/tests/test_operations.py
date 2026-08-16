@@ -119,7 +119,8 @@ class OperationalScriptTests(unittest.TestCase):
         restore = read("cmd/goalgo-ops/restore.go")
         self.assertIn("pg_restore", restore)
         self.assertIn("zstd", restore)
-        self.assertIn("postgresql-client", restore)
+        self.assertIn("postgresql-client-18", restore)
+        self.assertIn("18.", restore)
 
     def test_shell_scripts_parse(self):
         scripts = sorted((DEPLOY / "scripts").glob("*.sh"))
