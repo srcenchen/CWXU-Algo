@@ -105,7 +105,7 @@ func cmdRuntime(command string, args []string, runner opsexec.Command) int {
 	if err != nil {
 		return fail("参数", err)
 	}
-	root, err := opsroot.Resolve(rootPath)
+	root, err := resolveInstallRoot(rootPath)
 	if err != nil {
 		return fail("根目录", err)
 	}

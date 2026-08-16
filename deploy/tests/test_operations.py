@@ -123,6 +123,7 @@ class OperationalScriptTests(unittest.TestCase):
         self.assertIn("18.", restore)
         self.assertIn("CORE_DATA_IMAGE", restore)
         self.assertIn("ContainerToolRunner", restore)
+        self.assertIn("resolveInstallRoot", restore)
 
     def test_shell_scripts_parse(self):
         scripts = sorted((DEPLOY / "scripts").glob("*.sh"))

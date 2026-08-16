@@ -54,7 +54,7 @@ func cmdRestore(args []string, runner opsexec.Command) int {
 	if err := flags.Parse(args); err != nil {
 		return fail("restore", err)
 	}
-	root, err := opsroot.Resolve(rootPath)
+	root, err := resolveInstallRoot(rootPath)
 	if err != nil {
 		return fail("restore", err)
 	}
