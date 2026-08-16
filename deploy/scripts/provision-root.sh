@@ -41,6 +41,7 @@ generate_secret "$root/secrets/redis_password" 32
 generate_secret "$root/secrets/rabbitmq_password" 32
 generate_secret "$root/secrets/backup_encryption_key" 32
 generate_secret "$root/secrets/config_encryption_key" 32
+generate_secret "$root/secrets/jwt_secret" 32
 
 if [ ! -s "$root/secrets/jwt_private_key.pem" ]; then
     umask 077
@@ -58,6 +59,7 @@ postgres_password=$(tr -d '\r\n' <"$root/secrets/postgres_password")
 redis_password=$(tr -d '\r\n' <"$root/secrets/redis_password")
 rabbitmq_password=$(tr -d '\r\n' <"$root/secrets/rabbitmq_password")
 config_encryption_key=$(tr -d '\r\n' <"$root/secrets/config_encryption_key")
+jwt_secret=$(tr -d '\r\n' <"$root/secrets/jwt_secret")
 umask 077
 {
     printf 'USER_DATABASE_DSN=host=postgres user=goalgo password=%s dbname=algo_user port=5432 sslmode=disable TimeZone=Asia/Shanghai\n' "$postgres_password"
@@ -65,12 +67,13 @@ umask 077
     printf 'REDIS_ADDR=redis:6379\nREDIS_PASSWORD=%s\n' "$redis_password"
     printf 'AMQP_DSN=amqp://goalgo:%s@rabbitmq:5672/goalgo\n' "$rabbitmq_password"
     printf 'CONFIG_ENCRYPTION_KEY=%s\n' "$config_encryption_key"
+    printf 'CWXU_JWT_SECRET=%s\n' "$jwt_secret"
     printf 'JWT_PRIVATE_KEY_FILE=/run/secrets/jwt_private_key.pem\n'
     printf 'JWT_PUBLIC_KEY_FILE=/run/secrets/jwt_public_key.pem\n'
 } >"$root/secrets/app.env.tmp.$$"
 chmod 0600 "$root/secrets/app.env.tmp.$$"
 mv "$root/secrets/app.env.tmp.$$" "$root/secrets/app.env"
-unset postgres_password redis_password rabbitmq_password config_encryption_key
+unset postgres_password redis_password rabbitmq_password config_encryption_key jwt_secret
 
 if [ "$(id -u)" -eq 0 ]; then
     chown 10001:10001 "$root/secrets/backup_encryption_key" "$root/secrets/jwt_private_key.pem" "$root/secrets/jwt_public_key.pem"

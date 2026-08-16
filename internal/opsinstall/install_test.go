@@ -3,6 +3,7 @@ package opsinstall
 import (
 	"context"
 	"os"
+	"strings"
 	"testing"
 
 	"cwxu-algo/internal/opsroot"
@@ -122,8 +123,32 @@ func TestAppEnvHasNoEmbeddedNewlinesInDSNs(t *testing.T) {
 	}
 }
 
-func TestAdminCreatedMarker(t *testing.T) {
+func TestAppEnvIncludesJWTSecret(t *testing.T) {
 	root, err := opsroot.Resolve(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	inst := New(root)
+	if err := inst.Install(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	content, err := os.ReadFile(root.Join("secrets", "app.env"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, line := range splitLines(string(content)) {
+		if strings.HasPrefix(line, "CWXU_JWT_SECRET=") {
+			value := strings.TrimPrefix(line, "CWXU_JWT_SECRET=")
+			if len(value) < 32 {
+				t.Fatalf("CWXU_JWT_SECRET must be >= 32 chars, got %d", len(value))
+			}
+			return
+		}
+	}
+	t.Fatal("app.env must define CWXU_JWT_SECRET")
+}
+
+func TestAdminCreatedMarker(t *testing.T) {	root, err := opsroot.Resolve(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

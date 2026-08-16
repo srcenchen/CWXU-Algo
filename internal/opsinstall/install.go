@@ -40,7 +40,7 @@ func (i *Installer) Scaffold() error {
 }
 
 func (i *Installer) Secrets() error {
-	for _, secret := range []string{"postgres_password", "redis_password", "rabbitmq_password", "config_encryption_key"} {
+	for _, secret := range []string{"postgres_password", "redis_password", "rabbitmq_password", "config_encryption_key", "jwt_secret"} {
 		if err := writeHexSecret(i.Root.Path, "secrets/"+secret, 32); err != nil {
 			return err
 		}
@@ -122,15 +122,17 @@ func writeAppEnv(root string) error {
 	redisPassword := read("secrets/redis_password")
 	rabbitmqPassword := read("secrets/rabbitmq_password")
 	configEncryptionKey := read("secrets/config_encryption_key")
+	jwtSecret := read("secrets/jwt_secret")
 	content := fmt.Sprintf(
 		"USER_DATABASE_DSN=host=postgres user=goalgo password=%s dbname=algo_user port=5432 sslmode=disable TimeZone=Asia/Shanghai\n"+
 			"CORE_DATABASE_DSN=host=postgres user=goalgo password=%s dbname=algo_core_data port=5432 sslmode=disable TimeZone=Asia/Shanghai\n"+
 			"REDIS_ADDR=redis:6379\nREDIS_PASSWORD=%s\n"+
 			"AMQP_DSN=amqp://goalgo:%s@rabbitmq:5672/goalgo\n"+
 			"CONFIG_ENCRYPTION_KEY=%s\n"+
+			"CWXU_JWT_SECRET=%s\n"+
 			"JWT_PRIVATE_KEY_FILE=/run/secrets/jwt_private_key.pem\n"+
 			"JWT_PUBLIC_KEY_FILE=/run/secrets/jwt_public_key.pem\n",
-		postgresPassword, postgresPassword, redisPassword, rabbitmqPassword, configEncryptionKey)
+		postgresPassword, postgresPassword, redisPassword, rabbitmqPassword, configEncryptionKey, jwtSecret)
 	target := filepath.Join(root, "secrets", "app.env")
 	return atomicWrite(target, []byte(content), 0o600)
 }
