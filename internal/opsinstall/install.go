@@ -1,0 +1,173 @@
+package opsinstall
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"cwxu-algo/internal/opsroot"
+)
+
+type Installer struct {
+	Root *opsroot.Root
+}
+
+func New(root *opsroot.Root) *Installer {
+	return &Installer{Root: root}
+}
+
+func (i *Installer) Install(ctx context.Context) error {
+	if err := i.Root.EnsureLayout(); err != nil {
+		return err
+	}
+	for _, managed := range managedAssets() {
+		if err := writeManaged(i.Root.Path, managed); err != nil {
+			return err
+		}
+	}
+	if err := writeEnvIfMissing(i.Root.Path); err != nil {
+		return err
+	}
+	for _, secret := range []string{"postgres_password", "redis_password", "rabbitmq_password", "config_encryption_key"} {
+		if err := writeHexSecret(i.Root.Path, "secrets/"+secret, 32); err != nil {
+			return err
+		}
+	}
+	if err := writeSecret(i.Root.Path, "secrets/backup_encryption_key", 32); err != nil {
+		return err
+	}
+	if err := generateRSAKeyPair(i.Root.Path, 3072); err != nil {
+		return err
+	}
+	if err := writeAppEnv(i.Root.Path); err != nil {
+		return err
+	}
+	if err := applyOwnership(i.Root.Path); err != nil {
+		return err
+	}
+	return writeInstallMarker(i.Root)
+}
+
+type managedAsset struct {
+	source     string
+	destination string
+}
+
+func managedAssets() []managedAsset {
+	return []managedAsset{
+		{source: "compose.yaml", destination: "compose.yaml"},
+		{source: "config/gateway.yaml", destination: "config/gateway.yaml"},
+		{source: "config/user.yaml", destination: "config/user.yaml"},
+		{source: "config/core-data.yaml", destination: "config/core-data.yaml"},
+		{source: "config/agent.yaml", destination: "config/agent.yaml"},
+		{source: "config/postgres-init.sh", destination: "config/postgres-init.sh"},
+		{source: "docker/nginx.conf", destination: "config/nginx.conf"},
+		{source: "docker/rabbitmq-entrypoint.sh", destination: "config/rabbitmq-entrypoint.sh"},
+	}
+}
+
+func writeManaged(root string, asset managedAsset) error {
+	content, err := ReadAsset(asset.source)
+	if err != nil {
+		return err
+	}
+	target := filepath.Join(root, asset.destination)
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		return err
+	}
+	mode := os.FileMode(0o644)
+	if filepath.Ext(asset.destination) == ".sh" {
+		mode = 0o755
+	}
+	return atomicWrite(target, content, mode)
+}
+
+func writeEnvIfMissing(root string) error {
+	target := filepath.Join(root, ".env")
+	if _, err := os.Stat(target); err == nil {
+		return nil
+	}
+	content, err := ReadAsset("env.example")
+	if err != nil {
+		return err
+	}
+	rendered := []byte(fmt.Sprintf("GOALGO_ROOT=%s\n%s", root, string(content)))
+	if err := atomicWrite(target, rendered, 0o600); err != nil {
+		return err
+	}
+	return nil
+}
+
+func writeAppEnv(root string) error {
+	read := func(relative string) string {
+		value, err := readSecret(root, relative)
+		if err != nil {
+			return ""
+		}
+		return strings.TrimSpace(value)
+	}
+	postgresPassword := read("secrets/postgres_password")
+	redisPassword := read("secrets/redis_password")
+	rabbitmqPassword := read("secrets/rabbitmq_password")
+	configEncryptionKey := read("secrets/config_encryption_key")
+	content := fmt.Sprintf(
+		"USER_DATABASE_DSN=host=postgres user=goalgo password=%s dbname=algo_user port=5432 sslmode=disable TimeZone=Asia/Shanghai\n"+
+			"CORE_DATABASE_DSN=host=postgres user=goalgo password=%s dbname=algo_core_data port=5432 sslmode=disable TimeZone=Asia/Shanghai\n"+
+			"REDIS_ADDR=redis:6379\nREDIS_PASSWORD=%s\n"+
+			"AMQP_DSN=amqp://goalgo:%s@rabbitmq:5672/goalgo\n"+
+			"CONFIG_ENCRYPTION_KEY=%s\n"+
+			"JWT_PRIVATE_KEY_FILE=/run/secrets/jwt_private_key.pem\n"+
+			"JWT_PUBLIC_KEY_FILE=/run/secrets/jwt_public_key.pem\n",
+		postgresPassword, postgresPassword, redisPassword, rabbitmqPassword, configEncryptionKey)
+	target := filepath.Join(root, "secrets", "app.env")
+	return atomicWrite(target, []byte(content), 0o600)
+}
+
+func applyOwnership(root string) error {
+	if os.Geteuid() != 0 {
+		return nil
+	}
+	// Container data directories expect specific UIDs.
+	owners := map[string]int{
+		"data/postgres": 999,
+		"data/redis":    999,
+		"data/rabbitmq": 100,
+		"data/consul":   100,
+		"data/backups":  10001,
+	}
+	for relative, uid := range owners {
+		target := filepath.Join(root, relative)
+		if err := os.Chown(target, uid, 1000); err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return fmt.Errorf("chown %s：%w", relative, err)
+		}
+	}
+	for _, relative := range []string{"secrets/jwt_private_key.pem", "secrets/jwt_public_key.pem", "secrets/backup_encryption_key"} {
+		target := filepath.Join(root, relative)
+		if err := os.Chown(target, 10001, 10001); err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return fmt.Errorf("chown %s：%w", relative, err)
+		}
+	}
+	return nil
+}
+
+func writeInstallMarker(root *opsroot.Root) error {
+	marker := map[string]interface{}{
+		"schemaVersion": 1,
+		"installedAt":   time.Now().UTC().Format(time.RFC3339),
+	}
+	data, err := json.MarshalIndent(marker, "", "  ")
+	if err != nil {
+		return err
+	}
+	return atomicWrite(root.Join("state", "install.json"), data, 0o644)
+}
