@@ -75,6 +75,11 @@
 - `Done(message)`：成功摘要到 stdout。
 - `Fail(phase, err)`：统一失败（复用 `fail` 语义，`goalgo-ops: <阶段>: ...`）。
 - `install` 使用固定 5 步：初始化目录 / 生成密钥与 JWT / 解析发布镜像 / 创建管理员（如无）/ 启动并冒烟。
+- **镜像拉取与容器创建也必须有进度提示**：第 5 步内拆出可见子步骤——
+  - `[5.x] 拉取发布镜像`（`compose pull` 前输出，注明 digest/标签来源）
+  - `[5.x] 创建并启动容器`（`compose up` 前输出）
+  - `[5.x] 等待健康并冒烟`（`up --wait`、`Health`、`Smoke` 前输出）
+- 对 `install`、`deploy`、`restart`、`rollback` 等会执行 `Pull`/`Up` 的命令，同样在 `compose.Pull` 与 `compose.Up` 前输出对应子步骤提示；避免长时间静默。
 - `init`、`restore`、`backup download` 在关键阶段同样输出阶段行；`restore` 现有 `printf` 步骤提示保留并统一格式。
 
 ## 6. 错误与安全
@@ -89,6 +94,7 @@
 - `internal/opsprompt`：默认值、非 TTY `ErrNonInteractive` 单测。
 - `internal/opsprogress`：输出格式单测。
 - `internal/opsinstall`：`adminCreated` 标记读写单测。
+- `internal/opscompose`：`Pull`/`Up` 进度输出（若在 compose 层实现）或调用点提示的单测。
 - 命令层：注入 fake runner（沿用 `opsexec` 模式）测「缺参 → 交互提示 / 报错」分支。
 - `deploy/tests/test_operations.py`：断言 usage 含 `init`；install 帮助含 `--release-file`；非交互提示存在。
 
