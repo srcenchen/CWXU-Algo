@@ -67,6 +67,11 @@ class OperationalScriptTests(unittest.TestCase):
         self.assertIn("JWT_PUBLIC_KEY_FILE", entrypoint)
         self.assertIn("gateway-entrypoint.sh", dockerfile)
 
+    def test_ops_usage_mentions_init_and_interactive(self):
+        main = read("cmd/goalgo-ops/main.go")
+        self.assertIn('"init"', main)
+        self.assertIn("init [--root]", main)
+
     def test_shell_scripts_parse(self):
         scripts = sorted((DEPLOY / "scripts").glob("*.sh"))
         result = subprocess.run(["sh", "-n", *map(str, scripts)], capture_output=True, text=True)

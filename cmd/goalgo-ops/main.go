@@ -31,6 +31,8 @@ func run(args []string) int {
 	runner := opsexec.Real{}
 
 	switch command {
+	case "init":
+		return cmdInit(commandArgs, runner)
 	case "install":
 		return cmdInstall(commandArgs, runner)
 	case "admin-init":
@@ -53,7 +55,8 @@ func usage() {
 	fmt.Fprintf(os.Stderr, `goalgo-ops: GoAlgo 运维命令行工具
 
 命令：
-  install [--root 目录] [--release-file 文件]   初始化目录并启动服务
+  init [--root] [--print]                交互式填写 .env（--print 仅打印模板）
+  install [--root 目录] [--release-file 文件]   初始化目录并启动服务（默认解析 latest）
   admin-init [--root 目录] [--admin-config 文件] 创建首个站点管理员
   deploy [release-file] [--root 目录]           部署一个不可变发布版本
   rollback [--root 目录]                        回滚到上一个发布版本
