@@ -1,11 +1,12 @@
 #!/bin/sh
 set -eu
 
-if [ -n "${JWT_PRIVATE_KEY_FILE:-}" ]; then
+# 仅当文件存在时读取密钥：core-data/gateway 只挂载公钥，私钥文件缺失时跳过。
+if [ -n "${JWT_PRIVATE_KEY_FILE:-}" ] && [ -f "$JWT_PRIVATE_KEY_FILE" ]; then
     JWT_PRIVATE_KEY=$(awk '{printf "%s\\n", $0}' "$JWT_PRIVATE_KEY_FILE")
     export JWT_PRIVATE_KEY
 fi
-if [ -n "${JWT_PUBLIC_KEY_FILE:-}" ]; then
+if [ -n "${JWT_PUBLIC_KEY_FILE:-}" ] && [ -f "$JWT_PUBLIC_KEY_FILE" ]; then
     JWT_PUBLIC_KEY=$(awk '{printf "%s\\n", $0}' "$JWT_PUBLIC_KEY_FILE")
     export JWT_PUBLIC_KEY
 fi

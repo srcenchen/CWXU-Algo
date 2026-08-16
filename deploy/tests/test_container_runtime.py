@@ -177,6 +177,11 @@ class ContainerRuntimeTests(unittest.TestCase):
         self.assertIn("app/**/configs/config.yaml", ignored)
         self.assertIn(".goalgo-*", ignored)
 
+    def test_renderer_skips_missing_secret_files(self):
+        renderer = read("docker/render-config.sh")
+        self.assertIn('-f "$JWT_PRIVATE_KEY_FILE"', renderer)
+        self.assertIn('-f "$JWT_PUBLIC_KEY_FILE"', renderer)
+
     def test_rabbitmq_reads_mounted_password_without_file_environment_extension(self):
         compose = read("compose.yaml")
         self.assertNotIn("RABBITMQ_DEFAULT_PASS_FILE", compose)
