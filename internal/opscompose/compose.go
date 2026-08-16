@@ -123,12 +123,17 @@ func (c *Compose) Config(ctx context.Context) error {
 
 // RunService 在指定服务内运行一次性命令（docker compose run --rm -T，自动带起依赖）。
 // runOptions 会原样拼在 service 之前，entrypoint 覆盖与用户等选项可由此传入。
+// 使用流式输出，避免拉取依赖镜像等耗时操作期间无回显。
 func (c *Compose) RunService(ctx context.Context, service string, runOptions []string, args ...string) (string, error) {
 	full := []string{"run", "--rm", "-T"}
 	full = append(full, runOptions...)
 	full = append(full, service)
 	full = append(full, args...)
-	return c.Command(ctx, full...)
+	err := c.Run.Run(ctx, nil, os.Stdout, os.Stderr, "docker", append(c.baseArgs(), full...)...)
+	if err != nil {
+		return "", fmt.Errorf("compose run：%w", err)
+	}
+	return "", nil
 }
 
 func (c *Compose) Health(ctx context.Context) error {

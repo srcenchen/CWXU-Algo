@@ -45,11 +45,10 @@ func Bootstrap(ctx context.Context, root *opsroot.Root, compose *opscompose.Comp
 		return err
 	}
 	const containerMount = "/run/admin.env"
-	output, err := compose.RunService(ctx, "user",
+	if _, err := compose.RunService(ctx, "user",
 		[]string{"--user", "root", "--entrypoint", "/app/admin-init", "-v", configPath + ":" + containerMount + ":ro"},
-		"--admin-config", containerMount)
-	if err != nil {
-		return fmt.Errorf("docker compose run 失败：%w\n%s", err, output)
+		"--admin-config", containerMount); err != nil {
+		return fmt.Errorf("docker compose run 失败：%w", err)
 	}
 	return opsinstall.MarkAdminCreated(root)
 }

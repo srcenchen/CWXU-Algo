@@ -64,10 +64,6 @@ func installStart(ctx context.Context, compose *opscompose.Compose, progress *op
 		fmt.Fprintln(os.Stderr, "goalgo-ops: 安装：初始化完成；未检测到 docker compose，请安装后执行 `goalgo-ops start`")
 		return nil
 	}
-	progress.Sub("拉取发布镜像")
-	if err := compose.Pull(ctx); err != nil {
-		return fmt.Errorf("拉取镜像：%w", err)
-	}
 	progress.Sub("创建并启动容器")
 	if err := compose.Up(ctx, compose.WaitTimeout()); err != nil {
 		return fmt.Errorf("启动服务：%w", err)

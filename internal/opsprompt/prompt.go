@@ -48,13 +48,21 @@ func (p *Prompter) Password(prompt string) (string, error) {
 	if !p.TTY {
 		return "", ErrNonInteractive
 	}
+	fd := int(os.Stdin.Fd())
 	fmt.Fprint(p.Out, prompt+": ")
-	data, err := term.ReadPassword(int(os.Stdin.Fd()))
-	fmt.Fprintln(p.Out)
+	state, err := term.MakeRaw(fd)
 	if err != nil {
 		return "", err
 	}
-	return string(data), nil
+	defer func() {
+		_ = term.Restore(fd, state)
+		fmt.Fprintln(p.Out)
+	}()
+	line, err := p.In.ReadString('\n')
+	if err != nil && err != io.EOF {
+		return "", err
+	}
+	return strings.TrimRight(line, "\r\n"), nil
 }
 
 func (p *Prompter) Confirm(prompt string, def bool) (bool, error) {

@@ -442,6 +442,11 @@ func cmdInstall(args []string, runner opsexec.Command) int {
 		}
 	}
 
+	progress.Sub("拉取发布镜像")
+	if err := compose.Pull(ctx); err != nil {
+		return fail("安装", fmt.Errorf("拉取镜像：%w", err))
+	}
+
 	progress.Step("创建首个管理员（如无）")
 	if !opsinstall.AdminCreated(root) {
 		if err := opsadmin.Bootstrap(ctx, root, compose, "", opsprompt.New()); err != nil {

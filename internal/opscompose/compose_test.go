@@ -101,3 +101,23 @@ func TestPullAndUpUseStreamingRun(t *testing.T) {
 		t.Fatalf("Pull/Up must use Run (streaming), got %d streaming calls", runner.ran)
 	}
 }
+
+func TestRunServiceStreams(t *testing.T) {
+	root, err := opsroot.Resolve(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, relative := range []string{".env", "release.env", "compose.yaml"} {
+		if err := os.WriteFile(root.Join(relative), []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	runner := &streamRunner{}
+	compose := &Compose{Root: root, Run: runner}
+	if _, err := compose.RunService(context.Background(), "user", []string{"--user", "root"}, "--admin-config", "/run/admin.env"); err != nil {
+		t.Fatal(err)
+	}
+	if runner.ran != 1 {
+		t.Fatalf("RunService must use Run (streaming), got %d streaming calls", runner.ran)
+	}
+}
