@@ -57,17 +57,17 @@ func (c *Compose) CommandWithStdin(ctx context.Context, data []byte, args ...str
 }
 
 func (c *Compose) Up(ctx context.Context, timeout string) error {
-	output, err := c.Command(ctx, "up", "-d", "--wait", "--wait-timeout", timeout)
+	err := c.Run.Run(ctx, nil, os.Stdout, os.Stderr, "docker", append(c.baseArgs(), "up", "-d", "--wait", "--wait-timeout", timeout)...)
 	if err != nil {
-		return fmt.Errorf("compose up：%w\n%s", err, strings.TrimSpace(output))
+		return fmt.Errorf("compose up：%w", err)
 	}
 	return nil
 }
 
 func (c *Compose) Pull(ctx context.Context) error {
-	output, err := c.Command(ctx, "pull")
+	err := c.Run.Run(ctx, nil, os.Stdout, os.Stderr, "docker", append(c.baseArgs(), "pull")...)
 	if err != nil {
-		return fmt.Errorf("compose pull：%w\n%s", err, strings.TrimSpace(output))
+		return fmt.Errorf("compose pull：%w", err)
 	}
 	return nil
 }

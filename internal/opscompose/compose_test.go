@@ -3,6 +3,7 @@ package opscompose
 import (
 	"context"
 	"io"
+	"os"
 	"strings"
 	"testing"
 
@@ -64,5 +65,39 @@ func TestResolveLatestRejectsMissingDigest(t *testing.T) {
 	}}}
 	if _, err := compose.ResolveLatest(context.Background()); err == nil {
 		t.Fatal("expected error when digest missing")
+	}
+}
+
+type streamRunner struct{ ran int }
+
+func (f *streamRunner) CombinedOutput(ctx context.Context, name string, args ...string) (string, error) {
+	return "", nil
+}
+
+func (f *streamRunner) Run(ctx context.Context, stdin io.Reader, stdout, stderr io.Writer, name string, args ...string) error {
+	f.ran++
+	return nil
+}
+
+func TestPullAndUpUseStreamingRun(t *testing.T) {
+	root, err := opsroot.Resolve(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, relative := range []string{".env", "release.env", "compose.yaml"} {
+		if err := os.WriteFile(root.Join(relative), []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	runner := &streamRunner{}
+	compose := &Compose{Root: root, Run: runner}
+	if err := compose.Pull(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := compose.Up(context.Background(), "300"); err != nil {
+		t.Fatal(err)
+	}
+	if runner.ran != 2 {
+		t.Fatalf("Pull/Up must use Run (streaming), got %d streaming calls", runner.ran)
 	}
 }
