@@ -56,7 +56,7 @@ class OperationalScriptTests(unittest.TestCase):
         self.assertIn("app.env", script)
         self.assertNotRegex(script, r"(?m)^set -x")
         self.assertIn("chmod 0600", script)
-        self.assertIn('chown 10001:10001 "$root/secrets/jwt_private_key.pem"', script)
+        self.assertIn('chown 10001:10001 "$root/secrets/backup_encryption_key" "$root/secrets/jwt_private_key.pem" "$root/secrets/jwt_public_key.pem"', script)
 
     def test_gateway_loads_public_key_from_mounted_file(self):
         compose = read("deploy/compose.yaml")
