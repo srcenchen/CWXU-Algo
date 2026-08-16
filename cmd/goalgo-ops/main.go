@@ -35,6 +35,12 @@ func run(args []string) int {
 		return cmdInstall(commandArgs, runner)
 	case "admin-init":
 		return cmdAdminInit(commandArgs, runner)
+	case "backup":
+		return cmdBackup(commandArgs, runner)
+	case "restore":
+		return cmdRestore(commandArgs, runner)
+	case "config":
+		return cmdConfig(commandArgs, runner)
 	case "deploy", "rollback", "start", "stop", "restart", "status", "logs", "doctor":
 		return cmdRuntime(command, commandArgs, runner)
 	default:
@@ -53,6 +59,9 @@ func usage() {
   rollback [--root 目录]                        回滚到上一个发布版本
   start | stop | restart | status | logs [参数] [--root 目录]
   doctor [--root 目录]                          检查安装是否健康
+  backup verify|download [参数]                 离线校验 / 下载灾备归档
+  restore [--file|--latest] [--key-file] ...    从归档恢复整实例（需 --replace --confirm RESTORE）
+  config validate|export|import [参数]          校验 / 导出 / 导入配置与密钥
 
 `)
 }

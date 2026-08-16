@@ -1,8 +1,10 @@
 package opscompose
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"strconv"
@@ -15,6 +17,7 @@ import (
 
 type Runner interface {
 	CombinedOutput(ctx context.Context, name string, args ...string) (string, error)
+	Run(ctx context.Context, stdin io.Reader, stdout, stderr io.Writer, name string, args ...string) error
 }
 
 type Compose struct {
@@ -34,6 +37,22 @@ func (c *Compose) baseArgs() []string {
 func (c *Compose) Command(ctx context.Context, args ...string) (string, error) {
 	full := append(c.baseArgs(), args...)
 	return c.Run.CombinedOutput(ctx, "docker", full...)
+}
+
+// CommandWithStdin 运行命令并把 data 作为 stdin 传入（用于 psql/pg_restore 管道）。
+func (c *Compose) CommandWithStdin(ctx context.Context, data []byte, args ...string) (string, error) {
+	full := append(c.baseArgs(), args...)
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	err := c.Run.Run(ctx, bytes.NewReader(data), &stdout, &stderr, "docker", full...)
+	output := stdout.String()
+	if stderr.Len() > 0 {
+		if output != "" {
+			output += "\n"
+		}
+		output += stderr.String()
+	}
+	return output, err
 }
 
 func (c *Compose) Up(ctx context.Context, timeout string) error {
