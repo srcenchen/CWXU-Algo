@@ -18,19 +18,30 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - id: image-run
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
           script: |
-            const runs = await github.paginate(github.rest.actions.listWorkflowRuns, {
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              workflow_id: 'images.yml',
-              head_sha: context.sha,
-              status: 'success',
-              per_page: 100
-            });
-            if (runs.length === 0) core.setFailed(`No successful Images run found for ${context.sha}`);
-            core.setOutput('run-id', runs[0].id);
+            for (let attempt = 1; attempt <= 60; attempt++) {
+              const { data } = await github.rest.actions.listWorkflowRuns({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                workflow_id: 'images.yml',
+                head_sha: context.sha,
+                per_page: 10
+              });
+              const runs = data.workflow_runs;
+              if (runs.length === 0 || runs[0].status !== 'completed') {
+                core.info(`Waiting for Images run for ${context.sha} (${attempt}/60)`);
+                await new Promise(resolve => setTimeout(resolve, 15000));
+                continue;
+              }
+              if (runs[0].conclusion !== 'success') {
+                throw new Error(`Images run ${runs[0].id} concluded with ${runs[0].conclusion}`);
+              }
+              core.setOutput('run-id', runs[0].id);
+              return;
+            }
+            throw new Error(`Timed out waiting for Images run for ${context.sha}`);
       - uses: actions/download-artifact@v4
         with:
           pattern: release-manifest-*

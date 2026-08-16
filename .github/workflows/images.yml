@@ -47,6 +47,8 @@ jobs:
             frontend-source=./frontend
             shared-source=./frontend/shared
           push: true
+          provenance: false
+          sbom: false
           tags: ${{ env.ACR_IMAGE }}:frontend-sha-${{ steps.commits.outputs.backend }}
       - id: gateway
         uses: docker/build-push-action@v6
@@ -55,6 +57,8 @@ jobs:
           file: backend/deploy/docker/backend.Dockerfile
           target: gateway
           push: true
+          provenance: false
+          sbom: false
           tags: ${{ env.ACR_IMAGE }}:gateway-sha-${{ steps.commits.outputs.backend }}
       - id: user
         uses: docker/build-push-action@v6
@@ -63,6 +67,8 @@ jobs:
           file: backend/deploy/docker/backend.Dockerfile
           target: user
           push: true
+          provenance: false
+          sbom: false
           tags: ${{ env.ACR_IMAGE }}:user-sha-${{ steps.commits.outputs.backend }}
       - id: core_data
         uses: docker/build-push-action@v6
@@ -71,6 +77,8 @@ jobs:
           file: backend/deploy/docker/backend.Dockerfile
           target: core-data
           push: true
+          provenance: false
+          sbom: false
           tags: ${{ env.ACR_IMAGE }}:core-data-sha-${{ steps.commits.outputs.backend }}
       - id: agent
         uses: docker/build-push-action@v6
@@ -79,6 +87,8 @@ jobs:
           file: backend/deploy/docker/backend.Dockerfile
           target: agent
           push: true
+          provenance: false
+          sbom: false
           tags: ${{ env.ACR_IMAGE }}:agent-sha-${{ steps.commits.outputs.backend }}
       - name: Create digest manifest
         env:

@@ -99,6 +99,8 @@ class WorkflowTests(unittest.TestCase):
         self.assertIn("backendCommit", workflow)
         self.assertIn("frontendCommit", workflow)
         self.assertIn("release-manifest", workflow)
+        self.assertEqual(workflow.count("provenance: false"), 5)
+        self.assertEqual(workflow.count("sbom: false"), 5)
 
     def test_production_is_tag_only_approved_serial_self_hosted_deploy(self):
         workflow = read(".github/workflows/production.yml")
@@ -109,6 +111,8 @@ class WorkflowTests(unittest.TestCase):
         self.assertIn("cancel-in-progress: false", workflow)
         self.assertIn("actions: read", workflow)
         self.assertIn("deploy/scripts/deploy.sh", workflow)
+        self.assertIn("runs[0].status", workflow)
+        self.assertIn("runs[0].conclusion", workflow)
         self.assertNotIn("docker build", workflow)
         self.assertNotIn("ACR_PASSWORD", workflow)
 
