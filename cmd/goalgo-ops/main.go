@@ -393,6 +393,7 @@ func cmdInstall(args []string, runner opsexec.Command) int {
 	if err := inst.Install(ctx); err != nil {
 		return fail("安装", err)
 	}
+	compose := &opscompose.Compose{Root: root, Run: runner}
 	if releaseFile != "" {
 		release, err := opsrelease.ParseFile(releaseFile)
 		if err != nil {
@@ -401,8 +402,15 @@ func cmdInstall(args []string, runner opsexec.Command) int {
 		if err := release.WriteFile(root.Join("release.env")); err != nil {
 			return fail("安装", err)
 		}
+	} else {
+		release, err := compose.ResolveLatest(ctx)
+		if err != nil {
+			return fail("安装", err)
+		}
+		if err := release.WriteFile(root.Join("release.env")); err != nil {
+			return fail("安装", err)
+		}
 	}
-	compose := &opscompose.Compose{Root: root, Run: runner}
 	if err := compose.Version(ctx); err != nil {
 		fmt.Fprintln(os.Stderr, "goalgo-ops: 安装：初始化完成；未检测到 docker compose，请安装后执行 `goalgo-ops start`")
 		return 0

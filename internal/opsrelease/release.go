@@ -10,7 +10,9 @@ import (
 	"strings"
 )
 
-const imagePrefix = "registry.cn-hangzhou.aliyuncs.com/sanenchen/goalgo@sha256:"
+const Repository = "registry.cn-hangzhou.aliyuncs.com/sanenchen/goalgo"
+
+const imagePrefix = Repository + "@sha256:"
 
 var imageDigest = regexp.MustCompile(`^` + imagePrefix + `[0-9a-f]{64}$`)
 

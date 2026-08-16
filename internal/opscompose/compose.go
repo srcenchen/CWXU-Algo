@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -195,6 +196,31 @@ func (c *Compose) WaitTimeout() string {
 
 func (c *Compose) Release() (*opsrelease.Release, error) {
 	return opsrelease.ParseFile(c.Root.Join("release.env"))
+}
+
+// latestServices 与 ACR 镜像标签的 <service>-latest 约定一一对应。
+var latestServices = []string{"frontend", "gateway", "user", "core-data", "agent"}
+
+var digestInOutput = regexp.MustCompile(`sha256:[0-9a-f]{64}`)
+
+// ResolveLatest 解析 ACR 上各服务的 <service>-latest 标签，解析为不可变 digest 形式的 Release。
+// 生产机不直接引用可变标签，而是先把 latest 解析成 digest 后写入 release.env。
+func (c *Compose) ResolveLatest(ctx context.Context) (*opsrelease.Release, error) {
+	release := &opsrelease.Release{Images: map[string]string{}}
+	for _, service := range latestServices {
+		ref := opsrelease.Repository + ":" + service + "-latest"
+		output, err := c.Run.CombinedOutput(ctx, "docker", "manifest", "inspect", "--verbose", ref)
+		if err != nil {
+			return nil, fmt.Errorf("解析 %s：%w", ref, err)
+		}
+		match := digestInOutput.FindString(output)
+		if match == "" {
+			return nil, fmt.Errorf("解析 %s：未找到 digest", ref)
+		}
+		key := strings.ToUpper(strings.ReplaceAll(service, "-", "_")) + "_IMAGE"
+		release.Images[key] = opsrelease.Repository + "@" + match
+	}
+	return release, nil
 }
 
 func readFile(path string) (string, error) {
