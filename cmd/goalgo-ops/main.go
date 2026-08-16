@@ -46,7 +46,7 @@ func run(args []string) int {
 		return cmdRestore(commandArgs, runner)
 	case "config":
 		return cmdConfig(commandArgs, runner)
-	case "deploy", "rollback", "start", "stop", "restart", "status", "logs", "doctor":
+	case "deploy", "rollback", "start", "stop", "restart", "status", "logs", "doctor", "upgrade":
 		return cmdRuntime(command, commandArgs, runner)
 	default:
 		usage()
@@ -62,6 +62,7 @@ func usage() {
   install [--root 目录] [--release-file 文件]   初始化目录并启动服务（默认解析 latest）
   admin-init [--root 目录] [--admin-config 文件] 创建首个站点管理员
   deploy [release-file] [--root 目录]           部署一个不可变发布版本
+  upgrade [--root 目录]                        从 ACR 拉取最新镜像并升级（失败自动回滚）
   rollback [--root 目录]                        回滚到上一个发布版本
   start | stop | restart | status | logs [参数] [--root 目录]
   doctor [--root 目录]                          检查安装是否健康
@@ -135,6 +136,8 @@ func cmdRuntime(command string, args []string, runner opsexec.Command) int {
 		return runtimeDeploy(ctx, compose, args)
 	case "rollback":
 		return runtimeRollback(ctx, compose)
+	case "upgrade":
+		return runtimeUpgrade(ctx, compose)
 	case "doctor":
 		return runtimeDoctor(ctx, compose)
 	}

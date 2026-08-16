@@ -86,3 +86,49 @@ func deployCandidate(rootPath, current string, prompt *opsprompt.Prompter) (stri
 	}
 	return current, nil
 }
+
+// runtimeUpgrade 解析 ACR <svc>-latest 为 digest，与当前版本比对后升级；任一步失败自动回滚。
+func runtimeUpgrade(ctx context.Context, compose *opscompose.Compose) int {
+	if err := compose.Root.RequireFiles(); err != nil {
+		return fail("升级", err)
+	}
+	active, err := compose.Release()
+	if err != nil {
+		return fail("升级", err)
+	}
+	latest, err := compose.ResolveLatest(ctx)
+	if err != nil {
+		return fail("升级", err)
+	}
+	if releaseSame(latest, active) {
+		fmt.Fprintln(os.Stdout, "已是最新版本")
+		return 0
+	}
+	if err := latest.WriteFile(compose.Root.Join("release.previous.env")); err != nil {
+		return fail("升级", err)
+	}
+	if err := latest.WriteFile(compose.Root.Join("release.env")); err != nil {
+		return fail("升级", err)
+	}
+	rollback := func() { _ = rollbackFiles(compose, latest, active) }
+	opsprogress.Note(os.Stderr, "拉取发布镜像")
+	if err := compose.Pull(ctx); err != nil {
+		rollback()
+		return fail("升级", err)
+	}
+	opsprogress.Note(os.Stderr, "创建并启动容器")
+	if err := compose.Up(ctx, compose.WaitTimeout()); err != nil {
+		rollback()
+		return fail("升级", err)
+	}
+	if err := compose.Health(ctx); err != nil {
+		rollback()
+		return fail("升级", err)
+	}
+	if err := compose.Smoke(ctx); err != nil {
+		rollback()
+		return fail("升级", err)
+	}
+	opsprogress.Done(os.Stderr, "升级完成")
+	return 0
+}

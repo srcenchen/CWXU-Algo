@@ -88,6 +88,13 @@ class OperationalScriptTests(unittest.TestCase):
         config = read("cmd/goalgo-ops/config.go")
         self.assertIn("opsprompt", config)
 
+    def test_upgrade_resolves_latest_and_rolls_back_on_failure(self):
+        main = read("cmd/goalgo-ops/main.go")
+        self.assertIn('"upgrade"', main)
+        self.assertIn("ResolveLatest", main)
+        self.assertIn("rollbackFiles", main)
+        self.assertIn("release.previous.env", main)
+
     def test_shell_scripts_parse(self):
         scripts = sorted((DEPLOY / "scripts").glob("*.sh"))
         result = subprocess.run(["sh", "-n", *map(str, scripts)], capture_output=True, text=True)
