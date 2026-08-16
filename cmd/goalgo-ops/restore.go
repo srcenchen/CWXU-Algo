@@ -178,16 +178,16 @@ func cmdRestore(args []string, runner opsexec.Command) int {
 		return fail("restore", err)
 	}
 	psqlBase := []string{"exec", "-T", "postgres", "sh", "-c",
-		`PGPASSWORD="$(cat /run/secrets/postgres_password)" psql --dbname=postgres -q -v ON_ERROR_STOP=0`}
+		`PGPASSWORD="$(cat /run/secrets/postgres_password)" psql -U "$POSTGRES_USER" --dbname=postgres -q -v ON_ERROR_STOP=0`}
 	if _, err := compose.CommandWithStdin(ctx, globalsContent, psqlBase...); err != nil {
-		fmt.Fprintf(os.Stderr, "警告：globals 存在重复对象（可忽略）：%v\n", err)
+		fmt.Fprintf(os.Stderr, "警告：globals 恢复有误（可忽略，继续）：%v\n", err)
 	}
 
 	// 6. 逐个恢复数据库：先 DROP 再 pg_restore --create（stdin 管道传入 dump）。
 	for i, dump := range result.Dumps {
 		database := result.Manifest.Databases[i]
 		safe := sanitizeIdentifier(database)
-		dropCmd := fmt.Sprintf("PGPASSWORD=\"$(cat /run/secrets/postgres_password)\" psql --dbname=postgres -c 'DROP DATABASE IF EXISTS %s'", safe)
+		dropCmd := fmt.Sprintf("PGPASSWORD=\"$(cat /run/secrets/postgres_password)\" psql -U \"$POSTGRES_USER\" --dbname=postgres -c 'DROP DATABASE IF EXISTS %s'", safe)
 		if output, err := compose.Command(ctx, "exec", "-T", "postgres", "sh", "-c", dropCmd); err != nil {
 			_, _ = compose.Command(ctx, "stop", "postgres")
 			_ = rollback(backupDir)
@@ -200,7 +200,7 @@ func cmdRestore(args []string, runner opsexec.Command) int {
 			return fail("restore", err)
 		}
 		restoreCmd := []string{"exec", "-T", "postgres", "sh", "-c",
-			`PGPASSWORD="$(cat /run/secrets/postgres_password)" pg_restore --exit-on-error --create --dbname=postgres`}
+			`PGPASSWORD="$(cat /run/secrets/postgres_password)" pg_restore -U "$POSTGRES_USER" --exit-on-error --create --dbname=postgres`}
 		if _, err := compose.CommandWithStdin(ctx, data, restoreCmd...); err != nil {
 			_, _ = compose.Command(ctx, "stop", "postgres")
 			_ = rollback(backupDir)

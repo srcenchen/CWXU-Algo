@@ -124,6 +124,7 @@ class OperationalScriptTests(unittest.TestCase):
         self.assertIn("CORE_DATA_IMAGE", restore)
         self.assertIn("ContainerToolRunner", restore)
         self.assertIn("resolveInstallRoot", restore)
+        self.assertIn('"$POSTGRES_USER"', restore)
 
     def test_shell_scripts_parse(self):
         scripts = sorted((DEPLOY / "scripts").glob("*.sh"))
