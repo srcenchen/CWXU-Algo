@@ -79,6 +79,15 @@ class OperationalScriptTests(unittest.TestCase):
         self.assertIn("opsadmin.Bootstrap", main)
         self.assertIn("ResolveLatest", main)
 
+    def test_destructive_commands_prompt_when_missing_args(self):
+        restore = read("cmd/goalgo-ops/restore.go")
+        self.assertIn("opsprompt", restore)
+        self.assertIn("RESTORE", restore)
+        backup = read("cmd/goalgo-ops/backup.go")
+        self.assertIn("opsprompt", backup)
+        config = read("cmd/goalgo-ops/config.go")
+        self.assertIn("opsprompt", config)
+
     def test_shell_scripts_parse(self):
         scripts = sorted((DEPLOY / "scripts").glob("*.sh"))
         result = subprocess.run(["sh", "-n", *map(str, scripts)], capture_output=True, text=True)

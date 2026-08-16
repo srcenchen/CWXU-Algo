@@ -10,6 +10,7 @@ import (
 
 	"cwxu-algo/internal/opsbackup"
 	"cwxu-algo/internal/opsexec"
+	"cwxu-algo/internal/opsprompt"
 )
 
 func cmdBackup(args []string, runner opsexec.Command) int {
@@ -47,11 +48,27 @@ func backupVerify(args []string, runner opsexec.Command) int {
 	if err := flags.Parse(args); err != nil {
 		return fail("backup verify", err)
 	}
-	if archive == "" {
-		return fail("backup verify", fmt.Errorf("必须提供 --file"))
-	}
-	if keyFile == "" {
-		return fail("backup verify", fmt.Errorf("必须提供 --key-file"))
+	prompt := opsprompt.New()
+	if archive == "" || keyFile == "" {
+		if !prompt.TTY {
+			if archive == "" {
+				return fail("backup verify", fmt.Errorf("必须提供 --file"))
+			}
+			return fail("backup verify", fmt.Errorf("必须提供 --key-file"))
+		}
+		var err error
+		if archive == "" {
+			archive, err = prompt.String(".cwxubak 归档路径", "")
+			if err != nil {
+				return fail("backup verify", err)
+			}
+		}
+		if keyFile == "" {
+			keyFile, err = prompt.String("32 字节加密密钥文件路径", "")
+			if err != nil {
+				return fail("backup verify", err)
+			}
+		}
 	}
 	key, err := readKeyFile(keyFile)
 	if err != nil {
@@ -82,8 +99,30 @@ func backupDownload(args []string) int {
 	bucket := os.Getenv("UPYUN_BUCKET")
 	operator := os.Getenv("UPYUN_OPERATOR")
 	password := os.Getenv("UPYUN_PASSWORD")
+	prompt := opsprompt.New()
 	if bucket == "" || operator == "" || password == "" {
-		return fail("backup download", fmt.Errorf("需要环境变量 UPYUN_BUCKET / UPYUN_OPERATOR / UPYUN_PASSWORD"))
+		if !prompt.TTY {
+			return fail("backup download", fmt.Errorf("需要环境变量 UPYUN_BUCKET / UPYUN_OPERATOR / UPYUN_PASSWORD"))
+		}
+		var err error
+		if bucket == "" {
+			bucket, err = prompt.String("又拍云 Bucket", "")
+			if err != nil {
+				return fail("backup download", err)
+			}
+		}
+		if operator == "" {
+			operator, err = prompt.String("又拍云操作员", "")
+			if err != nil {
+				return fail("backup download", err)
+			}
+		}
+		if password == "" {
+			password, err = prompt.Password("又拍云操作员密码")
+			if err != nil {
+				return fail("backup download", err)
+			}
+		}
 	}
 	if prefix == "" {
 		prefix = "backups/core"

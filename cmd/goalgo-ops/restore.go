@@ -13,6 +13,7 @@ import (
 	"cwxu-algo/internal/opscompose"
 	"cwxu-algo/internal/opsexec"
 	"cwxu-algo/internal/opslock"
+	"cwxu-algo/internal/opsprompt"
 	"cwxu-algo/internal/opsroot"
 )
 
@@ -32,17 +33,55 @@ func cmdRestore(args []string, runner opsexec.Command) int {
 	if err := flags.Parse(args); err != nil {
 		return fail("restore", err)
 	}
-	if archive == "" && !useLatest {
-		return fail("restore", fmt.Errorf("必须提供 --file 或 --latest"))
+	root, err := opsroot.Resolve(rootPath)
+	if err != nil {
+		return fail("restore", err)
+	}
+	prompt := opsprompt.New()
+	if (archive == "" && !useLatest) || keyFile == "" || !confirm {
+		if !prompt.TTY {
+			if archive == "" && !useLatest {
+				return fail("restore", fmt.Errorf("必须提供 --file 或 --latest"))
+			}
+			if keyFile == "" {
+				return fail("restore", fmt.Errorf("必须提供 --key-file"))
+			}
+			if replace != confirm || !confirm {
+				return fail("restore", fmt.Errorf("覆盖已有数据必须同时提供 --replace --confirm "+confirmToken))
+			}
+		} else {
+			if archive == "" && !useLatest {
+				chosen, err := promptArchiveSource(root, prompt)
+				if err != nil {
+					return fail("restore", err)
+				}
+				if chosen == "" {
+					useLatest = true
+				} else {
+					archive = chosen
+				}
+			}
+			if keyFile == "" {
+				keyFile, err = prompt.String("备份加密密钥文件路径", "")
+				if err != nil {
+					return fail("restore", err)
+				}
+			}
+			if !confirm {
+				input, err := prompt.String(fmt.Sprintf("覆盖已有数据，请输入 %s 确认", confirmToken), "")
+				if err != nil {
+					return fail("restore", err)
+				}
+				if strings.TrimSpace(input) != confirmToken {
+					return fail("restore", fmt.Errorf("确认令牌不匹配，已取消"))
+				}
+				confirm = true
+				replace = true
+			}
+		}
 	}
 	if archive != "" && useLatest {
 		return fail("restore", fmt.Errorf("--file 与 --latest 不能同时使用"))
-	}
-	if keyFile == "" {
-		return fail("restore", fmt.Errorf("必须提供 --key-file"))
-	}
-	if replace != confirm || !confirm {
-		return fail("restore", fmt.Errorf("覆盖已有数据必须同时提供 --replace --confirm "+confirmToken))
 	}
 	key, err := readKeyFile(keyFile)
 	if err != nil {
@@ -50,10 +89,6 @@ func cmdRestore(args []string, runner opsexec.Command) int {
 	}
 	ctx, stop := signalContext()
 	defer stop()
-	root, err := opsroot.Resolve(rootPath)
-	if err != nil {
-		return fail("restore", err)
-	}
 	if root.IsProtectedInstall() && !opsroot.IsPrivileged() {
 		return fail("restore", fmt.Errorf("恢复需要 root 权限"))
 	}
@@ -172,8 +207,27 @@ func cmdRestore(args []string, runner opsexec.Command) int {
 	return 0
 }
 
-func downloadLatest(ctx context.Context, root *opsroot.Root) (string, error) {
-	bucket := os.Getenv("UPYUN_BUCKET")
+func promptArchiveSource(root *opsroot.Root, prompt *opsprompt.Prompter) (string, error) {
+	var candidates []string
+	for _, dir := range []string{root.Join("restore"), "."} {
+		matches, err := filepath.Glob(filepath.Join(dir, "*.cwxubak"))
+		if err != nil {
+			continue
+		}
+		candidates = append(candidates, matches...)
+	}
+	options := append(append([]string{}, candidates...), "从又拍云拉取最新归档")
+	idx, err := prompt.Choice("选择归档来源", len(options)-1, options...)
+	if err != nil {
+		return "", err
+	}
+	if idx == len(candidates) {
+		return "", nil
+	}
+	return candidates[idx], nil
+}
+
+func downloadLatest(ctx context.Context, root *opsroot.Root) (string, error) {	bucket := os.Getenv("UPYUN_BUCKET")
 	operator := os.Getenv("UPYUN_OPERATOR")
 	password := os.Getenv("UPYUN_PASSWORD")
 	prefix := os.Getenv("UPYUN_PREFIX")

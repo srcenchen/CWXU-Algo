@@ -11,6 +11,7 @@ import (
 
 	"cwxu-algo/internal/opscompose"
 	"cwxu-algo/internal/opsexec"
+	"cwxu-algo/internal/opsprompt"
 	"cwxu-algo/internal/opsrelease"
 	"cwxu-algo/internal/opsroot"
 )
@@ -122,7 +123,15 @@ func configImport(args []string) int {
 		return fail("config import", err)
 	}
 	if bundle == "" {
-		return fail("config import", fmt.Errorf("必须提供 --file"))
+		prompt := opsprompt.New()
+		if !prompt.TTY {
+			return fail("config import", fmt.Errorf("必须提供 --file"))
+		}
+		var err error
+		bundle, err = prompt.String("配置 tar 路径", "")
+		if err != nil {
+			return fail("config import", err)
+		}
 	}
 	root, err := opsroot.Resolve(rootPath)
 	if err != nil {
