@@ -58,11 +58,35 @@ func (p *Prompter) Password(prompt string) (string, error) {
 		_ = term.Restore(fd, state)
 		fmt.Fprintln(p.Out)
 	}()
-	line, err := p.In.ReadString('\n')
-	if err != nil && err != io.EOF {
-		return "", err
+	return p.readRawLine()
+}
+
+// readRawLine 逐字符读取直到 \r 或 \n（raw 模式下回车产生 \r），支持退格，0x03 视为中断。
+func (p *Prompter) readRawLine() (string, error) {
+	var builder strings.Builder
+	for {
+		ch, err := p.In.ReadByte()
+		if err != nil {
+			if err == io.EOF {
+				return builder.String(), nil
+			}
+			return "", err
+		}
+		switch ch {
+		case '\r', '\n':
+			return builder.String(), nil
+		case 0x03:
+			return "", errors.New("已中断")
+		case 0x7f, 0x08:
+			value := builder.String()
+			if len(value) > 0 {
+				builder.Reset()
+				builder.WriteString(value[:len(value)-1])
+			}
+		default:
+			builder.WriteByte(ch)
+		}
 	}
-	return strings.TrimRight(line, "\r\n"), nil
 }
 
 func (p *Prompter) Confirm(prompt string, def bool) (bool, error) {

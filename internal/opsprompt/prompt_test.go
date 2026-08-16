@@ -48,3 +48,38 @@ func TestConfirmFalseOnNo(t *testing.T) {
 		t.Fatalf("got %v, %v", ok, err)
 	}
 }
+
+func TestReadRawLineAcceptsCarriageReturn(t *testing.T) {
+	p := New()
+	p.TTY = true
+	p.In = bufio.NewReader(strings.NewReader("secret\r"))
+	line, err := p.readRawLine()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if line != "secret" {
+		t.Fatalf("got %q, want secret", line)
+	}
+}
+
+func TestReadRawLineHandlesBackspace(t *testing.T) {
+	p := New()
+	p.TTY = true
+	p.In = bufio.NewReader(strings.NewReader("abcd\x7fe\r"))
+	line, err := p.readRawLine()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if line != "abce" {
+		t.Fatalf("got %q, want abce", line)
+	}
+}
+
+func TestReadRawLineInterruptOnCtrlC(t *testing.T) {
+	p := New()
+	p.TTY = true
+	p.In = bufio.NewReader(strings.NewReader("\x03"))
+	if _, err := p.readRawLine(); err == nil {
+		t.Fatal("expected interrupt error")
+	}
+}
