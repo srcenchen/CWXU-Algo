@@ -205,9 +205,6 @@ func (s SpiderService) SetSpider(ctx context.Context, req *spider.SetSpiderReq) 
 	if !auth.VerifySelfOrAbove(ctx, uint(req.UserId)) {
 		return nil, SetForbidden
 	}
-	if !s.allow(ctx, ratelimit.SpiderSetKey(req.UserId), 30*time.Second) {
-		return nil, RateLimitError
-	}
 	platformName := strings.TrimSpace(req.Platform)
 	username := strings.TrimSpace(req.Username)
 	if _, ok := spiderregistry.Get(platformName); !ok {
@@ -215,6 +212,9 @@ func (s SpiderService) SetSpider(ctx context.Context, req *spider.SetSpiderReq) 
 	}
 	if username == "" || len([]rune(username)) > 128 {
 		return nil, errors.BadRequest("参数错误", "OJ 用户名不能为空且最多 128 个字符")
+	}
+	if !s.allow(ctx, ratelimit.SpiderSetKey(platformName, username), 30*time.Second) {
+		return nil, RateLimitError
 	}
 	platform := model.Platform{
 		UserID:   req.UserId,

@@ -2,6 +2,7 @@ package ratelimit
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"time"
 
@@ -30,9 +31,10 @@ func SpiderUpdateKey(userId int64) string {
 	return fmt.Sprintf("ratelimit:spider:update:%d", userId)
 }
 
-// SpiderSetKey 绑定 OJ 限流 key
-func SpiderSetKey(userId int64) string {
-	return fmt.Sprintf("ratelimit:spider:set:%d", userId)
+// SpiderSetKey 按 OJ 账号限制绑定触发的全量抓取，摘要避免在 Redis key 中暴露用户名。
+func SpiderSetKey(platform, username string) string {
+	digest := sha256.Sum256([]byte(platform + "\x00" + username))
+	return fmt.Sprintf("ratelimit:spider:set:account:%x", digest)
 }
 
 // SpiderUpdateAllKey 管理员全站更新限流 key
