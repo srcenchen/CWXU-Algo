@@ -24,7 +24,7 @@ const confirmToken = "RESTORE"
 
 // requireBackupTools 检查宿主机备份/恢复必需命令：zstd 存在，pg_restore 存在且版本 >=18（备份由 PG18 生成）。
 func requireBackupTools(ctx context.Context, runner opsexec.Command) error {
-	if err := opsexec.RequireCommand(ctx, runner, "zstd"); err != nil {
+	if _, err := runner.CombinedOutput(ctx, "zstd", "--version"); err != nil {
 		return fmt.Errorf("缺少 zstd：请安装（apt install -y zstd）")
 	}
 	if err := opsexec.RequireCommand(ctx, runner, "pg_restore"); err != nil {
