@@ -26,6 +26,6 @@ func provideUserDB(d *data.Data) *gorm.DB {
 }
 
 // wireApp init kratos application.
-func wireApp(*conf.Server, *conf.Data, log.Logger, *conf.SMTP, *conf.SupportCenter) (*kratos.App, func(), error) {
+func wireApp(*conf.Server, *conf.Data, log.Logger, *conf.SupportCenter, data.LegacySiteConfig) (*kratos.App, func(), error) {
 	panic(wire.Build(server.ProviderSet, service.ProviderSet, discovery.ProvideSet, data.ProviderSet, biz.ProviderSet, dal.ProviderSet, provideUserDB, newApp))
 }

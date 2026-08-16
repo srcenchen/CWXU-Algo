@@ -3,6 +3,7 @@ package opscompose
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -22,8 +23,9 @@ type Runner interface {
 }
 
 type Compose struct {
-	Root *opsroot.Root
-	Run  Runner
+	Root       *opsroot.Root
+	Run        Runner
+	SmokeCheck func(context.Context) error
 }
 
 func (c *Compose) baseArgs() []string {
@@ -36,12 +38,18 @@ func (c *Compose) baseArgs() []string {
 }
 
 func (c *Compose) Command(ctx context.Context, args ...string) (string, error) {
+	if err := c.ValidateRoot(); err != nil {
+		return "", err
+	}
 	full := append(c.baseArgs(), args...)
 	return c.Run.CombinedOutput(ctx, "docker", full...)
 }
 
 // CommandWithStdin 运行命令并把 data 作为 stdin 传入（用于 psql/pg_restore 管道）。
 func (c *Compose) CommandWithStdin(ctx context.Context, data []byte, args ...string) (string, error) {
+	if err := c.ValidateRoot(); err != nil {
+		return "", err
+	}
 	full := append(c.baseArgs(), args...)
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -57,6 +65,9 @@ func (c *Compose) CommandWithStdin(ctx context.Context, data []byte, args ...str
 }
 
 func (c *Compose) Up(ctx context.Context, timeout string) error {
+	if err := c.ValidateRoot(); err != nil {
+		return err
+	}
 	err := c.Run.Run(ctx, nil, os.Stdout, os.Stderr, "docker", append(c.baseArgs(), "up", "-d", "--wait", "--wait-timeout", timeout)...)
 	if err != nil {
 		return fmt.Errorf("compose up：%w", err)
@@ -65,6 +76,9 @@ func (c *Compose) Up(ctx context.Context, timeout string) error {
 }
 
 func (c *Compose) Pull(ctx context.Context) error {
+	if err := c.ValidateRoot(); err != nil {
+		return err
+	}
 	err := c.Run.Run(ctx, nil, os.Stdout, os.Stderr, "docker", append(c.baseArgs(), "pull")...)
 	if err != nil {
 		return fmt.Errorf("compose pull：%w", err)
@@ -89,21 +103,69 @@ func (c *Compose) Stop(ctx context.Context) error {
 }
 
 func (c *Compose) PSRunning(ctx context.Context) error {
-	output, err := c.Command(ctx, "ps", "--status", "running", "--format", "json")
+	output, err := c.Command(ctx, "ps", "--format", "json")
 	if err != nil {
 		return fmt.Errorf("compose ps：%w\n%s", err, strings.TrimSpace(output))
 	}
-	if strings.TrimSpace(output) == "" {
-		return fmt.Errorf("没有任何服务在运行")
+	type serviceState struct {
+		Service string `json:"Service"`
+		State   string `json:"State"`
+		Health  string `json:"Health"`
+	}
+	var states []serviceState
+	trimmed := strings.TrimSpace(output)
+	if strings.HasPrefix(trimmed, "[") {
+		if err := json.Unmarshal([]byte(trimmed), &states); err != nil {
+			return fmt.Errorf("解析 compose ps：%w", err)
+		}
+	} else {
+		for _, line := range strings.Split(trimmed, "\n") {
+			var state serviceState
+			if err := json.Unmarshal([]byte(line), &state); err != nil {
+				return fmt.Errorf("解析 compose ps：%w", err)
+			}
+			states = append(states, state)
+		}
+	}
+	byService := make(map[string]serviceState, len(states))
+	for _, state := range states {
+		byService[state.Service] = state
+	}
+	for _, service := range []string{"frontend", "gateway", "user", "core-data", "agent", "postgres", "redis", "rabbitmq", "consul", "nginx"} {
+		state, ok := byService[service]
+		if !ok {
+			return fmt.Errorf("预期服务未运行：%s", service)
+		}
+		if state.State != "running" || (state.Health != "" && state.Health != "healthy") {
+			return fmt.Errorf("服务未健康：%s（state=%s health=%s）", service, state.State, state.Health)
+		}
 	}
 	return nil
 }
 
 func (c *Compose) Logs(ctx context.Context, args ...string) error {
 	full := append([]string{"logs"}, args...)
-	output, err := c.Command(ctx, full...)
+	if err := c.ValidateRoot(); err != nil {
+		return err
+	}
+	err := c.Run.Run(ctx, nil, os.Stdout, os.Stderr, "docker", append(c.baseArgs(), full...)...)
 	if err != nil {
-		return fmt.Errorf("compose logs：%w\n%s", err, strings.TrimSpace(output))
+		return fmt.Errorf("compose logs：%w", err)
+	}
+	return nil
+}
+
+func (c *Compose) ValidateRoot() error {
+	configured := c.rootEnv("GOALGO_ROOT")
+	if configured == "" {
+		return fmt.Errorf(".env 缺少 GOALGO_ROOT")
+	}
+	resolved, err := opsroot.Resolve(configured)
+	if err != nil {
+		return fmt.Errorf(".env GOALGO_ROOT：%w", err)
+	}
+	if resolved.Path != c.Root.Path {
+		return fmt.Errorf(".env GOALGO_ROOT=%s 与选中 root=%s 不一致", resolved.Path, c.Root.Path)
 	}
 	return nil
 }
@@ -141,6 +203,9 @@ func (c *Compose) Health(ctx context.Context) error {
 }
 
 func (c *Compose) Smoke(ctx context.Context) error {
+	if c.SmokeCheck != nil {
+		return c.SmokeCheck(ctx)
+	}
 	base := c.httpBase()
 	client := &http.Client{Timeout: 15 * time.Second}
 	for _, path := range []string{"/healthz", "/api/user/site/config"} {

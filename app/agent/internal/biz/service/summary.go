@@ -10,7 +10,6 @@ import (
 	profile2 "cwxu-algo/api/user/v1/profile"
 	"cwxu-algo/app/agent/internal/agent"
 	"cwxu-algo/app/agent/internal/data"
-	"cwxu-algo/app/common/conf"
 	"cwxu-algo/app/common/discovery"
 	"cwxu-algo/app/common/mail"
 	"cwxu-algo/app/common/sitesettings"
@@ -21,24 +20,22 @@ import (
 )
 
 type SummaryUseCase struct {
-	chat     *agent.Chat
-	yamlSMTP *conf.SMTP
-	reg      *registry.Registrar
-	redis    *redis.Client
+	chat  *agent.Chat
+	reg   *registry.Registrar
+	redis *redis.Client
 }
 
-func NewSummaryUseCase(chat *agent.Chat, mailConf *conf.SMTP, reg *discovery.Register, d *data.Data) *SummaryUseCase {
+func NewSummaryUseCase(chat *agent.Chat, reg *discovery.Register, d *data.Data) *SummaryUseCase {
 	return &SummaryUseCase{
-		chat:     chat,
-		yamlSMTP: mailConf,
-		reg:      &reg.Reg,
-		redis:    d.RDB,
+		chat:  chat,
+		reg:   &reg.Reg,
+		redis: d.RDB,
 	}
 }
 
 func (uc *SummaryUseCase) runtime(ctx context.Context) *sitesettings.Runtime {
 	rt := sitesettings.Load(ctx, uc.redis, nil)
-	return rt.MergeFallback(uc.yamlSMTP, nil, nil)
+	return rt
 }
 
 func (uc *SummaryUseCase) brandTitle(ctx context.Context) string {

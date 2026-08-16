@@ -14,6 +14,7 @@ import (
 	redis2 "cwxu-algo/app/common/data/redis"
 	"cwxu-algo/app/common/mail"
 	"cwxu-algo/app/common/sitesettings"
+	"cwxu-algo/app/common/utils/legacysecret"
 	"cwxu-algo/app/user/internal/data/model"
 
 	"github.com/go-kratos/kratos/v2/log"
@@ -69,14 +70,18 @@ var ProviderSet = wire.NewSet(NewData)
 
 // Data .
 type Data struct {
-	DB     *gorm.DB
-	CoreDB *gorm.DB // optional: algo_core_data for site backup
-	RDB    *redis.Client
+	DB              *gorm.DB
+	CoreDB          *gorm.DB // optional: algo_core_data for site backup
+	RDB             *redis.Client
+	LegacyConfigKey string
 }
 
 // NewData .
-func NewData(c *conf.Data) (*Data, func(), error) {
-	data := &Data{DB: gorm2.InitGorm(c), RDB: redis2.InitRedis(c)}
+func NewData(c *conf.Data, legacy LegacySiteConfig) (*Data, func(), error) {
+	data := &Data{
+		DB: gorm2.InitGorm(c), RDB: redis2.InitRedis(c),
+		LegacyConfigKey: legacysecret.ResolveKey(legacy.ConfigEncryptionKey),
+	}
 	// 邮件发送结果 → 站点 SMTP 状态（Redis）
 	mail.SetStatusReporter(func(ok bool, errMsg string) {
 		st, msg := sitesettings.StatusFail, errMsg
@@ -92,6 +97,12 @@ func NewData(c *conf.Data) (*Data, func(), error) {
 		log.Warn("backup: core database not configured; full site export/import of training data will fail")
 	}
 	migrateModels(data.DB)
+	if err := migrateLegacySiteSecretsAtStartup(data.DB, legacy); err != nil {
+		return nil, nil, fmt.Errorf("site secret migration failed: %w", err)
+	}
+	if err := migrateLegacyBootstrapSiteConfig(data.DB, legacy); err != nil {
+		return nil, nil, fmt.Errorf("legacy YAML site config migration failed: %w", err)
+	}
 	PublishSiteSettings(data)
 	stopRefresh := startSiteSettingsRefresh(data)
 	stopOrderCloser := startPaymentOrderCloser(data)
@@ -969,6 +980,9 @@ func PublishSiteSettings(d *Data) {
 	}
 	rt, err := sitesettings.LoadFromDB(d.DB)
 	if err != nil || rt == nil {
+		if err != nil {
+			log.Errorf("publish site settings load: %v", err)
+		}
 		return
 	}
 	if err := sitesettings.PublishRedis(context.Background(), d.RDB, rt); err != nil {

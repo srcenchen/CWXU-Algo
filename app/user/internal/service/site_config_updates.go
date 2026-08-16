@@ -14,7 +14,7 @@ type secretEncryptor func(string) (string, error)
 
 var validSections = map[string]bool{
 	"basic": true, "email": true, "ai": true,
-	"upyun": true, "oj": true, "payment": true, "all": true,
+	"upyun": true, "oj": true, "payment": true, "backup": true, "all": true,
 }
 
 func normalizeSection(section string) string {
@@ -30,13 +30,7 @@ func isSection(section, target string) bool {
 }
 
 func buildSectionUpdates(section string, row *model.SiteConfig, req *site.UpdateConfigReq) (map[string]interface{}, error) {
-	return buildSectionUpdatesWith(row, req, func(v string) (string, error) {
-		enc, err := encryptSiteSecret(v)
-		if err != nil {
-			return "", err
-		}
-		return enc, nil
-	}, section)
+	return buildSectionUpdatesWith(row, req, func(v string) (string, error) { return v, nil }, section)
 }
 
 func buildSectionUpdatesWith(row *model.SiteConfig, req *site.UpdateConfigReq, encrypt secretEncryptor, section string) (map[string]interface{}, error) {
@@ -139,6 +133,18 @@ func buildSectionUpdatesWith(row *model.SiteConfig, req *site.UpdateConfigReq, e
 		if err := applySecret("payfm_secret", req.PayfmSecret, req.ClearPayfmSecret); err != nil {
 			return nil, err
 		}
+	}
+	if isSection(section, "backup") {
+		backupTime := strings.TrimSpace(req.BackupTime)
+		if backupTime == "" {
+			backupTime = "02:00"
+		}
+		if err := sitesettings.ValidateBackupTime(backupTime); err != nil {
+			return nil, err
+		}
+		updates["backup_enabled"] = req.BackupEnabled
+		updates["backup_time"] = backupTime
+		updates["backup_prefix"] = strings.Trim(strings.TrimSpace(req.BackupPrefix), "/")
 	}
 	return updates, nil
 }

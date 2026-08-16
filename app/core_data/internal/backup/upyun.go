@@ -14,7 +14,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"path"
 	"strings"
 	"time"
 )
@@ -42,14 +41,12 @@ func NewUpyunStore(bucket, operator, password string, client *http.Client) *Upyu
 }
 
 func (s *UpyunStore) Put(ctx context.Context, key string, body io.Reader, contentType string) error {
-	if path.Base(key) != "latest.json" {
-		exists, err := s.exists(ctx, key)
-		if err != nil {
-			return err
-		}
-		if exists {
-			return ErrObjectExists
-		}
+	exists, err := s.exists(ctx, key)
+	if err != nil {
+		return err
+	}
+	if exists {
+		return ErrObjectExists
 	}
 	req, err := s.request(ctx, http.MethodPut, key, body)
 	if err != nil {
@@ -129,6 +126,19 @@ func (s *UpyunStore) Delete(ctx context.Context, key string) error {
 	return s.do(req, http.StatusOK)
 }
 
+func (s *UpyunStore) Move(ctx context.Context, source, destination string) error {
+	req, err := s.request(ctx, http.MethodPut, destination, nil)
+	if err != nil {
+		return err
+	}
+	req.ContentLength = 0
+	req.Header.Set("X-Upyun-Move-Source", s.objectURI(source))
+	if err := s.do(req, http.StatusOK); err != nil {
+		return fmt.Errorf("%w: %v", ErrAmbiguousPublish, err)
+	}
+	return nil
+}
+
 func (s *UpyunStore) exists(ctx context.Context, key string) (bool, error) {
 	req, err := s.request(ctx, http.MethodHead, key, nil)
 	if err != nil {
@@ -150,8 +160,7 @@ func (s *UpyunStore) exists(ctx context.Context, key string) (bool, error) {
 }
 
 func (s *UpyunStore) request(ctx context.Context, method, key string, body io.Reader) (*http.Request, error) {
-	escaped := strings.Join(strings.FieldsFunc(key, func(r rune) bool { return r == '/' }), "/")
-	uri := "/" + url.PathEscape(s.bucket) + "/" + escaped
+	uri := s.objectURI(key)
 	req, err := http.NewRequestWithContext(ctx, method, s.endpoint+uri, body)
 	if err != nil {
 		return nil, err
@@ -165,12 +174,17 @@ func (s *UpyunStore) request(ctx context.Context, method, key string, body io.Re
 	return req, nil
 }
 
+func (s *UpyunStore) objectURI(key string) string {
+	parts := strings.FieldsFunc(key, func(r rune) bool { return r == '/' })
+	for i := range parts {
+		parts[i] = url.PathEscape(parts[i])
+	}
+	return "/" + url.PathEscape(s.bucket) + "/" + strings.Join(parts, "/")
+}
+
 func (s *UpyunStore) do(req *http.Request, wanted ...int) error {
 	resp, err := s.client.Do(req)
 	if err != nil {
-		if req.Method == http.MethodPut && path.Base(req.URL.Path) == "latest.json" {
-			return fmt.Errorf("%w: %v", ErrAmbiguousPublish, err)
-		}
 		return err
 	}
 	defer resp.Body.Close()

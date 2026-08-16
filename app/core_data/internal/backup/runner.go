@@ -19,12 +19,14 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 var (
 	ErrDisabled         = errors.New("backup is disabled")
 	ErrAlreadyRunning   = errors.New("backup is already running")
-	ErrAmbiguousPublish = errors.New("pointer publication outcome is ambiguous")
+	ErrAmbiguousPublish = errors.New("fixed object replacement outcome is ambiguous")
 )
 
 // Command describes a context-bound process without exposing secrets in argv.
@@ -47,14 +49,19 @@ type ObjectStore interface {
 	Get(ctx context.Context, key string) (io.ReadCloser, error)
 	List(ctx context.Context, prefix, token string) (keys []string, nextToken string, err error)
 	Delete(ctx context.Context, key string) error
+	Move(ctx context.Context, source, destination string) error
 }
+
+type CloudConfig struct{ Bucket, Operator, Password, Prefix string }
 
 // Dependencies provides replaceable side effects.
 type Dependencies struct {
-	Commands CommandRunner
-	Store    ObjectStore
-	Now      func() time.Time
-	DiskFree func(path string) (uint64, error)
+	Commands    CommandRunner
+	Store       ObjectStore
+	Now         func() time.Time
+	DiskFree    func(path string) (uint64, error)
+	CloudConfig func(context.Context) (CloudConfig, error)
+	UploadID    func() string
 }
 
 // Result describes a successfully published backup.
@@ -72,25 +79,44 @@ type Runner struct {
 	dep Dependencies
 }
 
+func (r *Runner) cloudConfig(ctx context.Context) (CloudConfig, error) {
+	if r.dep.CloudConfig == nil {
+		return CloudConfig{}, errors.New("灾备又拍云运行时配置不可用")
+	}
+	cloud, err := r.dep.CloudConfig(ctx)
+	if err != nil {
+		return CloudConfig{}, err
+	}
+	cloud.Bucket = strings.TrimSpace(cloud.Bucket)
+	cloud.Operator = strings.TrimSpace(cloud.Operator)
+	cloud.Prefix = strings.Trim(strings.TrimSpace(cloud.Prefix), "/")
+	if cloud.Bucket == "" || cloud.Operator == "" || strings.TrimSpace(cloud.Password) == "" {
+		return CloudConfig{}, errors.New("自动灾备已开启，但站点又拍云服务名、操作员或密码配置不完整")
+	}
+	return cloud, nil
+}
+
+func (r *Runner) Validate(ctx context.Context) error {
+	_, err := r.cloudConfig(ctx)
+	return err
+}
+
 // NewRunner validates dependencies without starting work.
 func NewRunner(cfg Config, dep Dependencies) (*Runner, error) {
-	if !cfg.Enabled {
-		return nil, ErrDisabled
-	}
-	if len(cfg.EncryptionKey) != 32 || cfg.PGDSN == "" || cfg.Prefix == "" {
+	if len(cfg.EncryptionKey) != 32 || cfg.PGDSN == "" {
 		return nil, errors.New("invalid backup configuration")
 	}
 	if dep.Commands == nil {
 		dep.Commands = ExecCommandRunner{}
-	}
-	if dep.Store == nil {
-		dep.Store = NewUpyunStore(cfg.Bucket, cfg.Operator, cfg.Password, nil)
 	}
 	if dep.Now == nil {
 		dep.Now = time.Now
 	}
 	if dep.DiskFree == nil {
 		dep.DiskFree = diskFree
+	}
+	if dep.UploadID == nil {
+		dep.UploadID = uuid.NewString
 	}
 	if cfg.WorkDir == "" {
 		cfg.WorkDir = os.TempDir()
@@ -112,6 +138,14 @@ func (r *Runner) Run(ctx context.Context) (Result, error) {
 	}
 	if free < r.cfg.MinFreeBytes {
 		return Result{}, fmt.Errorf("insufficient workspace free space: have %d bytes, require %d", free, r.cfg.MinFreeBytes)
+	}
+	cloud, err := r.cloudConfig(ctx)
+	if err != nil {
+		return Result{}, err
+	}
+	store := r.dep.Store
+	if store == nil {
+		store = NewUpyunStore(cloud.Bucket, cloud.Operator, cloud.Password, nil)
 	}
 	dir, err := os.MkdirTemp(r.cfg.WorkDir, "cwxu-core-backup-")
 	if err != nil {
@@ -207,7 +241,11 @@ func (r *Runner) Run(ctx context.Context) (Result, error) {
 	if err := os.Remove(compressedPath); err != nil {
 		return Result{}, fmt.Errorf("remove compressed intermediate: %w", err)
 	}
-	archiveKey := path.Join(r.cfg.Prefix, "core-"+created.Format("20060102T150405Z")+".cwxubak")
+	if err := r.verifyFile(ctx, encryptedPath, len(dbs)); err != nil {
+		return Result{}, fmt.Errorf("verify local archive: %w", err)
+	}
+	archiveKey := path.Join(cloud.Prefix, "algobak")
+	temporaryKey := archiveKey + ".uploading-" + r.dep.UploadID()
 	archive, err := os.Open(encryptedPath)
 	if err != nil {
 		return Result{}, err
@@ -223,21 +261,24 @@ func (r *Runner) Run(ctx context.Context) (Result, error) {
 		return Result{}, err
 	}
 	result := Result{ArchiveKey: archiveKey, SHA256: hex.EncodeToString(digest.Sum(nil)), Size: size, Databases: len(dbs), CreatedAt: created}
-	if err := r.dep.Store.Put(ctx, archiveKey, archive, "application/octet-stream"); err != nil {
+	defer func() { _ = store.Delete(context.Background(), temporaryKey) }()
+	if err := store.Put(ctx, temporaryKey, archive, "application/octet-stream"); err != nil {
 		_ = archive.Close()
-		return Result{}, fmt.Errorf("upload immutable archive: %w", err)
+		return Result{}, fmt.Errorf("upload temporary archive: %w", err)
 	}
 	if err := closeFile(archive); err != nil {
 		return Result{}, err
 	}
-	if err := r.verify(ctx, archiveKey, result.SHA256, len(dbs), dir); err != nil {
+	if err := r.verify(ctx, store, temporaryKey, result.SHA256, result.Size, len(dbs), dir); err != nil {
 		return Result{}, err
 	}
-	pointer, _ := json.Marshal(result)
-	if err := r.dep.Store.Put(ctx, path.Join(r.cfg.Prefix, "latest.json"), bytes.NewReader(pointer), "application/json"); err != nil {
-		return Result{}, fmt.Errorf("publish latest pointer: %w", err)
+	if err := store.Move(ctx, temporaryKey, archiveKey); err != nil {
+		return Result{}, fmt.Errorf("replace fixed archive: %w", err)
 	}
-	if err := r.cleanup(ctx, archiveKey); err != nil {
+	if err := r.verify(ctx, store, archiveKey, result.SHA256, result.Size, len(dbs), dir); err != nil {
+		return Result{}, fmt.Errorf("verify fixed archive: %w", err)
+	}
+	if err := r.cleanup(ctx, store, cloud.Prefix, archiveKey); err != nil {
 		return Result{}, fmt.Errorf("cleanup archives: %w", err)
 	}
 	return result, nil
@@ -274,24 +315,41 @@ func (r *Runner) runToFile(ctx context.Context, file string, command Command) er
 	return errors.Join(runErr, closeErr)
 }
 
-func (r *Runner) verify(ctx context.Context, key, want string, databases int, dir string) error {
-	body, err := r.dep.Store.Get(ctx, key)
+func (r *Runner) verify(ctx context.Context, store ObjectStore, key, want string, wantSize int64, databases int, dir string) error {
+	body, err := store.Get(ctx, key)
 	if err != nil {
 		return fmt.Errorf("download archive for verification: %w", err)
 	}
 	defer body.Close()
-	downloaded, err := os.OpenFile(filepath.Join(dir, "downloaded.cwxubak"), os.O_CREATE|os.O_RDWR|os.O_EXCL, 0o600)
+	downloaded, err := os.CreateTemp(dir, "downloaded-*.cwxubak")
 	if err != nil {
 		return err
 	}
 	defer downloaded.Close()
 	h := sha256.New()
-	if _, err := copyContext(ctx, io.MultiWriter(h, downloaded), body); err != nil {
+	size, err := copyContext(ctx, io.MultiWriter(h, downloaded), body)
+	if err != nil {
 		return fmt.Errorf("hash downloaded archive: %w", err)
+	}
+	if size != wantSize {
+		return fmt.Errorf("verify downloaded archive: size mismatch: got %d want %d", size, wantSize)
 	}
 	if got := hex.EncodeToString(h.Sum(nil)); got != want {
 		return fmt.Errorf("verify downloaded archive: SHA256 mismatch: got %s want %s", got, want)
 	}
+	return r.verifyOpenFile(ctx, downloaded, databases)
+}
+
+func (r *Runner) verifyFile(ctx context.Context, filePath string, databases int) error {
+	file, err := os.Open(filePath)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	return r.verifyOpenFile(ctx, file, databases)
+}
+
+func (r *Runner) verifyOpenFile(ctx context.Context, downloaded *os.File, databases int) error {
 	if _, err := downloaded.Seek(0, io.SeekStart); err != nil {
 		return err
 	}
@@ -315,16 +373,25 @@ func (r *Runner) verify(ctx context.Context, key, want string, databases int, di
 	return errors.Join(shapeErr, <-decompressDone, <-decryptDone)
 }
 
-func (r *Runner) cleanup(ctx context.Context, current string) error {
+func (r *Runner) cleanup(ctx context.Context, store ObjectStore, prefix, current string) error {
 	token := ""
 	for {
-		keys, next, err := r.dep.Store.List(ctx, r.cfg.Prefix+"/", token)
+		listPrefix := strings.TrimSuffix(prefix, "/")
+		if listPrefix != "" {
+			listPrefix += "/"
+		}
+		keys, next, err := store.List(ctx, listPrefix, token)
 		if err != nil {
 			return err
 		}
 		for _, key := range keys {
-			if key != current && strings.HasSuffix(key, ".cwxubak") {
-				if err := r.dep.Store.Delete(ctx, key); err != nil {
+			base := path.Base(key)
+			if path.Dir(key) != strings.TrimSuffix(prefix, "/") && !(prefix == "" && path.Dir(key) == ".") {
+				continue
+			}
+			legacyArchive := strings.HasPrefix(base, "core-") && strings.HasSuffix(base, ".cwxubak")
+			if key != current && (base == "latest.json" || legacyArchive || strings.HasPrefix(base, "algobak.uploading-")) {
+				if err := store.Delete(ctx, key); err != nil {
 					return err
 				}
 			}

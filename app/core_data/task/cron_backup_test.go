@@ -3,34 +3,20 @@ package task
 import (
 	"testing"
 	"time"
-
-	"github.com/robfig/cron/v3"
 )
 
-type fakeScheduledBackup struct{ runs int }
+type fakeScheduledBackup struct {
+	runs int
+	at   time.Time
+}
 
-func (b *fakeScheduledBackup) RunScheduled() { b.runs++ }
+func (b *fakeScheduledBackup) RunScheduled(at time.Time) { b.runs++; b.at = at }
 
-func TestRegisterBackupScheduleAtTwoShanghaiWithoutCatchup(t *testing.T) {
-	loc, err := time.LoadLocation("Asia/Shanghai")
-	if err != nil {
-		t.Fatal(err)
-	}
-	c := cron.New(cron.WithLocation(loc))
-	backup := &fakeScheduledBackup{}
-	if err := registerBackupSchedule(c, backup); err != nil {
-		t.Fatal(err)
-	}
-	if backup.runs != 0 {
-		t.Fatalf("registration ran backup %d times", backup.runs)
-	}
-	entries := c.Entries()
-	if len(entries) != 1 {
-		t.Fatalf("entries = %d, want 1", len(entries))
-	}
-	from := time.Date(2026, 8, 16, 1, 59, 0, 0, loc)
-	want := time.Date(2026, 8, 16, 2, 0, 0, 0, loc)
-	if got := entries[0].Schedule.Next(from); !got.Equal(want) {
-		t.Fatalf("next run = %v, want %v", got, want)
+func TestBackupScheduleChecksEveryMinuteWithCurrentTime(t *testing.T) {
+	b := &fakeScheduledBackup{}
+	now := time.Date(2026, 8, 16, 3, 15, 0, 0, time.FixedZone("CST", 8*3600))
+	backupTick(b, now)
+	if b.runs != 1 || !b.at.Equal(now) {
+		t.Fatalf("tick = (%d, %v)", b.runs, b.at)
 	}
 }

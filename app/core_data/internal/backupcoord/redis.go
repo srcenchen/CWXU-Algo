@@ -10,8 +10,10 @@ import (
 )
 
 const (
-	backupLockKey   = "core:backup:lock:v1"
-	backupStatusKey = "core:backup:status:v1"
+	backupLockKey    = "core:backup:lock:v1"
+	backupStatusKey  = "core:backup:status:v1"
+	backupDayPrefix  = "core:backup:scheduled-running:v2:"
+	backupDonePrefix = "core:backup:scheduled-done:v2:"
 )
 
 var renewScript = redis.NewScript(`
@@ -25,6 +27,15 @@ if redis.call("GET", KEYS[1]) == ARGV[1] then
   return redis.call("DEL", KEYS[1])
 end
 return 0`)
+
+var claimDayScript = redis.NewScript(`
+if redis.call("EXISTS", KEYS[2]) == 1 then return 0 end
+return redis.call("SET", KEYS[1], "1", "PX", ARGV[1], "NX") and 1 or 0`)
+
+var completeDayScript = redis.NewScript(`
+redis.call("SET", KEYS[2], "1", "PX", ARGV[1])
+redis.call("DEL", KEYS[1])
+return 1`)
 
 func (s *redisStatusStore) TryLock(ctx context.Context, token string, lease time.Duration) (bool, error) {
 	if s.rdb == nil {
@@ -64,4 +75,27 @@ func (s *redisStatusStore) Save(ctx context.Context, status Status) error {
 		return err
 	}
 	return s.rdb.Set(ctx, backupStatusKey, value, 0).Err()
+}
+
+func (s *redisStatusStore) ClaimDay(ctx context.Context, day string, ttl time.Duration) (bool, error) {
+	if s.rdb == nil {
+		return false, errors.New("backup Redis is unavailable")
+	}
+	n, err := claimDayScript.Run(ctx, s.rdb, []string{backupDayPrefix + day, backupDonePrefix + day}, ttl.Milliseconds()).Int64()
+	return n == 1, err
+}
+
+func (s *redisStatusStore) CompleteDay(ctx context.Context, day string, ttl time.Duration) error {
+	if s.rdb == nil {
+		return errors.New("backup Redis is unavailable")
+	}
+	_, err := completeDayScript.Run(ctx, s.rdb, []string{backupDayPrefix + day, backupDonePrefix + day}, ttl.Milliseconds()).Result()
+	return err
+}
+
+func (s *redisStatusStore) ReleaseDay(ctx context.Context, day string) error {
+	if s.rdb == nil {
+		return errors.New("backup Redis is unavailable")
+	}
+	return s.rdb.Del(ctx, backupDayPrefix+day).Err()
 }

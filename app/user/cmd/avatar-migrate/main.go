@@ -117,7 +117,7 @@ func main() {
 	if bc.Data == nil || bc.Data.Database == nil {
 		log.Fatalf("配置缺少 data.database")
 	}
-	// 加载共享安全密钥（JWT / config_encryption_key），供又拍云密码解密使用
+	// 加载 JWT 安全配置。
 	if err := security.Configure(bc.Server); err != nil {
 		log.Fatalf("初始化安全配置失败: %v", err)
 	}

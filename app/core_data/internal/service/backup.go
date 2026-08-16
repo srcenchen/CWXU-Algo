@@ -46,7 +46,11 @@ func (s *BackupService) Run(ctx context.Context, _ *backuppb.RunBackupRequest) (
 	if err := s.manager.Trigger(ctx, backupcoord.TriggerManual); err != nil {
 		switch {
 		case errors.Is(err, backupcoord.ErrDisabled):
-			return nil, kerrors.ServiceUnavailable("BACKUP_DISABLED", "backup is disabled")
+			message := s.manager.Status().Error
+			if message == "" {
+				message = "backup is disabled"
+			}
+			return nil, kerrors.ServiceUnavailable("BACKUP_DISABLED", message)
 		case errors.Is(err, backupcoord.ErrAlreadyRunning):
 			return nil, kerrors.Conflict("BACKUP_ALREADY_RUNNING", "backup is already running")
 		case errors.Is(err, backupcoord.ErrStopping):

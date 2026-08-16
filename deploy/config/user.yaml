@@ -9,7 +9,6 @@ server:
   jwt_secret: ""
   jwt_private_key: "${JWT_PRIVATE_KEY}"
   jwt_public_key: "${JWT_PUBLIC_KEY}"
-  config_encryption_key: "${CONFIG_ENCRYPTION_KEY}"
 data:
   database:
     driver: postgres
@@ -19,7 +18,6 @@ data:
     password: "${REDIS_PASSWORD}"
     read_timeout: 2s
     write_timeout: 2s
-smtp: {}
 support_center:
   base_url: ""
   product_id: ""

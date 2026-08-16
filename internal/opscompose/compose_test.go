@@ -74,6 +74,38 @@ func (f *streamRunner) CombinedOutput(ctx context.Context, name string, args ...
 	return "", nil
 }
 
+func TestDockerCommandsRejectMismatchedEnvRoot(t *testing.T) {
+	root, err := opsroot.Resolve(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(root.Join(".env"), []byte("GOALGO_ROOT=/different/root\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runner := &streamRunner{}
+	compose := &Compose{Root: root, Run: runner}
+	if err := compose.Pull(context.Background()); err == nil || !strings.Contains(err.Error(), "GOALGO_ROOT") {
+		t.Fatalf("expected root mismatch, got %v", err)
+	}
+	if runner.ran != 0 {
+		t.Fatal("docker must not run with a split root")
+	}
+}
+
+func TestHealthRequiresEveryExpectedService(t *testing.T) {
+	root, _ := opsroot.Resolve(t.TempDir())
+	output := `[{"Service":"postgres","State":"running","Health":"healthy"}]`
+	compose := &Compose{Root: root, Run: &fakeRunner{outputs: map[string]string{
+		"docker compose --env-file " + root.Join(".env") + " --env-file " + root.Join("release.env") + " -f " + root.Join("compose.yaml") + " ps --format json": output,
+	}}}
+	if err := os.WriteFile(root.Join(".env"), []byte("GOALGO_ROOT="+root.Path+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := compose.Health(context.Background()); err == nil || !strings.Contains(err.Error(), "frontend") {
+		t.Fatalf("expected missing service error, got %v", err)
+	}
+}
+
 func (f *streamRunner) Run(ctx context.Context, stdin io.Reader, stdout, stderr io.Writer, name string, args ...string) error {
 	f.ran++
 	return nil
@@ -84,10 +116,13 @@ func TestPullAndUpUseStreamingRun(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, relative := range []string{".env", "release.env", "compose.yaml"} {
+	for _, relative := range []string{"release.env", "compose.yaml"} {
 		if err := os.WriteFile(root.Join(relative), []byte("x"), 0o600); err != nil {
 			t.Fatal(err)
 		}
+	}
+	if err := os.WriteFile(root.Join(".env"), []byte("GOALGO_ROOT="+root.Path+"\n"), 0o600); err != nil {
+		t.Fatal(err)
 	}
 	runner := &streamRunner{}
 	compose := &Compose{Root: root, Run: runner}
@@ -107,10 +142,13 @@ func TestRunServiceStreams(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, relative := range []string{".env", "release.env", "compose.yaml"} {
+	for _, relative := range []string{"release.env", "compose.yaml"} {
 		if err := os.WriteFile(root.Join(relative), []byte("x"), 0o600); err != nil {
 			t.Fatal(err)
 		}
+	}
+	if err := os.WriteFile(root.Join(".env"), []byte("GOALGO_ROOT="+root.Path+"\n"), 0o600); err != nil {
+		t.Fatal(err)
 	}
 	runner := &streamRunner{}
 	compose := &Compose{Root: root, Run: runner}

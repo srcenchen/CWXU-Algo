@@ -17,24 +17,11 @@ import (
 	"time"
 )
 
-func TestLoadConfigDisabledAndInvalid(t *testing.T) {
-	t.Setenv("CWXU_BACKUP_ENABLED", "false")
-	cfg, err := LoadConfig()
-	if err != nil || cfg.Enabled {
-		t.Fatalf("disabled config = (%+v, %v), want disabled without error", cfg, err)
-	}
-
-	t.Setenv("CWXU_BACKUP_ENABLED", "true")
+func TestLoadConfigReportsMissingStaticConfigurationWithoutEnabledEnv(t *testing.T) {
 	t.Setenv("CWXU_BACKUP_PG_DSN", "")
-	cfg, err = LoadConfig()
-	if err == nil || cfg.Enabled || !strings.Contains(err.Error(), "CWXU_BACKUP_PG_DSN") {
+	cfg, err := LoadConfig()
+	if err == nil || !strings.Contains(err.Error(), "CWXU_BACKUP_PG_DSN") {
 		t.Fatalf("invalid config = (%+v, %v), want disabled explicit DSN error", cfg, err)
-	}
-
-	t.Setenv("CWXU_BACKUP_ENABLED", "sometimes")
-	cfg, err = LoadConfig()
-	if err == nil || cfg.Enabled || !strings.Contains(err.Error(), "CWXU_BACKUP_ENABLED") {
-		t.Fatalf("invalid enabled value = (%+v, %v), want explicit disabling error", cfg, err)
 	}
 }
 
@@ -44,19 +31,14 @@ func TestLoadConfigAcceptsValidKey(t *testing.T) {
 		t.Fatal(err)
 	}
 	for key, value := range map[string]string{
-		"CWXU_BACKUP_ENABLED":             "true",
 		"CWXU_BACKUP_PG_DSN":              "postgres://user:pass@db/core?sslmode=disable",
-		"CWXU_BACKUP_UPYUN_BUCKET":        "bucket",
-		"CWXU_BACKUP_UPYUN_OPERATOR":      "operator",
-		"CWXU_BACKUP_UPYUN_PASSWORD":      "password",
-		"CWXU_BACKUP_UPYUN_PREFIX":        "/backups/core/",
 		"CWXU_BACKUP_ENCRYPTION_KEY_FILE": keyFile,
 		"CWXU_BACKUP_WORK_DIR":            t.TempDir(),
 	} {
 		t.Setenv(key, value)
 	}
 	cfg, err := LoadConfig()
-	if err != nil || !cfg.Enabled || cfg.Prefix != "backups/core" || len(cfg.EncryptionKey) != 32 || cfg.WorkDir == "" {
+	if err != nil || len(cfg.EncryptionKey) != 32 || cfg.WorkDir == "" {
 		t.Fatalf("valid config = (%+v, %v)", cfg, err)
 	}
 }
@@ -71,19 +53,14 @@ func TestLoadConfigRejectsWorkspaceFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	for key, value := range map[string]string{
-		"CWXU_BACKUP_ENABLED":             "true",
 		"CWXU_BACKUP_PG_DSN":              "postgres://user:pass@db/core",
-		"CWXU_BACKUP_UPYUN_BUCKET":        "bucket",
-		"CWXU_BACKUP_UPYUN_OPERATOR":      "operator",
-		"CWXU_BACKUP_UPYUN_PASSWORD":      "password",
-		"CWXU_BACKUP_UPYUN_PREFIX":        "backups/core",
 		"CWXU_BACKUP_ENCRYPTION_KEY_FILE": keyFile,
 		"CWXU_BACKUP_WORK_DIR":            workFile,
 	} {
 		t.Setenv(key, value)
 	}
 	cfg, err := LoadConfig()
-	if err == nil || cfg.Enabled || !strings.Contains(err.Error(), "existing directory") {
+	if err == nil || !strings.Contains(err.Error(), "existing directory") {
 		t.Fatalf("workspace file config = (%+v, %v), want explicit disabled error", cfg, err)
 	}
 }
@@ -131,6 +108,19 @@ type memoryStore struct {
 	listTokens []string
 	deleted    []string
 	putReaders map[string]string
+	moveError  error
+}
+
+func (s *memoryStore) Move(_ context.Context, source, destination string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.events = append(s.events, "move:"+source+":"+destination)
+	if s.moveError != nil {
+		return s.moveError
+	}
+	s.objects[destination] = append([]byte(nil), s.objects[source]...)
+	delete(s.objects, source)
+	return nil
 }
 
 func newMemoryStore() *memoryStore {
@@ -190,18 +180,35 @@ func (s *memoryStore) Delete(_ context.Context, key string) error {
 func validConfig(t *testing.T) Config {
 	t.Helper()
 	return Config{
-		Enabled: true, PGDSN: "postgres://user:pass@db/core?sslmode=disable&dbname=wrong",
-		Bucket: "bucket", Operator: "operator", Password: "password", Prefix: "backups/core",
+		PGDSN:         "postgres://user:pass@db/core?sslmode=disable&dbname=wrong",
 		EncryptionKey: bytes.Repeat([]byte{9}, 32), WorkDir: t.TempDir(), MinFreeBytes: 1,
+	}
+}
+
+func TestCleanupAtBucketRootOnlyDeletesOwnedLegacyBackupNames(t *testing.T) {
+	store := newMemoryStore()
+	store.listPages = [][]string{{
+		"latest.json", "core-20260816T000000Z.cwxubak", "algobak.uploading-old",
+		"algobak", "customer.txt", "nested/latest.json", "other-core-1.cwxubak",
+	}}
+	runner := &Runner{}
+	if err := runner.cleanup(context.Background(), store, "", "algobak"); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"latest.json", "core-20260816T000000Z.cwxubak", "algobak.uploading-old"}
+	if !reflect.DeepEqual(store.deleted, want) {
+		t.Fatalf("bucket-root cleanup deleted wrong objects: %v, want %v", store.deleted, want)
 	}
 }
 
 func TestRunnerCommandsArtifactAndPublicationOrder(t *testing.T) {
 	commands := &fakeCommands{}
 	store := newMemoryStore()
-	store.listPages = [][]string{{"backups/core/old-a.cwxubak", "backups/core/note.txt"}, {"backups/core/old-b.cwxubak"}}
+	store.listPages = [][]string{{"backups/core/latest.json", "backups/core/note.txt", "backups/core/core-20260816T000000Z.cwxubak"}}
 	now := time.Date(2026, 8, 16, 12, 34, 56, 0, time.UTC)
-	runner, err := NewRunner(validConfig(t), Dependencies{Commands: commands, Store: store, Now: func() time.Time { return now }, DiskFree: func(string) (uint64, error) { return 1 << 40, nil }})
+	runner, err := NewRunner(validConfig(t), Dependencies{Commands: commands, Store: store, CloudConfig: func(context.Context) (CloudConfig, error) {
+		return CloudConfig{Bucket: "bucket", Operator: "operator", Password: "password", Prefix: "backups/core"}, nil
+	}, UploadID: func() string { return "test-id" }, Now: func() time.Time { return now }, DiskFree: func(string) (uint64, error) { return 1 << 40, nil }})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -209,7 +216,7 @@ func TestRunnerCommandsArtifactAndPublicationOrder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantKey := "backups/core/core-20260816T123456Z.cwxubak"
+	wantKey := "backups/core/algobak"
 	if result.ArchiveKey != wantKey || result.SHA256 == "" || result.Databases != 2 {
 		t.Fatalf("result = %+v", result)
 	}
@@ -231,7 +238,7 @@ func TestRunnerCommandsArtifactAndPublicationOrder(t *testing.T) {
 			t.Fatalf("%s env = %v, want isolated PGPASSWORD", call.name, call.env)
 		}
 	}
-	if !reflect.DeepEqual(names, []string{"psql", "pg_dumpall", "pg_dump", "pg_restore", "pg_dump", "pg_restore", "zstd", "zstd"}) {
+	if !reflect.DeepEqual(names, []string{"psql", "pg_dumpall", "pg_dump", "pg_restore", "pg_dump", "pg_restore", "zstd", "zstd", "zstd", "zstd"}) {
 		t.Fatalf("commands = %v", names)
 	}
 	wantArgs := [][]string{
@@ -259,8 +266,9 @@ func TestRunnerCommandsArtifactAndPublicationOrder(t *testing.T) {
 	}
 
 	archive := store.objects[wantKey]
-	if store.putReaders[wantKey] != "*os.File" {
-		t.Fatalf("archive uploaded from %s, want bounded-memory file stream", store.putReaders[wantKey])
+	tempKey := "backups/core/algobak.uploading-test-id"
+	if store.putReaders[tempKey] != "*os.File" {
+		t.Fatalf("archive uploaded from %s, want bounded-memory file stream", store.putReaders[tempKey])
 	}
 	plain, err := DecryptArchive(archive, validConfig(t).EncryptionKey)
 	if err != nil || !bytes.HasPrefix(plain, []byte("manifest.json")) {
@@ -272,18 +280,14 @@ func TestRunnerCommandsArtifactAndPublicationOrder(t *testing.T) {
 		t.Fatal("tampered archive passed authenticated integrity check")
 	}
 
-	latest := store.objects["backups/core/latest.json"]
-	if !bytes.Contains(latest, []byte(wantKey)) || !bytes.Contains(latest, []byte(result.SHA256)) {
-		t.Fatalf("latest pointer = %s", latest)
-	}
-	wantEventsPrefix := []string{"put:" + wantKey, "get:" + wantKey, "put:backups/core/latest.json"}
-	if !reflect.DeepEqual(store.events[:3], wantEventsPrefix) {
+	wantEventsPrefix := []string{"put:" + tempKey, "get:" + tempKey, "move:" + tempKey + ":" + wantKey, "get:" + wantKey}
+	if !reflect.DeepEqual(store.events[:4], wantEventsPrefix) {
 		t.Fatalf("publication events = %v", store.events)
 	}
-	if !reflect.DeepEqual(store.listTokens, []string{"", "page-2"}) {
+	if !reflect.DeepEqual(store.listTokens, []string{""}) {
 		t.Fatalf("list tokens = %v", store.listTokens)
 	}
-	if !reflect.DeepEqual(store.deleted, []string{"backups/core/old-a.cwxubak", "backups/core/old-b.cwxubak"}) {
+	if !reflect.DeepEqual(store.deleted, []string{"backups/core/latest.json", "backups/core/core-20260816T000000Z.cwxubak", tempKey}) {
 		t.Fatalf("deleted = %v", store.deleted)
 	}
 	digest := sha256.Sum256(archive)
@@ -299,13 +303,16 @@ func TestRunnerFailureDoesNotPublishOrCleanup(t *testing.T) {
 	}{
 		{"upload", func(s *memoryStore, archive string) { s.putError[archive] = errors.New("upload failed") }},
 		{"verify", func(s *memoryStore, archive string) { s.getError[archive] = errors.New("download failed") }},
-		{"ambiguous pointer", func(s *memoryStore, _ string) { s.putError["backups/core/latest.json"] = ErrAmbiguousPublish }},
+		{"replace", func(s *memoryStore, _ string) { s.moveError = errors.New("move failed") }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			store := newMemoryStore()
-			archive := "backups/core/core-20260816T123456Z.cwxubak"
+			archive := "backups/core/algobak.uploading-test-id"
+			store.objects["backups/core/algobak"] = []byte("old")
 			tc.configure(store, archive)
-			runner, err := NewRunner(validConfig(t), Dependencies{Commands: &fakeCommands{}, Store: store, DiskFree: func(string) (uint64, error) { return 1 << 40, nil }, Now: func() time.Time {
+			runner, err := NewRunner(validConfig(t), Dependencies{Commands: &fakeCommands{}, Store: store, CloudConfig: func(context.Context) (CloudConfig, error) {
+				return CloudConfig{Bucket: "bucket", Operator: "operator", Password: "password", Prefix: "backups/core"}, nil
+			}, UploadID: func() string { return "test-id" }, DiskFree: func(string) (uint64, error) { return 1 << 40, nil }, Now: func() time.Time {
 				return time.Date(2026, 8, 16, 12, 34, 56, 0, time.UTC)
 			}})
 			if err != nil {
@@ -314,16 +321,19 @@ func TestRunnerFailureDoesNotPublishOrCleanup(t *testing.T) {
 			if _, err := runner.Run(context.Background()); err == nil {
 				t.Fatal("Run succeeded, want failure")
 			}
-			if _, ok := store.objects["backups/core/latest.json"]; ok {
-				t.Fatal("latest pointer changed on failure")
+			if got := string(store.objects["backups/core/algobak"]); got != "old" {
+				t.Fatalf("old fixed object changed on failure: %q", got)
 			}
-			if len(store.deleted) != 0 {
-				t.Fatalf("failure deleted archives: %v", store.deleted)
+			if _, ok := store.objects[archive]; ok {
+				t.Fatal("temporary object was not cleaned after failure")
 			}
-			if tc.name == "ambiguous pointer" {
-				if _, ok := store.objects[archive]; !ok {
-					t.Fatal("ambiguous pointer publication deleted new archive")
-				}
+			wantEvents := map[string][]string{
+				"upload":  {"put:" + archive, "delete:" + archive},
+				"verify":  {"put:" + archive, "get:" + archive, "delete:" + archive},
+				"replace": {"put:" + archive, "get:" + archive, "move:" + archive + ":backups/core/algobak", "delete:" + archive},
+			}[tc.name]
+			if !reflect.DeepEqual(store.events, wantEvents) {
+				t.Fatalf("failure events = %v, want %v", store.events, wantEvents)
 			}
 		})
 	}
@@ -364,6 +374,18 @@ func TestRunnerRejectsInsufficientWorkspaceBeforeCommands(t *testing.T) {
 	}
 	if len(commands.calls) != 0 {
 		t.Fatalf("commands ran before free-space preflight: %v", commands.calls)
+	}
+}
+
+func TestRunnerValidateReportsIncompleteRuntimeUpyunConfiguration(t *testing.T) {
+	runner, err := NewRunner(validConfig(t), Dependencies{CloudConfig: func(context.Context) (CloudConfig, error) {
+		return CloudConfig{Bucket: "bucket"}, nil
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := runner.Validate(context.Background()); err == nil || !strings.Contains(err.Error(), "站点又拍云") {
+		t.Fatalf("Validate error = %v", err)
 	}
 }
 

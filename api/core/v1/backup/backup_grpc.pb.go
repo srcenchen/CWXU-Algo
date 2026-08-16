@@ -2,7 +2,7 @@
 // versions:
 // - protoc-gen-go-grpc v1.6.2
 // - protoc             v5.29.3
-// source: api/core/v1/backup/backup.proto
+// source: core/v1/backup/backup.proto
 
 package backup
 
@@ -193,5 +193,5 @@ var Backup_ServiceDesc = grpc.ServiceDesc{
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
-	Metadata: "api/core/v1/backup/backup.proto",
+	Metadata: "core/v1/backup/backup.proto",
 }

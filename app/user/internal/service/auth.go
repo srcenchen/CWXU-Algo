@@ -15,7 +15,6 @@ import (
 
 	spiderpb "cwxu-algo/api/core/v1/spider"
 	pb "cwxu-algo/api/user/v1/auth"
-	"cwxu-algo/app/common/conf"
 	"cwxu-algo/app/common/discovery"
 	"cwxu-algo/app/common/mail"
 	"cwxu-algo/app/common/notify"
@@ -55,16 +54,14 @@ type AuthService struct {
 	pb.UnimplementedAuthServer
 	db         *gorm.DB
 	rdb        *redis.Client
-	yamlSMTP   *conf.SMTP
 	reg        *discovery.Register
 	profileDal *dal.ProfileDal
 }
 
-func NewAuthService(d *data.Data, smtp *conf.SMTP, reg *discovery.Register) *AuthService {
+func NewAuthService(d *data.Data, reg *discovery.Register) *AuthService {
 	return &AuthService{
 		db:         d.DB,
 		rdb:        d.RDB,
-		yamlSMTP:   smtp,
 		reg:        reg,
 		profileDal: dal.NewProfileDal(d),
 	}
@@ -72,7 +69,7 @@ func NewAuthService(d *data.Data, smtp *conf.SMTP, reg *discovery.Register) *Aut
 
 func (s *AuthService) runtime(ctx context.Context) *sitesettings.Runtime {
 	rt := sitesettings.LoadPreferDB(ctx, s.db, s.rdb)
-	return rt.MergeFallback(s.yamlSMTP, nil, nil)
+	return rt
 }
 
 func (s *AuthService) mailSender(ctx context.Context) *mail.Sender {

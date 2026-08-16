@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -40,7 +41,7 @@ func (i *Installer) Scaffold() error {
 }
 
 func (i *Installer) Secrets() error {
-	for _, secret := range []string{"postgres_password", "redis_password", "rabbitmq_password", "config_encryption_key", "jwt_secret"} {
+	for _, secret := range []string{"postgres_password", "redis_password", "rabbitmq_password", "jwt_secret"} {
 		if err := writeHexSecret(i.Root.Path, "secrets/"+secret, 32); err != nil {
 			return err
 		}
@@ -61,7 +62,7 @@ func (i *Installer) Secrets() error {
 }
 
 type managedAsset struct {
-	source     string
+	source      string
 	destination string
 }
 
@@ -121,20 +122,48 @@ func writeAppEnv(root string) error {
 	postgresPassword := read("secrets/postgres_password")
 	redisPassword := read("secrets/redis_password")
 	rabbitmqPassword := read("secrets/rabbitmq_password")
-	configEncryptionKey := read("secrets/config_encryption_key")
 	jwtSecret := read("secrets/jwt_secret")
+	postgresUser := readEnv(root, "POSTGRES_USER", "goalgo")
+	rabbitmqUser := readEnv(root, "RABBITMQ_USER", "goalgo")
 	content := fmt.Sprintf(
-		"USER_DATABASE_DSN=host=postgres user=goalgo password=%s dbname=algo_user port=5432 sslmode=disable TimeZone=Asia/Shanghai\n"+
-			"CORE_DATABASE_DSN=host=postgres user=goalgo password=%s dbname=algo_core_data port=5432 sslmode=disable TimeZone=Asia/Shanghai\n"+
+		"POSTGRES_USER=%s\nRABBITMQ_USER=%s\n"+
+			"USER_DATABASE_DSN=host=postgres user=%s password=%s dbname=algo_user port=5432 sslmode=disable TimeZone=Asia/Shanghai\n"+
+			"CORE_DATABASE_DSN=host=postgres user=%s password=%s dbname=algo_core_data port=5432 sslmode=disable TimeZone=Asia/Shanghai\n"+
 			"REDIS_ADDR=redis:6379\nREDIS_PASSWORD=%s\n"+
-			"AMQP_DSN=amqp://goalgo:%s@rabbitmq:5672/goalgo\n"+
-			"CONFIG_ENCRYPTION_KEY=%s\n"+
+			"AMQP_DSN=amqp://%s:%s@rabbitmq:5672/goalgo\n"+
 			"CWXU_JWT_SECRET=%s\n"+
+			"CWXU_BACKUP_PG_DSN=%s\n"+
 			"JWT_PRIVATE_KEY_FILE=/run/secrets/jwt_private_key.pem\n"+
 			"JWT_PUBLIC_KEY_FILE=/run/secrets/jwt_public_key.pem\n",
-		postgresPassword, postgresPassword, redisPassword, rabbitmqPassword, configEncryptionKey, jwtSecret)
+		postgresUser, rabbitmqUser, postgresUser, postgresPassword, postgresUser, postgresPassword,
+		redisPassword, rabbitmqUser, rabbitmqPassword, jwtSecret, backupPostgresDSN(postgresUser, postgresPassword))
 	target := filepath.Join(root, "secrets", "app.env")
 	return atomicWrite(target, []byte(content), 0o600)
+}
+
+func backupPostgresDSN(user, password string) string {
+	u := &url.URL{Scheme: "postgres", Host: "postgres:5432", Path: "/postgres"}
+	u.User = url.UserPassword(user, password)
+	q := u.Query()
+	q.Set("sslmode", "disable")
+	u.RawQuery = q.Encode()
+	return u.String()
+}
+
+func readEnv(root, key, fallback string) string {
+	content, err := os.ReadFile(filepath.Join(root, ".env"))
+	if err != nil {
+		return fallback
+	}
+	for _, line := range strings.Split(string(content), "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), key+"=") {
+			value := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), key+"="))
+			if value != "" {
+				return value
+			}
+		}
+	}
+	return fallback
 }
 
 func applyOwnership(root string) error {
@@ -177,6 +206,11 @@ type installMarker struct {
 }
 
 func writeInstallMarker(root *opsroot.Root) error {
+	if _, err := os.Stat(root.Join("state", "install.json")); err == nil {
+		return nil
+	} else if !os.IsNotExist(err) {
+		return err
+	}
 	marker := installMarker{
 		SchemaVersion: 1,
 		InstalledAt:   time.Now().UTC().Format(time.RFC3339),

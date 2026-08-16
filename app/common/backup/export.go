@@ -9,8 +9,6 @@ import (
 	"strings"
 	"time"
 
-	secretutil "cwxu-algo/app/common/utils/secret"
-
 	"gorm.io/gorm"
 )
 
@@ -93,14 +91,13 @@ func Export(opts ExportOptions) (*Manifest, error) {
 	}
 
 	m := &Manifest{
-		Version:         FormatVersion,
-		CreatedAt:       time.Now().UTC().Format(time.RFC3339),
-		Scopes:          concrete,
-		EncryptionKeyFP: secretutil.Fingerprint(),
-		IncludeFiles:    includeFiles,
-		TableCounts:     counts,
-		FileCount:       fileCount,
-		AppHint:         "GoAlgo site backup",
+		Version:      FormatVersion,
+		CreatedAt:    time.Now().UTC().Format(time.RFC3339),
+		Scopes:       concrete,
+		IncludeFiles: includeFiles,
+		TableCounts:  counts,
+		FileCount:    fileCount,
+		AppHint:      "GoAlgo site backup",
 	}
 	raw, err := json.MarshalIndent(m, "", "  ")
 	if err != nil {

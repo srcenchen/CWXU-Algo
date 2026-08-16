@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"cwxu-algo/app/common/sitesettings"
 	native "cwxu-algo/app/core_data/internal/backup"
 	"cwxu-algo/app/core_data/internal/data"
 
@@ -63,6 +64,14 @@ type store interface {
 	Unlock(context.Context, string) error
 	Load(context.Context) (Status, bool, error)
 	Save(context.Context, Status) error
+	ClaimDay(context.Context, string, time.Duration) (bool, error)
+	CompleteDay(context.Context, string, time.Duration) error
+	ReleaseDay(context.Context, string) error
+}
+
+type Schedule struct {
+	Enabled bool
+	Time    string
 }
 
 type Coordinator struct {
@@ -71,36 +80,74 @@ type Coordinator struct {
 	lease      time.Duration
 	renewEvery time.Duration
 
-	mu       sync.RWMutex
-	status   Status
-	stopping bool
-	cancel   context.CancelFunc
-	done     chan struct{}
+	mu          sync.RWMutex
+	status      Status
+	stopping    bool
+	cancel      context.CancelFunc
+	done        chan struct{}
+	enabled     func(context.Context) bool
+	schedule    func(context.Context) Schedule
+	configError string
 }
 
 func NewCoordinator(d *data.Data) *Coordinator {
 	cfg, cfgErr := native.LoadConfig()
 	redisStore := newRedisStore(d.RDB)
+	checker := func(ctx context.Context) bool {
+		return sitesettings.Load(ctx, d.RDB, nil).BackupEnabled
+	}
+	schedule := func(ctx context.Context) Schedule {
+		rt := sitesettings.Load(ctx, d.RDB, nil)
+		return Schedule{Enabled: rt.BackupEnabled, Time: rt.BackupTime}
+	}
 	if cfgErr != nil {
-		return newCoordinator(false, cfgErr.Error(), nil, redisStore)
+		c := newCoordinatorDynamic(checker, cfgErr.Error(), nil, redisStore)
+		c.schedule = schedule
+		return c
 	}
-	if !cfg.Enabled {
-		return newCoordinator(false, "CWXU_BACKUP_ENABLED is false", nil, redisStore)
-	}
-	r, err := native.NewRunner(cfg, native.Dependencies{})
+	r, err := native.NewRunner(cfg, native.Dependencies{CloudConfig: func(ctx context.Context) (native.CloudConfig, error) {
+		rt := sitesettings.Load(ctx, d.RDB, nil)
+		return native.CloudConfig{Bucket: rt.UpyunBucket, Operator: rt.UpyunOperator, Password: rt.UpyunPassword, Prefix: rt.BackupPrefix}, nil
+	}})
 	if err != nil {
-		return newCoordinator(false, err.Error(), nil, redisStore)
+		c := newCoordinatorDynamic(checker, err.Error(), nil, redisStore)
+		c.schedule = schedule
+		return c
 	}
-	return newCoordinator(true, "", r, redisStore)
+	c := newCoordinatorDynamic(checker, "", r, redisStore)
+	c.schedule = schedule
+	return c
 }
 
 func NewForTest(enabled bool, reason string, r runner, s store) *Coordinator {
 	return newCoordinator(enabled, reason, r, s)
 }
 
+func NewForTestDynamic(enabled func(context.Context) bool, configError string, r runner, s store) *Coordinator {
+	return newCoordinatorDynamic(enabled, configError, r, s)
+}
+
+func NewForTestSchedule(schedule func(context.Context) Schedule, r runner, s store) *Coordinator {
+	c := newCoordinatorDynamic(func(ctx context.Context) bool { return schedule(ctx).Enabled }, "", r, s)
+	c.schedule = schedule
+	return c
+}
+
 func newCoordinator(enabled bool, reason string, r runner, s store) *Coordinator {
-	c := &Coordinator{runner: r, store: s, lease: 30 * time.Minute, renewEvery: 10 * time.Minute}
-	if !enabled {
+	return newCoordinatorDynamic(func(context.Context) bool { return enabled }, reason, r, s)
+}
+
+func newCoordinatorDynamic(enabled func(context.Context) bool, configError string, r runner, s store) *Coordinator {
+	c := &Coordinator{runner: r, store: s, lease: 30 * time.Minute, renewEvery: 10 * time.Minute, enabled: enabled, configError: configError}
+	c.schedule = func(ctx context.Context) Schedule {
+		isEnabled := enabled != nil && enabled(ctx)
+		return Schedule{Enabled: isEnabled, Time: "02:00"}
+	}
+	if enabled == nil || !enabled(context.Background()) || configError != "" {
+		reason := configError
+		if reason == "" {
+			reason = ErrDisabled.Error()
+		}
 		c.status = Status{Enabled: false, State: StateDisabled, Stage: string(StateDisabled), Error: reason, Message: reason}
 		c.persistStartupStatus()
 		return c
@@ -138,13 +185,22 @@ func (c *Coordinator) persistStartupStatus() {
 }
 
 func (c *Coordinator) Trigger(ctx context.Context, trigger Trigger) error {
+	return c.trigger(ctx, trigger, "")
+}
+
+func (c *Coordinator) trigger(ctx context.Context, trigger Trigger, scheduledDay string) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.stopping {
 		return ErrStopping
 	}
-	if !c.status.Enabled {
+	if c.enabled == nil || !c.enabled(ctx) || c.configError != "" {
 		return ErrDisabled
+	}
+	if validator, ok := c.runner.(interface{ Validate(context.Context) error }); ok {
+		if err := validator.Validate(ctx); err != nil {
+			return err
+		}
 	}
 	if c.status.State == StateRunning {
 		return ErrAlreadyRunning
@@ -171,11 +227,11 @@ func (c *Coordinator) Trigger(ctx context.Context, trigger Trigger) error {
 		c.status = Status{Enabled: true, State: StateIdle, Stage: string(StateIdle)}
 		return err
 	}
-	go c.run(runCtx, token)
+	go c.run(runCtx, token, scheduledDay)
 	return nil
 }
 
-func (c *Coordinator) run(ctx context.Context, token string) {
+func (c *Coordinator) run(ctx context.Context, token, scheduledDay string) {
 	done := c.done
 	defer close(done)
 	renewCtx, stopRenew := context.WithCancel(ctx)
@@ -183,6 +239,16 @@ func (c *Coordinator) run(ctx context.Context, token string) {
 	go c.renewLease(renewCtx, token)
 	result, err := c.runner.Run(ctx)
 	stopRenew()
+	if err != nil && scheduledDay != "" {
+		if releaseErr := c.store.ReleaseDay(context.Background(), scheduledDay); releaseErr != nil {
+			log.Errorf("backup: release failed scheduled day: %v", releaseErr)
+		}
+	}
+	if err == nil && scheduledDay != "" {
+		if completeErr := c.store.CompleteDay(context.Background(), scheduledDay, 72*time.Hour); completeErr != nil {
+			log.Errorf("backup: mark scheduled day complete: %v", completeErr)
+		}
+	}
 
 	c.mu.Lock()
 	c.status.FinishedAt = time.Now().UTC()
@@ -234,10 +300,12 @@ func (c *Coordinator) renewLease(ctx context.Context, token string) {
 }
 
 func (c *Coordinator) Status() Status {
+	switchEnabled := c.enabled != nil && c.enabled(context.Background())
+	dynamicallyEnabled := switchEnabled && c.configError == ""
 	c.mu.RLock()
-	enabled := c.status.Enabled
+	running := c.status.State == StateRunning
 	c.mu.RUnlock()
-	if enabled && c.store != nil {
+	if dynamicallyEnabled && c.store != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		persisted, ok, err := c.store.Load(ctx)
 		cancel()
@@ -250,7 +318,27 @@ func (c *Coordinator) Status() Status {
 	}
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	return c.status
+	status := c.status
+	status.Enabled = dynamicallyEnabled
+	if dynamicallyEnabled && status.State == StateDisabled {
+		status.State = StateIdle
+		status.Stage = string(StateIdle)
+		status.Message = ""
+		status.Error = ""
+	}
+	if !dynamicallyEnabled && !running {
+		status.State = StateDisabled
+		status.Stage = string(StateDisabled)
+		status.Error = ""
+		if switchEnabled {
+			status.Error = c.configError
+		}
+		if status.Error == "" {
+			status.Error = ErrDisabled.Error()
+		}
+		status.Message = status.Error
+	}
+	return status
 }
 
 func (c *Coordinator) Stop(ctx context.Context) error {
@@ -272,9 +360,39 @@ func (c *Coordinator) Stop(ctx context.Context) error {
 	}
 }
 
-func (c *Coordinator) RunScheduled() {
-	if err := c.Trigger(context.Background(), TriggerScheduled); err != nil && !errors.Is(err, ErrDisabled) && !errors.Is(err, ErrAlreadyRunning) && !errors.Is(err, ErrStopping) {
-		log.Errorf("backup: scheduled trigger: %v", err)
+func (c *Coordinator) RunScheduled(now time.Time) {
+	ctx := context.Background()
+	schedule := c.schedule(ctx)
+	if !schedule.Enabled {
+		return
+	}
+	configured := sitesettings.NormalizeBackupTime(schedule.Time)
+	shanghai, err := time.LoadLocation("Asia/Shanghai")
+	if err != nil {
+		shanghai = time.FixedZone("CST", 8*60*60)
+	}
+	local := now.In(shanghai)
+	configuredAt, err := time.ParseInLocation("15:04", configured, shanghai)
+	if err != nil {
+		return
+	}
+	configuredMinutes := configuredAt.Hour()*60 + configuredAt.Minute()
+	if local.Hour()*60+local.Minute() < configuredMinutes {
+		return
+	}
+	day := local.Format("2006-01-02")
+	claimed, err := c.store.ClaimDay(ctx, day, c.lease)
+	if err != nil || !claimed {
+		if err != nil {
+			log.Errorf("backup: claim scheduled day: %v", err)
+		}
+		return
+	}
+	if err := c.trigger(ctx, TriggerScheduled, day); err != nil {
+		_ = c.store.ReleaseDay(ctx, day)
+		if !errors.Is(err, ErrDisabled) && !errors.Is(err, ErrAlreadyRunning) && !errors.Is(err, ErrStopping) {
+			log.Errorf("backup: scheduled trigger: %v", err)
+		}
 	}
 }
 

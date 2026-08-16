@@ -2,15 +2,20 @@ package main
 
 import (
 	"archive/tar"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 
+	"gopkg.in/yaml.v3"
+
 	"cwxu-algo/internal/opscompose"
 	"cwxu-algo/internal/opsexec"
+	"cwxu-algo/internal/opslock"
 	"cwxu-algo/internal/opsprompt"
 	"cwxu-algo/internal/opsrelease"
 	"cwxu-algo/internal/opsroot"
@@ -40,7 +45,7 @@ func configValidate(args []string, runner opsexec.Command) int {
 	if err := flags.Parse(args); err != nil {
 		return fail("config validate", err)
 	}
-	root, err := opsroot.Resolve(rootPath)
+	root, err := resolveRegisteredRoot(rootPath)
 	if err != nil {
 		return fail("config validate", err)
 	}
@@ -80,8 +85,16 @@ func configExport(args []string) int {
 	if err := flags.Parse(args); err != nil {
 		return fail("config export", err)
 	}
-	root, err := opsroot.Resolve(rootPath)
+	root, err := resolveRegisteredRoot(rootPath)
 	if err != nil {
+		return fail("config export", err)
+	}
+	lock, err := opslock.Acquire(lockPath(root), 0)
+	if err != nil {
+		return fail("config export", err)
+	}
+	defer lock.Release()
+	if err := validateConfigExport(root); err != nil {
 		return fail("config export", err)
 	}
 	if _, err := os.Stat(output); err == nil {
@@ -92,7 +105,7 @@ func configExport(args []string) int {
 		return fail("config export", err)
 	}
 	writer := tar.NewWriter(file)
-	for _, relative := range []string{".env", "release.env", "config", "secrets"} {
+	for _, relative := range []string{".env", "release.env", "compose.yaml", "config", "secrets"} {
 		source := root.Join(relative)
 		if _, err := os.Lstat(source); err != nil {
 			continue
@@ -110,7 +123,7 @@ func configExport(args []string) int {
 	if err := file.Close(); err != nil {
 		return fail("config export", err)
 	}
-	fmt.Printf("配置已导出：%s（含 .env / release.env / config / secrets，请妥善保管）\n", output)
+	fmt.Printf("配置已导出：%s（含 .env / release.env / compose.yaml / config / secrets，请妥善保管）\n", output)
 	return 0
 }
 
@@ -133,15 +146,89 @@ func configImport(args []string) int {
 			return fail("config import", err)
 		}
 	}
-	root, err := opsroot.Resolve(rootPath)
+	root, err := resolveRegisteredRoot(rootPath)
 	if err != nil {
 		return fail("config import", err)
 	}
+	lock, err := opslock.Acquire(lockPath(root), 0)
+	if err != nil {
+		return fail("config import", err)
+	}
+	defer lock.Release()
+	if err := importConfigBundle(root, bundle); err != nil {
+		return fail("config import", err)
+	}
+	fmt.Printf("配置已导入：%s（密钥目录保持 0600；建议重启服务生效）\n", root.Path)
+	return 0
+}
+
+var criticalConfigEntries = []string{
+	".env", "release.env", "compose.yaml", "config", "secrets/app.env", "secrets/jwt_private_key.pem",
+	"secrets/jwt_public_key.pem", "secrets/postgres_password", "secrets/redis_password",
+	"secrets/rabbitmq_password", "secrets/backup_encryption_key",
+}
+
+func validateStagedConfig(root *opsroot.Root) error {
+	if err := validateConfigExport(root); err != nil {
+		return err
+	}
+	if _, err := opsrelease.ParseFile(root.Join("release.env")); err != nil {
+		return fmt.Errorf("release.env 无效: %w", err)
+	}
+	for _, relative := range []string{"compose.yaml", "config/gateway.yaml", "config/user.yaml", "config/core-data.yaml", "config/agent.yaml"} {
+		raw, err := os.ReadFile(root.Join(relative))
+		if err != nil {
+			return fmt.Errorf("读取 %s: %w", relative, err)
+		}
+		var value any
+		if err := yaml.Unmarshal(raw, &value); err != nil {
+			return fmt.Errorf("%s YAML 无效: %w", relative, err)
+		}
+		if value == nil {
+			return fmt.Errorf("%s 内容为空", relative)
+		}
+	}
+	for _, relative := range []string{"secrets/app.env", "secrets/jwt_private_key.pem", "secrets/jwt_public_key.pem", "secrets/postgres_password", "secrets/redis_password", "secrets/rabbitmq_password", "secrets/backup_encryption_key"} {
+		content, err := os.ReadFile(root.Join(relative))
+		if err != nil || len(content) == 0 {
+			return fmt.Errorf("关键密钥内容为空或不可读：%s", relative)
+		}
+	}
+	key, _ := os.ReadFile(root.Join("secrets/backup_encryption_key"))
+	if len(key) != 32 {
+		return fmt.Errorf("backup_encryption_key 必须为 32 字节")
+	}
+	dsn, err := dotenvValue(root.Join("secrets/app.env"), "CWXU_BACKUP_PG_DSN")
+	if err != nil {
+		return err
+	}
+	parsed, err := url.Parse(dsn)
+	if err != nil || (parsed.Scheme != "postgres" && parsed.Scheme != "postgresql") || parsed.Host == "" {
+		return fmt.Errorf("secrets/app.env 的 CWXU_BACKUP_PG_DSN 必须是有效 PostgreSQL URI")
+	}
+	return nil
+}
+
+func validateConfigExport(root *opsroot.Root) error {
+	for _, relative := range criticalConfigEntries {
+		if _, err := os.Stat(root.Join(relative)); err != nil {
+			return fmt.Errorf("缺少关键配置：%s", relative)
+		}
+	}
+	return nil
+}
+
+func importConfigBundle(root *opsroot.Root, bundle string) error {
 	file, err := os.Open(bundle)
 	if err != nil {
-		return fail("config import", err)
+		return err
 	}
 	defer file.Close()
+	stage, err := os.MkdirTemp(filepath.Dir(root.Path), ".goalgo-config-stage-")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(stage)
 	reader := tar.NewReader(file)
 	for {
 		header, err := reader.Next()
@@ -149,27 +236,27 @@ func configImport(args []string) int {
 			break
 		}
 		if err != nil {
-			return fail("config import", err)
+			return err
 		}
 		name := header.Name
 		if strings.HasPrefix(name, "/") || strings.Contains(name, "..") {
-			return fail("config import", fmt.Errorf("非法条目：%s", name))
+			return fmt.Errorf("非法条目：%s", name)
 		}
-		target := root.Join(name)
-		if !strings.HasPrefix(target, root.Path) {
-			return fail("config import", fmt.Errorf("路径逃逸：%s", name))
+		target := filepath.Join(stage, filepath.Clean(name))
+		if target != stage && !strings.HasPrefix(target, stage+string(os.PathSeparator)) {
+			return fmt.Errorf("路径逃逸：%s", name)
 		}
 		if header.Typeflag == tar.TypeDir {
 			if err := os.MkdirAll(target, 0o700); err != nil {
-				return fail("config import", err)
+				return err
 			}
 			continue
 		}
 		if header.Typeflag != tar.TypeReg {
-			return fail("config import", fmt.Errorf("非法条目类型：%s", name))
+			return fmt.Errorf("非法条目类型：%s", name)
 		}
 		if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
-			return fail("config import", err)
+			return err
 		}
 		mode := os.FileMode(0o600)
 		if strings.HasPrefix(name, "config/") {
@@ -177,18 +264,75 @@ func configImport(args []string) int {
 		}
 		out, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode)
 		if err != nil {
-			return fail("config import", err)
+			return err
 		}
 		if _, err := io.Copy(out, reader); err != nil {
 			out.Close()
-			return fail("config import", err)
+			return err
 		}
 		if err := out.Close(); err != nil {
-			return fail("config import", err)
+			return err
 		}
 	}
-	fmt.Printf("配置已导入：%s（密钥目录保持 0600；建议重启服务生效）\n", root.Path)
-	return 0
+	stageRoot, err := opsroot.Resolve(stage)
+	if err != nil {
+		return err
+	}
+	if err := validateStagedConfig(stageRoot); err != nil {
+		return err
+	}
+	if value, err := dotenvValue(filepath.Join(stage, ".env"), "GOALGO_ROOT"); err != nil || filepath.Clean(value) != root.Path {
+		return fmt.Errorf("导入 .env 的 GOALGO_ROOT 必须为 %s", root.Path)
+	}
+	backup, err := os.MkdirTemp(filepath.Dir(root.Path), ".goalgo-config-backup-")
+	if err != nil {
+		return err
+	}
+	entries := []string{".env", "release.env", "compose.yaml", "config", "secrets"}
+	var replaced []string
+	hadOriginal := map[string]bool{}
+	rollback := func() error {
+		var rollbackErr error
+		for i := len(replaced) - 1; i >= 0; i-- {
+			name := replaced[i]
+			rollbackErr = errors.Join(rollbackErr, os.RemoveAll(root.Join(name)))
+			if hadOriginal[name] {
+				rollbackErr = errors.Join(rollbackErr, os.Rename(filepath.Join(backup, name), root.Join(name)))
+			}
+		}
+		return rollbackErr
+	}
+	for _, name := range entries {
+		target := root.Join(name)
+		hadTarget := false
+		if _, err := os.Stat(target); err == nil {
+			if err := os.Rename(target, filepath.Join(backup, name)); err != nil {
+				rollbackErr := rollback()
+				if rollbackErr != nil {
+					return errors.Join(err, fmt.Errorf("配置回滚失败，备份保留于 %s: %w", backup, rollbackErr))
+				}
+				return err
+			}
+			hadTarget = true
+			hadOriginal[name] = true
+		}
+		if err := os.Rename(filepath.Join(stage, name), target); err != nil {
+			var rollbackErr error
+			if hadTarget {
+				rollbackErr = errors.Join(rollbackErr, os.Rename(filepath.Join(backup, name), target))
+			}
+			rollbackErr = errors.Join(rollbackErr, rollback())
+			if rollbackErr != nil {
+				return errors.Join(err, fmt.Errorf("配置回滚失败，备份保留于 %s: %w", backup, rollbackErr))
+			}
+			return err
+		}
+		replaced = append(replaced, name)
+	}
+	if err := os.RemoveAll(backup); err != nil {
+		return fmt.Errorf("配置已导入但清理旧备份失败（%s）: %w", backup, err)
+	}
+	return nil
 }
 
 func addTarEntry(writer *tar.Writer, source, relative string) error {

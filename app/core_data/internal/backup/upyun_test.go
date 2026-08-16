@@ -80,11 +80,32 @@ func (failingTransport) RoundTrip(*http.Request) (*http.Response, error) {
 	return nil, errors.New("connection reset after write")
 }
 
-func TestUpyunStoreMarksPointerTransportFailureAmbiguous(t *testing.T) {
+func TestUpyunStoreMovesTemporaryObjectOverFixedObject(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPut || r.URL.Path != "/bucket/backups/core/algobak" {
+			t.Fatalf("move request = %s %s", r.Method, r.URL.Path)
+		}
+		if got := r.Header.Get("X-Upyun-Move-Source"); got != "/bucket/backups/core/algobak.uploading-id" {
+			t.Fatalf("move source = %q", got)
+		}
+		if r.ContentLength != 0 {
+			t.Fatalf("move content length = %d", r.ContentLength)
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+	store := NewUpyunStore("bucket", "operator", "password", server.Client())
+	store.endpoint = server.URL
+	if err := store.Move(context.Background(), "backups/core/algobak.uploading-id", "backups/core/algobak"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestUpyunStoreMarksMoveTransportFailureAmbiguous(t *testing.T) {
 	store := NewUpyunStore("bucket", "operator", "password", &http.Client{Transport: failingTransport{}})
-	err := store.Put(context.Background(), "backups/core/latest.json", bytes.NewBufferString("{}"), "application/json")
+	err := store.Move(context.Background(), "algobak.uploading-id", "algobak")
 	if !errors.Is(err, ErrAmbiguousPublish) {
-		t.Fatalf("Put error = %v, want ErrAmbiguousPublish", err)
+		t.Fatalf("Move error = %v", err)
 	}
 }
 

@@ -18,7 +18,6 @@ server:
     -----BEGIN PUBLIC KEY-----
     <RSA 公钥 PEM>
     -----END PUBLIC KEY-----
-  config_encryption_key: ""
 data:
   database:
     driver: postgres
@@ -28,13 +27,3 @@ data:
     password: cwxu
     read_timeout: 0.2s
     write_timeout: 0.2s
-
-# 业务配置请在站点设置 /admin/site 配置；以下仅作兜底（Redis 无数据时）
-# Agent（日报/周报 OpenAI 兼容）配置只认站点设置，不在此兜底。
-
-smtp:
-  host: smtp.163.com
-  port: 465
-  username: xxx@163.com
-  password: xxx
-  from: xxx@163.com

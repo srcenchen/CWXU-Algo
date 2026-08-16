@@ -57,7 +57,7 @@ type CronTask struct {
 }
 
 type scheduledBackup interface {
-	RunScheduled()
+	RunScheduled(time.Time)
 }
 
 func NewCronTask(spider *SpiderTask, data *data.Data, summary *SummaryTask, profile *UserProfileTask, reg *discovery.Register, backup *backupcoord.Coordinator) *CronTask {
@@ -73,8 +73,10 @@ func NewCronTask(spider *SpiderTask, data *data.Data, summary *SummaryTask, prof
 	}
 }
 
+func backupTick(backup scheduledBackup, now time.Time) { backup.RunScheduled(now) }
+
 func registerBackupSchedule(c *cron.Cron, backup scheduledBackup) error {
-	_, err := c.AddFunc("0 2 * * *", backup.RunScheduled)
+	_, err := c.AddFunc("* * * * *", func() { backupTick(backup, time.Now()) })
 	return err
 }
 
@@ -563,7 +565,7 @@ func (t *CronTask) Do() {
 	stopCh := t.stopCh
 	t.mu.Unlock()
 
-	log.Infof("CronTask started: backup daily 02:00; spider/summary 5m; calendar 12h; user_profile daily 03:15 + empty-radar heal 6h")
+	log.Infof("CronTask started: backup schedule checked every minute; spider/summary 5m; calendar 12h; user_profile daily 03:15 + empty-radar heal 6h")
 
 	defer func() {
 		t.mu.Lock()

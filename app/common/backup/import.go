@@ -2,13 +2,12 @@ package backup
 
 import (
 	"bufio"
+	"cwxu-algo/app/common/utils/legacysecret"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
-
-	secretutil "cwxu-algo/app/common/utils/secret"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -19,6 +18,8 @@ type ImportOptions struct {
 	DBs      DBs
 	Dir      string // contains manifest.json, data/, optional files/
 	Progress Progress
+	// LegacyConfigKey is only used to upgrade old enc:v1 site config backups.
+	LegacyConfigKey string
 }
 
 // Import performs wipe-and-replace for scopes listed in the package manifest.
@@ -38,17 +39,19 @@ func Import(opts ImportOptions) (*Manifest, error) {
 	if m.Version != FormatVersion {
 		return nil, fmt.Errorf("不支持的备份版本: %s（需要 %s）", m.Version, FormatVersion)
 	}
-	fp := secretutil.Fingerprint()
-	if m.EncryptionKeyFP != "" && fp != "" && m.EncryptionKeyFP != fp {
-		return nil, fmt.Errorf("加密密钥指纹不匹配（备份 %s ≠ 当前 %s）。请使用相同的 config_encryption_key 后再导入", m.EncryptionKeyFP, fp)
-	}
-
 	concrete := ExpandedScopes(m.Scopes)
 	if NeedsCoreDB(concrete) && opts.DBs.Core == nil {
 		return nil, fmt.Errorf("未配置 core 数据库，无法导入训练/题库数据")
 	}
 
 	tables := TablesForScopes(concrete)
+	for _, spec := range tables {
+		if spec.File == "site_configs.ndjson" {
+			if err := preprocessLegacySiteConfig(filepath.Join(opts.Dir, "data", spec.File), opts.LegacyConfigKey); err != nil {
+				return nil, err
+			}
+		}
+	}
 	// truncate reverse order to respect FKs within each DB
 	report(5, "清空目标表 …")
 	if err := truncateTables(opts.DBs, reverseTables(tables)); err != nil {
@@ -99,6 +102,57 @@ func Import(opts ImportOptions) (*Manifest, error) {
 
 	report(98, "导入完成")
 	return m, nil
+}
+
+var legacySiteSecretColumns = []string{"smtp_password", "agent_secret", "ai_analyze_secret", "upyun_password", "oj_luogu_password", "oj_qoj_password", "payfm_secret"}
+
+func preprocessLegacySiteConfig(filePath, configuredKey string) error {
+	raw, err := os.ReadFile(filePath)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("读取旧站点配置备份: %w", err)
+	}
+	lines := strings.Split(string(raw), "\n")
+	changed := false
+	for i, line := range lines {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		var row map[string]interface{}
+		if err := json.Unmarshal([]byte(line), &row); err != nil {
+			return fmt.Errorf("预检 site_configs.ndjson: %w", err)
+		}
+		for _, column := range legacySiteSecretColumns {
+			value, _ := row[column].(string)
+			if !legacysecret.IsEncrypted(value) {
+				continue
+			}
+			plain, err := legacysecret.DecryptWithKey(value, legacysecret.ResolveKey(configuredKey))
+			if err != nil {
+				return fmt.Errorf("旧配置备份包含 enc:v1 密文，无法解密 %s；请先在升级环境完成迁移或提供旧配置密钥: %w", column, err)
+			}
+			row[column], changed = plain, true
+		}
+		encoded, err := json.Marshal(row)
+		if err != nil {
+			return err
+		}
+		lines[i] = string(encoded)
+	}
+	if !changed {
+		return nil
+	}
+	tmp := filePath + ".migrating"
+	if err := os.WriteFile(tmp, []byte(strings.Join(lines, "\n")), 0o600); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp, filePath); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	return nil
 }
 
 // ReadManifest loads manifest.json from an unzipped backup directory.

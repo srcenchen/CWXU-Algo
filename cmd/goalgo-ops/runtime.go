@@ -6,7 +6,6 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -34,7 +33,7 @@ func dotenvValue(path, key string) (string, error) {
 	return "", fmt.Errorf("%s 未定义于 %s", key, path)
 }
 
-// resolveInstallRoot 确定安装根目录：显式 --root > $GOALGO_ROOT > ~/.ops.data.json 持久化的 root > 默认 .env 的 GOALGO_ROOT > /opt/goalgo。
+// resolveInstallRoot 仅用于尚未注册的 init/install 根选择。
 func resolveInstallRoot(path string) (*opsroot.Root, error) {
 	if path != "" {
 		return opsroot.Resolve(path)
@@ -42,42 +41,58 @@ func resolveInstallRoot(path string) (*opsroot.Root, error) {
 	if env := os.Getenv("GOALGO_ROOT"); env != "" {
 		return opsroot.Resolve(env)
 	}
-	if data, err := opsdata.Load(); err == nil && data.Root != "" {
-		return opsroot.Resolve(data.Root)
-	}
-	if value, err := dotenvValue("/opt/goalgo/.env", "GOALGO_ROOT"); err == nil && value != "" {
-		return opsroot.Resolve(value)
-	}
 	return opsroot.Resolve("")
 }
 
-// persistInstallRoot 把安装根目录写入 ~/.ops.data.json，供后续命令（restore/deploy/upgrade 等）读取。
-func persistInstallRoot(root *opsroot.Root) {
+func resolveRegisteredRoot(explicit string) (*opsroot.Root, error) {
 	data, err := opsdata.Load()
 	if err != nil {
-		return
+		return nil, err
 	}
-	if data.Root == root.Path {
-		return
+	if data.Root == "" {
+		return resolveInstallRoot(explicit)
 	}
-	data.Root = root.Path
-	_ = data.Save()
+	registered, err := opsroot.Resolve(data.Root)
+	if err != nil {
+		return nil, err
+	}
+	if explicit != "" {
+		selected, err := opsroot.Resolve(explicit)
+		if err != nil {
+			return nil, err
+		}
+		if selected.Path != registered.Path {
+			return nil, fmt.Errorf("已安装实例位于 %s，拒绝使用其他 root %s", registered.Path, selected.Path)
+		}
+	}
+	return registered, nil
 }
 
-// carryAnchorEnv 当安装根不是默认锚点位置时，把锚点 .env 复制到安装根，保留 init 填写的值。
-func carryAnchorEnv(root *opsroot.Root) error {
-	anchor := "/opt/goalgo/.env"
-	if filepath.Clean(anchor) == root.Join(".env") {
-		return nil
-	}
-	data, err := os.ReadFile(anchor)
+func persistInstallRoot(root *opsroot.Root) error {
+	data, err := opsdata.Load()
 	if err != nil {
-		return nil
-	}
-	if err := os.MkdirAll(root.Path, 0o755); err != nil {
 		return err
 	}
-	return os.WriteFile(root.Join(".env"), data, 0o600)
+	data.Root = root.Path
+	return data.Save()
+}
+
+func ensureInstallAvailable(root *opsroot.Root) error {
+	data, err := opsdata.Load()
+	if err != nil {
+		return err
+	}
+	if data.Root == "" {
+		return nil
+	}
+	registered, err := opsroot.Resolve(data.Root)
+	if err != nil {
+		return err
+	}
+	if registered.Path == root.Path {
+		return fmt.Errorf("%s 已安装，请使用 upgrade/restart", root.Path)
+	}
+	return fmt.Errorf("已有安装位于 %s，拒绝安装到 %s", registered.Path, root.Path)
 }
 
 func installUp(ctx context.Context, compose *opscompose.Compose, progress *opsprogress.Progress) error {
@@ -104,7 +119,7 @@ func deployCandidate(rootPath, current string, prompt *opsprompt.Prompter) (stri
 	return current, nil
 }
 
-// runtimeUpgrade 解析 ACR <svc>-latest 的 digest 用于版本判断（持久化到 ~/.ops.data.json），
+// runtimeUpgrade 解析 ACR <svc>-latest 的 digest 用于版本判断（持久化到系统注册文件），
 // 实际镜像仍用 latest 标签；有更新则原子升级，失败自动回滚。
 func runtimeUpgrade(ctx context.Context, compose *opscompose.Compose) int {
 	if err := compose.Root.RequireFiles(); err != nil {
@@ -126,36 +141,23 @@ func runtimeUpgrade(ctx context.Context, compose *opscompose.Compose) int {
 	if err != nil {
 		return fail("升级", err)
 	}
+	previous, err := opsrelease.ParseFile(compose.Root.Join("release.previous.env"))
+	if err != nil && !os.IsNotExist(err) {
+		return fail("升级", err)
+	}
+	if err := applyRelease(ctx, compose, latest, active, previous); err != nil {
+		return fail("升级", err)
+	}
 	data.Deploy.LastDigests = latest.Images
 	data.Deploy.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
 	if err := data.Save(); err != nil {
-		return fail("升级", err)
-	}
-	release := opsrelease.LatestTagRelease()
-	if err := release.WriteFile(compose.Root.Join("release.previous.env")); err != nil {
-		return fail("升级", err)
-	}
-	if err := release.WriteFile(compose.Root.Join("release.env")); err != nil {
-		return fail("升级", err)
-	}
-	rollback := func() { _ = rollbackFiles(compose, release, active) }
-	opsprogress.Note(os.Stderr, "拉取发布镜像")
-	if err := compose.Pull(ctx); err != nil {
-		rollback()
-		return fail("升级", err)
-	}
-	opsprogress.Note(os.Stderr, "创建并启动容器")
-	if err := compose.Up(ctx, compose.WaitTimeout()); err != nil {
-		rollback()
-		return fail("升级", err)
-	}
-	if err := compose.Health(ctx); err != nil {
-		rollback()
-		return fail("升级", err)
-	}
-	if err := compose.Smoke(ctx); err != nil {
-		rollback()
-		return fail("升级", err)
+		rollbackCtx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+		defer cancel()
+		rollbackErr := restoreRunningRelease(rollbackCtx, compose, active, previous)
+		if rollbackErr != nil {
+			return fail("升级", errors.Join(fmt.Errorf("保存 digest 状态失败：%w", err), fmt.Errorf("恢复旧版本失败：%w", rollbackErr)))
+		}
+		return fail("升级", fmt.Errorf("保存 digest 状态失败，已恢复旧版本：%w", err))
 	}
 	opsprogress.Done(os.Stderr, "升级完成")
 	return 0
@@ -173,7 +175,7 @@ func sameDigests(a, b map[string]string) bool {
 	return true
 }
 
-// runtimeUninstall 彻底删除：容器（compose down -v）→ root 目录（配置/密钥/数据）→ ~/.ops.data.json →
+// runtimeUninstall 彻底删除：容器（compose down -v）→ root 目录（配置/密钥/数据）→ 系统注册文件 →
 // 询问是否删除 goalgo 镜像。--yes 跳过确认并删除镜像。
 func runtimeUninstall(ctx context.Context, compose *opscompose.Compose, args []string) int {
 	var yes bool

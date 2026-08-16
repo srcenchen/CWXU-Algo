@@ -125,6 +125,10 @@ Each service has its own `configs/config.yaml` containing:
 - Data: Database connection (PostgreSQL)
 - Redis: connection settings
 
+SMTP, Agent/AI, Upyun, OJ, PayFM, and backup scheduling are runtime site settings from `site_configs` + Redis, not YAML fallbacks.
+
+Any config proto, example, template, or loader change must keep `deploy/config`, container render/provision, `goalgo-ops` scaffold/doctor, and their contract tests synchronized.
+
 ### Adding a New Platform Spider
 
 1. Create new file in `app/core_data/internal/spider/platform/`

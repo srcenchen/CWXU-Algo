@@ -460,6 +460,7 @@ func runImportJob(d *data.Data, id uint) {
 	_, err := backup.Import(backup.ImportOptions{
 		DBs: backup.DBs{User: d.DB, Core: d.CoreDB},
 		Dir: work,
+		LegacyConfigKey: d.LegacyConfigKey,
 		Progress: func(pct int, msg string) {
 			updateJobProgress(d, id, pct, msg)
 		},

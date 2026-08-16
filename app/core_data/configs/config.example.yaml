@@ -14,7 +14,6 @@ server:
     -----BEGIN PUBLIC KEY-----
     <RSA 公钥 PEM>
     -----END PUBLIC KEY-----
-  config_encryption_key: ""
 data:
   database:
     driver: postgres
@@ -22,12 +21,6 @@ data:
   redis:
     addr: 192.168.1.7:6379
     password: cwxu
-    # 过短会导致 sitesettings.Load 偶发超时，SMTP 读不到、日历确认信静默跳过
+    # 过短会导致运行时站点配置偶发读取失败
     read_timeout: 2s
     write_timeout: 2s
-
-# 业务配置请在站点设置 /admin/site 配置；以下仅作兜底（Redis 无数据时）
-ai_analyze:
-  endpoint: http://103.24.219.60:8001/api
-  model: glm-5-2-260617
-  secret: xxx

@@ -2,12 +2,55 @@ package opsinstall
 
 import (
 	"context"
+	"net/url"
 	"os"
 	"strings"
 	"testing"
 
 	"cwxu-algo/internal/opsroot"
 )
+
+func TestAppEnvIncludesEscapedBackupPostgresURI(t *testing.T) {
+	root, err := opsroot.Resolve(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(root.Join(".env"), []byte("POSTGRES_USER=user+ops@example.com\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(root.Join("secrets"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(root.Join("secrets", "postgres_password"), []byte("p@ss:/?#[]\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := New(root).Install(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	value := ""
+	for _, line := range splitLines(string(mustReadFile(t, root.Join("secrets", "app.env")))) {
+		if strings.HasPrefix(line, "CWXU_BACKUP_PG_DSN=") {
+			value = strings.TrimPrefix(line, "CWXU_BACKUP_PG_DSN=")
+		}
+	}
+	u, err := url.Parse(value)
+	if err != nil || u.Host != "postgres:5432" || u.User.Username() != "user+ops@example.com" {
+		t.Fatalf("backup DSN invalid: %q, %v", value, err)
+	}
+	password, ok := u.User.Password()
+	if !ok || password != "p@ss:/?#[]" {
+		t.Fatalf("backup DSN password was not URI escaped: %q", value)
+	}
+}
+
+func mustReadFile(t *testing.T, path string) []byte {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return data
+}
 
 func TestInstallProvisionsFullLayout(t *testing.T) {
 	root, err := opsroot.Resolve(t.TempDir())
@@ -57,7 +100,7 @@ func TestInstallGeneratesSecretsAndCertificates(t *testing.T) {
 		t.Fatalf("backup key must be 0600, got %v", info.Mode().Perm())
 	}
 	// Text passwords must be 64 hex chars plus newline.
-	for _, name := range []string{"postgres_password", "redis_password", "rabbitmq_password", "config_encryption_key"} {
+	for _, name := range []string{"postgres_password", "redis_password", "rabbitmq_password"} {
 		data, err := os.ReadFile(root.Join("secrets", name))
 		if err != nil {
 			t.Fatal(err)
@@ -65,6 +108,9 @@ func TestInstallGeneratesSecretsAndCertificates(t *testing.T) {
 		if len(data) != 65 {
 			t.Fatalf("%s must be 64 hex + newline, got %d bytes", name, len(data))
 		}
+	}
+	if _, err := os.Stat(root.Join("secrets", "config_encryption_key")); !os.IsNotExist(err) {
+		t.Fatalf("config_encryption_key must not be generated, stat error = %v", err)
 	}
 	// RSA key pair must exist.
 	for _, name := range []string{"jwt_private_key.pem", "jwt_public_key.pem"} {
@@ -148,7 +194,25 @@ func TestAppEnvIncludesJWTSecret(t *testing.T) {
 	t.Fatal("app.env must define CWXU_JWT_SECRET")
 }
 
-func TestAdminCreatedMarker(t *testing.T) {	root, err := opsroot.Resolve(t.TempDir())
+func TestAppEnvOmitsConfigEncryptionKey(t *testing.T) {
+	root, err := opsroot.Resolve(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := New(root).Install(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	content, err := os.ReadFile(root.Join("secrets", "app.env"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(content), "CONFIG_ENCRYPTION_KEY") {
+		t.Fatalf("app.env contains retired config encryption key: %s", content)
+	}
+}
+
+func TestAdminCreatedMarker(t *testing.T) {
+	root, err := opsroot.Resolve(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -164,6 +228,34 @@ func TestAdminCreatedMarker(t *testing.T) {	root, err := opsroot.Resolve(t.TempD
 	}
 	if !AdminCreated(root) {
 		t.Fatal("marker must be readable after set")
+	}
+	if err := inst.Install(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if !AdminCreated(root) {
+		t.Fatal("repeat installer call must preserve adminCreated")
+	}
+}
+
+func TestAppEnvUsesConfiguredDatabaseAndRabbitUsers(t *testing.T) {
+	root, err := opsroot.Resolve(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(root.Join(".env"), []byte("GOALGO_ROOT="+root.Path+"\nPOSTGRES_USER=custom_pg\nRABBITMQ_USER=custom_mq\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := New(root).Install(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	content, err := os.ReadFile(root.Join("secrets", "app.env"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"POSTGRES_USER=custom_pg", "RABBITMQ_USER=custom_mq", "user=custom_pg", "amqp://custom_mq:"} {
+		if !strings.Contains(string(content), want) {
+			t.Errorf("app.env missing %q: %s", want, content)
+		}
 	}
 }
 

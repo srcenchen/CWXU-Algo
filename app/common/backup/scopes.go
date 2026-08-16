@@ -30,10 +30,10 @@ const (
 
 // TableSpec describes one logical table in the backup package.
 type TableSpec struct {
-	File   string // relative path under data/, e.g. users.ndjson
-	DB     string // "user" | "core"
-	Table  string // physical table name
-	Scope  string
+	File  string // relative path under data/, e.g. users.ndjson
+	DB    string // "user" | "core"
+	Table string // physical table name
+	Scope string
 	// SeqCol is the identity column for setval after import; empty = no sequence fix.
 	SeqCol string
 }
@@ -157,12 +157,11 @@ func TablesForScopes(concrete []string) []TableSpec {
 
 // Manifest describes a backup package.
 type Manifest struct {
-	Version             string           `json:"version"`
-	CreatedAt           string           `json:"createdAt"`
-	Scopes              []string         `json:"scopes"`
-	EncryptionKeyFP     string           `json:"encryptionKeyFp"`
-	IncludeFiles        bool             `json:"includeFiles"`
-	TableCounts         map[string]int64 `json:"tableCounts"`
-	FileCount           int              `json:"fileCount,omitempty"`
-	AppHint             string           `json:"appHint,omitempty"`
+	Version      string           `json:"version"`
+	CreatedAt    string           `json:"createdAt"`
+	Scopes       []string         `json:"scopes"`
+	IncludeFiles bool             `json:"includeFiles"`
+	TableCounts  map[string]int64 `json:"tableCounts"`
+	FileCount    int              `json:"fileCount,omitempty"`
+	AppHint      string           `json:"appHint,omitempty"`
 }

@@ -315,6 +315,68 @@ func (x *HealthServiceItem) GetErrMsg() string {
 	return ""
 }
 
+type HealthBackendServiceItem struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// 后台服务名：user / core-data / agent（gateway 不注册 Consul）
+	Name string `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	// ok | unchecked
+	Status        string `protobuf:"bytes,2,opt,name=status,proto3" json:"status,omitempty"`
+	ErrMsg        string `protobuf:"bytes,3,opt,name=err_msg,json=errMsg,proto3" json:"err_msg,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *HealthBackendServiceItem) Reset() {
+	*x = HealthBackendServiceItem{}
+	mi := &file_core_v1_health_health_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *HealthBackendServiceItem) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*HealthBackendServiceItem) ProtoMessage() {}
+
+func (x *HealthBackendServiceItem) ProtoReflect() protoreflect.Message {
+	mi := &file_core_v1_health_health_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use HealthBackendServiceItem.ProtoReflect.Descriptor instead.
+func (*HealthBackendServiceItem) Descriptor() ([]byte, []int) {
+	return file_core_v1_health_health_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *HealthBackendServiceItem) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *HealthBackendServiceItem) GetStatus() string {
+	if x != nil {
+		return x.Status
+	}
+	return ""
+}
+
+func (x *HealthBackendServiceItem) GetErrMsg() string {
+	if x != nil {
+		return x.ErrMsg
+	}
+	return ""
+}
+
 type HealthMiddlewareItem struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// database / redis / registry / mq
@@ -330,7 +392,7 @@ type HealthMiddlewareItem struct {
 
 func (x *HealthMiddlewareItem) Reset() {
 	*x = HealthMiddlewareItem{}
-	mi := &file_core_v1_health_health_proto_msgTypes[5]
+	mi := &file_core_v1_health_health_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -342,7 +404,7 @@ func (x *HealthMiddlewareItem) String() string {
 func (*HealthMiddlewareItem) ProtoMessage() {}
 
 func (x *HealthMiddlewareItem) ProtoReflect() protoreflect.Message {
-	mi := &file_core_v1_health_health_proto_msgTypes[5]
+	mi := &file_core_v1_health_health_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -355,7 +417,7 @@ func (x *HealthMiddlewareItem) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HealthMiddlewareItem.ProtoReflect.Descriptor instead.
 func (*HealthMiddlewareItem) Descriptor() ([]byte, []int) {
-	return file_core_v1_health_health_proto_rawDescGZIP(), []int{5}
+	return file_core_v1_health_health_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *HealthMiddlewareItem) GetName() string {
@@ -406,7 +468,7 @@ type HealthResourceItem struct {
 
 func (x *HealthResourceItem) Reset() {
 	*x = HealthResourceItem{}
-	mi := &file_core_v1_health_health_proto_msgTypes[6]
+	mi := &file_core_v1_health_health_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -418,7 +480,7 @@ func (x *HealthResourceItem) String() string {
 func (*HealthResourceItem) ProtoMessage() {}
 
 func (x *HealthResourceItem) ProtoReflect() protoreflect.Message {
-	mi := &file_core_v1_health_health_proto_msgTypes[6]
+	mi := &file_core_v1_health_health_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -431,7 +493,7 @@ func (x *HealthResourceItem) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HealthResourceItem.ProtoReflect.Descriptor instead.
 func (*HealthResourceItem) Descriptor() ([]byte, []int) {
-	return file_core_v1_health_health_proto_rawDescGZIP(), []int{6}
+	return file_core_v1_health_health_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *HealthResourceItem) GetName() string {
@@ -502,7 +564,7 @@ type HealthApiItem struct {
 
 func (x *HealthApiItem) Reset() {
 	*x = HealthApiItem{}
-	mi := &file_core_v1_health_health_proto_msgTypes[7]
+	mi := &file_core_v1_health_health_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -514,7 +576,7 @@ func (x *HealthApiItem) String() string {
 func (*HealthApiItem) ProtoMessage() {}
 
 func (x *HealthApiItem) ProtoReflect() protoreflect.Message {
-	mi := &file_core_v1_health_health_proto_msgTypes[7]
+	mi := &file_core_v1_health_health_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -527,7 +589,7 @@ func (x *HealthApiItem) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HealthApiItem.ProtoReflect.Descriptor instead.
 func (*HealthApiItem) Descriptor() ([]byte, []int) {
-	return file_core_v1_health_health_proto_rawDescGZIP(), []int{7}
+	return file_core_v1_health_health_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *HealthApiItem) GetRequestsToday() int64 {
@@ -626,7 +688,7 @@ type HealthCapacityItem struct {
 
 func (x *HealthCapacityItem) Reset() {
 	*x = HealthCapacityItem{}
-	mi := &file_core_v1_health_health_proto_msgTypes[8]
+	mi := &file_core_v1_health_health_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -638,7 +700,7 @@ func (x *HealthCapacityItem) String() string {
 func (*HealthCapacityItem) ProtoMessage() {}
 
 func (x *HealthCapacityItem) ProtoReflect() protoreflect.Message {
-	mi := &file_core_v1_health_health_proto_msgTypes[8]
+	mi := &file_core_v1_health_health_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -651,7 +713,7 @@ func (x *HealthCapacityItem) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HealthCapacityItem.ProtoReflect.Descriptor instead.
 func (*HealthCapacityItem) Descriptor() ([]byte, []int) {
-	return file_core_v1_health_health_proto_rawDescGZIP(), []int{8}
+	return file_core_v1_health_health_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *HealthCapacityItem) GetRegisteredUsers() int64 {
@@ -737,14 +799,16 @@ type GetHealthRes struct {
 	Api       *HealthApiItem        `protobuf:"bytes,6,opt,name=api,proto3" json:"api,omitempty"`
 	Capacity  *HealthCapacityItem   `protobuf:"bytes,7,opt,name=capacity,proto3" json:"capacity,omitempty"`
 	// 采集时间 unix 秒
-	CollectedAt   int64 `protobuf:"varint,8,opt,name=collected_at,json=collectedAt,proto3" json:"collected_at,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	CollectedAt int64 `protobuf:"varint,8,opt,name=collected_at,json=collectedAt,proto3" json:"collected_at,omitempty"`
+	// GoAlgo 后台进程状态；来自 Consul passing 实例，本进程 core-data 直接标记在线
+	BackendServices []*HealthBackendServiceItem `protobuf:"bytes,9,rep,name=backend_services,json=backendServices,proto3" json:"backend_services,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *GetHealthRes) Reset() {
 	*x = GetHealthRes{}
-	mi := &file_core_v1_health_health_proto_msgTypes[9]
+	mi := &file_core_v1_health_health_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -756,7 +820,7 @@ func (x *GetHealthRes) String() string {
 func (*GetHealthRes) ProtoMessage() {}
 
 func (x *GetHealthRes) ProtoReflect() protoreflect.Message {
-	mi := &file_core_v1_health_health_proto_msgTypes[9]
+	mi := &file_core_v1_health_health_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -769,7 +833,7 @@ func (x *GetHealthRes) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetHealthRes.ProtoReflect.Descriptor instead.
 func (*GetHealthRes) Descriptor() ([]byte, []int) {
-	return file_core_v1_health_health_proto_rawDescGZIP(), []int{9}
+	return file_core_v1_health_health_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *GetHealthRes) GetCode() int64 {
@@ -828,6 +892,13 @@ func (x *GetHealthRes) GetCollectedAt() int64 {
 	return 0
 }
 
+func (x *GetHealthRes) GetBackendServices() []*HealthBackendServiceItem {
+	if x != nil {
+		return x.BackendServices
+	}
+	return nil
+}
+
 var File_core_v1_health_health_proto protoreflect.FileDescriptor
 
 const file_core_v1_health_health_proto_rawDesc = "" +
@@ -850,7 +921,11 @@ const file_core_v1_health_health_proto_rawDesc = "" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x16\n" +
 	"\x06status\x18\x02 \x01(\tR\x06status\x12\x0e\n" +
 	"\x02at\x18\x03 \x01(\x03R\x02at\x12\x17\n" +
-	"\aerr_msg\x18\x04 \x01(\tR\x06errMsg\"z\n" +
+	"\aerr_msg\x18\x04 \x01(\tR\x06errMsg\"_\n" +
+	"\x18HealthBackendServiceItem\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12\x16\n" +
+	"\x06status\x18\x02 \x01(\tR\x06status\x12\x17\n" +
+	"\aerr_msg\x18\x03 \x01(\tR\x06errMsg\"z\n" +
 	"\x14HealthMiddlewareItem\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x16\n" +
 	"\x06status\x18\x02 \x01(\tR\x06status\x12\x1d\n" +
@@ -889,7 +964,7 @@ const file_core_v1_health_health_proto_rawDesc = "" +
 	"\n" +
 	"load_level\x18\t \x01(\tR\tloadLevel\x12\x1b\n" +
 	"\tload_note\x18\n" +
-	" \x01(\tR\bloadNote\"\xab\x03\n" +
+	" \x01(\tR\bloadNote\"\x84\x04\n" +
 	"\fGetHealthRes\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\x03R\x04code\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12A\n" +
@@ -900,7 +975,8 @@ const file_core_v1_health_health_proto_rawDesc = "" +
 	"\tresources\x18\x05 \x03(\v2&.api.core.v1.health.HealthResourceItemR\tresources\x123\n" +
 	"\x03api\x18\x06 \x01(\v2!.api.core.v1.health.HealthApiItemR\x03api\x12B\n" +
 	"\bcapacity\x18\a \x01(\v2&.api.core.v1.health.HealthCapacityItemR\bcapacity\x12!\n" +
-	"\fcollected_at\x18\b \x01(\x03R\vcollectedAt2\x88\x02\n" +
+	"\fcollected_at\x18\b \x01(\x03R\vcollectedAt\x12W\n" +
+	"\x10backend_services\x18\t \x03(\v2,.api.core.v1.health.HealthBackendServiceItemR\x0fbackendServices2\x88\x02\n" +
 	"\x06Health\x12q\n" +
 	"\tGetHealth\x12 .api.core.v1.health.GetHealthReq\x1a .api.core.v1.health.GetHealthRes\" \x82\xd3\xe4\x93\x02\x1a\x12\x18/v1/core/health/overview\x12\x8a\x01\n" +
 	"\x11GetResourceSeries\x12%.api.core.v1.health.ResourceSeriesReq\x1a%.api.core.v1.health.ResourceSeriesRes\"'\x82\xd3\xe4\x93\x02!\x12\x1f/v1/core/health/resource-seriesB;\n" +
@@ -918,35 +994,37 @@ func file_core_v1_health_health_proto_rawDescGZIP() []byte {
 	return file_core_v1_health_health_proto_rawDescData
 }
 
-var file_core_v1_health_health_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
+var file_core_v1_health_health_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
 var file_core_v1_health_health_proto_goTypes = []any{
-	(*ResourceSeriesReq)(nil),    // 0: api.core.v1.health.ResourceSeriesReq
-	(*ResourceSample)(nil),       // 1: api.core.v1.health.ResourceSample
-	(*ResourceSeriesRes)(nil),    // 2: api.core.v1.health.ResourceSeriesRes
-	(*GetHealthReq)(nil),         // 3: api.core.v1.health.GetHealthReq
-	(*HealthServiceItem)(nil),    // 4: api.core.v1.health.HealthServiceItem
-	(*HealthMiddlewareItem)(nil), // 5: api.core.v1.health.HealthMiddlewareItem
-	(*HealthResourceItem)(nil),   // 6: api.core.v1.health.HealthResourceItem
-	(*HealthApiItem)(nil),        // 7: api.core.v1.health.HealthApiItem
-	(*HealthCapacityItem)(nil),   // 8: api.core.v1.health.HealthCapacityItem
-	(*GetHealthRes)(nil),         // 9: api.core.v1.health.GetHealthRes
+	(*ResourceSeriesReq)(nil),        // 0: api.core.v1.health.ResourceSeriesReq
+	(*ResourceSample)(nil),           // 1: api.core.v1.health.ResourceSample
+	(*ResourceSeriesRes)(nil),        // 2: api.core.v1.health.ResourceSeriesRes
+	(*GetHealthReq)(nil),             // 3: api.core.v1.health.GetHealthReq
+	(*HealthServiceItem)(nil),        // 4: api.core.v1.health.HealthServiceItem
+	(*HealthBackendServiceItem)(nil), // 5: api.core.v1.health.HealthBackendServiceItem
+	(*HealthMiddlewareItem)(nil),     // 6: api.core.v1.health.HealthMiddlewareItem
+	(*HealthResourceItem)(nil),       // 7: api.core.v1.health.HealthResourceItem
+	(*HealthApiItem)(nil),            // 8: api.core.v1.health.HealthApiItem
+	(*HealthCapacityItem)(nil),       // 9: api.core.v1.health.HealthCapacityItem
+	(*GetHealthRes)(nil),             // 10: api.core.v1.health.GetHealthRes
 }
 var file_core_v1_health_health_proto_depIdxs = []int32{
-	1, // 0: api.core.v1.health.ResourceSeriesRes.samples:type_name -> api.core.v1.health.ResourceSample
-	4, // 1: api.core.v1.health.GetHealthRes.services:type_name -> api.core.v1.health.HealthServiceItem
-	5, // 2: api.core.v1.health.GetHealthRes.middleware:type_name -> api.core.v1.health.HealthMiddlewareItem
-	6, // 3: api.core.v1.health.GetHealthRes.resources:type_name -> api.core.v1.health.HealthResourceItem
-	7, // 4: api.core.v1.health.GetHealthRes.api:type_name -> api.core.v1.health.HealthApiItem
-	8, // 5: api.core.v1.health.GetHealthRes.capacity:type_name -> api.core.v1.health.HealthCapacityItem
-	3, // 6: api.core.v1.health.Health.GetHealth:input_type -> api.core.v1.health.GetHealthReq
-	0, // 7: api.core.v1.health.Health.GetResourceSeries:input_type -> api.core.v1.health.ResourceSeriesReq
-	9, // 8: api.core.v1.health.Health.GetHealth:output_type -> api.core.v1.health.GetHealthRes
-	2, // 9: api.core.v1.health.Health.GetResourceSeries:output_type -> api.core.v1.health.ResourceSeriesRes
-	8, // [8:10] is the sub-list for method output_type
-	6, // [6:8] is the sub-list for method input_type
-	6, // [6:6] is the sub-list for extension type_name
-	6, // [6:6] is the sub-list for extension extendee
-	0, // [0:6] is the sub-list for field type_name
+	1,  // 0: api.core.v1.health.ResourceSeriesRes.samples:type_name -> api.core.v1.health.ResourceSample
+	4,  // 1: api.core.v1.health.GetHealthRes.services:type_name -> api.core.v1.health.HealthServiceItem
+	6,  // 2: api.core.v1.health.GetHealthRes.middleware:type_name -> api.core.v1.health.HealthMiddlewareItem
+	7,  // 3: api.core.v1.health.GetHealthRes.resources:type_name -> api.core.v1.health.HealthResourceItem
+	8,  // 4: api.core.v1.health.GetHealthRes.api:type_name -> api.core.v1.health.HealthApiItem
+	9,  // 5: api.core.v1.health.GetHealthRes.capacity:type_name -> api.core.v1.health.HealthCapacityItem
+	5,  // 6: api.core.v1.health.GetHealthRes.backend_services:type_name -> api.core.v1.health.HealthBackendServiceItem
+	3,  // 7: api.core.v1.health.Health.GetHealth:input_type -> api.core.v1.health.GetHealthReq
+	0,  // 8: api.core.v1.health.Health.GetResourceSeries:input_type -> api.core.v1.health.ResourceSeriesReq
+	10, // 9: api.core.v1.health.Health.GetHealth:output_type -> api.core.v1.health.GetHealthRes
+	2,  // 10: api.core.v1.health.Health.GetResourceSeries:output_type -> api.core.v1.health.ResourceSeriesRes
+	9,  // [9:11] is the sub-list for method output_type
+	7,  // [7:9] is the sub-list for method input_type
+	7,  // [7:7] is the sub-list for extension type_name
+	7,  // [7:7] is the sub-list for extension extendee
+	0,  // [0:7] is the sub-list for field type_name
 }
 
 func init() { file_core_v1_health_health_proto_init() }
@@ -960,7 +1038,7 @@ func file_core_v1_health_health_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_core_v1_health_health_proto_rawDesc), len(file_core_v1_health_health_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   10,
+			NumMessages:   11,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

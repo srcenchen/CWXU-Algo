@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -9,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -34,41 +36,44 @@ func requireBackupTools(ctx context.Context, runner opsexec.Command) error {
 	if err != nil {
 		return fmt.Errorf("pg_restore --version：%w", err)
 	}
-	if !pgRestoreVersion18.MatchString(output) {
+	match := pgRestoreVersion.FindStringSubmatch(output)
+	major := 0
+	if len(match) == 2 {
+		major, _ = strconv.Atoi(match[1])
+	}
+	if major < 18 {
 		return fmt.Errorf("pg_restore 版本过低：备份由 PostgreSQL 18 生成，请安装 postgresql-client-18（当前 %s）", strings.TrimSpace(output))
 	}
 	return nil
 }
 
-var pgRestoreVersion18 = regexp.MustCompile(`\(PostgreSQL\) 18\.`)
+var pgRestoreVersion = regexp.MustCompile(`\(PostgreSQL\) ([0-9]+)\.`)
 
 func cmdRestore(args []string, runner opsexec.Command) int {
 	var rootPath, archive, keyFile string
-	var replace, confirm bool
+	var replace bool
+	var confirm string
 	flags := flag.NewFlagSet("restore", flag.ContinueOnError)
 	flags.StringVar(&rootPath, "root", "", "goalgo 根目录")
 	flags.StringVar(&archive, "file", "", ".cwxubak 本地路径或 http(s) URL")
 	flags.StringVar(&keyFile, "key-file", "", "32 字节加密密钥文件")
 	flags.BoolVar(&replace, "replace", false, "覆盖已有数据")
-	flags.BoolVar(&confirm, "confirm", false, "确认破坏性恢复（须同时 --replace 与 --confirm RESTORE）")
+	flags.StringVar(&confirm, "confirm", "", "确认令牌（已有数据时须为 RESTORE）")
 	if err := flags.Parse(args); err != nil {
 		return fail("restore", err)
 	}
-	root, err := resolveInstallRoot(rootPath)
+	root, err := resolveRegisteredRoot(rootPath)
 	if err != nil {
 		return fail("restore", err)
 	}
 	prompt := opsprompt.New()
-	if archive == "" || keyFile == "" || !confirm {
+	if archive == "" || keyFile == "" {
 		if !prompt.TTY {
 			if archive == "" {
 				return fail("restore", fmt.Errorf("必须提供 --file（本地路径或 URL）"))
 			}
 			if keyFile == "" {
 				return fail("restore", fmt.Errorf("必须提供 --key-file"))
-			}
-			if replace != confirm || !confirm {
-				return fail("restore", fmt.Errorf("覆盖已有数据必须同时提供 --replace --confirm "+confirmToken))
 			}
 		} else {
 			if archive == "" {
@@ -83,18 +88,19 @@ func cmdRestore(args []string, runner opsexec.Command) int {
 					return fail("restore", err)
 				}
 			}
-			if !confirm {
-				input, err := prompt.String(fmt.Sprintf("覆盖已有数据，请输入 %s 确认", confirmToken), "")
-				if err != nil {
-					return fail("restore", err)
-				}
-				if strings.TrimSpace(input) != confirmToken {
-					return fail("restore", fmt.Errorf("确认令牌不匹配，已取消"))
-				}
-				confirm = true
-				replace = true
-			}
 		}
+	}
+	dataDir := root.Join("data", "postgres")
+	if hasData(dataDir) && prompt.TTY && (replace == false || confirm == "") {
+		input, err := prompt.String(fmt.Sprintf("覆盖已有数据，请输入 %s 确认", confirmToken), "")
+		if err != nil {
+			return fail("restore", err)
+		}
+		confirm = strings.TrimSpace(input)
+		replace = true
+	}
+	if err := validateRestoreConfirmation(dataDir, replace, confirm); err != nil {
+		return fail("restore", err)
 	}
 	key, err := readKeyFile(keyFile)
 	if err != nil {
@@ -137,45 +143,25 @@ func cmdRestore(args []string, runner opsexec.Command) int {
 	}
 	fmt.Printf("归档校验通过：%d 个数据库：%s\n", len(result.Manifest.Databases), strings.Join(result.Manifest.Databases, ", "))
 
-	// 2. 停止应用服务与 postgres。
-	for _, service := range []string{"frontend", "gateway", "user", "core-data", "agent", "nginx"} {
-		if _, err := compose.Command(ctx, "stop", service); err != nil {
-			return fail("restore", fmt.Errorf("停止 %s：%w", service, err))
-		}
-	}
-	if _, err := compose.Command(ctx, "stop", "postgres"); err != nil {
+	// 2. 停止应用服务与 postgres，并换新数据卷（保留旧卷用于回滚）。
+	backupDir := dataDir + ".bak-" + time.Now().Format("20060102T150405")
+	hadPrevious := hasData(dataDir)
+	volumeReplaced, err := prepareRestore(ctx, compose, dataDir, backupDir, os.Rename)
+	if err != nil {
 		return fail("restore", err)
 	}
-
-	// 3. 换新数据卷（保留旧卷用于回滚）。
-	dataDir := root.Join("data", "postgres")
-	backupDir := dataDir + ".bak-" + time.Now().Format("20060102T150405")
-	if _, err := os.Stat(dataDir); err == nil {
-		if err := os.Rename(dataDir, backupDir); err != nil {
-			return fail("restore", fmt.Errorf("备份旧数据卷：%w", err))
-		}
+	if volumeReplaced {
 		fmt.Printf("旧数据卷已保留：%s\n", backupDir)
 	}
-	rollback := func(previous string) error {
-		_ = os.RemoveAll(dataDir)
-		if previous != "" {
-			return os.Rename(previous, dataDir)
-		}
-		return nil
-	}
-
-	// 4. 启动全新 postgres（initdb + 建库脚本自动执行），等待就绪后再恢复。
+	// 3. 启动全新 postgres（initdb + 建库脚本自动执行），等待就绪后再恢复。
 	if _, err := compose.Command(ctx, "up", "-d", "--wait", "--wait-timeout", compose.WaitTimeout(), "postgres"); err != nil {
-		_ = rollback(backupDir)
-		return fail("restore", fmt.Errorf("启动新 postgres：%w", err))
+		return fail("restore", recoverRestore(compose, dataDir, backupDir, volumeReplaced, hadPrevious, fmt.Errorf("启动新 postgres：%w", err)))
 	}
 
 	// 5. 恢复 globals.sql（角色已存在时 CREATE ROLE 冲突可忽略）。
 	globalsContent, err := os.ReadFile(result.Globals)
 	if err != nil {
-		_, _ = compose.Command(ctx, "stop", "postgres")
-		_ = rollback(backupDir)
-		return fail("restore", err)
+		return fail("restore", recoverRestore(compose, dataDir, backupDir, volumeReplaced, hadPrevious, err))
 	}
 	psqlBase := []string{"exec", "-T", "postgres", "sh", "-c",
 		`PGPASSWORD="$(cat /run/secrets/postgres_password)" psql -U "$POSTGRES_USER" --dbname=postgres -q -v ON_ERROR_STOP=0`}
@@ -189,41 +175,117 @@ func cmdRestore(args []string, runner opsexec.Command) int {
 		safe := sanitizeIdentifier(database)
 		dropCmd := fmt.Sprintf("PGPASSWORD=\"$(cat /run/secrets/postgres_password)\" psql -U \"$POSTGRES_USER\" --dbname=postgres -c 'DROP DATABASE IF EXISTS %s'", safe)
 		if output, err := compose.Command(ctx, "exec", "-T", "postgres", "sh", "-c", dropCmd); err != nil {
-			_, _ = compose.Command(ctx, "stop", "postgres")
-			_ = rollback(backupDir)
-			return fail("restore", fmt.Errorf("删除数据库 %s：%w\n%s", database, err, output))
+			cause := fmt.Errorf("删除数据库 %s：%w\n%s", database, err, output)
+			return fail("restore", recoverRestore(compose, dataDir, backupDir, volumeReplaced, hadPrevious, cause))
 		}
 		data, err := os.ReadFile(dump)
 		if err != nil {
-			_, _ = compose.Command(ctx, "stop", "postgres")
-			_ = rollback(backupDir)
-			return fail("restore", err)
+			return fail("restore", recoverRestore(compose, dataDir, backupDir, volumeReplaced, hadPrevious, err))
 		}
 		restoreCmd := []string{"exec", "-T", "postgres", "sh", "-c",
 			`PGPASSWORD="$(cat /run/secrets/postgres_password)" pg_restore -U "$POSTGRES_USER" --exit-on-error --create --dbname=postgres`}
 		if _, err := compose.CommandWithStdin(ctx, data, restoreCmd...); err != nil {
-			_, _ = compose.Command(ctx, "stop", "postgres")
-			_ = rollback(backupDir)
-			return fail("restore", fmt.Errorf("恢复数据库 %s：%w", database, err))
+			cause := fmt.Errorf("恢复数据库 %s：%w", database, err)
+			return fail("restore", recoverRestore(compose, dataDir, backupDir, volumeReplaced, hadPrevious, cause))
 		}
 		fmt.Printf("数据库 %s 恢复完成\n", database)
 	}
 
 	// 7. 启动全栈并冒烟。
 	if err := compose.Up(ctx, compose.WaitTimeout()); err != nil {
-		_, _ = compose.Command(ctx, "stop", "postgres")
-		_ = rollback(backupDir)
-		return fail("restore", fmt.Errorf("启动服务失败，已回滚旧数据卷：%w", err))
+		return fail("restore", recoverRestore(compose, dataDir, backupDir, volumeReplaced, hadPrevious, err))
 	}
 	if err := compose.Health(ctx); err != nil {
-		return fail("restore", err)
+		return fail("restore", recoverRestore(compose, dataDir, backupDir, volumeReplaced, hadPrevious, err))
 	}
 	if err := compose.Smoke(ctx); err != nil {
-		return fail("restore", err)
+		return fail("restore", recoverRestore(compose, dataDir, backupDir, volumeReplaced, hadPrevious, err))
 	}
 	fmt.Printf("恢复成功。旧数据卷保留于 %s（确认无误后可删除）\n", backupDir)
 	return 0
 }
+
+func hasData(path string) bool {
+	entries, err := os.ReadDir(path)
+	return err == nil && len(entries) > 0
+}
+
+func validateRestoreConfirmation(dataDir string, replace bool, confirm string) error {
+	if !hasData(dataDir) {
+		return nil
+	}
+	if !replace || confirm != confirmToken {
+		return fmt.Errorf("覆盖已有数据必须同时提供 --replace --confirm %s", confirmToken)
+	}
+	return nil
+}
+
+func rollbackPostgresVolume(dataDir, previous string) error {
+	if err := os.RemoveAll(dataDir); err != nil {
+		return fmt.Errorf("删除失败恢复卷：%w", err)
+	}
+	if previous != "" {
+		if err := os.Rename(previous, dataDir); err != nil {
+			return fmt.Errorf("恢复旧数据卷：%w", err)
+		}
+	}
+	return nil
+}
+
+func prepareRestore(ctx context.Context, compose *opscompose.Compose, dataDir, backupDir string, rename func(string, string) error) (bool, error) {
+	recoverServices := func(cause error) (bool, error) {
+		return false, recoverRestore(compose, dataDir, backupDir, false, false, cause)
+	}
+	for _, service := range []string{"frontend", "gateway", "user", "core-data", "agent", "nginx"} {
+		if _, err := compose.Command(ctx, "stop", service); err != nil {
+			return recoverServices(fmt.Errorf("停止 %s：%w", service, err))
+		}
+	}
+	if _, err := compose.Command(ctx, "stop", "postgres"); err != nil {
+		return recoverServices(fmt.Errorf("停止 postgres：%w", err))
+	}
+	if err := ctx.Err(); err != nil {
+		return recoverServices(err)
+	}
+	if _, err := os.Stat(dataDir); err == nil {
+		if err := rename(dataDir, backupDir); err != nil {
+			return recoverServices(fmt.Errorf("备份旧数据卷：%w", err))
+		}
+		return true, nil
+	} else if !os.IsNotExist(err) {
+		return recoverServices(fmt.Errorf("检查旧数据卷：%w", err))
+	}
+	return false, nil
+}
+
+func recoverRestore(compose *opscompose.Compose, dataDir, backupDir string, volumeReplaced, hadPrevious bool, cause error) error {
+	rollbackCtx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
+	var rollbackErr, volumeErr error
+	if volumeReplaced {
+		_, stopErr := compose.Command(rollbackCtx, "stop", "postgres")
+		previous := ""
+		if hadPrevious {
+			previous = backupDir
+		}
+		volumeErr = rollbackPostgresVolume(dataDir, previous)
+		rollbackErr = errors.Join(stopErr, volumeErr)
+	}
+	if volumeErr == nil {
+		if err := compose.Up(rollbackCtx, compose.WaitTimeout()); err != nil {
+			rollbackErr = errors.Join(rollbackErr, err)
+		} else if err := compose.Health(rollbackCtx); err != nil {
+			rollbackErr = errors.Join(rollbackErr, err)
+		} else if err := compose.Smoke(rollbackCtx); err != nil {
+			rollbackErr = errors.Join(rollbackErr, err)
+		}
+	}
+	if rollbackErr != nil {
+		return errors.Join(cause, fmt.Errorf("回滚旧数据卷或服务失败：%w", rollbackErr))
+	}
+	return fmt.Errorf("%w；原服务状态已恢复", cause)
+}
+
 // containerVerifyRunner 优先用 core-data 镜像容器执行 zstd/pg_restore（镜像内置 PG18 客户端与 zstd），
 // 免装宿主机客户端；拿不到镜像或 docker 不可用时返回 ok=false 由调用方回退宿主机工具。
 func containerVerifyRunner(ctx context.Context, compose *opscompose.Compose, runner opsexec.Command, workDir string) (opsexec.Command, bool) {

@@ -9,6 +9,7 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 
 	"cwxu-algo/internal/opsadmin"
 	"cwxu-algo/internal/opscompose"
@@ -67,21 +68,42 @@ func usage() {
   rollback [--root 目录]                        回滚到上一个发布版本
   start | stop | restart | status | logs [参数] [--root 目录]
   doctor [--root 目录]                          检查安装是否健康
-  backup verify|download [参数]                 离线校验 / 下载灾备归档
+  backup verify [参数]                          离线校验灾备归档
   restore --file <路径|URL> [--key-file] ...    从归档恢复整实例（需 --replace --confirm RESTORE）
   config validate|export|import [参数]          校验 / 导出 / 导入配置与密钥
 
 `)
 }
 
-func rootFromFlags(commandArgs []string) (string, error) {
+func extractRoot(args []string) (string, []string, error) {
 	var root string
-	flags := flag.NewFlagSet("root", flag.ContinueOnError)
-	flags.StringVar(&root, "root", "", "goalgo 根目录（默认 $GOALGO_ROOT 或 /opt/goalgo）")
-	if err := flags.Parse(commandArgs); err != nil {
-		return "", err
+	rest := make([]string, 0, len(args))
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if arg == "--root" {
+			if root != "" {
+				return "", nil, fmt.Errorf("--root 只能指定一次")
+			}
+			if i+1 >= len(args) {
+				return "", nil, fmt.Errorf("--root 缺少路径")
+			}
+			root = args[i+1]
+			i++
+			continue
+		}
+		if strings.HasPrefix(arg, "--root=") {
+			if root != "" {
+				return "", nil, fmt.Errorf("--root 只能指定一次")
+			}
+			root = strings.TrimPrefix(arg, "--root=")
+			if root == "" {
+				return "", nil, fmt.Errorf("--root 缺少路径")
+			}
+			continue
+		}
+		rest = append(rest, arg)
 	}
-	return root, nil
+	return root, rest, nil
 }
 
 func acquireForMutation(ctx context.Context, root *opsroot.Root) (*opslock.Lock, error) {
@@ -92,20 +114,17 @@ func lockPath(root *opsroot.Root) string {
 	if override := os.Getenv("GOALGO_LOCK_FILE"); override != "" {
 		return override
 	}
-	if root.IsProtectedInstall() {
-		return "/run/lock/goalgo-ops.lock"
-	}
-	return root.Join("state", "goalgo-ops.lock")
+	return "/run/lock/goalgo-ops.lock"
 }
 
 func cmdRuntime(command string, args []string, runner opsexec.Command) int {
 	ctx, stop := signalContext()
 	defer stop()
-	rootPath, err := rootFromFlags(args)
+	rootPath, commandArgs, err := extractRoot(args)
 	if err != nil {
 		return fail("参数", err)
 	}
-	root, err := resolveInstallRoot(rootPath)
+	root, err := resolveRegisteredRoot(rootPath)
 	if err != nil {
 		return fail("根目录", err)
 	}
@@ -132,15 +151,15 @@ func cmdRuntime(command string, args []string, runner opsexec.Command) int {
 	case "status":
 		return runtimeStatus(ctx, compose)
 	case "logs":
-		return runtimeLogs(ctx, compose, args)
+		return runtimeLogs(ctx, compose, commandArgs)
 	case "deploy":
-		return runtimeDeploy(ctx, compose, args)
+		return runtimeDeploy(ctx, compose, commandArgs)
 	case "rollback":
 		return runtimeRollback(ctx, compose)
 	case "upgrade":
 		return runtimeUpgrade(ctx, compose)
 	case "uninstall":
-		return runtimeUninstall(ctx, compose, args)
+		return runtimeUninstall(ctx, compose, commandArgs)
 	case "doctor":
 		return runtimeDoctor(ctx, compose)
 	}
@@ -262,49 +281,81 @@ func runtimeDeploy(ctx context.Context, compose *opscompose.Compose, args []stri
 	if err != nil {
 		return fail("部署", err)
 	}
-	active, err := compose.Release()
-	if err != nil {
+	previous, err := opsrelease.ParseFile(compose.Root.Join("release.previous.env"))
+	if err != nil && !os.IsNotExist(err) {
 		return fail("部署", err)
 	}
-	if !releaseSame(release, active) {
-		if err := release.WriteFile(compose.Root.Join("release.previous.env")); err != nil {
-			return fail("部署", err)
-		}
-		if err := release.WriteFile(compose.Root.Join("release.env")); err != nil {
-			return fail("部署", err)
-		}
+	if releaseSame(release, current) {
+		fmt.Fprintln(os.Stdout, "当前版本已在运行")
+		return 0
 	}
-	opsprogress.Note(os.Stderr, "拉取发布镜像")
-	if err := compose.Pull(ctx); err != nil {
-		return fail("部署", err)
-	}
-	opsprogress.Note(os.Stderr, "创建并启动容器")
-	if err := compose.Up(ctx, compose.WaitTimeout()); err != nil {
-		if rollbackErr := rollbackFiles(compose, release, current); rollbackErr != nil {
-			return fail("部署", errors.Join(err, rollbackErr))
-		}
-		return fail("部署", err)
-	}
-	if err := compose.Health(ctx); err != nil {
-		if rollbackErr := rollbackFiles(compose, release, current); rollbackErr != nil {
-			return fail("部署", errors.Join(err, rollbackErr))
-		}
-		return fail("部署", err)
-	}
-	if err := compose.Smoke(ctx); err != nil {
-		if rollbackErr := rollbackFiles(compose, release, current); rollbackErr != nil {
-			return fail("部署", errors.Join(err, rollbackErr))
-		}
+	if err := applyRelease(ctx, compose, release, current, previous); err != nil {
 		return fail("部署", err)
 	}
 	return 0
 }
 
-func rollbackFiles(compose *opscompose.Compose, release, current *opsrelease.Release) error {
+func restoreReleaseFiles(compose *opscompose.Compose, current, previous *opsrelease.Release) error {
 	if err := current.WriteFile(compose.Root.Join("release.env")); err != nil {
 		return err
 	}
-	return release.WriteFile(compose.Root.Join("release.previous.env"))
+	if previous == nil {
+		if err := os.Remove(compose.Root.Join("release.previous.env")); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+		return nil
+	}
+	return previous.WriteFile(compose.Root.Join("release.previous.env"))
+}
+
+func applyRelease(ctx context.Context, compose *opscompose.Compose, candidate, current, previous *opsrelease.Release) error {
+	if err := current.WriteFile(compose.Root.Join("release.previous.env")); err != nil {
+		return err
+	}
+	if err := candidate.WriteFile(compose.Root.Join("release.env")); err != nil {
+		_ = restoreReleaseFiles(compose, current, previous)
+		return err
+	}
+	apply := func() error {
+		opsprogress.Note(os.Stderr, "拉取发布镜像")
+		if err := compose.Pull(ctx); err != nil {
+			return err
+		}
+		opsprogress.Note(os.Stderr, "创建并启动容器")
+		if err := compose.Up(ctx, compose.WaitTimeout()); err != nil {
+			return err
+		}
+		if err := compose.Health(ctx); err != nil {
+			return err
+		}
+		return compose.Smoke(ctx)
+	}
+	if err := apply(); err != nil {
+		rollbackCtx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+		defer cancel()
+		rollbackErr := restoreRunningRelease(rollbackCtx, compose, current, previous)
+		if rollbackErr != nil {
+			return errors.Join(err, fmt.Errorf("恢复旧版本失败：%w", rollbackErr))
+		}
+		return err
+	}
+	return nil
+}
+
+func restoreRunningRelease(ctx context.Context, compose *opscompose.Compose, current, previous *opsrelease.Release) error {
+	if err := restoreReleaseFiles(compose, current, previous); err != nil {
+		return err
+	}
+	if err := compose.Pull(ctx); err != nil {
+		return err
+	}
+	if err := compose.Up(ctx, compose.WaitTimeout()); err != nil {
+		return err
+	}
+	if err := compose.Health(ctx); err != nil {
+		return err
+	}
+	return compose.Smoke(ctx)
 }
 
 func runtimeRollback(ctx context.Context, compose *opscompose.Compose) int {
@@ -319,24 +370,7 @@ func runtimeRollback(ctx context.Context, compose *opscompose.Compose) int {
 	if err != nil {
 		return fail("回滚", err)
 	}
-	if err := current.WriteFile(compose.Root.Join("release.previous.env")); err != nil {
-		return fail("回滚", err)
-	}
-	if err := previous.WriteFile(compose.Root.Join("release.env")); err != nil {
-		return fail("回滚", err)
-	}
-	opsprogress.Note(os.Stderr, "拉取发布镜像")
-	if err := compose.Pull(ctx); err != nil {
-		return fail("回滚", err)
-	}
-	opsprogress.Note(os.Stderr, "创建并启动容器")
-	if err := compose.Up(ctx, compose.WaitTimeout()); err != nil {
-		return fail("回滚", err)
-	}
-	if err := compose.Health(ctx); err != nil {
-		return fail("回滚", err)
-	}
-	if err := compose.Smoke(ctx); err != nil {
+	if err := applyRelease(ctx, compose, previous, current, previous); err != nil {
 		return fail("回滚", err)
 	}
 	return 0
@@ -393,10 +427,11 @@ func releaseSame(a, b *opsrelease.Release) bool {
 func cmdInstall(args []string, runner opsexec.Command) int {
 	ctx, stop := signalContext()
 	defer stop()
-	var rootPath, releaseFile string
+	var rootPath, releaseFile, adminConfig string
 	flags := flag.NewFlagSet("install", flag.ContinueOnError)
 	flags.StringVar(&rootPath, "root", "", "goalgo 根目录（默认 $GOALGO_ROOT 或 /opt/goalgo）")
 	flags.StringVar(&releaseFile, "release-file", "", "从文件写入经过校验的 release.env（默认解析 <svc>-latest）")
+	flags.StringVar(&adminConfig, "admin-config", "", "管理员配置文件路径")
 	if err := flags.Parse(args); err != nil {
 		return fail("安装", err)
 	}
@@ -404,7 +439,9 @@ func cmdInstall(args []string, runner opsexec.Command) int {
 	if err != nil {
 		return fail("安装", err)
 	}
-	persistInstallRoot(root)
+	if err := ensureInstallAvailable(root); err != nil {
+		return fail("安装", err)
+	}
 	if root.IsProtectedInstall() && !opsroot.IsPrivileged() {
 		return fail("安装", fmt.Errorf("安装到 %s 需要 root 权限", root.Path))
 	}
@@ -414,15 +451,18 @@ func cmdInstall(args []string, runner opsexec.Command) int {
 	}
 	defer lock.Release()
 
-	if err := carryAnchorEnv(root); err != nil {
+	if err := ensureInstallAvailable(root); err != nil {
 		return fail("安装", err)
 	}
-
-	progress := opsprogress.New(5, os.Stderr)
+	progress := opsprogress.New(6, os.Stderr)
 	inst := opsinstall.New(root)
 
 	progress.Step("初始化目录结构与模板")
 	if err := inst.Scaffold(); err != nil {
+		return fail("安装", err)
+	}
+	compose := &opscompose.Compose{Root: root, Run: runner}
+	if err := compose.ValidateRoot(); err != nil {
 		return fail("安装", err)
 	}
 
@@ -430,8 +470,6 @@ func cmdInstall(args []string, runner opsexec.Command) int {
 	if err := inst.Secrets(); err != nil {
 		return fail("安装", err)
 	}
-
-	compose := &opscompose.Compose{Root: root, Run: runner}
 
 	progress.Step("解析发布镜像")
 	if releaseFile != "" {
@@ -460,7 +498,7 @@ func cmdInstall(args []string, runner opsexec.Command) int {
 
 	progress.Step("创建首个管理员（如无）")
 	if !opsinstall.AdminCreated(root) {
-		if err := opsadmin.Bootstrap(ctx, root, compose, "", opsprompt.New()); err != nil {
+		if err := opsadmin.Bootstrap(ctx, root, compose, adminConfig, opsprompt.New()); err != nil {
 			return fail("安装", fmt.Errorf("创建管理员：%w", err))
 		}
 	} else {
@@ -470,6 +508,9 @@ func cmdInstall(args []string, runner opsexec.Command) int {
 	progress.Step("冒烟测试")
 	if err := compose.Smoke(ctx); err != nil {
 		return fail("安装", err)
+	}
+	if err := persistInstallRoot(root); err != nil {
+		return fail("安装", fmt.Errorf("保存安装注册：%w", err))
 	}
 	opsprogress.Done(os.Stderr, "安装完成")
 	return 0

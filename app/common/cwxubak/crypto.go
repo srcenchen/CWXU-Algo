@@ -14,9 +14,6 @@ import (
 	"io"
 )
 
-// ErrInvalidPointer latest.json 结构无效。
-var ErrInvalidPointer = errors.New("invalid latest pointer")
-
 func keyCheck(key []byte) error {
 	if len(key) != 32 {
 		return errors.New("AES-256 key must be 32 bytes")

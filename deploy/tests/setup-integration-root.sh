@@ -27,8 +27,6 @@ printf '%s' "$rabbitmq_password" > "$root/secrets/rabbitmq_password"
     printf '%s\n' 'REDIS_PASSWORD=Rd:@/?#[]!phase2a'
     printf '%s\n' 'AMQP_DSN=amqp://goalgo:Mq%3A%40%2F%3F%23%5B%5D%21phase2a@rabbitmq:5672/goalgo'
     printf '%s\n' 'CWXU_JWT_SECRET=phase2a-jwt-secret-at-least-32-characters'
-    printf '%s\n' 'CWXU_CONFIG_ENCRYPTION_KEY=phase2a-config-key-at-least-32-chars'
-    printf '%s\n' 'CWXU_BACKUP_ENABLED=false'
     printf '%s\n' "CWXU_JWT_PRIVATE_KEY='$(cat "$root/secrets/jwt_private.pem")'"
     printf '%s\n' "CWXU_JWT_PUBLIC_KEY='$(cat "$root/secrets/jwt_public.pem")'"
 } > "$root/secrets/app.env"

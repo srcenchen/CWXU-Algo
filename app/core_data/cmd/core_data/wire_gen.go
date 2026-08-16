@@ -29,7 +29,7 @@ import (
 // Injectors from wire.go:
 
 // wireApp init kratos application.
-func wireApp(confServer *conf.Server, confData *conf.Data, logger log.Logger, aiAnalyze *conf.AiAnalyze) (*kratos.App, func(), error) {
+func wireApp(confServer *conf.Server, confData *conf.Data, logger log.Logger) (*kratos.App, func(), error) {
 	dataData, cleanup, err := data.NewData(confData)
 	if err != nil {
 		return nil, nil, err
@@ -49,7 +49,7 @@ func wireApp(confServer *conf.Server, confData *conf.Data, logger log.Logger, ai
 	statisticDal := dal.NewStatisticDal(db, client)
 	statisticUseCase := service2.NewStatisticUseCase(statisticDal, client, register)
 	statisticService := service.NewStatistic(statisticUseCase)
-	problemTagger := service2.NewProblemTagger(aiAnalyze, client)
+	problemTagger := service2.NewProblemTagger(client)
 	userProfileTask := task.NewUserProfileTask(rabbitMQ, client)
 	problemUseCase := service2.NewProblemUseCase(dataData, rabbitMQ, problemTagger, register, userProfileTask)
 	contestLogService := service.NewContestLogService(spiderDal, dataData, register, problemUseCase)

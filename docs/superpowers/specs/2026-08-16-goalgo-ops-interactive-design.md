@@ -63,7 +63,6 @@
 | `install` | release 来源选择 + 管理员 |
 | `deploy` | 未给候选文件时选择（默认当前 release.env） |
 | `restore` | 归档来源（本地 `*.cwxubak` 列表 / `--latest`）、密钥文件路径；覆盖仍须输入 `RESTORE` |
-| `backup download` | 缺 `UPYUN_*` 时交互输入；输出路径默认 |
 | `backup verify` | 归档与密钥文件路径 |
 | `config export` | 输出路径（默认 `./goalgo-config.tar`） |
 | `config import` | 导入 tar 路径 |
@@ -80,7 +79,7 @@
   - `[5.x] 创建并启动容器`（`compose up` 前输出）
   - `[5.x] 等待健康并冒烟`（`up --wait`、`Health`、`Smoke` 前输出）
 - 对 `install`、`deploy`、`restart`、`rollback` 等会执行 `Pull`/`Up` 的命令，同样在 `compose.Pull` 与 `compose.Up` 前输出对应子步骤提示；避免长时间静默。
-- `init`、`restore`、`backup download` 在关键阶段同样输出阶段行；`restore` 现有 `printf` 步骤提示保留并统一格式。
+- `init`、`restore` 在关键阶段同样输出阶段行；`restore` 现有 `printf` 步骤提示保留并统一格式。
 
 ## 6. 错误与安全
 

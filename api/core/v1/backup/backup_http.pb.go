@@ -2,7 +2,7 @@
 // versions:
 // - protoc-gen-go-http v2.9.2
 // - protoc             v5.29.3
-// source: api/core/v1/backup/backup.proto
+// source: core/v1/backup/backup.proto
 
 package backup
 

@@ -26,8 +26,8 @@ import (
 // Injectors from wire.go:
 
 // wireApp init kratos application.
-func wireApp(confServer *conf.Server, confData *conf.Data, logger log.Logger, smtp *conf.SMTP, supportCenter *conf.SupportCenter) (*kratos.App, func(), error) {
-	dataData, cleanup, err := data.NewData(confData)
+func wireApp(confServer *conf.Server, confData *conf.Data, logger log.Logger, supportCenter *conf.SupportCenter, legacySiteConfig data.LegacySiteConfig) (*kratos.App, func(), error) {
+	dataData, cleanup, err := data.NewData(confData, legacySiteConfig)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -38,12 +38,12 @@ func wireApp(confServer *conf.Server, confData *conf.Data, logger log.Logger, sm
 	subscriptionDal := dal.NewSubscriptionDal(dataData)
 	subscriptionService := service.NewSubscriptionService(dataData, subscriptionDal, profileDal)
 	grpcServer := server.NewGRPCServer(confServer, logger, profileService, subscriptionService)
-	authService := service.NewAuthService(dataData, smtp, register)
+	authService := service.NewAuthService(dataData, register)
 	groupDal := dal.NewGroupDal(dataData)
 	groupUseCase := biz.NewGroupUseCase(groupDal)
 	groupService := service.NewGroupService(register, groupUseCase, groupDal)
 	roleService := service.NewRoleService(profileDal)
-	siteService := service.NewSiteService(dataData, smtp)
+	siteService := service.NewSiteService(dataData)
 	orgService := service.NewOrgService(dataData)
 	rbacService := service.NewRbacService(dataData)
 	pasteService := service.NewPasteService(dataData)

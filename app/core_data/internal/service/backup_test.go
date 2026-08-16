@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	backuppb "cwxu-algo/api/core/v1/backup"
@@ -90,5 +91,17 @@ func TestBackupStatusRequiresPermission(t *testing.T) {
 	_, err := svc.Status(context.Background(), &backuppb.GetBackupStatusRequest{})
 	if reason := kratosReason(err); reason != "BACKUP_PERMISSION_DENIED" {
 		t.Fatalf("reason = %q", reason)
+	}
+}
+
+func TestRunBackupReturnsStaticConfigurationProblem(t *testing.T) {
+	manager := &fakeBackupManager{
+		err: backupcoord.ErrDisabled,
+		status: backupcoord.Status{Error: "backup disabled: missing CWXU_BACKUP_PG_DSN"},
+	}
+	svc := newBackupService(manager, func(context.Context) bool { return true })
+	_, err := svc.Run(context.Background(), &backuppb.RunBackupRequest{})
+	if err == nil || !strings.Contains(err.Error(), "CWXU_BACKUP_PG_DSN") {
+		t.Fatalf("Run error = %v, want static configuration problem", err)
 	}
 }

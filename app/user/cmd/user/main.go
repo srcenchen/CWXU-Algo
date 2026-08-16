@@ -4,6 +4,7 @@ import (
 	"cwxu-algo/app/common/conf"
 	"cwxu-algo/app/common/discovery"
 	"cwxu-algo/app/common/security"
+	"cwxu-algo/app/user/internal/data"
 	"flag"
 	"fmt"
 	"os"
@@ -80,8 +81,18 @@ func main() {
 	if err := security.Configure(bc.Server); err != nil {
 		panic(err)
 	}
+	legacy := data.LegacySiteConfig{ConfigEncryptionKey: bc.Server.GetConfigEncryptionKey()}
+	if bc.Smtp != nil {
+		legacy.SMTPHost, legacy.SMTPPort, legacy.SMTPUsername, legacy.SMTPPassword, legacy.SMTPFrom = bc.Smtp.Host, int(bc.Smtp.Port), bc.Smtp.Username, bc.Smtp.Password, bc.Smtp.From
+	}
+	if bc.Agent != nil {
+		legacy.AgentEndpoint, legacy.AgentModel, legacy.AgentSecret = bc.Agent.Endpoint, bc.Agent.Model, bc.Agent.Secret
+	}
+	if bc.AiAnalyze != nil {
+		legacy.AiAnalyzeEndpoint, legacy.AiAnalyzeModel, legacy.AiAnalyzeSecret = bc.AiAnalyze.Endpoint, bc.AiAnalyze.Model, bc.AiAnalyze.Secret
+	}
 
-	app, cleanup, err := wireApp(bc.Server, bc.Data, logger, bc.Smtp, bc.SupportCenter)
+	app, cleanup, err := wireApp(bc.Server, bc.Data, logger, bc.SupportCenter, legacy)
 	if err != nil {
 		panic(err)
 	}

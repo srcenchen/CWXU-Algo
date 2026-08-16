@@ -5,7 +5,6 @@ package cwxubak
 
 import (
 	"crypto/sha256"
-	"encoding/json"
 	"time"
 )
 
@@ -26,25 +25,4 @@ type Manifest struct {
 	Version   int       `json:"version"`
 	CreatedAt time.Time `json:"createdAt"`
 	Databases []string  `json:"databases"`
-}
-
-// Pointer 远端 latest.json 指针，与 core_data 备份 Result 一致。
-type Pointer struct {
-	ArchiveKey string    `json:"archiveKey"`
-	SHA256     string    `json:"sha256"`
-	Size       int64     `json:"size"`
-	Databases  int       `json:"databases"`
-	CreatedAt  time.Time `json:"createdAt"`
-}
-
-// ParsePointer 解析 latest.json。
-func ParsePointer(data []byte) (*Pointer, error) {
-	var pointer Pointer
-	if err := json.Unmarshal(data, &pointer); err != nil {
-		return nil, err
-	}
-	if pointer.ArchiveKey == "" || pointer.SHA256 == "" || pointer.Size <= 0 {
-		return nil, ErrInvalidPointer
-	}
-	return &pointer, nil
 }

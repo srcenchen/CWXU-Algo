@@ -80,7 +80,11 @@ func cmdInit(args []string, runner opsexec.Command) int {
 	if err := os.WriteFile(path, []byte(builder.String()), 0o600); err != nil {
 		return fail("init", err)
 	}
-	fmt.Printf("已写入 %s（0600）。现在可执行：goalgo-ops install\n", path)
+	installCommand := "goalgo-ops install"
+	if rootPath != "" {
+		installCommand += " --root " + root.Path
+	}
+	fmt.Printf("已写入 %s（0600）。现在可执行：%s\n", path, installCommand)
 	return 0
 }
 

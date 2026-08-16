@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"cwxu-algo/app/common/upyun"
-	secretutil "cwxu-algo/app/common/utils/secret"
+	"cwxu-algo/app/common/utils/legacysecret"
 
 	"github.com/go-kratos/kratos/v2/log"
 	"gorm.io/gorm"
@@ -101,14 +101,14 @@ func LoadUpyunClient(db *gorm.DB) *upyun.Client {
 	if err := db.First(&row, 1).Error; err != nil {
 		return upyun.New(upyun.Config{})
 	}
-	pass, err := secretutil.Decrypt(row.UpyunPassword)
-	if err != nil {
-		pass = ""
+	if legacysecret.IsEncrypted(row.UpyunPassword) {
+		log.Errorf("site_configs.upyun_password still contains unmigrated enc:v1 data")
+		row.UpyunPassword = ""
 	}
 	return upyun.New(upyun.Config{
 		Bucket:   strings.TrimSpace(row.UpyunBucket),
 		Operator: strings.TrimSpace(row.UpyunOperator),
-		Password: pass,
+		Password: row.UpyunPassword,
 		Domain:   strings.TrimSpace(row.UpyunDomain),
 		Scheme:   strings.TrimSpace(row.UpyunScheme),
 	})

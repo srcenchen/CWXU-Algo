@@ -15,16 +15,14 @@ import (
 
 func cmdBackup(args []string, runner opsexec.Command) int {
 	if len(args) < 1 {
-		return fail("backup", fmt.Errorf("缺少子命令：verify|download"))
+		return fail("backup", fmt.Errorf("缺少子命令：verify"))
 	}
 	sub, rest := args[0], args[1:]
 	switch sub {
 	case "verify":
 		return backupVerify(rest, runner)
-	case "download":
-		return backupDownload(rest)
 	default:
-		return fail("backup", fmt.Errorf("未知子命令 %q（支持 verify|download）", sub))
+		return fail("backup", fmt.Errorf("未知子命令 %q（支持 verify）", sub))
 	}
 }
 
@@ -88,67 +86,5 @@ func backupVerify(args []string, runner opsexec.Command) int {
 	}
 	fmt.Printf("校验通过：归档创建于 %s，数据库 %d 个：%s\n", result.Manifest.CreatedAt.Format(time.RFC3339), len(result.Manifest.Databases), strings.Join(result.Manifest.Databases, ", "))
 	fmt.Printf("解压目录：%s\n", result.WorkDir)
-	return 0
-}
-
-func backupDownload(args []string) int {
-	var output, prefix string
-	flags := flag.NewFlagSet("backup download", flag.ContinueOnError)
-	flags.StringVar(&output, "output", "", "下载到本地的 .cwxubak 路径（默认 ./latest.cwxubak）")
-	flags.StringVar(&prefix, "prefix", "", "又拍云归档前缀（默认 backups/core）")
-	if err := flags.Parse(args); err != nil {
-		return fail("backup download", err)
-	}
-	bucket := os.Getenv("UPYUN_BUCKET")
-	operator := os.Getenv("UPYUN_OPERATOR")
-	password := os.Getenv("UPYUN_PASSWORD")
-	prompt := opsprompt.New()
-	if bucket == "" || operator == "" || password == "" {
-		if !prompt.TTY {
-			return fail("backup download", fmt.Errorf("需要环境变量 UPYUN_BUCKET / UPYUN_OPERATOR / UPYUN_PASSWORD"))
-		}
-		var err error
-		if bucket == "" {
-			bucket, err = prompt.String("又拍云 Bucket", "")
-			if err != nil {
-				return fail("backup download", err)
-			}
-		}
-		if operator == "" {
-			operator, err = prompt.String("又拍云操作员", "")
-			if err != nil {
-				return fail("backup download", err)
-			}
-		}
-		if password == "" {
-			password, err = prompt.Password("又拍云操作员密码")
-			if err != nil {
-				return fail("backup download", err)
-			}
-		}
-	}
-	if prefix == "" {
-		prefix = "backups/core"
-	}
-	if output == "" {
-		output = "./latest.cwxubak"
-	}
-	if _, err := os.Stat(output); err == nil {
-		return fail("backup download", fmt.Errorf("目标已存在：%s", output))
-	}
-	store := opsbackup.NewUpyun(opsbackup.UpyunConfig{Bucket: bucket, Operator: operator, Password: password, Prefix: prefix})
-	ctx, stop := signalContext()
-	defer stop()
-	pointer, err := store.LatestPointer(ctx)
-	if err != nil {
-		return fail("backup download", err)
-	}
-	hash, err := store.DownloadArchive(ctx, pointer, output)
-	if err != nil {
-		return fail("backup download", err)
-	}
-	fmt.Printf("下载完成：%s\n", output)
-	fmt.Printf("归档：%s\nSHA-256：%s\n大小：%d 字节\n数据库：%d 个\n创建于：%s\n",
-		pointer.ArchiveKey, hash, pointer.Size, pointer.Databases, pointer.CreatedAt.Format(time.RFC3339))
 	return 0
 }

@@ -22,7 +22,7 @@ func cmdAdminInit(args []string, runner opsexec.Command) int {
 	if err := flags.Parse(args); err != nil {
 		return fail("参数", err)
 	}
-	root, err := opsroot.Resolve(rootPath)
+	root, err := resolveRegisteredRoot(rootPath)
 	if err != nil {
 		return fail("根目录", err)
 	}

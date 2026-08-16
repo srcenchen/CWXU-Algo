@@ -2,8 +2,52 @@ package sitesettings
 
 import (
 	"context"
+	"strings"
 	"testing"
 )
+
+func TestRowToRuntimeReadsPlaintextSecrets(t *testing.T) {
+	rt, err := (&Row{
+		BackupEnabled: true, BackupTime: "03:15", BackupPrefix: " disaster ",
+		UpyunBucket: "bucket", UpyunOperator: "operator", UpyunPassword: "upyun-plain",
+		SMTPPassword: "smtp-plain", AgentSecret: "agent-plain",
+		AiAnalyzeSecret: "analyze-plain", OjLuoguPassword: "luogu-plain",
+		OjQojPassword: "qoj-plain", PayFmSecret: "payfm-plain",
+	}).ToRuntimeChecked()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rt.SMTPPassword != "smtp-plain" || rt.AgentSecret != "agent-plain" ||
+		rt.AiAnalyzeSecret != "analyze-plain" || rt.OjLuoguPassword != "luogu-plain" ||
+		rt.OjQojPassword != "qoj-plain" || rt.PayFmSecret != "payfm-plain" {
+		t.Fatalf("plaintext secrets were not preserved: %#v", rt)
+	}
+	if !rt.BackupEnabled || rt.BackupTime != "03:15" || rt.BackupPrefix != "disaster" ||
+		rt.UpyunBucket != "bucket" || rt.UpyunOperator != "operator" || rt.UpyunPassword != "upyun-plain" {
+		t.Fatalf("backup runtime fields were not copied: %#v", rt)
+	}
+}
+
+func TestBackupTimeDefaultsAndValidatesStrictHHMM(t *testing.T) {
+	for input, want := range map[string]string{"": "02:00", "3:15": "02:00", "24:00": "02:00", "03:15": "03:15"} {
+		if got := NormalizeBackupTime(input); got != want {
+			t.Errorf("NormalizeBackupTime(%q) = %q, want %q", input, got, want)
+		}
+	}
+	if err := ValidateBackupTime("03:15"); err != nil {
+		t.Fatalf("valid time rejected: %v", err)
+	}
+	if err := ValidateBackupTime("3:15"); err == nil {
+		t.Fatal("non-HH:mm time accepted")
+	}
+}
+
+func TestRowToRuntimeRejectsUnmigratedCiphertext(t *testing.T) {
+	_, err := (&Row{SMTPPassword: "enc:v1:broken"}).ToRuntimeChecked()
+	if err == nil || !strings.Contains(err.Error(), "smtp_password") {
+		t.Fatalf("expected diagnostic smtp_password error, got %v", err)
+	}
+}
 
 func TestRuntimeWorthCaching(t *testing.T) {
 	if (&Runtime{SiteTitle: "GoAlgo"}).worthCaching() {
@@ -20,6 +64,12 @@ func TestRuntimeWorthCaching(t *testing.T) {
 	}
 	if !(&Runtime{AgentEndpoint: "https://api.openai.com/v1"}).worthCaching() {
 		t.Fatal("agent endpoint should be cacheable")
+	}
+	if !(&Runtime{BackupEnabled: true}).worthCaching() {
+		t.Fatal("enabled backup switch should be cacheable")
+	}
+	if !(&Runtime{ConfigVersion: 1, BackupEnabled: false}).worthCaching() {
+		t.Fatal("versioned disabled backup switch should be cacheable")
 	}
 }
 

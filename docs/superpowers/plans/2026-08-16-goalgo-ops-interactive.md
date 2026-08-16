@@ -25,7 +25,7 @@
 | `cmd/goalgo-ops/admin.go` | 改为调用 `opsadmin.Bootstrap`，删除重复代码 |
 | `cmd/goalgo-ops/runtime.go`（新增） | deploy/rollback/restart 中 Pull/Up 前子步骤提示 + 候选文件交互 |
 | `cmd/goalgo-ops/restore.go` | 缺参交互补全（归档/密钥/确认） |
-| `cmd/goalgo-ops/backup.go` | `backup download`/`verify` 缺参交互 |
+| `cmd/goalgo-ops/backup.go` | `backup verify` 缺参交互 |
 | `cmd/goalgo-ops/config.go` | `config export`/`import` 路径交互 |
 | `deploy/tests/test_operations.py` | 契约断言：usage 含 `init`、install 帮助、非交互提示 |
 
@@ -354,7 +354,7 @@ func (i *Installer) Scaffold() error {
 }
 
 func (i *Installer) Secrets() error {
-	for _, secret := range []string{"postgres_password", "redis_password", "rabbitmq_password", "config_encryption_key"} {
+	for _, secret := range []string{"postgres_password", "redis_password", "rabbitmq_password"} {
 		if err := writeHexSecret(i.Root.Path, "secrets/"+secret, 32); err != nil {
 			return err
 		}
@@ -1063,7 +1063,6 @@ def test_destructive_commands_prompt_when_missing_args(self):
 - 非 TTY 且缺项：维持现有报错。
 
 `backup.go`：
-- `backup download` 缺 `UPYUN_*` 且 TTY：逐个 `opsprompt.String` 输入 bucket/operator/password（password 掩码）；缺 output 交互确认默认。
 - `backup verify` 缺 `--file`/`--key-file` 且 TTY：`opsprompt.String` 输入路径。
 
 `config.go`：

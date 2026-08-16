@@ -2,9 +2,13 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net"
+	"net/http"
+	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"cwxu-algo/api/core/v1/health"
@@ -25,10 +29,11 @@ import (
 // HealthService 运维监控：服务状态 + 中间件 + 服务器资源 + API 延迟 + 容量估算
 type HealthService struct {
 	health.UnimplementedHealthServer
-	db     *gorm.DB
-	udb    *gorm.DB // optional: algo_user
-	rdb    *redis.Client
-	server *conf.Server
+	db                  *gorm.DB
+	udb                 *gorm.DB // optional: algo_user
+	rdb                 *redis.Client
+	server              *conf.Server
+	backendProbeTimeout time.Duration
 }
 
 func NewHealthService(d *data.Data, c *conf.Server) *HealthService {
@@ -48,15 +53,76 @@ func (s *HealthService) GetHealth(ctx context.Context, _ *health.GetHealthReq) (
 	capacity := s.collectCapacity(ctx, resources, api)
 
 	return &health.GetHealthRes{
-		Code:        0,
-		Message:     "success",
-		Services:    services,
-		Middleware:  middleware,
-		Resources:   resources,
-		Api:         api,
-		Capacity:    capacity,
-		CollectedAt: time.Now().Unix(),
+		Code:            0,
+		Message:         "success",
+		Services:        services,
+		BackendServices: s.collectBackendServices(ctx),
+		Middleware:      middleware,
+		Resources:       resources,
+		Api:             api,
+		Capacity:        capacity,
+		CollectedAt:     time.Now().Unix(),
 	}, nil
+}
+
+func (s *HealthService) collectBackendServices(ctx context.Context) []*health.HealthBackendServiceItem {
+	const localService = "core-data"
+	names := []string{"user", localService, "agent"}
+	out := make([]*health.HealthBackendServiceItem, 0, len(names))
+	items := make([]*health.HealthBackendServiceItem, len(names))
+	var wg sync.WaitGroup
+	for i, name := range names {
+		if name == localService {
+			items[i] = &health.HealthBackendServiceItem{Name: name, Status: "ok"}
+			continue
+		}
+		wg.Add(1)
+		go func(i int, name string) {
+			defer wg.Done()
+			status, errMsg := s.probeConsulService(ctx, name)
+			items[i] = &health.HealthBackendServiceItem{Name: name, Status: status, ErrMsg: errMsg}
+		}(i, name)
+	}
+	wg.Wait()
+	out = append(out, items...)
+	return out
+}
+
+func (s *HealthService) probeConsulService(ctx context.Context, service string) (string, string) {
+	if s.server == nil || strings.TrimSpace(s.server.RegDsn) == "" {
+		return "unchecked", "未配置注册中心"
+	}
+	base := strings.TrimRight(strings.TrimSpace(s.server.RegDsn), "/")
+	if !strings.Contains(base, "://") {
+		base = "http://" + base
+	}
+	endpoint := base + "/v1/health/service/" + url.PathEscape(service) + "?passing=true"
+	timeout := s.backendProbeTimeout
+	if timeout <= 0 {
+		timeout = 800 * time.Millisecond
+	}
+	probeCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(probeCtx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return "unchecked", err.Error()
+	}
+	resp, err := (&http.Client{Timeout: timeout}).Do(req)
+	if err != nil {
+		return "unchecked", "Consul 探测失败: " + err.Error()
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "unchecked", fmt.Sprintf("Consul 返回 HTTP %d", resp.StatusCode)
+	}
+	var instances []json.RawMessage
+	if err := json.NewDecoder(resp.Body).Decode(&instances); err != nil {
+		return "unchecked", "Consul 响应无效: " + err.Error()
+	}
+	if len(instances) == 0 {
+		return "unchecked", "未发现通过健康检查的注册实例"
+	}
+	return "ok", ""
 }
 
 func (s *HealthService) collectServices(ctx context.Context) []*health.HealthServiceItem {

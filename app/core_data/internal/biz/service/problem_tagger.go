@@ -20,7 +20,6 @@ import (
 // ProblemTagger 使用官方 openai-go SDK 调用 OpenAI 兼容 Chat Completions。
 // 优先读站点设置（Redis），yaml 仅作兜底。
 type ProblemTagger struct {
-	yaml   *conf.AiAnalyze
 	rdb    *redis.Client
 	mu     sync.Mutex
 	client *openai.Client
@@ -29,14 +28,14 @@ type ProblemTagger struct {
 	base   string
 }
 
-func NewProblemTagger(c *conf.AiAnalyze, rdb *redis.Client) *ProblemTagger {
-	t := &ProblemTagger{yaml: c, rdb: rdb}
+func NewProblemTagger(rdb *redis.Client) *ProblemTagger {
+	t := &ProblemTagger{rdb: rdb}
 	t.reload(context.Background())
 	return t
 }
 
 func (t *ProblemTagger) conf(ctx context.Context) *conf.AiAnalyze {
-	rt := sitesettings.Load(ctx, t.rdb, nil).MergeFallback(nil, nil, t.yaml)
+	rt := sitesettings.Load(ctx, t.rdb, nil)
 	return rt.AiAnalyzeConf()
 }
 

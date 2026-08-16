@@ -1,11 +1,22 @@
 package backup
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func TestManifestHasNoSQLSecretKeyFingerprint(t *testing.T) {
+	raw, err := json.Marshal(Manifest{Version: FormatVersion})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "encryptionKeyFp") {
+		t.Fatalf("manifest must not contain SQL secret key fingerprint: %s", raw)
+	}
+}
 
 func TestNormalizeScopes(t *testing.T) {
 	all, err := NormalizeScopes(nil)

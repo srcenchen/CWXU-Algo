@@ -9,7 +9,6 @@ server:
   amqp_dsn: "${AMQP_DSN}"
   jwt_secret: ""
   jwt_public_key: "${JWT_PUBLIC_KEY}"
-  config_encryption_key: "${CONFIG_ENCRYPTION_KEY}"
 data:
   database:
     driver: postgres
@@ -19,4 +18,3 @@ data:
     password: "${REDIS_PASSWORD}"
     read_timeout: 2s
     write_timeout: 2s
-ai_analyze: {}

@@ -8,9 +8,10 @@ import "google/protobuf/duration.proto";
 message Bootstrap {
   Server server = 1;
   Data data = 2;
-  Agent agent = 3;
-  SMTP smtp = 4;
-  AiAnalyze ai_analyze = 5;
+  // Deprecated: 仅供旧 YAML 启动时一次性迁移到 site_configs；运行时不读取。
+  SMTP smtp = 3 [deprecated = true];
+  Agent agent = 4 [deprecated = true];
+  AiAnalyze ai_analyze = 5 [deprecated = true];
   SupportCenter support_center = 6;
 }
 
@@ -30,7 +31,8 @@ message Server {
   string reg_dsn = 3;
   string amqp_dsn = 4;
   string jwt_secret = 5;
-  string config_encryption_key = 6;
+  // Deprecated: 仅用于解密旧 site_configs enc:v1 数据；新配置不要设置。
+  string config_encryption_key = 6 [deprecated = true];
   // RSA 私钥 PEM（签发；仅 user/agent 服务配置）
   string jwt_private_key = 7;
   // RSA 公钥 PEM（验证；所有服务配置）

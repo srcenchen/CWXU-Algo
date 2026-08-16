@@ -61,6 +61,14 @@ message HealthServiceItem {
   string err_msg = 4;
 }
 
+message HealthBackendServiceItem {
+	// 后台服务名：user / core-data / agent（gateway 不注册 Consul）
+  string name = 1;
+  // ok | unchecked
+  string status = 2;
+  string err_msg = 3;
+}
+
 message HealthMiddlewareItem {
   // database / redis / registry / mq
   string name = 1;
@@ -141,4 +149,6 @@ message GetHealthRes {
   HealthCapacityItem capacity = 7;
   // 采集时间 unix 秒
   int64 collected_at = 8;
+  // GoAlgo 后台进程状态；来自 Consul passing 实例，本进程 core-data 直接标记在线
+  repeated HealthBackendServiceItem backend_services = 9;
 }

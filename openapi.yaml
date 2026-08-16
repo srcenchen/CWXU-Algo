@@ -95,6 +95,48 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/api.core.v1.community.ActivityFeedRes'
+    /v1/core/backup/key:
+        get:
+            tags:
+                - Backup
+            operationId: Backup_DownloadKey
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.core.v1.backup.DownloadBackupKeyReply'
+    /v1/core/backup/run:
+        post:
+            tags:
+                - Backup
+            operationId: Backup_Run
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/api.core.v1.backup.RunBackupRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.core.v1.backup.RunBackupReply'
+    /v1/core/backup/status:
+        get:
+            tags:
+                - Backup
+            operationId: Backup_Status
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.core.v1.backup.GetBackupStatusReply'
     /v1/core/bulletin/create:
         post:
             tags:
@@ -5821,6 +5863,56 @@ components:
                     type: string
                 squadId:
                     type: string
+        api.core.v1.backup.BackupStatus:
+            type: object
+            properties:
+                enabled:
+                    type: boolean
+                status:
+                    type: string
+                trigger:
+                    type: string
+                stage:
+                    type: string
+                message:
+                    type: string
+                error:
+                    type: string
+                startedAt:
+                    type: string
+                finishedAt:
+                    type: string
+                archiveKey:
+                    type: string
+                archiveSize:
+                    type: string
+                sha256:
+                    type: string
+                databaseCount:
+                    type: integer
+                    format: int32
+        api.core.v1.backup.DownloadBackupKeyReply:
+            type: object
+            properties:
+                key:
+                    type: string
+                    description: 32 字节原始 AES 密钥；JSON 传输时按 protobuf 约定为 base64。
+                    format: bytes
+        api.core.v1.backup.GetBackupStatusReply:
+            type: object
+            properties:
+                status:
+                    $ref: '#/components/schemas/api.core.v1.backup.BackupStatus'
+        api.core.v1.backup.RunBackupReply:
+            type: object
+            properties:
+                accepted:
+                    type: boolean
+                status:
+                    $ref: '#/components/schemas/api.core.v1.backup.BackupStatus'
+        api.core.v1.backup.RunBackupRequest:
+            type: object
+            properties: {}
         api.core.v1.bulletin.BulletinInfo:
             type: object
             properties:
@@ -7054,6 +7146,11 @@ components:
                 collectedAt:
                     type: string
                     description: 采集时间 unix 秒
+                backendServices:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/api.core.v1.health.HealthBackendServiceItem'
+                    description: GoAlgo 后台进程状态；来自 Consul passing 实例，本进程 core-data 直接标记在线
         api.core.v1.health.HealthApiItem:
             type: object
             properties:
@@ -7084,6 +7181,17 @@ components:
                 spiderOkToday:
                     type: string
                 spiderFailToday:
+                    type: string
+        api.core.v1.health.HealthBackendServiceItem:
+            type: object
+            properties:
+                name:
+                    type: string
+                    description: 后台服务名：user / core-data / agent（gateway 不注册 Consul）
+                status:
+                    type: string
+                    description: ok | unchecked
+                errMsg:
                     type: string
         api.core.v1.health.HealthCapacityItem:
             type: object
@@ -12668,6 +12776,12 @@ components:
                 configVersion:
                     type: string
                     description: 配置乐观并发版本（每次更新 +1；0=旧数据）
+                backupEnabled:
+                    type: boolean
+                backupTime:
+                    type: string
+                backupPrefix:
+                    type: string
         api.user.v1.site.GetConfigRes:
             type: object
             properties:
@@ -12810,13 +12924,19 @@ components:
                     description: 支付方式（如 aloop=支付宝轮循池；空=默认 aloop）
                 section:
                     type: string
-                    description: 保存分区：basic | email | ai | upyun | oj | payment | all（空=all）
+                    description: 保存分区：basic | email | ai | upyun | oj | payment | backup | all（空=all）
                 agentEndpoint:
                     type: string
                     description: Agent OpenAI 兼容服务地址（非敏感）
                 expectedConfigVersion:
                     type: string
                     description: 期望的 config_version；>0 时校验，不匹配返回冲突；0=兼容旧客户端
+                backupEnabled:
+                    type: boolean
+                backupTime:
+                    type: string
+                backupPrefix:
+                    type: string
         api.user.v1.site.UpdateConfigRes:
             type: object
             properties:
@@ -13545,6 +13665,7 @@ tags:
 
          注：import（multipart 大文件上传）与 jobs/{id}/download（zip 流式下载）以及
          jobs/{id} 删除仍为手写路由（见 app/user/internal/service/backup.go RegisterBackupRoutes）。
+    - name: Backup
     - name: Blog
       description: |-
         个人博客服务（文章/评论/点赞/分类/标签/主题/页面/协议开通/插件版本/图片上传/站管管理/举报）

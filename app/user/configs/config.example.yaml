@@ -21,8 +21,6 @@ server:
     -----BEGIN PUBLIC KEY-----
     <RSA 公钥 PEM>
     -----END PUBLIC KEY-----
-  # user/core_data/agent 必须一致，用于加密 SMTP / AI 密钥（至少 32 字符）
-  config_encryption_key: ""
 data:
   database:
     driver: postgres
@@ -34,14 +32,6 @@ data:
     password: cwxu
     read_timeout: 2s
     write_timeout: 2s
-# 备份 zip 目录（可选，默认 ./data/backups）；上传文件目录 CWXU_UPLOAD_DIR（默认 ./data/uploads）
-# 业务配置（SMTP / AI）请在站点设置 /admin/site 配置；以下仅作首次启动兜底
-smtp:
-  host: smtp.163.com
-  port: 465
-  username: xxx@163.com
-  password: xxx
-  from: xxx@163.com
 # 客户中心（工单系统）对接；值为空时工单接口返回「支持中心未配置」，不 panic
 support_center:
   base_url: ""          # 形如 https://support.example.com
