@@ -31,3 +31,7 @@ func (p *Progress) Message(message string) {
 func Done(out io.Writer, message string) {
 	fmt.Fprintf(out, "%s\n", message)
 }
+
+func Note(out io.Writer, message string) {
+	fmt.Fprintf(out, "  - %s\n", message)
+}

@@ -72,6 +72,13 @@ class OperationalScriptTests(unittest.TestCase):
         self.assertIn('"init"', main)
         self.assertIn("init [--root]", main)
 
+    def test_install_uses_progress_and_creates_admin(self):
+        main = read("cmd/goalgo-ops/main.go")
+        self.assertIn("opsprogress", main)
+        self.assertIn("AdminCreated", main)
+        self.assertIn("opsadmin.Bootstrap", main)
+        self.assertIn("ResolveLatest", main)
+
     def test_shell_scripts_parse(self):
         scripts = sorted((DEPLOY / "scripts").glob("*.sh"))
         result = subprocess.run(["sh", "-n", *map(str, scripts)], capture_output=True, text=True)

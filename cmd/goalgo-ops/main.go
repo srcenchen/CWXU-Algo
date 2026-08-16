@@ -10,10 +10,13 @@ import (
 	"strings"
 	"syscall"
 
+	"cwxu-algo/internal/opsadmin"
 	"cwxu-algo/internal/opscompose"
 	"cwxu-algo/internal/opsexec"
 	"cwxu-algo/internal/opsinstall"
 	"cwxu-algo/internal/opslock"
+	"cwxu-algo/internal/opsprogress"
+	"cwxu-algo/internal/opsprompt"
 	"cwxu-algo/internal/opsrelease"
 	"cwxu-algo/internal/opsroot"
 )
@@ -162,6 +165,7 @@ func runtimeUp(ctx context.Context, compose *opscompose.Compose) int {
 	if _, err := compose.Release(); err != nil {
 		return fail("启动", err)
 	}
+	opsprogress.Note(os.Stderr, "创建并启动容器")
 	if err := compose.Up(ctx, compose.WaitTimeout()); err != nil {
 		return fail("启动", err)
 	}
@@ -191,6 +195,7 @@ func runtimeRestart(ctx context.Context, compose *opscompose.Compose) int {
 	if err := compose.Restart(ctx); err != nil {
 		return fail("重启", err)
 	}
+	opsprogress.Note(os.Stderr, "创建并启动容器")
 	if err := compose.Up(ctx, compose.WaitTimeout()); err != nil {
 		return fail("重启", err)
 	}
@@ -234,13 +239,16 @@ func runtimeDeploy(ctx context.Context, compose *opscompose.Compose, args []stri
 	if len(rest) > 0 && !strings.HasPrefix(rest[0], "-") {
 		candidate, rest = rest[0], rest[1:]
 	}
+	if candidate == "" {
+		chosen, err := deployCandidate(compose.Root.Path, compose.Root.Join("release.env"), opsprompt.New())
+		if err != nil {
+			return fail("部署", err)
+		}
+		candidate = chosen
+	}
 	var release *opsrelease.Release
 	var err error
-	if candidate == "" {
-		release, err = opsrelease.ParseFile(compose.Root.Join("release.env"))
-	} else {
-		release, err = opsrelease.ParseFile(candidate)
-	}
+	release, err = opsrelease.ParseFile(candidate)
 	if err != nil {
 		return fail("部署", err)
 	}
@@ -252,7 +260,7 @@ func runtimeDeploy(ctx context.Context, compose *opscompose.Compose, args []stri
 	if err != nil {
 		return fail("部署", err)
 	}
-	if candidate != "" && !releaseSame(release, active) {
+	if !releaseSame(release, active) {
 		if err := release.WriteFile(compose.Root.Join("release.previous.env")); err != nil {
 			return fail("部署", err)
 		}
@@ -260,9 +268,11 @@ func runtimeDeploy(ctx context.Context, compose *opscompose.Compose, args []stri
 			return fail("部署", err)
 		}
 	}
+	opsprogress.Note(os.Stderr, "拉取发布镜像")
 	if err := compose.Pull(ctx); err != nil {
 		return fail("部署", err)
 	}
+	opsprogress.Note(os.Stderr, "创建并启动容器")
 	if err := compose.Up(ctx, compose.WaitTimeout()); err != nil {
 		if rollbackErr := rollbackFiles(compose, release, current); rollbackErr != nil {
 			return fail("部署", errors.Join(err, rollbackErr))
@@ -309,9 +319,11 @@ func runtimeRollback(ctx context.Context, compose *opscompose.Compose) int {
 	if err := previous.WriteFile(compose.Root.Join("release.env")); err != nil {
 		return fail("回滚", err)
 	}
+	opsprogress.Note(os.Stderr, "拉取发布镜像")
 	if err := compose.Pull(ctx); err != nil {
 		return fail("回滚", err)
 	}
+	opsprogress.Note(os.Stderr, "创建并启动容器")
 	if err := compose.Up(ctx, compose.WaitTimeout()); err != nil {
 		return fail("回滚", err)
 	}
@@ -375,7 +387,7 @@ func cmdInstall(args []string, runner opsexec.Command) int {
 	var rootPath, releaseFile string
 	flags := flag.NewFlagSet("install", flag.ContinueOnError)
 	flags.StringVar(&rootPath, "root", "", "goalgo 根目录（默认 $GOALGO_ROOT 或 /opt/goalgo）")
-	flags.StringVar(&releaseFile, "release-file", "", "从文件写入经过校验的 release.env")
+	flags.StringVar(&releaseFile, "release-file", "", "从文件写入经过校验的 release.env（默认解析 <svc>-latest）")
 	if err := flags.Parse(args); err != nil {
 		return fail("安装", err)
 	}
@@ -392,11 +404,22 @@ func cmdInstall(args []string, runner opsexec.Command) int {
 	}
 	defer lock.Release()
 
+	progress := opsprogress.New(5, os.Stderr)
 	inst := opsinstall.New(root)
-	if err := inst.Install(ctx); err != nil {
+
+	progress.Step("初始化目录结构与模板")
+	if err := inst.Scaffold(); err != nil {
 		return fail("安装", err)
 	}
+
+	progress.Step("生成密钥与 JWT 密钥对")
+	if err := inst.Secrets(); err != nil {
+		return fail("安装", err)
+	}
+
 	compose := &opscompose.Compose{Root: root, Run: runner}
+
+	progress.Step("解析发布镜像")
 	if releaseFile != "" {
 		release, err := opsrelease.ParseFile(releaseFile)
 		if err != nil {
@@ -414,14 +437,18 @@ func cmdInstall(args []string, runner opsexec.Command) int {
 			return fail("安装", err)
 		}
 	}
-	if err := compose.Version(ctx); err != nil {
-		fmt.Fprintln(os.Stderr, "goalgo-ops: 安装：初始化完成；未检测到 docker compose，请安装后执行 `goalgo-ops start`")
-		return 0
+
+	progress.Step("创建首个管理员（如无）")
+	if !opsinstall.AdminCreated(root) {
+		if err := opsadmin.Bootstrap(ctx, root, compose, "", opsprompt.New()); err != nil {
+			return fail("安装", fmt.Errorf("创建管理员：%w", err))
+		}
+	} else {
+		progress.Message("管理员已存在，跳过")
 	}
-	if err := compose.Up(ctx, compose.WaitTimeout()); err != nil {
-		return fail("安装", err)
-	}
-	if err := compose.Health(ctx); err != nil {
+
+	progress.Step("启动服务并冒烟")
+	if err := installStart(ctx, compose, progress); err != nil {
 		return fail("安装", err)
 	}
 	return 0
