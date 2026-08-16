@@ -34,8 +34,7 @@ func dotenvValue(path, key string) (string, error) {
 	return "", fmt.Errorf("%s 未定义于 %s", key, path)
 }
 
-// resolveInstallRoot 确定安装根目录：显式 --root > $GOALGO_ROOT > 默认 .env 的 GOALGO_ROOT > /opt/goalgo。
-// 这样 init 里填写的 GOALGO_ROOT 会决定后续 install 的安装位置，避免 root 与 .env 挂载路径错位。
+// resolveInstallRoot 确定安装根目录：显式 --root > $GOALGO_ROOT > ~/.ops.data.json 持久化的 root > 默认 .env 的 GOALGO_ROOT > /opt/goalgo。
 func resolveInstallRoot(path string) (*opsroot.Root, error) {
 	if path != "" {
 		return opsroot.Resolve(path)
@@ -43,10 +42,26 @@ func resolveInstallRoot(path string) (*opsroot.Root, error) {
 	if env := os.Getenv("GOALGO_ROOT"); env != "" {
 		return opsroot.Resolve(env)
 	}
+	if data, err := opsdata.Load(); err == nil && data.Root != "" {
+		return opsroot.Resolve(data.Root)
+	}
 	if value, err := dotenvValue("/opt/goalgo/.env", "GOALGO_ROOT"); err == nil && value != "" {
 		return opsroot.Resolve(value)
 	}
 	return opsroot.Resolve("")
+}
+
+// persistInstallRoot 把安装根目录写入 ~/.ops.data.json，供后续命令（restore/deploy/upgrade 等）读取。
+func persistInstallRoot(root *opsroot.Root) {
+	data, err := opsdata.Load()
+	if err != nil {
+		return
+	}
+	if data.Root == root.Path {
+		return
+	}
+	data.Root = root.Path
+	_ = data.Save()
 }
 
 // carryAnchorEnv 当安装根不是默认锚点位置时，把锚点 .env 复制到安装根，保留 init 填写的值。

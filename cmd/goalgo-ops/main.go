@@ -404,6 +404,7 @@ func cmdInstall(args []string, runner opsexec.Command) int {
 	if err != nil {
 		return fail("安装", err)
 	}
+	persistInstallRoot(root)
 	if root.IsProtectedInstall() && !opsroot.IsPrivileged() {
 		return fail("安装", fmt.Errorf("安装到 %s 需要 root 权限", root.Path))
 	}

@@ -126,6 +126,13 @@ class OperationalScriptTests(unittest.TestCase):
         self.assertIn("resolveInstallRoot", restore)
         self.assertIn('"$POSTGRES_USER"', restore)
 
+    def test_install_persists_root_and_runtime_reads_it(self):
+        runtime = read("cmd/goalgo-ops/runtime.go")
+        self.assertIn("data.Root", runtime)
+        self.assertIn("persistInstallRoot", runtime)
+        main = read("cmd/goalgo-ops/main.go")
+        self.assertIn("persistInstallRoot", main)
+
     def test_shell_scripts_parse(self):
         scripts = sorted((DEPLOY / "scripts").glob("*.sh"))
         result = subprocess.run(["sh", "-n", *map(str, scripts)], capture_output=True, text=True)

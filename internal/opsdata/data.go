@@ -11,6 +11,7 @@ const schemaVersion = 1
 
 type Data struct {
 	Version int     `json:"version"`
+	Root    string  `json:"root"`
 	Deploy  Deploy  `json:"deploy"`
 	Webhook Webhook `json:"webhook"`
 }
