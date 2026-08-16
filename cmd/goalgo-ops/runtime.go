@@ -6,10 +6,13 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"cwxu-algo/internal/opscompose"
+	"cwxu-algo/internal/opsdata"
 	"cwxu-algo/internal/opsprogress"
 	"cwxu-algo/internal/opsprompt"
+	"cwxu-algo/internal/opsrelease"
 	"cwxu-algo/internal/opsroot"
 )
 
@@ -87,30 +90,41 @@ func deployCandidate(rootPath, current string, prompt *opsprompt.Prompter) (stri
 	return current, nil
 }
 
-// runtimeUpgrade 解析 ACR <svc>-latest 为 digest，与当前版本比对后升级；任一步失败自动回滚。
+// runtimeUpgrade 解析 ACR <svc>-latest 的 digest 用于版本判断（持久化到 ~/.ops.data.json），
+// 实际镜像仍用 latest 标签；有更新则原子升级，失败自动回滚。
 func runtimeUpgrade(ctx context.Context, compose *opscompose.Compose) int {
 	if err := compose.Root.RequireFiles(); err != nil {
-		return fail("升级", err)
-	}
-	active, err := compose.Release()
-	if err != nil {
 		return fail("升级", err)
 	}
 	latest, err := compose.ResolveLatest(ctx)
 	if err != nil {
 		return fail("升级", err)
 	}
-	if releaseSame(latest, active) {
+	data, err := opsdata.Load()
+	if err != nil {
+		return fail("升级", err)
+	}
+	if sameDigests(data.Deploy.LastDigests, latest.Images) {
 		fmt.Fprintln(os.Stdout, "已是最新版本")
 		return 0
 	}
-	if err := latest.WriteFile(compose.Root.Join("release.previous.env")); err != nil {
+	active, err := compose.Release()
+	if err != nil {
 		return fail("升级", err)
 	}
-	if err := latest.WriteFile(compose.Root.Join("release.env")); err != nil {
+	data.Deploy.LastDigests = latest.Images
+	data.Deploy.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+	if err := data.Save(); err != nil {
 		return fail("升级", err)
 	}
-	rollback := func() { _ = rollbackFiles(compose, latest, active) }
+	release := opsrelease.LatestTagRelease()
+	if err := release.WriteFile(compose.Root.Join("release.previous.env")); err != nil {
+		return fail("升级", err)
+	}
+	if err := release.WriteFile(compose.Root.Join("release.env")); err != nil {
+		return fail("升级", err)
+	}
+	rollback := func() { _ = rollbackFiles(compose, release, active) }
 	opsprogress.Note(os.Stderr, "拉取发布镜像")
 	if err := compose.Pull(ctx); err != nil {
 		rollback()
@@ -131,4 +145,16 @@ func runtimeUpgrade(ctx context.Context, compose *opscompose.Compose) int {
 	}
 	opsprogress.Done(os.Stderr, "升级完成")
 	return 0
+}
+
+func sameDigests(a, b map[string]string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for key, value := range a {
+		if b[key] != value {
+			return false
+		}
+	}
+	return true
 }

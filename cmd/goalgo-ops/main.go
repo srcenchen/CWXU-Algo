@@ -436,11 +436,7 @@ func cmdInstall(args []string, runner opsexec.Command) int {
 			return fail("安装", err)
 		}
 	} else {
-		release, err := compose.ResolveLatest(ctx)
-		if err != nil {
-			return fail("安装", err)
-		}
-		if err := release.WriteFile(root.Join("release.env")); err != nil {
+		if err := opsrelease.LatestTagRelease().WriteFile(root.Join("release.env")); err != nil {
 			return fail("安装", err)
 		}
 	}

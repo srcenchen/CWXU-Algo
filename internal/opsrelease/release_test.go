@@ -55,3 +55,29 @@ func TestParseExtraAssignment(t *testing.T) {
 		t.Fatal("expected error for extra assignment")
 	}
 }
+
+func TestParseAcceptsLatestTags(t *testing.T) {
+	var builder strings.Builder
+	for _, entry := range serviceKeys {
+		builder.WriteString(entry.Key + "=" + Repository + ":" + entry.Service + "-latest\n")
+	}
+	release, err := Parse(strings.NewReader(builder.String()))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(release.Images) != 5 {
+		t.Fatalf("expected 5 images, got %d", len(release.Images))
+	}
+}
+
+func TestLatestTagRelease(t *testing.T) {
+	release := LatestTagRelease()
+	if len(release.Images) != 5 {
+		t.Fatalf("expected 5 images, got %d", len(release.Images))
+	}
+	for key, value := range release.Images {
+		if !imageTag.MatchString(value) {
+			t.Errorf("%s must be a latest tag, got %q", key, value)
+		}
+	}
+}

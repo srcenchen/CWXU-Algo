@@ -31,10 +31,11 @@ class OperationalScriptTests(unittest.TestCase):
         self.assertIn("flock", library)
         self.assertIn("/run/lock/goalgo-ops.lock", library)
 
-    def test_release_validation_accepts_only_five_exact_acr_digests(self):
+    def test_release_validation_accepts_digest_or_latest(self):
         library = read("deploy/scripts/lib.sh")
-        self.assertIn("registry.cn-hangzhou.aliyuncs.com/sanenchen/goalgo@sha256:", library)
-        self.assertIn("[0-9a-f]", library)
+        self.assertIn("registry.cn-hangzhou.aliyuncs.com/sanenchen/goalgo", library)
+        self.assertIn("@sha256:[0-9a-f]{64}", library)
+        self.assertIn("(frontend|gateway|user|core-data|agent)-latest", library)
         for variable in ("FRONTEND_IMAGE", "GATEWAY_IMAGE", "USER_IMAGE", "CORE_DATA_IMAGE", "AGENT_IMAGE"):
             self.assertIn(variable, library)
 
@@ -77,7 +78,7 @@ class OperationalScriptTests(unittest.TestCase):
         self.assertIn("opsprogress", main)
         self.assertIn("AdminCreated", main)
         self.assertIn("opsadmin.Bootstrap", main)
-        self.assertIn("ResolveLatest", main)
+        self.assertIn("LatestTagRelease", main)
 
     def test_destructive_commands_prompt_when_missing_args(self):
         restore = read("cmd/goalgo-ops/restore.go")
@@ -91,9 +92,11 @@ class OperationalScriptTests(unittest.TestCase):
     def test_upgrade_resolves_latest_and_rolls_back_on_failure(self):
         main = read("cmd/goalgo-ops/main.go")
         self.assertIn('"upgrade"', main)
-        self.assertIn("ResolveLatest", main)
-        self.assertIn("rollbackFiles", main)
-        self.assertIn("release.previous.env", main)
+        runtime = read("cmd/goalgo-ops/runtime.go")
+        self.assertIn("ResolveLatest", runtime)
+        self.assertIn("opsdata", runtime)
+        self.assertIn("rollbackFiles", runtime)
+        self.assertIn("release.previous.env", runtime)
 
     def test_shell_scripts_parse(self):
         scripts = sorted((DEPLOY / "scripts").glob("*.sh"))

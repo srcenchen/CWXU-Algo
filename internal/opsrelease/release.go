@@ -16,6 +16,28 @@ const imagePrefix = Repository + "@sha256:"
 
 var imageDigest = regexp.MustCompile(`^` + imagePrefix + `[0-9a-f]{64}$`)
 
+var imageTag = regexp.MustCompile(`^` + regexp.QuoteMeta(Repository) + `:(frontend|gateway|user|core-data|agent)-latest$`)
+
+var serviceKeys = []struct {
+	Service string
+	Key     string
+}{
+	{"frontend", "FRONTEND_IMAGE"},
+	{"gateway", "GATEWAY_IMAGE"},
+	{"user", "USER_IMAGE"},
+	{"core-data", "CORE_DATA_IMAGE"},
+	{"agent", "AGENT_IMAGE"},
+}
+
+// LatestTagRelease 返回引用 <repo>:<svc>-latest 的发布清单（实际镜像走 latest，版本判断用解析出的 digest）。
+func LatestTagRelease() *Release {
+	release := &Release{Images: map[string]string{}}
+	for _, entry := range serviceKeys {
+		release.Images[entry.Key] = Repository + ":" + entry.Service + "-latest"
+	}
+	return release
+}
+
 var required = []string{"FRONTEND_IMAGE", "GATEWAY_IMAGE", "USER_IMAGE", "CORE_DATA_IMAGE", "AGENT_IMAGE"}
 
 type Release struct {
@@ -51,8 +73,8 @@ func Parse(r io.Reader) (*Release, error) {
 		if !ok {
 			return nil, fmt.Errorf("缺少必需的赋值：%s", key)
 		}
-		if !imageDigest.MatchString(value) {
-			return nil, fmt.Errorf("%s 必须是 %s 加 64 位小写十六进制", key, imagePrefix)
+		if !imageDigest.MatchString(value) && !imageTag.MatchString(value) {
+			return nil, fmt.Errorf("%s 必须是 %s 加 64 位小写十六进制，或 <service>-latest 标签", key, imagePrefix)
 		}
 	}
 	if len(values) != len(required) {

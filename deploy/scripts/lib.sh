@@ -39,13 +39,13 @@ validate_release() {
     release_file=${1:-$GOALGO_ROOT/release.env}
     [ -f "$release_file" ] || die "release file not found: $release_file"
     expected='FRONTEND_IMAGE GATEWAY_IMAGE USER_IMAGE CORE_DATA_IMAGE AGENT_IMAGE'
-    prefix='registry.cn-hangzhou.aliyuncs.com/sanenchen/goalgo@sha256:'
+    base='registry.cn-hangzhou.aliyuncs.com/sanenchen/goalgo'
     for variable in $expected; do
         count=$(sed -n "/^${variable}=/p" "$release_file" | wc -l | tr -d ' ')
         [ "$count" = 1 ] || die "$release_file must define $variable exactly once"
         value=$(sed -n "s/^${variable}=//p" "$release_file")
-        printf '%s\n' "$value" | grep -Eq "^${prefix}[0-9a-f]{64}$" || \
-            die "$variable must be $prefix followed by 64 lowercase hex characters"
+        printf '%s\n' "$value" | grep -Eq "^${base}@sha256:[0-9a-f]{64}$|^${base}:(frontend|gateway|user|core-data|agent)-latest$" || \
+            die "$variable must be ${base}@sha256:<64hex> or ${base}:<service>-latest"
     done
     assignments=$(sed -n '/^[A-Za-z_][A-Za-z0-9_]*=/p' "$release_file" | wc -l | tr -d ' ')
     [ "$assignments" = 5 ] || die "$release_file must contain only the five application image assignments"

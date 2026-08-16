@@ -203,9 +203,9 @@ class ContainerRuntimeTests(unittest.TestCase):
         ):
             self.assertIn("image: " + image, compose)
 
-    def test_release_contract_requires_digest_shaped_values(self):
+    def test_release_contract_accepts_digest_or_latest(self):
         release = read("release.env.example")
-        self.assertEqual(release.count("@sha256:"), 5)
+        self.assertEqual(release.count("-latest"), 5)
         compose = read("compose.yaml")
         self.assertNotIn(":latest", compose)
 
