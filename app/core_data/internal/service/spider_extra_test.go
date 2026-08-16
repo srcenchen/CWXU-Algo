@@ -15,6 +15,7 @@ import (
 	"cwxu-algo/api/core/v1/spider"
 	_const "cwxu-algo/app/common/const"
 	"cwxu-algo/app/common/utils/auth"
+	"cwxu-algo/app/core_data/task"
 
 	"github.com/alicebob/miniredis/v2"
 	khttp "github.com/go-kratos/kratos/v2/transport/http"
@@ -38,6 +39,48 @@ func genTestRSAKeys(t *testing.T) (privPEM, pubPEM string) {
 	}
 	pubPEM = string(pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: pubDER}))
 	return privPEM, pubPEM
+}
+
+func TestTogglePlatformDispatchesModuleAndReportsRedisFailure(t *testing.T) {
+	mr := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	t.Cleanup(func() { _ = rdb.Close() })
+	server := khttp.NewServer()
+	spider.RegisterSpiderHTTPServer(server, &SpiderService{rdb: rdb})
+	admin := spiderExtraAdminToken(t, 1, true)
+
+	r := spiderExtraRequest(server, http.MethodPost, "/v1/core/spider/toggle-platform", admin,
+		`{"platform":"NowCoder","enabled":false,"module":"problem"}`)
+	var body map[string]interface{}
+	if err := json.Unmarshal(r.Body.Bytes(), &body); err != nil {
+		t.Fatalf("problem toggle invalid json: %v body=%s", err, r.Body.String())
+	}
+	if body["code"] != "0" || !task.IsProblemPlatformPaused(rdb, "NowCoder") {
+		t.Fatalf("problem toggle 未写入题面 SET: body=%s", r.Body.String())
+	}
+	if task.IsPlatformPaused(rdb, "NowCoder") {
+		t.Fatal("problem toggle 不应暂停提交爬虫")
+	}
+
+	r = spiderExtraRequest(server, http.MethodPost, "/v1/core/spider/toggle-platform", admin,
+		`{"platform":"NowCoder","enabled":false,"module":"contest"}`)
+	if err := json.Unmarshal(r.Body.Bytes(), &body); err != nil {
+		t.Fatalf("invalid module json: %v", err)
+	}
+	if body["code"] != "1" {
+		t.Fatalf("非法 module 应拒绝，body=%s", r.Body.String())
+	}
+
+	unavailable := khttp.NewServer()
+	spider.RegisterSpiderHTTPServer(unavailable, &SpiderService{})
+	r = spiderExtraRequest(unavailable, http.MethodPost, "/v1/core/spider/toggle-platform", admin,
+		`{"platform":"NowCoder","enabled":false}`)
+	if err := json.Unmarshal(r.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unavailable redis json: %v", err)
+	}
+	if body["code"] != "1" {
+		t.Fatalf("Redis 不可用不能误报成功，body=%s", r.Body.String())
+	}
 }
 
 // spiderExtraAdminToken 签发站管 JWT（IsSiteAdmin=true 绕过细粒度权限位图）。

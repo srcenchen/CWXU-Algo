@@ -251,12 +251,18 @@ message SpiderPlatformStat {
   bool paused = 19;
   // 今日新入库（写入数据库）提交记录条数
   int64 todayRows = 20;
+  // 提交同步是否暂停
+  bool submitPaused = 21;
+  // 题面抓取是否暂停
+  bool problemPaused = 22;
 }
 
 message TogglePlatformReq {
   string platform = 1;
   // true=启用（恢复同步）；false=关闭（暂停同步）
   bool enabled = 2;
+  // submit/problem；空值兼容 submit
+  string module = 3;
 }
 
 message TogglePlatformRes {
@@ -342,4 +348,3 @@ message RefreshSpiderStatusRes {
   // 当前生效自动同步间隔（分钟；min(站管覆盖, 组织 MIN, 订阅档)；失败回落默认）
   int32 sync_interval_min = 6;
 }
-

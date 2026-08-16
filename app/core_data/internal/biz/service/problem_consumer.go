@@ -6,6 +6,7 @@ import (
 	"cwxu-algo/app/common/utils/mqconsume"
 	"cwxu-algo/app/core_data/internal/loadgate"
 	"encoding/json"
+	"errors"
 	"strconv"
 	"strings"
 	"sync"
@@ -24,7 +25,9 @@ const (
 	problemRetryBaseDelay = 2 * time.Second
 	problemRetryMaxDelay  = 30 * time.Second
 	// problemPausedRequeueDelay 流水线暂停时拉长等待再重投，避免「取出-sleep-requeue」空转
-	problemPausedRequeueDelay = 30 * time.Second
+	problemPausedRequeueDelay    = 30 * time.Second
+	problemFetchQueue            = "problem_fetch"
+	problemFetchPausedDelayQueue = "problem_fetch.paused.delay"
 )
 
 // 进程内解析一次，供 consumer 与 progress 面板共用
@@ -108,6 +111,77 @@ func sleepOrStop(stop <-chan struct{}, d time.Duration) {
 	case <-stop:
 	case <-time.After(d):
 	}
+}
+
+func problemFetchConsumerPaused() bool {
+	return pipelineControl.IsFetchPaused()
+}
+
+type problemFetchPauseKind uint8
+
+const (
+	problemFetchPauseNone problemFetchPauseKind = iota
+	problemFetchPauseGlobal
+	problemFetchPausePlatform
+)
+
+func classifyProblemFetchPause(err error) problemFetchPauseKind {
+	switch {
+	case errors.Is(err, errProblemFetchPaused):
+		return problemFetchPauseGlobal
+	case errors.Is(err, errProblemPlatformPaused):
+		return problemFetchPausePlatform
+	default:
+		return problemFetchPauseNone
+	}
+}
+
+type problemFetchPausedBroker interface {
+	QueueDeclare(name string, durable, autoDelete, exclusive, noWait bool, args amqp.Table) (amqp.Queue, error)
+	Publish(exchange, key string, mandatory, immediate bool, msg amqp.Publishing) error
+}
+
+func problemFetchPausedPublishing(d amqp.Delivery) amqp.Publishing {
+	headers := amqp.Table{}
+	for key, value := range d.Headers {
+		headers[key] = value
+	}
+	return amqp.Publishing{
+		ContentType:     d.ContentType,
+		ContentEncoding: d.ContentEncoding,
+		DeliveryMode:    d.DeliveryMode,
+		Priority:        d.Priority,
+		CorrelationId:   d.CorrelationId,
+		ReplyTo:         d.ReplyTo,
+		Expiration:      d.Expiration,
+		MessageId:       d.MessageId,
+		Timestamp:       d.Timestamp,
+		Type:            d.Type,
+		UserId:          d.UserId,
+		AppId:           d.AppId,
+		Headers:         headers,
+		Body:            append([]byte(nil), d.Body...),
+	}
+}
+
+func publishProblemFetchPaused(mq problemFetchPausedBroker, d amqp.Delivery) error {
+	_, err := mq.QueueDeclare(problemFetchPausedDelayQueue, true, false, false, false, amqp.Table{
+		"x-message-ttl":             int32(problemPausedRequeueDelay / time.Millisecond),
+		"x-dead-letter-exchange":    "",
+		"x-dead-letter-routing-key": problemFetchQueue,
+	})
+	if err != nil {
+		return err
+	}
+	return mq.Publish("", problemFetchPausedDelayQueue, false, false, problemFetchPausedPublishing(d))
+}
+
+func settleProblemFetchPaused(mq problemFetchPausedBroker, d amqp.Delivery) error {
+	if err := publishProblemFetchPaused(mq, d); err != nil {
+		_ = d.Nack(false, true)
+		return err
+	}
+	return d.Ack(false)
 }
 
 // ProblemFetchConsumer 消费 problem_fetch：仅爬取
@@ -203,7 +277,8 @@ func (c *ProblemFetchConsumer) consumeOnce() error {
 				_ = d.Nack(false, false)
 				return
 			}
-			if pipelineControl.IsFetchPaused() {
+			// 平台暂停必须由 ProcessFetch 读取题目后按 DB 平台判断，不能信任可能陈旧的消息平台。
+			if problemFetchConsumerPaused() {
 				log.Warnf("problem_fetch id=%d requeue: fetch paused", msg.ProblemID)
 				sleepOrStop(c.stopCh, problemPausedRequeueDelay)
 				_ = d.Nack(false, true)
@@ -214,10 +289,17 @@ func (c *ProblemFetchConsumer) consumeOnce() error {
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 			defer cancel()
 			if err := c.problem.ProcessFetch(ctx, msg); err != nil {
-				if strings.Contains(err.Error(), "paused") {
+				switch classifyProblemFetchPause(err) {
+				case problemFetchPauseGlobal:
 					log.Warnf("RabbitMQ(problem_fetch) id=%d requeue paused: %v", msg.ProblemID, err)
 					sleepOrStop(c.stopCh, problemPausedRequeueDelay)
 					_ = d.Nack(false, true)
+					return
+				case problemFetchPausePlatform:
+					log.Warnf("RabbitMQ(problem_fetch) id=%d delayed republish: %v", msg.ProblemID, err)
+					if settleErr := settleProblemFetchPaused(c.mq, d); settleErr != nil {
+						log.Errorf("RabbitMQ(problem_fetch) id=%d settle paused: %v", msg.ProblemID, settleErr)
+					}
 					return
 				}
 				log.Errorf("RabbitMQ(problem_fetch) id=%d: %v", msg.ProblemID, err)

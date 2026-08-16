@@ -8498,6 +8498,12 @@ components:
                 todayRows:
                     type: string
                     description: 今日新入库（写入数据库）提交记录条数
+                submitPaused:
+                    type: boolean
+                    description: 提交同步是否暂停
+                problemPaused:
+                    type: boolean
+                    description: 题面抓取是否暂停
             description: 单个 OJ 的爬虫各模块监控
         api.core.v1.spider.SubmitInventoryRes:
             type: object
@@ -8528,6 +8534,9 @@ components:
                 enabled:
                     type: boolean
                     description: true=启用（恢复同步）；false=关闭（暂停同步）
+                module:
+                    type: string
+                    description: submit/problem；空值兼容 submit
         api.core.v1.spider.TogglePlatformRes:
             type: object
             properties:

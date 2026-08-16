@@ -1048,7 +1048,11 @@ type SpiderPlatformStat struct {
 	// 站管是否已暂停该 OJ 的爬虫同步（true=暂停；绑定用户仍在，只是不再同步）
 	Paused bool `protobuf:"varint,19,opt,name=paused,proto3" json:"paused,omitempty"`
 	// 今日新入库（写入数据库）提交记录条数
-	TodayRows     int64 `protobuf:"varint,20,opt,name=todayRows,proto3" json:"todayRows,omitempty"`
+	TodayRows int64 `protobuf:"varint,20,opt,name=todayRows,proto3" json:"todayRows,omitempty"`
+	// 提交同步是否暂停
+	SubmitPaused bool `protobuf:"varint,21,opt,name=submitPaused,proto3" json:"submitPaused,omitempty"`
+	// 题面抓取是否暂停
+	ProblemPaused bool `protobuf:"varint,22,opt,name=problemPaused,proto3" json:"problemPaused,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1223,11 +1227,27 @@ func (x *SpiderPlatformStat) GetTodayRows() int64 {
 	return 0
 }
 
+func (x *SpiderPlatformStat) GetSubmitPaused() bool {
+	if x != nil {
+		return x.SubmitPaused
+	}
+	return false
+}
+
+func (x *SpiderPlatformStat) GetProblemPaused() bool {
+	if x != nil {
+		return x.ProblemPaused
+	}
+	return false
+}
+
 type TogglePlatformReq struct {
 	state    protoimpl.MessageState `protogen:"open.v1"`
 	Platform string                 `protobuf:"bytes,1,opt,name=platform,proto3" json:"platform,omitempty"`
 	// true=启用（恢复同步）；false=关闭（暂停同步）
-	Enabled       bool `protobuf:"varint,2,opt,name=enabled,proto3" json:"enabled,omitempty"`
+	Enabled bool `protobuf:"varint,2,opt,name=enabled,proto3" json:"enabled,omitempty"`
+	// submit/problem；空值兼容 submit
+	Module        string `protobuf:"bytes,3,opt,name=module,proto3" json:"module,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1274,6 +1294,13 @@ func (x *TogglePlatformReq) GetEnabled() bool {
 		return x.Enabled
 	}
 	return false
+}
+
+func (x *TogglePlatformReq) GetModule() string {
+	if x != nil {
+		return x.Module
+	}
+	return ""
 }
 
 type TogglePlatformRes struct {
@@ -2174,7 +2201,7 @@ const file_core_v1_spider_spider_proto_rawDesc = "" +
 	"\x04code\x18\x01 \x01(\x03R\x04code\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12D\n" +
 	"\tplatforms\x18\x03 \x03(\v2&.api.core.v1.spider.SpiderPlatformStatR\tplatforms\x12 \n" +
-	"\vcollectedAt\x18\x04 \x01(\x03R\vcollectedAt\"\xb2\x05\n" +
+	"\vcollectedAt\x18\x04 \x01(\x03R\vcollectedAt\"\xfc\x05\n" +
 	"\x12SpiderPlatformStat\x12\x1a\n" +
 	"\bplatform\x18\x01 \x01(\tR\bplatform\x12\x1e\n" +
 	"\n" +
@@ -2204,10 +2231,13 @@ const file_core_v1_spider_spider_proto_rawDesc = "" +
 	"accountErr\x18\x12 \x01(\tR\n" +
 	"accountErr\x12\x16\n" +
 	"\x06paused\x18\x13 \x01(\bR\x06paused\x12\x1c\n" +
-	"\ttodayRows\x18\x14 \x01(\x03R\ttodayRows\"I\n" +
+	"\ttodayRows\x18\x14 \x01(\x03R\ttodayRows\x12\"\n" +
+	"\fsubmitPaused\x18\x15 \x01(\bR\fsubmitPaused\x12$\n" +
+	"\rproblemPaused\x18\x16 \x01(\bR\rproblemPaused\"a\n" +
 	"\x11TogglePlatformReq\x12\x1a\n" +
 	"\bplatform\x18\x01 \x01(\tR\bplatform\x12\x18\n" +
-	"\aenabled\x18\x02 \x01(\bR\aenabled\"A\n" +
+	"\aenabled\x18\x02 \x01(\bR\aenabled\x12\x16\n" +
+	"\x06module\x18\x03 \x01(\tR\x06module\"A\n" +
 	"\x11TogglePlatformRes\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\x03R\x04code\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\"/\n" +

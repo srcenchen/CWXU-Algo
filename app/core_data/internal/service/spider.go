@@ -639,10 +639,16 @@ var ojCaps = []ojCap{
 	{platform: "POJ", problem: true},
 }
 
-// GetSpiderMonitor 运维：各 OJ 爬虫模块监控（提交/题库/比赛/账号），仅站管
+func hasSpiderMonitorReadPermission(claims *auth.JwtPayload) bool {
+	return auth.PayloadHasPerm(claims, rbac.PermSiteConfigRead) ||
+		auth.PayloadHasPerm(claims, rbac.PermSiteSpiderOps) ||
+		auth.PayloadHasPerm(claims, rbac.PermSiteProblemOps)
+}
+
+// GetSpiderMonitor 运维：各 OJ 爬虫模块监控（提交/题库/比赛/账号）。
 func (s SpiderService) GetSpiderMonitor(ctx context.Context, _ *spider.SpiderMonitorReq) (*spider.SpiderMonitorRes, error) {
-	if !auth.HasPerm(ctx, rbac.PermSiteConfigRead) {
-		return &spider.SpiderMonitorRes{Code: 1, Message: "需要查看站点配置权限"}, nil
+	if !hasSpiderMonitorReadPermission(auth.GetCurrentUser(ctx)) {
+		return &spider.SpiderMonitorRes{Code: 1, Message: "需要查看站点配置、爬虫运维或题库运维权限"}, nil
 	}
 
 	// DB 按平台一次 GROUP BY（空库/无该平台行 → 计 0）；平台名归一化，
@@ -701,6 +707,7 @@ func (s SpiderService) GetSpiderMonitor(ctx context.Context, _ *spider.SpiderMon
 	stats := make([]*spider.SpiderPlatformStat, 0, len(ojCaps))
 	for _, cap := range ojCaps {
 		today := opsmetrics.ReadSpiderPlatformToday(ctx, s.rdb, cap.platform)
+		submitPaused := task.IsPlatformPaused(s.rdb, cap.platform)
 		st := &spider.SpiderPlatformStat{
 			Platform:           cap.platform,
 			BoundUsers:         boundBy[cap.platform],
@@ -714,7 +721,9 @@ func (s SpiderService) GetSpiderMonitor(ctx context.Context, _ *spider.SpiderMon
 			HasSubmitFetcher:   true,
 			HasProblemFetch:    cap.problem,
 			HasContestCalendar: cap.contest,
-			Paused:             task.IsPlatformPaused(s.rdb, cap.platform),
+			Paused:             submitPaused,
+			SubmitPaused:       submitPaused,
+			ProblemPaused:      task.IsProblemPlatformPaused(s.rdb, cap.platform),
 		}
 		if s.rdb != nil {
 			// 最近同步（按 OJ 聚合）
@@ -985,21 +994,39 @@ func (s SpiderService) RefreshSpiderStatus(ctx context.Context, req *spider.Refr
 	}, nil
 }
 
-// TogglePlatform 站管：暂停 / 恢复某 OJ 的爬虫同步（仅站点管理员）。
-// 暂停不清空任何绑定或历史数据，只是不再入队/消费该平台；绑定用户仍可继续绑定。
+// TogglePlatform 站管：暂停 / 恢复某 OJ 的提交同步或题面抓取。
 func (s SpiderService) TogglePlatform(ctx context.Context, req *spider.TogglePlatformReq) (*spider.TogglePlatformRes, error) {
-	if !auth.HasPerm(ctx, rbac.PermSiteSpiderOps) {
-		return &spider.TogglePlatformRes{Code: 1, Message: "需要爬虫运维权限"}, nil
+	module := strings.ToLower(strings.TrimSpace(req.GetModule()))
+	if module == "" {
+		module = "submit"
+	}
+	var setter func(*redis.Client, string, bool) error
+	switch module {
+	case "submit":
+		if !auth.HasPerm(ctx, rbac.PermSiteSpiderOps) {
+			return &spider.TogglePlatformRes{Code: 1, Message: "需要爬虫运维权限"}, nil
+		}
+		setter = task.SetPlatformPaused
+	case "problem":
+		if !auth.HasPerm(ctx, rbac.PermSiteProblemOps) {
+			return &spider.TogglePlatformRes{Code: 1, Message: "需要题库运维权限"}, nil
+		}
+		setter = task.SetProblemPlatformPaused
+	default:
+		return &spider.TogglePlatformRes{Code: 1, Message: "module 仅支持 submit/problem"}, nil
 	}
 	plat := strings.TrimSpace(req.GetPlatform())
 	if _, ok := spiderregistry.Get(plat); !ok {
 		return &spider.TogglePlatformRes{Code: 1, Message: "不支持的平台: " + plat}, nil
 	}
-	task.SetPlatformPaused(s.rdb, plat, !req.GetEnabled())
-	if req.GetEnabled() {
-		log.Infof("SpiderService: platform %s 已恢复同步", plat)
-		return &spider.TogglePlatformRes{Code: 0, Message: "已启用同步，该 OJ 将恢复正常抓取"}, nil
+	if err := setter(s.rdb, plat, !req.GetEnabled()); err != nil {
+		log.Warnf("SpiderService: toggle platform=%s module=%s: %v", plat, module, err)
+		return &spider.TogglePlatformRes{Code: 1, Message: "操作失败"}, nil
 	}
-	log.Infof("SpiderService: platform %s 已暂停同步", plat)
-	return &spider.TogglePlatformRes{Code: 0, Message: "已关闭同步，已绑定用户保留但暂停更新"}, nil
+	if req.GetEnabled() {
+		log.Infof("SpiderService: platform %s module %s enabled", plat, module)
+		return &spider.TogglePlatformRes{Code: 0, Message: "已启用"}, nil
+	}
+	log.Infof("SpiderService: platform %s module %s paused", plat, module)
+	return &spider.TogglePlatformRes{Code: 0, Message: "已暂停"}, nil
 }

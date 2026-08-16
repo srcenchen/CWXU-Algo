@@ -1,10 +1,10 @@
 package service
 
 import (
-	"cwxu-algo/app/common/utils/sqllike"
 	"context"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -16,6 +16,7 @@ import (
 	data2 "cwxu-algo/app/common/data"
 	"cwxu-algo/app/common/discovery"
 	"cwxu-algo/app/common/event"
+	"cwxu-algo/app/common/utils/sqllike"
 	"cwxu-algo/app/core_data/internal/data"
 	"cwxu-algo/app/core_data/internal/data/dal"
 	"cwxu-algo/app/core_data/internal/data/model"
@@ -31,6 +32,11 @@ import (
 	"github.com/streadway/amqp"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
+)
+
+var (
+	errProblemFetchPaused    = errors.New("fetch paused")
+	errProblemPlatformPaused = errors.New("problem platform paused")
 )
 
 type ProblemUseCase struct {
@@ -557,11 +563,18 @@ func (uc *ProblemUseCase) nowcoderContestFetchURLs(externalID string, problemID 
 // Force=true 时忽略用户爬取资格；SkipAnalyze=true 时爬取成功后不入 AI。
 func (uc *ProblemUseCase) ProcessFetch(ctx context.Context, ev event.ProblemFetchEvent) error {
 	if pipelineControl.IsFetchPaused() {
-		return fmt.Errorf("fetch paused")
+		return errProblemFetchPaused
 	}
 	var p model.Problem
 	if err := uc.data.DB.First(&p, ev.ProblemID).Error; err != nil {
 		return err
+	}
+	paused, pauseErr := uc.problemPlatformPaused(p.Platform)
+	if pauseErr != nil {
+		return fmt.Errorf("%w: unavailable: %v", errProblemPlatformPaused, pauseErr)
+	}
+	if paused {
+		return fmt.Errorf("%w: %s", errProblemPlatformPaused, strings.TrimSpace(p.Platform))
 	}
 	pipelineControl.TrackStart("fetch", p.ID, p.Platform, p.ExternalID, p.Title)
 	defer pipelineControl.TrackEnd("fetch", p.ID)
@@ -654,7 +667,6 @@ func (uc *ProblemUseCase) ProcessFetch(ctx context.Context, ev event.ProblemFetc
 	if res.RowsAffected == 0 {
 		return nil
 	}
-
 	url := p.URL
 	if url == "" {
 		url = ev.URL
@@ -671,6 +683,9 @@ func (uc *ProblemUseCase) ProcessFetch(ctx context.Context, ev event.ProblemFetc
 				}
 			}
 		}
+	}
+	if err := uc.restorePausedProblemFetch(&p); err != nil {
+		return err
 	}
 	fetched, err := problem_fetch.FetchWithFallbacks(p.Platform, p.ExternalID, url, fallbacks)
 	if err != nil {
@@ -733,6 +748,45 @@ func (uc *ProblemUseCase) ProcessFetch(ctx context.Context, ev event.ProblemFetc
 	}
 	// 分析暂停时仍入队（暂停不清队列，恢复后继续）；高优先级延续当前已出队的爬取任务
 	return uc.enqueueAnalyzePrio(p.ID, mqPriorityIncremental)
+}
+
+// restorePausedProblemFetch closes the pause race after FETCHING is claimed.
+// Only the still-empty FETCHING row may be restored; a concurrent success must win.
+func (uc *ProblemUseCase) restorePausedProblemFetch(p *model.Problem) error {
+	globalPaused := pipelineControl.IsFetchPaused()
+	platformPaused, pauseErr := uc.problemPlatformPaused(p.Platform)
+	if !globalPaused && pauseErr == nil && !platformPaused {
+		return nil
+	}
+	if strings.TrimSpace(p.ContentMD) == "" {
+		res := uc.data.DB.Model(&model.Problem{}).
+			Where("id = ? AND status = ? AND TRIM(COALESCE(content_md, '')) = ''", p.ID, model.ProblemStatusFetching).
+			Update("status", model.ProblemStatusPending)
+		if res.Error != nil {
+			return fmt.Errorf("%w: %s (restore status: %v)", errProblemPlatformPaused, p.Platform, res.Error)
+		}
+		if res.RowsAffected > 0 {
+			p.Status = model.ProblemStatusPending
+		}
+	}
+	if globalPaused {
+		return errProblemFetchPaused
+	}
+	if pauseErr != nil {
+		return fmt.Errorf("%w: unavailable: %v", errProblemPlatformPaused, pauseErr)
+	}
+	return fmt.Errorf("%w: %s", errProblemPlatformPaused, strings.TrimSpace(p.Platform))
+}
+
+func (uc *ProblemUseCase) isProblemPlatformPaused(platform string) bool {
+	return uc != nil && uc.data != nil && task.IsProblemPlatformPaused(uc.data.RDB, platform)
+}
+
+func (uc *ProblemUseCase) problemPlatformPaused(platform string) (bool, error) {
+	if uc == nil || uc.data == nil {
+		return false, fmt.Errorf("redis unavailable")
+	}
+	return task.IsProblemPlatformPausedSafe(uc.data.RDB, platform)
 }
 
 // ForceEnqueueFetchOnly 强制入队题面爬取，忽略用户资格，且不触发 AI 分析。
@@ -1960,16 +2014,16 @@ func normalizeQOJForbiddenMsg(msg, platform string) string {
 }
 
 type ListProblemFilter struct {
-	Page          int64
-	PageSize      int64
-	Sort          string
-	Platforms     []string
-	Tags          []string
-	UserStatus    string
-	UserID        int64
-	Keyword       string
-	Difficulty    string
-	FollowingIDs  []int64 // 非空：仅这些用户提交过的题
+	Page         int64
+	PageSize     int64
+	Sort         string
+	Platforms    []string
+	Tags         []string
+	UserStatus   string
+	UserID       int64
+	Keyword      string
+	Difficulty   string
+	FollowingIDs []int64 // 非空：仅这些用户提交过的题
 }
 
 type listCachePayload struct {
@@ -2281,14 +2335,14 @@ func (uc *ProblemUseCase) Get(id uint) (*model.Problem, error) {
 
 // ProblemRelatedContest 题目在站内出现过的比赛（全平台）
 type ProblemRelatedContest struct {
-	Platform      string
-	ContestID     string
-	Label         string
-	ContestName   string
-	ContestLogID  uint
-	ContestTime   int64
-	ProblemTitle  string
-	ContestURL    string
+	Platform     string
+	ContestID    string
+	Label        string
+	ContestName  string
+	ContestLogID uint
+	ContestTime  int64
+	ProblemTitle string
+	ContestURL   string
 }
 
 // ListRelatedContests 按 problem_id（及 external_id 兜底）反查 contest_problems，
@@ -2425,19 +2479,19 @@ func (uc *ProblemUseCase) FollowingProblemStatus(problemID uint, followingIDs []
 // UserProfile 见 user_profile.go（缓存 + MQ 预计算）
 
 type ProgressSnapshot struct {
-	Items      []struct {
+	Items []struct {
 		Status string
 		Count  int64
 	}
-	Failed         []model.Problem
-	FailedPerm     []model.Problem
-	InProgress     []model.Problem
-	Total          int64
-	Paused         bool // AI 暂停（兼容）
-	FetchPaused    bool
-	AnalyzePaused  bool
-	ActiveJobs     []ActiveJob
-	Queues         []struct {
+	Failed        []model.Problem
+	FailedPerm    []model.Problem
+	InProgress    []model.Problem
+	Total         int64
+	Paused        bool // AI 暂停（兼容）
+	FetchPaused   bool
+	AnalyzePaused bool
+	ActiveJobs    []ActiveJob
+	Queues        []struct {
 		Name        string
 		Messages    int64
 		Consumers   int64

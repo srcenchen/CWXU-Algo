@@ -97,34 +97,75 @@ func OjLastErrKey(platform string) string {
 	return fmt.Sprintf("spider:oj_last_err:%s", platform)
 }
 
-// pausedPlatformsKey 站管暂停同步的 OJ 集合（SET；不带 TTL，Redis 重启后默认恢复全部启用）
-const pausedPlatformsKey = "spider:paused_platforms"
+const (
+	// pausedPlatformsKey 站管暂停提交同步的 OJ 集合（SET；不带 TTL）
+	pausedPlatformsKey = "spider:paused_platforms"
+	// problemPausedPlatformsKey 站管暂停题面抓取的 OJ 集合（SET；不带 TTL）
+	problemPausedPlatformsKey = "problem:paused_platforms"
+)
 
-// IsPlatformPaused 站管是否已暂停某 OJ 的爬虫同步
-func IsPlatformPaused(rdb *redis.Client, platform string) bool {
+func isPlatformPaused(rdb *redis.Client, key, platform string) bool {
 	if rdb == nil || strings.TrimSpace(platform) == "" {
 		return false
 	}
-	ok, err := rdb.SIsMember(context.Background(), pausedPlatformsKey, strings.TrimSpace(platform)).Result()
+	ok, err := rdb.SIsMember(context.Background(), key, strings.TrimSpace(platform)).Result()
 	if err != nil {
-		log.Warnf("SpiderTask: SIsMember paused platform %s: %v", platform, err)
+		log.Warnf("SpiderTask: SIsMember %s platform %s: %v", key, platform, err)
 		return false
 	}
 	return ok
 }
 
-// SetPlatformPaused 暂停 / 恢复某 OJ 的爬虫同步
-func SetPlatformPaused(rdb *redis.Client, platform string, paused bool) {
-	if rdb == nil || strings.TrimSpace(platform) == "" {
-		return
+func setPlatformPaused(rdb *redis.Client, key, platform string, paused bool) error {
+	if rdb == nil {
+		return fmt.Errorf("set platform pause: redis unavailable")
 	}
-	ctx := context.Background()
 	p := strings.TrimSpace(platform)
-	if paused {
-		_ = rdb.SAdd(ctx, pausedPlatformsKey, p).Err()
-	} else {
-		_ = rdb.SRem(ctx, pausedPlatformsKey, p).Err()
+	if p == "" {
+		return fmt.Errorf("set platform pause: platform is empty")
 	}
+	if paused {
+		if err := rdb.SAdd(context.Background(), key, p).Err(); err != nil {
+			return fmt.Errorf("set platform pause: %w", err)
+		}
+		return nil
+	}
+	if err := rdb.SRem(context.Background(), key, p).Err(); err != nil {
+		return fmt.Errorf("set platform pause: %w", err)
+	}
+	return nil
+}
+
+// IsPlatformPaused 站管是否已暂停某 OJ 的爬虫同步
+func IsPlatformPaused(rdb *redis.Client, platform string) bool {
+	return isPlatformPaused(rdb, pausedPlatformsKey, platform)
+}
+
+// SetPlatformPaused 暂停 / 恢复某 OJ 的爬虫同步
+func SetPlatformPaused(rdb *redis.Client, platform string, paused bool) error {
+	return setPlatformPaused(rdb, pausedPlatformsKey, platform, paused)
+}
+
+// IsProblemPlatformPaused 站管是否已暂停某 OJ 的题面抓取
+func IsProblemPlatformPaused(rdb *redis.Client, platform string) bool {
+	return isPlatformPaused(rdb, problemPausedPlatformsKey, platform)
+}
+
+// IsProblemPlatformPausedSafe is the fail-safe pause check used before external problem fetches.
+func IsProblemPlatformPausedSafe(rdb *redis.Client, platform string) (bool, error) {
+	if rdb == nil {
+		return false, fmt.Errorf("problem platform pause: redis unavailable")
+	}
+	paused, err := rdb.SIsMember(context.Background(), problemPausedPlatformsKey, strings.TrimSpace(platform)).Result()
+	if err != nil {
+		return false, fmt.Errorf("problem platform pause: %w", err)
+	}
+	return paused, nil
+}
+
+// SetProblemPlatformPaused 暂停 / 恢复某 OJ 的题面抓取
+func SetProblemPlatformPaused(rdb *redis.Client, platform string, paused bool) error {
+	return setPlatformPaused(rdb, problemPausedPlatformsKey, platform, paused)
 }
 
 // PausedPlatforms 返回已暂停同步的 OJ 集合（站管监控用）
