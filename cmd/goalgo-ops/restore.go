@@ -164,8 +164,8 @@ func cmdRestore(args []string, runner opsexec.Command) int {
 		return nil
 	}
 
-	// 4. 启动全新 postgres（initdb + 建库脚本自动执行）。
-	if _, err := compose.Command(ctx, "up", "-d", "postgres"); err != nil {
+	// 4. 启动全新 postgres（initdb + 建库脚本自动执行），等待就绪后再恢复。
+	if _, err := compose.Command(ctx, "up", "-d", "--wait", "--wait-timeout", compose.WaitTimeout(), "postgres"); err != nil {
 		_ = rollback(backupDir)
 		return fail("restore", fmt.Errorf("启动新 postgres：%w", err))
 	}
@@ -188,10 +188,10 @@ func cmdRestore(args []string, runner opsexec.Command) int {
 		database := result.Manifest.Databases[i]
 		safe := sanitizeIdentifier(database)
 		dropCmd := fmt.Sprintf("PGPASSWORD=\"$(cat /run/secrets/postgres_password)\" psql --dbname=postgres -c 'DROP DATABASE IF EXISTS %s'", safe)
-		if _, err := compose.Command(ctx, "exec", "-T", "postgres", "sh", "-c", dropCmd); err != nil {
+		if output, err := compose.Command(ctx, "exec", "-T", "postgres", "sh", "-c", dropCmd); err != nil {
 			_, _ = compose.Command(ctx, "stop", "postgres")
 			_ = rollback(backupDir)
-			return fail("restore", fmt.Errorf("删除数据库 %s：%w", database, err))
+			return fail("restore", fmt.Errorf("删除数据库 %s：%w\n%s", database, err, output))
 		}
 		data, err := os.ReadFile(dump)
 		if err != nil {
