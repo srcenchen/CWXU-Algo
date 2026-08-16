@@ -122,6 +122,26 @@ func TestAppEnvHasNoEmbeddedNewlinesInDSNs(t *testing.T) {
 	}
 }
 
+func TestAdminCreatedMarker(t *testing.T) {
+	root, err := opsroot.Resolve(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	inst := New(root)
+	if err := inst.Install(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if AdminCreated(root) {
+		t.Fatal("fresh install must not be admin-created")
+	}
+	if err := MarkAdminCreated(root); err != nil {
+		t.Fatal(err)
+	}
+	if !AdminCreated(root) {
+		t.Fatal("marker must be readable after set")
+	}
+}
+
 func splitLines(content string) []string {
 	var lines []string
 	current := ""

@@ -21,6 +21,13 @@ func New(root *opsroot.Root) *Installer {
 }
 
 func (i *Installer) Install(ctx context.Context) error {
+	if err := i.Scaffold(); err != nil {
+		return err
+	}
+	return i.Secrets()
+}
+
+func (i *Installer) Scaffold() error {
 	if err := i.Root.EnsureLayout(); err != nil {
 		return err
 	}
@@ -29,9 +36,10 @@ func (i *Installer) Install(ctx context.Context) error {
 			return err
 		}
 	}
-	if err := writeEnvIfMissing(i.Root.Path); err != nil {
-		return err
-	}
+	return writeEnvIfMissing(i.Root.Path)
+}
+
+func (i *Installer) Secrets() error {
 	for _, secret := range []string{"postgres_password", "redis_password", "rabbitmq_password", "config_encryption_key"} {
 		if err := writeHexSecret(i.Root.Path, "secrets/"+secret, 32); err != nil {
 			return err
@@ -160,14 +168,57 @@ func applyOwnership(root string) error {
 	return nil
 }
 
+type installMarker struct {
+	SchemaVersion int    `json:"schemaVersion"`
+	InstalledAt   string `json:"installedAt"`
+	AdminCreated  bool   `json:"adminCreated"`
+}
+
 func writeInstallMarker(root *opsroot.Root) error {
-	marker := map[string]interface{}{
-		"schemaVersion": 1,
-		"installedAt":   time.Now().UTC().Format(time.RFC3339),
+	marker := installMarker{
+		SchemaVersion: 1,
+		InstalledAt:   time.Now().UTC().Format(time.RFC3339),
+		AdminCreated:  false,
 	}
 	data, err := json.MarshalIndent(marker, "", "  ")
 	if err != nil {
 		return err
 	}
 	return atomicWrite(root.Join("state", "install.json"), data, 0o644)
+}
+
+func AdminCreated(root *opsroot.Root) bool {
+	data, err := os.ReadFile(root.Join("state", "install.json"))
+	if err != nil {
+		return false
+	}
+	var marker installMarker
+	if err := json.Unmarshal(data, &marker); err != nil {
+		return false
+	}
+	return marker.AdminCreated
+}
+
+func MarkAdminCreated(root *opsroot.Root) error {
+	path := root.Join("state", "install.json")
+	marker := installMarker{SchemaVersion: 1, AdminCreated: true}
+	if data, err := os.ReadFile(path); err == nil {
+		_ = json.Unmarshal(data, &marker)
+	}
+	marker.AdminCreated = true
+	data, err := json.MarshalIndent(marker, "", "  ")
+	if err != nil {
+		return err
+	}
+	return atomicWrite(path, data, 0o644)
+}
+
+// ReadTemplateEnv 返回带注释的 .env 模板（首行写入 GOALGO_ROOT），供 init 打印。
+func ReadTemplateEnv(root string) string {
+	content, err := ReadAsset("env.example")
+	if err != nil {
+		return "GOALGO_ROOT=" + root + "\n"
+	}
+	rendered := fmt.Sprintf("GOALGO_ROOT=%s\n%s", root, string(content))
+	return rendered + "\n# 其余密钥与凭据由 install 自动生成，无需填写。\n"
 }
