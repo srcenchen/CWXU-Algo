@@ -391,7 +391,7 @@ func cmdInstall(args []string, runner opsexec.Command) int {
 	if err := flags.Parse(args); err != nil {
 		return fail("安装", err)
 	}
-	root, err := opsroot.Resolve(rootPath)
+	root, err := resolveInstallRoot(rootPath)
 	if err != nil {
 		return fail("安装", err)
 	}
@@ -403,6 +403,10 @@ func cmdInstall(args []string, runner opsexec.Command) int {
 		return fail("安装", err)
 	}
 	defer lock.Release()
+
+	if err := carryAnchorEnv(root); err != nil {
+		return fail("安装", err)
+	}
 
 	progress := opsprogress.New(5, os.Stderr)
 	inst := opsinstall.New(root)
