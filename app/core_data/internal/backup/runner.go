@@ -227,7 +227,7 @@ func (r *Runner) Run(ctx context.Context) (Result, error) {
 		_ = archive.Close()
 		return Result{}, fmt.Errorf("upload immutable archive: %w", err)
 	}
-	if err := archive.Close(); err != nil {
+	if err := closeFile(archive); err != nil {
 		return Result{}, err
 	}
 	if err := r.verify(ctx, archiveKey, result.SHA256, len(dbs), dir); err != nil {
