@@ -40,4 +40,7 @@ dist/
 
 # Claude Code
 .claude/
-goalgo-ops
+
+# 根目录 go build 产物（不匹配 cmd/goalgo-ops 目录）
+/goalgo-ops
+/admin-init

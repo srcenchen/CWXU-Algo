@@ -10,6 +10,7 @@ ARG VERSION=dev
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X main.Version=${VERSION}" -o /out/user ./app/user/cmd/user && \
+    CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X main.Version=${VERSION}" -o /out/admin-init ./app/user/cmd/admin-init && \
     CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X main.Version=${VERSION}" -o /out/core-data ./app/core_data/cmd/core_data && \
     CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X main.Version=${VERSION}" -o /out/agent ./app/agent/cmd/agent
 
@@ -45,6 +46,7 @@ CMD ["/app/gateway", "-addr", "0.0.0.0:8080", "-conf", "/etc/goalgo/config/gatew
 
 FROM runtime AS user
 COPY --from=backend-builder --chown=goalgo:goalgo /out/user /app/user
+COPY --from=backend-builder --chown=goalgo:goalgo /out/admin-init /app/admin-init
 USER goalgo
 EXPOSE 8000 9000
 ENTRYPOINT ["/app/render-config.sh", "/etc/goalgo/config/user.yaml"]

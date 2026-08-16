@@ -33,6 +33,8 @@ func run(args []string) int {
 	switch command {
 	case "install":
 		return cmdInstall(commandArgs, runner)
+	case "admin-init":
+		return cmdAdminInit(commandArgs, runner)
 	case "deploy", "rollback", "start", "stop", "restart", "status", "logs", "doctor":
 		return cmdRuntime(command, commandArgs, runner)
 	default:
@@ -46,6 +48,7 @@ func usage() {
 
 命令：
   install [--root 目录] [--release-file 文件]   初始化目录并启动服务
+  admin-init [--root 目录] [--admin-config 文件] 创建首个站点管理员
   deploy [release-file] [--root 目录]           部署一个不可变发布版本
   rollback [--root 目录]                        回滚到上一个发布版本
   start | stop | restart | status | logs [参数] [--root 目录]
