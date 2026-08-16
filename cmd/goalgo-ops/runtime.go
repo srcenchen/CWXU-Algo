@@ -65,7 +65,7 @@ func carryAnchorEnv(root *opsroot.Root) error {
 	return os.WriteFile(root.Join(".env"), data, 0o600)
 }
 
-func installStart(ctx context.Context, compose *opscompose.Compose, progress *opsprogress.Progress) error {
+func installUp(ctx context.Context, compose *opscompose.Compose, progress *opsprogress.Progress) error {
 	if err := compose.Version(ctx); err != nil {
 		fmt.Fprintln(os.Stderr, "goalgo-ops: 安装：初始化完成；未检测到 docker compose，请安装后执行 `goalgo-ops start`")
 		return nil
@@ -74,14 +74,10 @@ func installStart(ctx context.Context, compose *opscompose.Compose, progress *op
 	if err := compose.Up(ctx, compose.WaitTimeout()); err != nil {
 		return fmt.Errorf("启动服务：%w", err)
 	}
-	progress.Sub("等待健康并冒烟")
+	progress.Sub("等待健康")
 	if err := compose.Health(ctx); err != nil {
 		return fmt.Errorf("健康检查：%w", err)
 	}
-	if err := compose.Smoke(ctx); err != nil {
-		return fmt.Errorf("冒烟测试：%w", err)
-	}
-	opsprogress.Done(os.Stderr, "安装完成")
 	return nil
 }
 

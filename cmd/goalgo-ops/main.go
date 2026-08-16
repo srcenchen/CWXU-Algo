@@ -449,6 +449,11 @@ func cmdInstall(args []string, runner opsexec.Command) int {
 		return fail("安装", fmt.Errorf("拉取镜像：%w", err))
 	}
 
+	progress.Step("启动服务")
+	if err := installUp(ctx, compose, progress); err != nil {
+		return fail("安装", err)
+	}
+
 	progress.Step("创建首个管理员（如无）")
 	if !opsinstall.AdminCreated(root) {
 		if err := opsadmin.Bootstrap(ctx, root, compose, "", opsprompt.New()); err != nil {
@@ -458,9 +463,10 @@ func cmdInstall(args []string, runner opsexec.Command) int {
 		progress.Message("管理员已存在，跳过")
 	}
 
-	progress.Step("启动服务并冒烟")
-	if err := installStart(ctx, compose, progress); err != nil {
+	progress.Step("冒烟测试")
+	if err := compose.Smoke(ctx); err != nil {
 		return fail("安装", err)
 	}
+	opsprogress.Done(os.Stderr, "安装完成")
 	return 0
 }
