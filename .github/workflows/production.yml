@@ -1,0 +1,71 @@
+name: Production
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: goalgo-production
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - id: image-run
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const runs = await github.paginate(github.rest.actions.listWorkflowRuns, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: 'images.yml',
+              head_sha: context.sha,
+              status: 'success',
+              per_page: 100
+            });
+            if (runs.length === 0) core.setFailed(`No successful Images run found for ${context.sha}`);
+            core.setOutput('run-id', runs[0].id);
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-manifest-*
+          path: artifact
+          merge-multiple: true
+          github-token: ${{ github.token }}
+          run-id: ${{ steps.image-run.outputs.run-id }}
+      - name: Verify manifest and create release environment
+        run: |
+          test "$(jq -r .backendCommit artifact/release-manifest.json)" = "$GITHUB_SHA"
+          image='registry.cn-hangzhou.aliyuncs.com/sanenchen/goalgo@sha256:[0-9a-f]{64}'
+          jq -e --arg image "$image" '.images | all(.[]; test($image))' artifact/release-manifest.json >/dev/null
+          jq -r '"FRONTEND_IMAGE=" + .images.frontend,
+                 "GATEWAY_IMAGE=" + .images.gateway,
+                 "USER_IMAGE=" + .images.user,
+                 "CORE_DATA_IMAGE=" + .images.coreData,
+                 "AGENT_IMAGE=" + .images.agent' artifact/release-manifest.json > artifact/release.env
+      - uses: actions/upload-artifact@v4
+        with:
+          name: production-release
+          path: artifact/release.env
+          retention-days: 1
+          if-no-files-found: error
+
+  deploy:
+    needs: release
+    environment: production
+    runs-on: [self-hosted, linux, x64, goalgo-production]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: production-release
+          path: release
+      - name: Deploy immutable release
+        env:
+          GOALGO_ROOT: /opt/goalgo
+        run: deploy/scripts/deploy.sh "$GITHUB_WORKSPACE/release/release.env"

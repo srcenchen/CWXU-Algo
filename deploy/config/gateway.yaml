@@ -1,0 +1,44 @@
+name: goalgo
+version: v1
+middlewares:
+  - name: jwt
+    options:
+      '@type': type.googleapis.com/gateway.middleware.jwt.v1.JWT
+      secret: ""
+endpoints:
+  - path: /v1/user/site/backup/*
+    timeout: 600s
+    protocol: HTTP
+    stream: true
+    backends:
+      - target: discovery:///user
+  - path: /v1/payment/*
+    timeout: 30s
+    protocol: HTTP
+    backends:
+      - target: discovery:///user
+  - path: /v1/support/events
+    timeout: 30s
+    protocol: HTTP
+    backends:
+      - target: discovery:///user
+  - path: /v1/user/tickets/ai/answer
+    timeout: 500s
+    protocol: HTTP
+    backends:
+      - target: discovery:///user
+  - path: /v1/user/*
+    timeout: 5s
+    protocol: HTTP
+    backends:
+      - target: discovery:///user
+  - path: /v1/core/*
+    timeout: 120s
+    protocol: HTTP
+    backends:
+      - target: discovery:///core-data
+  - path: /v1/agent/*
+    timeout: 10s
+    protocol: HTTP
+    backends:
+      - target: discovery:///agent

@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"cwxu-algo/api/agent/v1/summary"
 	bizservice "cwxu-algo/app/agent/internal/biz/service"
 	"cwxu-algo/app/agent/internal/data"
@@ -15,9 +16,16 @@ import (
 	"github.com/go-kratos/kratos/v2/log"
 	"github.com/go-kratos/kratos/v2/middleware/auth/jwt"
 	"github.com/go-kratos/kratos/v2/middleware/recovery"
+	"github.com/go-kratos/kratos/v2/middleware/selector"
 	"github.com/go-kratos/kratos/v2/transport/http"
 	jwt2 "github.com/golang-jwt/jwt/v5"
 )
+
+func NewWhiteListMatcher() selector.MatchFunc {
+	return func(_ context.Context, operation string) bool {
+		return operation != "/healthz" && operation != "/readyz"
+	}
+}
 
 // NewHTTPServer new an HTTP server.
 func NewHTTPServer(c *conf.Server, logger log.Logger, d *data.Data, summaryService *service.SummaryService, summaryUC *bizservice.SummaryUseCase) *http.Server {
@@ -27,12 +35,12 @@ func NewHTTPServer(c *conf.Server, logger log.Logger, d *data.Data, summaryServi
 			safeerrors.Middleware(),
 			opsmetrics.Middleware(d.RDB, "agent"),
 			authutil.CookieBearer(),
-			jwt.Server(func(token *jwt2.Token) (interface{}, error) {
+			selector.Server(jwt.Server(func(token *jwt2.Token) (interface{}, error) {
 				if token.Method != jwt2.SigningMethodRS256 {
 					return nil, jwt2.ErrSignatureInvalid
 				}
 				return _const.JWTPublicKey(), nil
-			}, jwt.WithSigningMethod(jwt2.SigningMethodRS256)),
+			}, jwt.WithSigningMethod(jwt2.SigningMethodRS256))).Match(NewWhiteListMatcher()).Build(),
 		),
 	}
 	if c.Http.Network != "" {

@@ -1,0 +1,108 @@
+name: Images
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+
+permissions:
+  contents: read
+
+env:
+  ACR_REGISTRY: registry.cn-hangzhou.aliyuncs.com
+  ACR_IMAGE: registry.cn-hangzhou.aliyuncs.com/sanenchen/goalgo
+  FRONTEND_REPOSITORY: WXUProjects/AlgoAnalysisFront-new
+
+jobs:
+  build:
+    if: github.event.workflow_run.event == 'push' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          path: backend
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ env.FRONTEND_REPOSITORY }}
+          ref: main
+          path: frontend
+      - id: commits
+        name: Record source commits
+        run: |
+          echo "backend=$(git -C backend rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "frontend=$(git -C frontend rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.ACR_REGISTRY }}
+          username: ${{ secrets.ACR_USERNAME }}
+          password: ${{ secrets.ACR_PASSWORD }}
+      - id: frontend
+        uses: docker/build-push-action@v6
+        with:
+          context: backend
+          file: backend/deploy/docker/frontend.Dockerfile
+          build-contexts: |
+            frontend-source=./frontend
+            shared-source=./frontend/shared
+          push: true
+          tags: ${{ env.ACR_IMAGE }}:frontend-sha-${{ steps.commits.outputs.backend }}
+      - id: gateway
+        uses: docker/build-push-action@v6
+        with:
+          context: backend
+          file: backend/deploy/docker/backend.Dockerfile
+          target: gateway
+          push: true
+          tags: ${{ env.ACR_IMAGE }}:gateway-sha-${{ steps.commits.outputs.backend }}
+      - id: user
+        uses: docker/build-push-action@v6
+        with:
+          context: backend
+          file: backend/deploy/docker/backend.Dockerfile
+          target: user
+          push: true
+          tags: ${{ env.ACR_IMAGE }}:user-sha-${{ steps.commits.outputs.backend }}
+      - id: core_data
+        uses: docker/build-push-action@v6
+        with:
+          context: backend
+          file: backend/deploy/docker/backend.Dockerfile
+          target: core-data
+          push: true
+          tags: ${{ env.ACR_IMAGE }}:core-data-sha-${{ steps.commits.outputs.backend }}
+      - id: agent
+        uses: docker/build-push-action@v6
+        with:
+          context: backend
+          file: backend/deploy/docker/backend.Dockerfile
+          target: agent
+          push: true
+          tags: ${{ env.ACR_IMAGE }}:agent-sha-${{ steps.commits.outputs.backend }}
+      - name: Create digest manifest
+        env:
+          BACKEND_COMMIT: ${{ steps.commits.outputs.backend }}
+          FRONTEND_COMMIT: ${{ steps.commits.outputs.frontend }}
+          FRONTEND_DIGEST: ${{ steps.frontend.outputs.digest }}
+          GATEWAY_DIGEST: ${{ steps.gateway.outputs.digest }}
+          USER_DIGEST: ${{ steps.user.outputs.digest }}
+          CORE_DATA_DIGEST: ${{ steps.core_data.outputs.digest }}
+          AGENT_DIGEST: ${{ steps.agent.outputs.digest }}
+        run: |
+          jq -n \
+            --arg backendCommit "$BACKEND_COMMIT" \
+            --arg frontendCommit "$FRONTEND_COMMIT" \
+            --arg frontend "$ACR_IMAGE@$FRONTEND_DIGEST" \
+            --arg gateway "$ACR_IMAGE@$GATEWAY_DIGEST" \
+            --arg user "$ACR_IMAGE@$USER_DIGEST" \
+            --arg coreData "$ACR_IMAGE@$CORE_DATA_DIGEST" \
+            --arg agent "$ACR_IMAGE@$AGENT_DIGEST" \
+            '{backendCommit:$backendCommit,frontendCommit:$frontendCommit,images:{frontend:$frontend,gateway:$gateway,user:$user,coreData:$coreData,agent:$agent}}' \
+            > release-manifest.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-manifest-${{ steps.commits.outputs.backend }}
+          path: release-manifest.json
+          retention-days: 90
+          if-no-files-found: error

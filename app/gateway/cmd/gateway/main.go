@@ -90,6 +90,19 @@ func makeDiscovery() registry.Discovery {
 	}
 	return d
 }
+
+func withLocalHealth(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/healthz" || r.URL.Path == "/readyz" {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"status":"ok"}`))
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 func main() {
 	flag.Parse()
 
@@ -155,7 +168,7 @@ func main() {
 	}
 	confLoader.Watch(reloader)
 
-	var serverHandler http.Handler = p
+	var serverHandler http.Handler = withLocalHealth(p)
 	if withDebug {
 		debug.Register("proxy", p)
 		debug.Register("config", confLoader)

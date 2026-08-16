@@ -1,0 +1,23 @@
+server:
+  http:
+    addr: 0.0.0.0:8002
+    timeout: 5s
+  grpc:
+    addr: 0.0.0.0:9002
+    timeout: 5s
+  reg_dsn: consul:8500
+  amqp_dsn: "${AMQP_DSN}"
+  jwt_secret: ""
+  jwt_private_key: "${JWT_PRIVATE_KEY}"
+  jwt_public_key: "${JWT_PUBLIC_KEY}"
+  config_encryption_key: "${CONFIG_ENCRYPTION_KEY}"
+data:
+  database:
+    driver: postgres
+    source: "${USER_DATABASE_DSN}"
+  redis:
+    addr: "${REDIS_ADDR}"
+    password: "${REDIS_PASSWORD}"
+    read_timeout: 2s
+    write_timeout: 2s
+smtp: {}
