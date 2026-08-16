@@ -9,6 +9,7 @@ import (
 	"cwxu-algo/api/user/v1/profile"
 	"cwxu-algo/app/common/discovery"
 	"cwxu-algo/app/common/utils"
+	"cwxu-algo/app/core_data/internal/backupcoord"
 	"cwxu-algo/app/core_data/internal/data"
 	"cwxu-algo/app/core_data/internal/data/model"
 	"cwxu-algo/app/core_data/internal/loadgate"
@@ -48,13 +49,18 @@ type CronTask struct {
 	db      *gorm.DB
 	rdb     *redis.Client
 	reg     *discovery.Register
+	backup  scheduledBackup
 	cron    *cron.Cron
 	stopCh  chan struct{}
 	mu      sync.Mutex
 	running bool
 }
 
-func NewCronTask(spider *SpiderTask, data *data.Data, summary *SummaryTask, profile *UserProfileTask, reg *discovery.Register) *CronTask {
+type scheduledBackup interface {
+	RunScheduled()
+}
+
+func NewCronTask(spider *SpiderTask, data *data.Data, summary *SummaryTask, profile *UserProfileTask, reg *discovery.Register, backup *backupcoord.Coordinator) *CronTask {
 	return &CronTask{
 		spider:  spider,
 		db:      data.DB,
@@ -62,8 +68,14 @@ func NewCronTask(spider *SpiderTask, data *data.Data, summary *SummaryTask, prof
 		summary: summary,
 		profile: profile,
 		reg:     reg,
+		backup:  backup,
 		stopCh:  make(chan struct{}),
 	}
+}
+
+func registerBackupSchedule(c *cron.Cron, backup scheduledBackup) error {
+	_, err := c.AddFunc("0 2 * * *", backup.RunScheduled)
+	return err
 }
 
 func (t *CronTask) Stop() {
@@ -485,6 +497,9 @@ func (t *CronTask) Do() {
 	}
 	loc, _ := time.LoadLocation("Asia/Shanghai")
 	c := cron.New(cron.WithLocation(loc))
+	if err := registerBackupSchedule(c, t.backup); err != nil {
+		log.Errorf("CronTask: register backup schedule: %v", err)
+	}
 	// 每 5 分钟扫一次：按用户有效间隔（多组织 MIN）判断是否到期，每人最多入队一次
 	_, _ = c.AddFunc("*/5 * * * *", func() {
 		t.runSpiderTick()
@@ -548,7 +563,7 @@ func (t *CronTask) Do() {
 	stopCh := t.stopCh
 	t.mu.Unlock()
 
-	log.Infof("CronTask started: spider/summary 5m; calendar 12h; user_profile daily 03:15 + empty-radar heal 6h")
+	log.Infof("CronTask started: backup daily 02:00; spider/summary 5m; calendar 12h; user_profile daily 03:15 + empty-radar heal 6h")
 
 	defer func() {
 		t.mu.Lock()

@@ -10,6 +10,7 @@ import (
 	"cwxu-algo/app/common/conf"
 	"cwxu-algo/app/common/discovery"
 	"cwxu-algo/app/common/event"
+	"cwxu-algo/app/core_data/internal/backupcoord"
 	service2 "cwxu-algo/app/core_data/internal/biz/service"
 	"cwxu-algo/app/core_data/internal/data"
 	"cwxu-algo/app/core_data/internal/data/dal"
@@ -52,7 +53,9 @@ func wireApp(confServer *conf.Server, confData *conf.Data, logger log.Logger, ai
 	userProfileTask := task.NewUserProfileTask(rabbitMQ, client)
 	problemUseCase := service2.NewProblemUseCase(dataData, rabbitMQ, problemTagger, register, userProfileTask)
 	contestLogService := service.NewContestLogService(spiderDal, dataData, register, problemUseCase)
-	grpcServer := server.NewGRPCServer(confServer, logger, spiderService, submitLogService, statisticService, contestLogService)
+	coordinator := backupcoord.NewCoordinator(dataData)
+	backupService := service.NewBackupService(coordinator)
+	grpcServer := server.NewGRPCServer(confServer, logger, spiderService, submitLogService, statisticService, contestLogService, backupService)
 	bulletinDal := dal.NewBulletinDal(dataData)
 	bulletinService := service.NewBulletinService(bulletinDal)
 	problemService := service.NewProblemService(problemUseCase, register)
@@ -63,7 +66,7 @@ func wireApp(confServer *conf.Server, confData *conf.Data, logger log.Logger, ai
 	communityService := service.NewCommunityService(dataData, register)
 	problemsetService := service.NewProblemsetService(dataData, problemUseCase, register)
 	healthService := service.NewHealthService(dataData, confServer)
-	httpServer := server.NewHTTPServer(confServer, logger, dataData, submitLogService, spiderService, statisticService, contestLogService, bulletinService, problemService, emergencyService, contestCalendarService, communityService, problemsetService, healthService)
+	httpServer := server.NewHTTPServer(confServer, logger, dataData, submitLogService, spiderService, statisticService, contestLogService, bulletinService, problemService, emergencyService, contestCalendarService, communityService, problemsetService, healthService, backupService)
 	spiderUseCase := service2.NewSpiderUseCase(dataData, problemUseCase, spiderTask)
 	consumer := service2.NewConsumer(rabbitMQ, spiderUseCase, spiderTask)
 	problemFetchConsumer := service2.NewProblemFetchConsumer(rabbitMQ, problemUseCase)
@@ -71,8 +74,8 @@ func wireApp(confServer *conf.Server, confData *conf.Data, logger log.Logger, ai
 	userProfileConsumer := service2.NewUserProfileConsumer(rabbitMQ, problemUseCase, userProfileTask)
 	mailConsumer := service2.NewMailConsumer(rabbitMQ, dataData)
 	summaryTask := task.NewSummaryTask(rabbitMQ, client)
-	cronTask := task.NewCronTask(spiderTask, dataData, summaryTask, userProfileTask, register)
-	app := newApp(logger, grpcServer, httpServer, register, consumer, problemFetchConsumer, problemAnalyzeConsumer, userProfileConsumer, mailConsumer, cronTask)
+	cronTask := task.NewCronTask(spiderTask, dataData, summaryTask, userProfileTask, register, coordinator)
+	app := newApp(logger, grpcServer, httpServer, register, consumer, problemFetchConsumer, problemAnalyzeConsumer, userProfileConsumer, mailConsumer, cronTask, coordinator)
 	return app, func() {
 		cleanup2()
 		cleanup()

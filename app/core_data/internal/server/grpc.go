@@ -1,6 +1,7 @@
 package server
 
 import (
+	backuppb "cwxu-algo/api/core/v1/backup"
 	"cwxu-algo/api/core/v1/contest_log"
 	"cwxu-algo/api/core/v1/spider"
 	statistic2 "cwxu-algo/api/core/v1/statistic"
@@ -24,6 +25,7 @@ func NewGRPCServer(
 	submitLogService *service.SubmitLogService,
 	statisticService *service.StatisticService,
 	contestLogService *service.ContestLogService,
+	backupService *service.BackupService,
 ) *grpc.Server {
 	var opts = []grpc.ServerOption{
 		grpc.Middleware(
@@ -45,5 +47,6 @@ func NewGRPCServer(
 	submit_log.RegisterSubmitServer(srv, submitLogService)
 	statistic2.RegisterStatisticServer(srv, statisticService)
 	contest_log.RegisterContestServer(srv, contestLogService)
+	backuppb.RegisterBackupServer(srv, backupService)
 	return srv
 }

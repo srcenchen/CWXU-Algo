@@ -4,6 +4,7 @@ import (
 	"context"
 	"cwxu-algo/app/common/discovery"
 	"cwxu-algo/app/common/security"
+	"cwxu-algo/app/core_data/internal/backupcoord"
 	"cwxu-algo/app/core_data/internal/biz/service"
 	"cwxu-algo/app/core_data/task"
 	"flag"
@@ -71,7 +72,7 @@ func init() {
 	flag.StringVar(&flagconf, "conf", "./configs", "config path, eg: -conf config.yaml")
 }
 
-func newApp(logger log.Logger, gs *grpc.Server, hs *http.Server, reg *discovery.Register, cm *service.Consumer, pfc *service.ProblemFetchConsumer, pac *service.ProblemAnalyzeConsumer, upc *service.UserProfileConsumer, mac *service.MailConsumer, cron *task.CronTask) *kratos.App {
+func newApp(logger log.Logger, gs *grpc.Server, hs *http.Server, reg *discovery.Register, cm *service.Consumer, pfc *service.ProblemFetchConsumer, pac *service.ProblemAnalyzeConsumer, upc *service.UserProfileConsumer, mac *service.MailConsumer, cron *task.CronTask, backup *backupcoord.Coordinator) *kratos.App {
 	stopCh := make(chan struct{})
 	runForever("spider-consumer", stopCh, cm.Consume)
 	runForever("problem-fetch-consumer", stopCh, pfc.Consume)
@@ -92,6 +93,11 @@ func newApp(logger log.Logger, gs *grpc.Server, hs *http.Server, reg *discovery.
 		kratos.Registrar(reg.Reg),
 		kratos.BeforeStop(func(ctx context.Context) error {
 			log.Info("stopping background workers...")
+			backupCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+			defer cancel()
+			if err := backup.Stop(backupCtx); err != nil {
+				log.Warnf("backup shutdown wait: %v", err)
+			}
 			close(stopCh)
 			cm.Stop()
 			pfc.Stop()

@@ -1,0 +1,49 @@
+syntax = "proto3";
+
+package api.core.v1.backup;
+
+import "google/api/annotations.proto";
+
+option go_package = "cwxu-algo/api/core/v1/backup;backup";
+option java_multiple_files = true;
+option java_package = "api.core.v1.backup";
+
+service Backup {
+  rpc Run (RunBackupRequest) returns (RunBackupReply) {
+    option (google.api.http) = {
+      post: "/v1/core/backup/run"
+      body: "*"
+    };
+  }
+  rpc Status (GetBackupStatusRequest) returns (GetBackupStatusReply) {
+    option (google.api.http) = {get: "/v1/core/backup/status"};
+  }
+}
+
+message RunBackupRequest {}
+
+message RunBackupReply {
+  bool accepted = 1;
+  BackupStatus status = 2;
+}
+
+message GetBackupStatusRequest {}
+
+message GetBackupStatusReply {
+  BackupStatus status = 1;
+}
+
+message BackupStatus {
+  bool enabled = 1;
+  string status = 2;
+  string trigger = 3;
+  string stage = 4;
+  string message = 5;
+  string error = 6;
+  int64 started_at = 7;
+  int64 finished_at = 8;
+  string archive_key = 9;
+  int64 archive_size = 10;
+  string sha256 = 11;
+  int32 database_count = 12;
+}
