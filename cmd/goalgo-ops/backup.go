@@ -76,6 +76,9 @@ func backupVerify(args []string, runner opsexec.Command) int {
 	}
 	ctx, stop := signalContext()
 	defer stop()
+	if err := requireBackupTools(ctx, runner); err != nil {
+		return fail("backup verify", err)
+	}
 	if outDir == "" {
 		outDir = filepath.Join(os.TempDir(), "goalgo-verify-"+time.Now().Format("20060102T150405"))
 	}

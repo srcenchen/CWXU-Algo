@@ -107,6 +107,20 @@ class OperationalScriptTests(unittest.TestCase):
         self.assertIn('"down"', runtime)
         self.assertIn("registry.cn-hangzhou.aliyuncs.com/sanenchen/goalgo:", runtime)
 
+    def test_restore_file_accepts_local_or_url(self):
+        restore = read("cmd/goalgo-ops/restore.go")
+        self.assertNotIn("useLatest", restore)
+        self.assertIn("http://", restore)
+        self.assertIn("downloadURL", restore)
+        main = read("cmd/goalgo-ops/main.go")
+        self.assertNotIn("--latest", main)
+
+    def test_restore_checks_backup_tools(self):
+        restore = read("cmd/goalgo-ops/restore.go")
+        self.assertIn("pg_restore", restore)
+        self.assertIn("zstd", restore)
+        self.assertIn("postgresql-client", restore)
+
     def test_shell_scripts_parse(self):
         scripts = sorted((DEPLOY / "scripts").glob("*.sh"))
         result = subprocess.run(["sh", "-n", *map(str, scripts)], capture_output=True, text=True)

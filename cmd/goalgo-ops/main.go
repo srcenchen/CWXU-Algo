@@ -68,7 +68,7 @@ func usage() {
   start | stop | restart | status | logs [参数] [--root 目录]
   doctor [--root 目录]                          检查安装是否健康
   backup verify|download [参数]                 离线校验 / 下载灾备归档
-  restore [--file|--latest] [--key-file] ...    从归档恢复整实例（需 --replace --confirm RESTORE）
+  restore --file <路径|URL> [--key-file] ...    从归档恢复整实例（需 --replace --confirm RESTORE）
   config validate|export|import [参数]          校验 / 导出 / 导入配置与密钥
 
 `)
@@ -350,6 +350,9 @@ func runtimeDoctor(ctx context.Context, compose *opscompose.Compose) int {
 		return fail("诊断", err)
 	}
 	if err := opsexec.RequireCommand(ctx, compose.Run, "curl"); err != nil {
+		return fail("诊断", err)
+	}
+	if err := requireBackupTools(ctx, compose.Run); err != nil {
 		return fail("诊断", err)
 	}
 	if err := compose.Version(ctx); err != nil {

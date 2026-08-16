@@ -4,6 +4,8 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -19,14 +21,22 @@ import (
 
 const confirmToken = "RESTORE"
 
+// requireBackupTools 检查宿主机备份/恢复必需命令，缺失时给出安装提示。
+func requireBackupTools(ctx context.Context, runner opsexec.Command) error {
+	for _, tool := range []string{"pg_restore", "zstd"} {
+		if err := opsexec.RequireCommand(ctx, runner, tool); err != nil {
+			return fmt.Errorf("缺少 %s：请安装（apt install -y postgresql-client zstd）", tool)
+		}
+	}
+	return nil
+}
+
 func cmdRestore(args []string, runner opsexec.Command) int {
 	var rootPath, archive, keyFile string
 	var replace, confirm bool
-	var useLatest bool
 	flags := flag.NewFlagSet("restore", flag.ContinueOnError)
 	flags.StringVar(&rootPath, "root", "", "goalgo 根目录")
-	flags.StringVar(&archive, "file", "", ".cwxubak 归档路径（与 --latest 二选一）")
-	flags.BoolVar(&useLatest, "latest", false, "从又拍云拉取最新归档")
+	flags.StringVar(&archive, "file", "", ".cwxubak 本地路径或 http(s) URL")
 	flags.StringVar(&keyFile, "key-file", "", "32 字节加密密钥文件")
 	flags.BoolVar(&replace, "replace", false, "覆盖已有数据")
 	flags.BoolVar(&confirm, "confirm", false, "确认破坏性恢复（须同时 --replace 与 --confirm RESTORE）")
@@ -38,10 +48,10 @@ func cmdRestore(args []string, runner opsexec.Command) int {
 		return fail("restore", err)
 	}
 	prompt := opsprompt.New()
-	if (archive == "" && !useLatest) || keyFile == "" || !confirm {
+	if archive == "" || keyFile == "" || !confirm {
 		if !prompt.TTY {
-			if archive == "" && !useLatest {
-				return fail("restore", fmt.Errorf("必须提供 --file 或 --latest"))
+			if archive == "" {
+				return fail("restore", fmt.Errorf("必须提供 --file（本地路径或 URL）"))
 			}
 			if keyFile == "" {
 				return fail("restore", fmt.Errorf("必须提供 --key-file"))
@@ -50,15 +60,10 @@ func cmdRestore(args []string, runner opsexec.Command) int {
 				return fail("restore", fmt.Errorf("覆盖已有数据必须同时提供 --replace --confirm "+confirmToken))
 			}
 		} else {
-			if archive == "" && !useLatest {
-				chosen, err := promptArchiveSource(root, prompt)
+			if archive == "" {
+				archive, err = prompt.String("归档路径或 URL", "")
 				if err != nil {
 					return fail("restore", err)
-				}
-				if chosen == "" {
-					useLatest = true
-				} else {
-					archive = chosen
 				}
 			}
 			if keyFile == "" {
@@ -80,9 +85,6 @@ func cmdRestore(args []string, runner opsexec.Command) int {
 			}
 		}
 	}
-	if archive != "" && useLatest {
-		return fail("restore", fmt.Errorf("--file 与 --latest 不能同时使用"))
-	}
 	key, err := readKeyFile(keyFile)
 	if err != nil {
 		return fail("restore", err)
@@ -99,16 +101,18 @@ func cmdRestore(args []string, runner opsexec.Command) int {
 	defer lock.Release()
 
 	// 1. 校验归档（认证解密 + zstd + tar + manifest + pg_restore --list）。
+	if err := requireBackupTools(ctx, runner); err != nil {
+		return fail("restore", err)
+	}
 	verifyDir := filepath.Join(root.Join("restore"), "verify-"+time.Now().Format("20060102T150405"))
 	if err := os.MkdirAll(verifyDir, 0o700); err != nil {
 		return fail("restore", err)
 	}
-	archivePath := archive
-	if useLatest {
-		archivePath, err = downloadLatest(ctx, root)
-		if err != nil {
-			return fail("restore", err)
-		}
+	archivePath, downloaded, err := resolveArchive(ctx, root, archive)
+	if err != nil {
+		return fail("restore", err)
+	}
+	if downloaded {
 		defer os.Remove(archivePath)
 	}
 	result, err := opsbackup.VerifyArchive(ctx, archivePath, key, verifyDir, runner)
@@ -206,47 +210,57 @@ func cmdRestore(args []string, runner opsexec.Command) int {
 	fmt.Printf("恢复成功。旧数据卷保留于 %s（确认无误后可删除）\n", backupDir)
 	return 0
 }
-
-func promptArchiveSource(root *opsroot.Root, prompt *opsprompt.Prompter) (string, error) {
-	var candidates []string
-	for _, dir := range []string{root.Join("restore"), "."} {
-		matches, err := filepath.Glob(filepath.Join(dir, "*.cwxubak"))
+// resolveArchive 本地文件直接使用；http(s) URL 下载到 restore 目录，返回 downloaded=true。
+func resolveArchive(ctx context.Context, root *opsroot.Root, source string) (path string, downloaded bool, err error) {
+	if !strings.HasPrefix(source, "http://") && !strings.HasPrefix(source, "https://") {
+		info, err := os.Stat(source)
 		if err != nil {
-			continue
+			return "", false, fmt.Errorf("归档文件不存在：%s", source)
 		}
-		candidates = append(candidates, matches...)
+		if info.IsDir() {
+			return "", false, fmt.Errorf("归档路径是目录：%s", source)
+		}
+		return source, false, nil
 	}
-	options := append(append([]string{}, candidates...), "从又拍云拉取最新归档")
-	idx, err := prompt.Choice("选择归档来源", len(options)-1, options...)
+	path, err = downloadURL(ctx, root, source)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
-	if idx == len(candidates) {
-		return "", nil
-	}
-	return candidates[idx], nil
+	return path, true, nil
 }
 
-func downloadLatest(ctx context.Context, root *opsroot.Root) (string, error) {	bucket := os.Getenv("UPYUN_BUCKET")
-	operator := os.Getenv("UPYUN_OPERATOR")
-	password := os.Getenv("UPYUN_PASSWORD")
-	prefix := os.Getenv("UPYUN_PREFIX")
-	if bucket == "" || operator == "" || password == "" {
-		return "", fmt.Errorf("需要环境变量 UPYUN_BUCKET / UPYUN_OPERATOR / UPYUN_PASSWORD")
-	}
-	if prefix == "" {
-		prefix = "backups/core"
-	}
-	store := opsbackup.NewUpyun(opsbackup.UpyunConfig{Bucket: bucket, Operator: operator, Password: password, Prefix: prefix})
-	pointer, err := store.LatestPointer(ctx)
+func downloadURL(ctx context.Context, root *opsroot.Root, url string) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return "", err
 	}
-	dest := filepath.Join(root.Join("restore"), "latest-"+time.Now().Format("20060102T150405")+".cwxubak")
-	if _, err := store.DownloadArchive(ctx, pointer, dest); err != nil {
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("下载 %s：%w", url, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", fmt.Errorf("下载 %s：HTTP %d", url, resp.StatusCode)
+	}
+	dir := root.Join("restore")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", err
 	}
-	fmt.Printf("已下载最新归档：%s（%s）\n", pointer.ArchiveKey, pointer.SHA256[:16]+"…")
+	dest := filepath.Join(dir, "download-"+time.Now().Format("20060102T150405")+".cwxubak")
+	out, err := os.OpenFile(dest, os.O_CREATE|os.O_WRONLY|os.O_EXCL, 0o600)
+	if err != nil {
+		return "", err
+	}
+	if _, err := io.Copy(out, resp.Body); err != nil {
+		out.Close()
+		os.Remove(dest)
+		return "", err
+	}
+	if err := out.Close(); err != nil {
+		os.Remove(dest)
+		return "", err
+	}
+	fmt.Printf("已下载归档：%s\n", dest)
 	return dest, nil
 }
 
