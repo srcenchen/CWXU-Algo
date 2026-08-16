@@ -27,12 +27,16 @@ jobs:
           (cd app/gateway && go build ./cmd/gateway)
       - name: Validate Compose
         env:
+          GOALGO_ROOT: ${{ runner.temp }}/goalgo
           FRONTEND_IMAGE: registry.cn-hangzhou.aliyuncs.com/sanenchen/goalgo@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
           GATEWAY_IMAGE: registry.cn-hangzhou.aliyuncs.com/sanenchen/goalgo@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
           USER_IMAGE: registry.cn-hangzhou.aliyuncs.com/sanenchen/goalgo@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
           CORE_DATA_IMAGE: registry.cn-hangzhou.aliyuncs.com/sanenchen/goalgo@sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
           AGENT_IMAGE: registry.cn-hangzhou.aliyuncs.com/sanenchen/goalgo@sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
-        run: docker compose -f deploy/compose.yaml config --quiet
+        run: |
+          mkdir -p "$GOALGO_ROOT/secrets"
+          touch "$GOALGO_ROOT/secrets/app.env"
+          docker compose -f deploy/compose.yaml config --quiet
       - name: Build backend images without pushing
         run: |
           for target in gateway user core-data agent; do
