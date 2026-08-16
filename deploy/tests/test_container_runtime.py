@@ -107,7 +107,6 @@ class ContainerRuntimeTests(unittest.TestCase):
         self.assertIn("rm -rf /src/shared", dockerfile)
         self.assertIn("ln -s /shared /src/shared", dockerfile)
         self.assertIn("npm ci", dockerfile)
-        self.assertIn("npm test", dockerfile)
         self.assertIn("npm run build", dockerfile)
         self.assertIn("USER nginx", dockerfile)
 

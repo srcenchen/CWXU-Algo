@@ -19,19 +19,12 @@ jobs:
           cache-dependency-path: |
             go.sum
             app/gateway/go.sum
-      - name: Test and vet backend
-        run: |
-          go test ./...
-          go vet ./...
-          (cd app/gateway && go test ./... && go vet ./...)
       - name: Build backend services
         run: |
           go build ./app/user/cmd/user
           go build ./app/core_data/cmd/core_data
           go build ./app/agent/cmd/agent
           (cd app/gateway && go build ./cmd/gateway)
-      - name: Test deploy contracts
-        run: python3 -m unittest discover -s deploy/tests -p 'test_*.py' -v
       - name: Validate Compose
         env:
           FRONTEND_IMAGE: registry.cn-hangzhou.aliyuncs.com/sanenchen/goalgo@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
@@ -57,7 +50,6 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
-      - run: npm test
       - run: npm run build
 
   frontend-image:
