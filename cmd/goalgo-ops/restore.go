@@ -112,12 +112,17 @@ func cmdRestore(args []string, runner opsexec.Command) int {
 	defer lock.Release()
 
 	// 1. 校验归档（认证解密 + zstd + tar + manifest + pg_restore --list）。
-	if err := requireBackupTools(ctx, runner); err != nil {
-		return fail("restore", err)
-	}
+	compose := &opscompose.Compose{Root: root, Run: runner}
 	verifyDir := filepath.Join(root.Join("restore"), "verify-"+time.Now().Format("20060102T150405"))
 	if err := os.MkdirAll(verifyDir, 0o700); err != nil {
 		return fail("restore", err)
+	}
+	verifyRunner, ok := containerVerifyRunner(ctx, compose, runner, verifyDir)
+	if !ok {
+		if err := requireBackupTools(ctx, runner); err != nil {
+			return fail("restore", err)
+		}
+		verifyRunner = runner
 	}
 	archivePath, downloaded, err := resolveArchive(ctx, root, archive)
 	if err != nil {
@@ -126,13 +131,11 @@ func cmdRestore(args []string, runner opsexec.Command) int {
 	if downloaded {
 		defer os.Remove(archivePath)
 	}
-	result, err := opsbackup.VerifyArchive(ctx, archivePath, key, verifyDir, runner)
+	result, err := opsbackup.VerifyArchive(ctx, archivePath, key, verifyDir, verifyRunner)
 	if err != nil {
 		return fail("restore", fmt.Errorf("归档校验失败：%w", err))
 	}
 	fmt.Printf("归档校验通过：%d 个数据库：%s\n", len(result.Manifest.Databases), strings.Join(result.Manifest.Databases, ", "))
-
-	compose := &opscompose.Compose{Root: root, Run: runner}
 
 	// 2. 停止应用服务与 postgres。
 	for _, service := range []string{"frontend", "gateway", "user", "core-data", "agent", "nginx"} {
@@ -221,6 +224,23 @@ func cmdRestore(args []string, runner opsexec.Command) int {
 	fmt.Printf("恢复成功。旧数据卷保留于 %s（确认无误后可删除）\n", backupDir)
 	return 0
 }
+// containerVerifyRunner 优先用 core-data 镜像容器执行 zstd/pg_restore（镜像内置 PG18 客户端与 zstd），
+// 免装宿主机客户端；拿不到镜像或 docker 不可用时返回 ok=false 由调用方回退宿主机工具。
+func containerVerifyRunner(ctx context.Context, compose *opscompose.Compose, runner opsexec.Command, workDir string) (opsexec.Command, bool) {
+	release, err := compose.Release()
+	if err != nil {
+		return nil, false
+	}
+	image := release.Images["CORE_DATA_IMAGE"]
+	if image == "" {
+		return nil, false
+	}
+	if err := opsexec.RequireCommand(ctx, runner, "docker"); err != nil {
+		return nil, false
+	}
+	return opsbackup.ContainerToolRunner{Inner: runner, Image: image, WorkDir: workDir}, true
+}
+
 // resolveArchive 本地文件直接使用；http(s) URL 下载到 restore 目录，返回 downloaded=true。
 func resolveArchive(ctx context.Context, root *opsroot.Root, source string) (path string, downloaded bool, err error) {
 	if !strings.HasPrefix(source, "http://") && !strings.HasPrefix(source, "https://") {
