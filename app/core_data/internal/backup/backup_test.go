@@ -434,3 +434,16 @@ func TestTaskStatusAndCancellation(t *testing.T) {
 		t.Fatalf("final status = %+v", status)
 	}
 }
+
+func TestCloseFileTreatsAlreadyClosedAsSuccess(t *testing.T) {
+	file, err := os.CreateTemp(t.TempDir(), "closed-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := closeFile(file); err != nil {
+		t.Fatalf("closeFile on an already closed file: %v", err)
+	}
+}

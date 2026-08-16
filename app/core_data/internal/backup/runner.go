@@ -201,7 +201,7 @@ func (r *Runner) Run(ctx context.Context) (Result, error) {
 		_ = encrypted.Close()
 		return Result{}, fmt.Errorf("encrypt backup: %w", err)
 	}
-	if err := errors.Join(compressed.Close(), encrypted.Close()); err != nil {
+	if err := errors.Join(closeFile(compressed), closeFile(encrypted)); err != nil {
 		return Result{}, fmt.Errorf("close encrypted artifact: %w", err)
 	}
 	if err := os.Remove(compressedPath); err != nil {
@@ -381,6 +381,14 @@ func commandDSN(dsn, database string) (string, string, error) {
 		u.RawPath = "/" + url.PathEscape(database)
 	}
 	return u.String(), password, nil
+}
+
+func closeFile(file *os.File) error {
+	err := file.Close()
+	if errors.Is(err, os.ErrClosed) {
+		return nil
+	}
+	return err
 }
 
 // ExecCommandRunner is the production context-aware command implementation.
