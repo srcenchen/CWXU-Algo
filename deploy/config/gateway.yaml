@@ -21,6 +21,13 @@ endpoints:
     protocol: HTTP
     backends:
       - target: discovery:///user
+  - path: /v1/user/upload
+    timeout: 90s
+    protocol: HTTP
+    metadata:
+      maxRequestBodyBytes: "16777216"
+    backends:
+      - target: discovery:///user
   - path: /v1/user/*
     timeout: 5s
     protocol: HTTP

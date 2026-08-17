@@ -2,6 +2,7 @@ package main
 
 import (
 	"testing"
+	"time"
 
 	configv1 "github.com/go-kratos/gateway/api/gateway/config/v1"
 	circuitbreakerv1 "github.com/go-kratos/gateway/api/gateway/middleware/circuitbreaker/v1"
@@ -172,8 +173,15 @@ func TestConfigUnmarshaler(t *testing.T) {
 	if gateway.Name != "cwxu-algo" || gateway.Version != "v1" {
 		t.Errorf("unexpected gateway identity: %s %s", gateway.Name, gateway.Version)
 	}
-	if len(gateway.Endpoints) != 5 {
-		t.Errorf("expected five service endpoints, got %d", len(gateway.Endpoints))
+	if len(gateway.Endpoints) != 7 {
+		t.Errorf("expected seven service endpoints, got %d", len(gateway.Endpoints))
+	}
+	upload := gateway.Endpoints[3]
+	if upload.Path != "/v1/user/upload" || upload.Timeout == nil || upload.Timeout.AsDuration() != 90*time.Second || upload.Metadata["maxRequestBodyBytes"] != "16777216" {
+		t.Errorf("upload endpoint must use a 90s timeout and 16MiB body cap: %+v", upload)
+	}
+	if gateway.Endpoints[4].Path != "/v1/user/*" {
+		t.Errorf("upload endpoint must precede the generic user route")
 	}
 	if len(gateway.Middlewares) != 1 || gateway.Middlewares[0].Name != "jwt" {
 		t.Errorf("global jwt middleware must be enabled")

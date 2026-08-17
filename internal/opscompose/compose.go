@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -24,9 +25,11 @@ type Runner interface {
 }
 
 type Compose struct {
-	Root       *opsroot.Root
-	Run        Runner
-	SmokeCheck func(context.Context) error
+	Root               *opsroot.Root
+	Run                Runner
+	SmokeCheck         func(context.Context) error
+	smokeRetryInterval time.Duration
+	smokeTimeout       time.Duration
 }
 
 // runner 返回用于执行 docker 命令的 Runner。对真实的 opsexec.Real，
@@ -237,6 +240,52 @@ func (c *Compose) Health(ctx context.Context) error {
 }
 
 func (c *Compose) Smoke(ctx context.Context) error {
+	timeout := c.smokeTimeout
+	if timeout <= 0 {
+		timeout = 120 * time.Second
+	}
+	interval := c.smokeRetryInterval
+	if interval <= 0 {
+		interval = 2 * time.Second
+	}
+	smokeCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	consecutive := 0
+	var lastErr error
+	for {
+		err := c.smokeOnce(smokeCtx)
+		if err == nil {
+			consecutive++
+			if consecutive >= 2 {
+				return nil
+			}
+		} else {
+			consecutive = 0
+			lastErr = err
+			var permanent *permanentSmokeError
+			if errors.As(err, &permanent) {
+				return err
+			}
+		}
+		timer := time.NewTimer(interval)
+		select {
+		case <-smokeCtx.Done():
+			timer.Stop()
+			if lastErr != nil {
+				return fmt.Errorf("冒烟等待服务稳定超时: %w", lastErr)
+			}
+			return smokeCtx.Err()
+		case <-timer.C:
+		}
+	}
+}
+
+type permanentSmokeError struct{ err error }
+
+func (e *permanentSmokeError) Error() string { return e.err.Error() }
+func (e *permanentSmokeError) Unwrap() error { return e.err }
+
+func (c *Compose) smokeOnce(ctx context.Context) error {
 	if c.SmokeCheck != nil {
 		return c.SmokeCheck(ctx)
 	}
@@ -253,7 +302,11 @@ func (c *Compose) Smoke(ctx context.Context) error {
 		}
 		response.Body.Close()
 		if response.StatusCode < 200 || response.StatusCode >= 300 {
-			return fmt.Errorf("冒烟 %s：意外状态码 %d", path, response.StatusCode)
+			err := fmt.Errorf("冒烟 %s：意外状态码 %d", path, response.StatusCode)
+			if response.StatusCode >= 400 && response.StatusCode < 500 {
+				return &permanentSmokeError{err: err}
+			}
+			return err
 		}
 	}
 	return nil

@@ -137,8 +137,7 @@ func deployCandidate(rootPath, current string, prompt *opsprompt.Prompter) (stri
 	return current, nil
 }
 
-// runtimeUpgrade 解析 ACR <svc>-latest 的 digest 用于版本判断（持久化到系统注册文件），
-// 实际镜像仍用 latest 标签；有更新则原子升级，失败自动回滚。
+// runtimeUpgrade 解析 ACR <svc>-latest 为不可变 digest；有更新则原子升级，失败自动回滚。
 func runtimeUpgrade(ctx context.Context, compose *opscompose.Compose) int {
 	if err := compose.Root.RequireFiles(); err != nil {
 		return fail("升级", err)
@@ -151,19 +150,19 @@ func runtimeUpgrade(ctx context.Context, compose *opscompose.Compose) int {
 	if err != nil {
 		return fail("升级", err)
 	}
-	if sameDigests(data.Deploy.LastDigests, latest.Images) {
-		fmt.Fprintln(os.Stdout, "已是最新版本")
-		return 0
-	}
 	active, err := compose.Release()
 	if err != nil {
 		return fail("升级", err)
+	}
+	if sameDigests(data.Deploy.LastDigests, latest.Images) && releaseSame(active, latest) {
+		fmt.Fprintln(os.Stdout, "已是最新版本")
+		return 0
 	}
 	previous, err := opsrelease.ParseFile(compose.Root.Join("release.previous.env"))
 	if err != nil && !os.IsNotExist(err) {
 		return fail("升级", err)
 	}
-	if err := applyRelease(ctx, compose, opsrelease.LatestTagRelease(), active, previous); err != nil {
+	if err := applyRelease(ctx, compose, latest, active, previous); err != nil {
 		return fail("升级", err)
 	}
 	data.Deploy.LastDigests = latest.Images

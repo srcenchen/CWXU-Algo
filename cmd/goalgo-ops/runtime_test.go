@@ -81,7 +81,7 @@ type recordingRunner struct {
 	calls  [][]string
 }
 
-func TestRuntimeUpgradePullsLatestTagsAndStoresResolvedDigests(t *testing.T) {
+func TestRuntimeUpgradeAppliesAndStoresResolvedDigests(t *testing.T) {
 	dataPath := filepath.Join(t.TempDir(), "ops.data.json")
 	t.Setenv("GOALGO_OPS_DATA_FILE", dataPath)
 	root, err := opsroot.Resolve(t.TempDir())
@@ -108,9 +108,6 @@ func TestRuntimeUpgradePullsLatestTagsAndStoresResolvedDigests(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !releaseSame(active, opsrelease.LatestTagRelease()) {
-		t.Fatalf("upgrade must keep latest tags in release.env, got %v", active.Images)
-	}
 	data, err := opsdata.Load()
 	if err != nil {
 		t.Fatal(err)
@@ -121,6 +118,49 @@ func TestRuntimeUpgradePullsLatestTagsAndStoresResolvedDigests(t *testing.T) {
 		if got := data.Deploy.LastDigests[key]; got != want {
 			t.Errorf("stored %s = %q, want %q", key, got, want)
 		}
+		if got := active.Images[key]; got != want {
+			t.Errorf("active %s = %q, want %q", key, got, want)
+		}
+	}
+}
+
+func TestRuntimeUpgradeMigratesLatestReleaseWhenDigestsAlreadyRecorded(t *testing.T) {
+	dataPath := filepath.Join(t.TempDir(), "ops.data.json")
+	t.Setenv("GOALGO_OPS_DATA_FILE", dataPath)
+	root, err := opsroot.Resolve(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(root.Join(".env"), []byte("GOALGO_ROOT="+root.Path+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(root.Join("compose.yaml"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := opsrelease.LatestTagRelease().WriteFile(root.Join("release.env")); err != nil {
+		t.Fatal(err)
+	}
+	runner := &upgradeRunner{}
+	resolved, err := (&opscompose.Compose{Root: root, Run: runner}).ResolveLatest(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	data := &opsdata.Data{}
+	data.Deploy.LastDigests = resolved.Images
+	if err := data.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	compose := &opscompose.Compose{Root: root, Run: runner, SmokeCheck: func(context.Context) error { return nil }}
+	if code := runtimeUpgrade(context.Background(), compose); code != 0 {
+		t.Fatalf("upgrade exit code = %d", code)
+	}
+	active, err := opsrelease.ParseFile(root.Join("release.env"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !releaseSame(active, resolved) {
+		t.Fatalf("latest release was not migrated to digests: %v", active.Images)
 	}
 }
 
@@ -182,6 +222,9 @@ func TestApplyReleaseFailureRestoresFilesAndRunningRelease(t *testing.T) {
 	if runner.upCalls != 2 {
 		t.Fatalf("old release was not started after failure, up calls=%d", runner.upCalls)
 	}
+	if runner.pullCalls != 1 {
+		t.Fatalf("rollback must reuse local images, pull calls=%d", runner.pullCalls)
+	}
 }
 
 func TestRestoreRunningReleaseRestoresFilesAndContainers(t *testing.T) {
@@ -210,12 +253,12 @@ func TestRestoreRunningReleaseRestoresFilesAndContainers(t *testing.T) {
 	}
 	active, _ := opsrelease.ParseFile(root.Join("release.env"))
 	oldPrevious, _ := opsrelease.ParseFile(root.Join("release.previous.env"))
-	if !releaseSame(active, current) || !releaseSame(oldPrevious, previous) || runner.upCalls != 1 {
-		t.Fatalf("release not restored: active=%v previous=%v up=%d", active.Images, oldPrevious.Images, runner.upCalls)
+	if !releaseSame(active, current) || !releaseSame(oldPrevious, previous) || runner.upCalls != 1 || runner.pullCalls != 0 {
+		t.Fatalf("release not restored: active=%v previous=%v up=%d pull=%d", active.Images, oldPrevious.Images, runner.upCalls, runner.pullCalls)
 	}
 }
 
-func TestApplyReleaseRollbackUsesLiveContextAfterMainContextCanceled(t *testing.T) {
+func TestApplyReleaseCancellationDuringPullOnlyRestoresFiles(t *testing.T) {
 	root, _ := opsroot.Resolve(t.TempDir())
 	_ = os.WriteFile(root.Join(".env"), []byte("GOALGO_ROOT="+root.Path+"\n"), 0o600)
 	_ = os.WriteFile(root.Join("compose.yaml"), []byte("x"), 0o600)
@@ -226,8 +269,16 @@ func TestApplyReleaseRollbackUsesLiveContextAfterMainContextCanceled(t *testing.
 	runner := &cancelThenRequireLiveRunner{cancel: cancel}
 	compose := &opscompose.Compose{Root: root, Run: runner, SmokeCheck: func(ctx context.Context) error { return ctx.Err() }}
 	err := applyRelease(ctx, compose, candidate, current, previous)
-	if err == nil || runner.liveRollbackCalls == 0 {
-		t.Fatalf("rollback did not run with independent context: err=%v live=%d", err, runner.liveRollbackCalls)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("applyRelease() error = %v, want context.Canceled", err)
+	}
+	if runner.liveRollbackCalls != 0 {
+		t.Fatalf("pull cancellation must not restart running containers, live calls=%d", runner.liveRollbackCalls)
+	}
+	active, _ := opsrelease.ParseFile(root.Join("release.env"))
+	oldPrevious, _ := opsrelease.ParseFile(root.Join("release.previous.env"))
+	if !releaseSame(active, current) || !releaseSame(oldPrevious, previous) {
+		t.Fatalf("files not restored: active=%v previous=%v", active.Images, oldPrevious.Images)
 	}
 }
 
@@ -268,6 +319,7 @@ type transactionRunner struct {
 	runErrors []error
 	runIndex  int
 	upCalls   int
+	pullCalls int
 }
 
 func (r *transactionRunner) CombinedOutput(_ context.Context, _ string, args ...string) (string, error) {
@@ -286,6 +338,8 @@ func (r *transactionRunner) Run(_ context.Context, _ io.Reader, _, _ io.Writer, 
 	for _, arg := range args {
 		if arg == "up" {
 			r.upCalls++
+		} else if arg == "pull" {
+			r.pullCalls++
 		}
 	}
 	if r.runIndex >= len(r.runErrors) {

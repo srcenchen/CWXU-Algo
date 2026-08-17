@@ -32,6 +32,10 @@ services:
       - ${GOALGO_ROOT:-/opt/goalgo}/config:/etc/goalgo/config:ro
       - ${GOALGO_ROOT:-/opt/goalgo}/secrets/jwt_public_key.pem:/run/secrets/jwt_public_key.pem:ro
     expose: ["8080"]
+    mem_limit: 1g
+    pids_limit: 512
+    environment:
+      GOMEMLIMIT: 768MiB
     depends_on:
       consul:
         condition: service_healthy
@@ -56,6 +60,10 @@ services:
       - ${GOALGO_ROOT:-/opt/goalgo}/secrets/jwt_private_key.pem:/run/secrets/jwt_private_key.pem:ro
       - ${GOALGO_ROOT:-/opt/goalgo}/secrets/jwt_public_key.pem:/run/secrets/jwt_public_key.pem:ro
     expose: ["8000", "9000"]
+    mem_limit: 3g
+    pids_limit: 512
+    environment:
+      GOMEMLIMIT: 2GiB
     depends_on:
       postgres:
         condition: service_healthy

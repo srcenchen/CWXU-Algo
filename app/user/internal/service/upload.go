@@ -358,7 +358,8 @@ func RegisterUploadRoutes(srv *khttp.Server, d *data.Data) {
 		if looksLikeSVG(raw) {
 			ct = "image/svg+xml"
 		}
-		if !allowedImage(ct) || !validImageData(raw, ct) {
+		isBlogImage := purpose == "blog" || purpose == "blog_cover"
+		if !allowedImage(ct) || (!isBlogImage && !validImageData(raw, ct)) {
 			return ctx.JSON(http.StatusBadRequest, map[string]interface{}{
 				"code": 1, "message": "仅支持有效的 jpg/png/gif/webp/ico/svg 图片（svg 不得含脚本或事件处理器）",
 			})
@@ -378,7 +379,7 @@ func RegisterUploadRoutes(srv *khttp.Server, d *data.Data) {
 		}
 
 		// —— 博客/题解图：又拍云（需站点配置 + 用户授权）——
-		if purpose == "blog" || purpose == "blog_cover" {
+		if isBlogImage {
 			return handleBlogUpyunUpload(ctx, d, pd.UserID, raw, ct, purpose, hdr.Filename)
 		}
 		// —— 头像：又拍云（需站点配置，无需博客授权）——
@@ -511,6 +512,11 @@ func handleBlogUpyunUpload(
 			"code": 1, "message": "博客图片暂不支持 SVG，请使用 jpg/png/gif/webp",
 		})
 	}
+	if ct != "image/jpeg" && ct != "image/png" && ct != "image/gif" && ct != "image/webp" {
+		return ctx.JSON(http.StatusBadRequest, map[string]interface{}{
+			"code": 1, "message": "博客图片仅支持 jpg/png/gif/webp",
+		})
+	}
 
 	client := loadUpyunFromDB(d.DB)
 	if !client.Configured() || client.PublicBaseURL() == "" {
@@ -529,7 +535,7 @@ func handleBlogUpyunUpload(
 		})
 	}
 
-	compressed, err := blogimg.CompressForUpload(raw, ct)
+	compressed, err := globalBlogImageProcessor.Process(ctx.Request().Context(), raw, ct)
 	if err != nil {
 		return ctx.JSON(http.StatusBadRequest, map[string]interface{}{
 			"code": 1, "message": err.Error(),

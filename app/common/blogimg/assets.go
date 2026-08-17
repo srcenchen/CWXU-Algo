@@ -3,6 +3,7 @@ package blogimg
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"image"
 	_ "image/gif"
@@ -12,6 +13,8 @@ import (
 	"path"
 	"regexp"
 	"strings"
+
+	_ "golang.org/x/image/webp"
 )
 
 // MaxUploadBytes is the soft limit after compression for blog images (10MB).
@@ -19,6 +22,16 @@ const MaxUploadBytes = 10 << 20
 
 // MaxDim is the longest edge kept when re-encoding oversized photos.
 const MaxDim = 2560
+
+const (
+	MaxInputImageSide   = 12_000
+	MaxInputImagePixels = 40_000_000
+)
+
+var (
+	ErrImageDimensionsExceeded = errors.New("image side exceeds limit")
+	ErrImagePixelsExceeded     = errors.New("image pixel count exceeds limit")
+)
 
 // JPEGQuality prefers clarity over aggressive size reduction.
 const JPEGQuality = 88
@@ -270,6 +283,31 @@ type CompressResult struct {
 	Ext         string // including dot, e.g. ".jpg"
 	// Passthrough true if original bytes kept
 	Passthrough bool
+}
+
+func validateImageConfig(cfg image.Config) error {
+	if cfg.Width <= 0 || cfg.Height <= 0 {
+		return fmt.Errorf("图片尺寸无效")
+	}
+	if cfg.Width > MaxInputImageSide || cfg.Height > MaxInputImageSide {
+		return fmt.Errorf("图片尺寸过大，单边不得超过 %d 像素: %w", MaxInputImageSide, ErrImageDimensionsExceeded)
+	}
+	if uint64(cfg.Width)*uint64(cfg.Height) > MaxInputImagePixels {
+		return fmt.Errorf("图片总像素过大，不得超过 4000 万像素: %w", ErrImagePixelsExceeded)
+	}
+	return nil
+}
+
+// ValidateAndCompressForUpload rejects decompression bombs before full decoding.
+func ValidateAndCompressForUpload(data []byte, contentType string) (CompressResult, error) {
+	cfg, _, err := image.DecodeConfig(bytes.NewReader(data))
+	if err != nil {
+		return CompressResult{}, fmt.Errorf("无法读取图片尺寸: %w", err)
+	}
+	if err := validateImageConfig(cfg); err != nil {
+		return CompressResult{}, err
+	}
+	return CompressForUpload(data, contentType)
 }
 
 // CompressForUpload keeps small/clear images as-is; re-encodes large rasters with high quality.

@@ -126,7 +126,7 @@ func TestRecoverRestoreContinuesServiceRecoveryWhenRollbackPostgresStopFails(t *
 	if err == nil || !strings.Contains(err.Error(), "restore failed") || !strings.Contains(err.Error(), "rollback postgres stop failed") {
 		t.Fatalf("restore and rollback failures not combined: %v", err)
 	}
-	if runner.upCalls != 1 || runner.healthCalls != 1 || runner.smokeCalls != 1 {
+	if runner.upCalls != 1 || runner.healthCalls != 1 || runner.smokeCalls != 2 {
 		t.Fatalf("service recovery stopped early: up=%d health=%d smoke=%d", runner.upCalls, runner.healthCalls, runner.smokeCalls)
 	}
 	if _, err := os.Stat(filepath.Join(dataDir, "old")); err != nil {
@@ -289,7 +289,7 @@ func assertRestorePreparationRecovered(t *testing.T, err error, runner *restoreT
 	if err == nil || !strings.Contains(err.Error(), cause) {
 		t.Fatalf("original failure missing: %v", err)
 	}
-	if runner.upCalls != 1 || runner.healthCalls != 1 || runner.smokeCalls != 1 {
+	if runner.upCalls != 1 || runner.healthCalls != 1 || runner.smokeCalls != 2 {
 		t.Fatalf("original release not fully recovered: up=%d health=%d smoke=%d", runner.upCalls, runner.healthCalls, runner.smokeCalls)
 	}
 }

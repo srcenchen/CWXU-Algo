@@ -27,6 +27,14 @@ endpoints:
     protocol: HTTP
     backends:
       - target: 'discovery:///user'
+  # 图片上传包含解码、压缩和对象存储写入，单独放宽总超时并限制请求体。
+  - path: /v1/user/upload
+    timeout: 90s
+    protocol: HTTP
+    metadata:
+      maxRequestBodyBytes: "16777216"
+    backends:
+      - target: 'discovery:///user'
   - path: /v1/user/*
     timeout: 5s
     protocol: HTTP

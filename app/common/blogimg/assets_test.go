@@ -2,12 +2,35 @@ package blogimg
 
 import (
 	"bytes"
+	"errors"
 	"image"
 	"image/color"
 	"image/png"
 	"strings"
 	"testing"
 )
+
+func TestValidateImageConfigLimitsDimensionsAndPixels(t *testing.T) {
+	tests := []struct {
+		name string
+		cfg  image.Config
+		want error
+	}{
+		{name: "side boundary", cfg: image.Config{Width: 12000, Height: 1}},
+		{name: "width over", cfg: image.Config{Width: 12001, Height: 1}, want: ErrImageDimensionsExceeded},
+		{name: "height over", cfg: image.Config{Width: 1, Height: 12001}, want: ErrImageDimensionsExceeded},
+		{name: "pixel boundary", cfg: image.Config{Width: 8000, Height: 5000}},
+		{name: "pixels over", cfg: image.Config{Width: 8000, Height: 5001}, want: ErrImagePixelsExceeded},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateImageConfig(tt.cfg)
+			if !errors.Is(err, tt.want) {
+				t.Fatalf("validateImageConfig() error = %v, want %v", err, tt.want)
+			}
+		})
+	}
+}
 
 func TestExtractImageURLs(t *testing.T) {
 	md := `hello ![a|550](https://cdn.example.com/a.webp) and ![b](http://x.test/b.png)
@@ -133,7 +156,7 @@ func TestCompressLargeJPEGUnderCap(t *testing.T) {
 	if err := png.Encode(&buf, img); err != nil {
 		t.Fatal(err)
 	}
-	// force non-passtrough by size path: use image/jpeg content type with png bytes still decodable? 
+	// force non-passtrough by size path: use image/jpeg content type with png bytes still decodable?
 	// Compress decodes via image.Decode which handles png magic.
 	res, err := CompressForUpload(buf.Bytes(), "image/png")
 	if err != nil {

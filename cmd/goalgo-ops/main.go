@@ -316,12 +316,17 @@ func applyRelease(ctx context.Context, compose *opscompose.Compose, candidate, c
 		_ = restoreReleaseFiles(compose, current, previous)
 		return err
 	}
+	runtimeMayHaveChanged := false
 	apply := func() error {
 		opsprogress.Note(os.Stderr, "拉取发布镜像")
 		if err := compose.Pull(ctx); err != nil {
 			return err
 		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		opsprogress.Note(os.Stderr, "创建并启动容器")
+		runtimeMayHaveChanged = true
 		if err := compose.Up(ctx, compose.WaitTimeout()); err != nil {
 			return err
 		}
@@ -331,6 +336,12 @@ func applyRelease(ctx context.Context, compose *opscompose.Compose, candidate, c
 		return compose.Smoke(ctx)
 	}
 	if err := apply(); err != nil {
+		if !runtimeMayHaveChanged {
+			if restoreErr := restoreReleaseFiles(compose, current, previous); restoreErr != nil {
+				return errors.Join(err, fmt.Errorf("恢复版本文件失败：%w", restoreErr))
+			}
+			return err
+		}
 		rollbackCtx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 		defer cancel()
 		rollbackErr := restoreRunningRelease(rollbackCtx, compose, current, previous)
@@ -344,9 +355,6 @@ func applyRelease(ctx context.Context, compose *opscompose.Compose, candidate, c
 
 func restoreRunningRelease(ctx context.Context, compose *opscompose.Compose, current, previous *opsrelease.Release) error {
 	if err := restoreReleaseFiles(compose, current, previous); err != nil {
-		return err
-	}
-	if err := compose.Pull(ctx); err != nil {
 		return err
 	}
 	if err := compose.Up(ctx, compose.WaitTimeout()); err != nil {

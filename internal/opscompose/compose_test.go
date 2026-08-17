@@ -2,14 +2,36 @@ package opscompose
 
 import (
 	"context"
+	"errors"
 	"io"
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"cwxu-algo/internal/opsrelease"
 	"cwxu-algo/internal/opsroot"
 )
+
+func TestSmokeRetriesUntilTwoConsecutiveSuccesses(t *testing.T) {
+	calls := 0
+	results := []error{nil, errors.New("startup 502"), nil, nil}
+	compose := &Compose{
+		SmokeCheck: func(context.Context) error {
+			err := results[calls]
+			calls++
+			return err
+		},
+		smokeRetryInterval: time.Millisecond,
+		smokeTimeout:       time.Second,
+	}
+	if err := compose.Smoke(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if calls != 4 {
+		t.Fatalf("SmokeCheck calls = %d, want 4", calls)
+	}
+}
 
 type fakeRunner struct {
 	outputs map[string]string
