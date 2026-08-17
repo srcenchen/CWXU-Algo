@@ -153,7 +153,11 @@ func (uc *SummaryUseCase) WeeklyStaff(userId int64) error {
 
 	// 锁 TTL ≥ 最大工作时长（工作 ctx 8 分钟），防止未完成时锁先过期导致并发重跑
 	lockKey := fmt.Sprintf("agent:lock:summary:weekly:%d", userId)
-	if !uc.tryAcquireLock(context.Background(), lockKey, 10*time.Minute) {
+	locked, err := uc.tryAcquireWeeklyLock(context.Background(), lockKey, 10*time.Minute)
+	if err != nil {
+		return err
+	}
+	if !locked {
 		log.Infof("用户 %d 周报发送进行中，跳过", userId)
 		return nil
 	}
@@ -163,16 +167,26 @@ func (uc *SummaryUseCase) WeeklyStaff(userId int64) error {
 
 	orgIDs := uc.userStaffOrgIDs(ctx, userId)
 	if len(orgIDs) == 0 {
+		uc.releaseLock(lockKey)
 		return fmt.Errorf("用户 %d 无 staff 组织，无法生成周报", userId)
 	}
 	weekStart, weekEnd := LastWeekRange(time.Now())
 	email := uc.userContactEmail(userId)
 	if email == "" {
+		uc.releaseLock(lockKey)
 		return fmt.Errorf("用户 %d 未绑定邮箱", userId)
 	}
 	var lastErr error
 	sent := 0
 	for _, orgID := range orgIDs {
+		alreadySent, err := uc.weeklyAlreadySent(ctx, userId, orgID, weekStart, weekEnd)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		if alreadySent {
+			continue
+		}
 		html, jobID, reused, err := uc.ensureSharedWeeklyReport(ctx, orgID, userId, weekStart, weekEnd)
 		if err != nil {
 			lastErr = err
@@ -192,6 +206,11 @@ func (uc *SummaryUseCase) WeeklyStaff(userId int64) error {
 			log.Warnf("weekly email org=%d user=%d: %v", orgID, userId, err)
 			continue
 		}
+		if err := uc.markWeeklySent(ctx, userId, orgID, weekStart, weekEnd); err != nil {
+			log.Warnf("weekly sent marker org=%d user=%d: %v", orgID, userId, err)
+			lastErr = err
+			continue
+		}
 		sent++
 		shareTag := "generated"
 		if reused {
@@ -200,13 +219,51 @@ func (uc *SummaryUseCase) WeeklyStaff(userId int64) error {
 		log.Infof("用户 %d 周报(训练报告)已发送至 %s org=%d range=%s~%s job=%s mode=%s",
 			userId, email, orgID, weekStart.Format(dateLayout), weekEnd.Format(dateLayout), jobID, shareTag)
 	}
+	if lastErr != nil {
+		uc.releaseLock(lockKey)
+		return lastErr
+	}
 	if sent == 0 {
-		if lastErr != nil {
-			return lastErr
+		// 所有组织均已有本周期发送记录，MQ 重试可正常结束。
+		for _, orgID := range orgIDs {
+			alreadySent, err := uc.weeklyAlreadySent(ctx, userId, orgID, weekStart, weekEnd)
+			if err != nil || !alreadySent {
+				uc.releaseLock(lockKey)
+				if err != nil {
+					return err
+				}
+				return fmt.Errorf("用户 %d 周报未发送任何组织", userId)
+			}
 		}
-		return fmt.Errorf("用户 %d 周报未发送任何组织", userId)
+		return nil
 	}
 	return nil
+}
+
+func weeklySentKey(userID, orgID int64, start, end time.Time) string {
+	return fmt.Sprintf("agent:summary:weekly:sent:%d:%d:%s:%s", userID, orgID, start.Format(dateLayout), end.Format(dateLayout))
+}
+
+func (uc *SummaryUseCase) tryAcquireWeeklyLock(ctx context.Context, key string, ttl time.Duration) (bool, error) {
+	ok, err := uc.redis.SetNX(ctx, key, "1", ttl).Result()
+	if err != nil {
+		return false, fmt.Errorf("获取周报锁失败: %w", err)
+	}
+	return ok, nil
+}
+
+func (uc *SummaryUseCase) weeklyAlreadySent(ctx context.Context, userID, orgID int64, start, end time.Time) (bool, error) {
+	ok, err := uc.redis.Exists(ctx, weeklySentKey(userID, orgID, start, end)).Result()
+	if err != nil {
+		return false, fmt.Errorf("查询周报发送记录失败 user=%d org=%d: %w", userID, orgID, err)
+	}
+	return ok > 0, nil
+}
+
+func (uc *SummaryUseCase) markWeeklySent(ctx context.Context, userID, orgID int64, start, end time.Time) error {
+	markerCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	return uc.redis.Set(markerCtx, weeklySentKey(userID, orgID, start, end), "1", 14*24*time.Hour).Err()
 }
 
 func (uc *SummaryUseCase) userStaffOrgIDs(ctx context.Context, userId int64) []int64 {

@@ -29,8 +29,10 @@ func TestRenderDailyRuleHTML_HasLayout(t *testing.T) {
 			t.Errorf("missing daily chart/detail %q", want)
 		}
 	}
-	if strings.Contains(html, ">日期</th>") {
-		t.Error("daily trend should not include the old date table")
+	for _, want := range []string{">日期</th>", ">提交</th>", ">AC</th>", "07-22"} {
+		if !strings.Contains(html, want) {
+			t.Errorf("daily trend fallback table missing %q", want)
+		}
 	}
 }
 

@@ -82,6 +82,21 @@ func renderDailyHTML(data *DailyReportData, brand string, comment AIReportCommen
 			acSeries = append(acSeries, ac)
 		}
 		b.WriteString(LineChartSVG(labels, [][]int64{subSeries, acSeries}, []string{"提交", "AC"}, []string{"#171717", "#f97316"}))
+		b.WriteString(`<div style="margin-top:12px;overflow-x:auto;-webkit-overflow-scrolling:touch;">`)
+		b.WriteString(mail.DataTableOpen())
+		b.WriteString(`<tr>`)
+		b.WriteString(mail.TH("日期", "left"))
+		b.WriteString(mail.TH("提交", "right"))
+		b.WriteString(mail.TH("AC", "right"))
+		b.WriteString(`</tr>`)
+		for i, label := range labels {
+			b.WriteString(`<tr>`)
+			b.WriteString(mail.TD(html.EscapeString(label), "left"))
+			b.WriteString(mail.TD(fmt.Sprintf("%d", subSeries[i]), "right"))
+			b.WriteString(mail.TD(fmt.Sprintf("%d", acSeries[i]), "right"))
+			b.WriteString(`</tr>`)
+		}
+		b.WriteString(`</table></div>`)
 	})
 
 	// 昨日明细

@@ -1,8 +1,12 @@
 package service
 
 import (
+	"context"
 	"testing"
 	"time"
+
+	"github.com/alicebob/miniredis/v2"
+	"github.com/redis/go-redis/v9"
 )
 
 func TestFillMissingDays(t *testing.T) {
@@ -83,5 +87,39 @@ func TestWeeklyDateRange(t *testing.T) {
 func TestFormatCNDate(t *testing.T) {
 	if formatCNDate("2026-07-06") != "7月6日" {
 		t.Fatalf("got %s", formatCNDate("2026-07-06"))
+	}
+}
+
+func TestWeeklySentMarkerIsScopedByUserOrgAndWeek(t *testing.T) {
+	mr := miniredis.RunT(t)
+	uc := &SummaryUseCase{redis: redis.NewClient(&redis.Options{Addr: mr.Addr()})}
+	ctx := context.Background()
+	start := time.Date(2026, 8, 10, 0, 0, 0, 0, time.Local)
+	end := time.Date(2026, 8, 16, 0, 0, 0, 0, time.Local)
+
+	sent, err := uc.weeklyAlreadySent(ctx, 7, 11, start, end)
+	if err != nil {
+		t.Fatalf("read weekly marker: %v", err)
+	}
+	if sent {
+		t.Fatal("new weekly delivery must not be marked sent")
+	}
+	if err := uc.markWeeklySent(ctx, 7, 11, start, end); err != nil {
+		t.Fatalf("mark weekly sent: %v", err)
+	}
+	sent, err = uc.weeklyAlreadySent(ctx, 7, 11, start, end)
+	if err != nil || !sent {
+		t.Fatal("marked weekly delivery should be detected")
+	}
+	otherOrg, err := uc.weeklyAlreadySent(ctx, 7, 12, start, end)
+	if err != nil {
+		t.Fatalf("read other org marker: %v", err)
+	}
+	otherUser, err := uc.weeklyAlreadySent(ctx, 8, 11, start, end)
+	if err != nil {
+		t.Fatalf("read other user marker: %v", err)
+	}
+	if otherOrg || otherUser {
+		t.Fatal("weekly marker leaked across user or organization")
 	}
 }
