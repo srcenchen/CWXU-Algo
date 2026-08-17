@@ -1,0 +1,75 @@
+name: back-image
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: back-image-main
+  cancel-in-progress: false
+
+env:
+  ACR_REGISTRY: registry.cn-hangzhou.aliyuncs.com
+  ACR_IMAGE: registry.cn-hangzhou.aliyuncs.com/sanenchen/goalgo
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.ACR_REGISTRY }}
+          username: ${{ secrets.ACR_USERNAME }}
+          password: ${{ secrets.ACR_PASSWORD }}
+      - name: Build and push gateway
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/docker/backend.Dockerfile
+          target: gateway
+          push: true
+          provenance: false
+          sbom: false
+          tags: ${{ env.ACR_IMAGE }}:gateway-sha-${{ github.sha }}
+      - name: Build and push user
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/docker/backend.Dockerfile
+          target: user
+          push: true
+          provenance: false
+          sbom: false
+          tags: ${{ env.ACR_IMAGE }}:user-sha-${{ github.sha }}
+      - name: Build and push core-data
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/docker/backend.Dockerfile
+          target: core-data
+          push: true
+          provenance: false
+          sbom: false
+          tags: ${{ env.ACR_IMAGE }}:core-data-sha-${{ github.sha }}
+      - name: Build and push agent
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/docker/backend.Dockerfile
+          target: agent
+          push: true
+          provenance: false
+          sbom: false
+          tags: ${{ env.ACR_IMAGE }}:agent-sha-${{ github.sha }}
+      - name: Promote backend latest tags
+        run: |
+          for target in gateway user core-data agent; do
+            docker buildx imagetools create \
+              --tag "$ACR_IMAGE:${target}-latest" \
+              "$ACR_IMAGE:${target}-sha-$GITHUB_SHA"
+          done

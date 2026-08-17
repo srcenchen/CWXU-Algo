@@ -166,56 +166,43 @@ class OperationalScriptTests(unittest.TestCase):
 
 
 class WorkflowTests(unittest.TestCase):
-    def test_ci_is_unprivileged_and_runs_on_pr_and_main(self):
-        workflow = read(".github/workflows/ci.yml")
-        self.assertRegex(workflow, r"(?m)^\s*pull_request:\s*$")
+    def test_backend_images_run_directly_on_main_and_use_acr_secrets(self):
+        workflow = read(".github/workflows/back-image.yml")
         self.assertRegex(workflow, r"(?m)^\s*push:\s*$")
         self.assertIn("main", workflow)
         self.assertIn("contents: read", workflow)
-        self.assertNotIn("ACR_PASSWORD", workflow)
-        self.assertNotIn("self-hosted", workflow)
-
-    def test_images_only_follows_successful_main_ci_and_uses_acr_secrets(self):
-        workflow = read(".github/workflows/images.yml")
-        self.assertIn("workflow_run:", workflow)
-        self.assertIn("CI", workflow)
-        self.assertIn("completed", workflow)
-        self.assertIn("conclusion == 'success'", workflow)
-        self.assertIn("workflow_run.event == 'push'", workflow)
-        self.assertIn("head_branch == 'main'", workflow)
         self.assertIn("ACR_USERNAME", workflow)
         self.assertIn("ACR_PASSWORD", workflow)
         self.assertIn("registry.cn-hangzhou.aliyuncs.com/sanenchen/goalgo", workflow)
-        for service in ("frontend", "gateway", "user", "core-data", "agent"):
-            self.assertIn(service, workflow)
-        self.assertIn("backendCommit", workflow)
-        self.assertIn("frontendCommit", workflow)
-        self.assertIn("release-manifest", workflow)
-        self.assertEqual(workflow.count("provenance: false"), 5)
-        self.assertEqual(workflow.count("sbom: false"), 5)
-        for service in ("frontend", "gateway", "user", "core-data", "agent"):
-            self.assertIn(f":{service}-latest", workflow)
-            self.assertIn(f":{service}-sha-", workflow)
-
-    def test_production_is_tag_only_approved_serial_self_hosted_deploy(self):
-        workflow = read(".github/workflows/production.yml")
-        self.assertRegex(workflow, r"(?s)push:.*tags:.*v\*")
-        self.assertIn("environment: production", workflow)
-        self.assertIn("self-hosted", workflow)
-        self.assertIn("goalgo-production", workflow)
+        self.assertNotIn("self-hosted", workflow)
+        self.assertNotIn("workflow_run", workflow)
+        self.assertNotIn("pull_request", workflow)
+        self.assertNotIn("frontend", workflow)
+        self.assertNotIn("repository:", workflow)
         self.assertIn("cancel-in-progress: false", workflow)
-        self.assertIn("actions: read", workflow)
+        for service in ("gateway", "user", "core-data", "agent"):
+            self.assertIn(service, workflow)
+            self.assertIn(f":{service}-sha-${{{{ github.sha }}}}", workflow)
+        self.assertIn('${target}-latest', workflow)
+        self.assertEqual(workflow.count("provenance: false"), 4)
+        self.assertEqual(workflow.count("sbom: false"), 4)
+
+    def test_production_workflow_is_preserved_but_disabled(self):
+        disabled = REPO / ".github/workflows/production.yml.disabled"
+        self.assertTrue(disabled.is_file())
+        self.assertFalse((REPO / ".github/workflows/production.yml").exists())
+        self.assertFalse((REPO / ".github/workflows/production.yaml").exists())
+        workflow = disabled.read_text()
+        self.assertIn("environment: production", workflow)
         self.assertIn("deploy/scripts/deploy.sh", workflow)
-        self.assertIn("runs[0].status", workflow)
-        self.assertIn("runs[0].conclusion", workflow)
-        self.assertNotIn("docker build", workflow)
-        self.assertNotIn("ACR_PASSWORD", workflow)
 
     def test_workflows_have_restrictive_permissions(self):
-        for name in ("ci", "images", "production"):
-            workflow = read(f".github/workflows/{name}.yml")
-            self.assertRegex(workflow, r"(?m)^permissions:\s*$")
-            self.assertNotIn("write-all", workflow)
+        workflows = list((REPO / ".github/workflows").glob("*.yml"))
+        workflows += list((REPO / ".github/workflows").glob("*.yaml"))
+        self.assertEqual([path.name for path in workflows], ["back-image.yml"])
+        workflow = workflows[0].read_text()
+        self.assertRegex(workflow, r"(?m)^permissions:\s*$")
+        self.assertNotIn("write-all", workflow)
 
 
 if __name__ == "__main__":

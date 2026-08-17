@@ -7,8 +7,8 @@
 - Debian 12 新机可通过一个入口完成空系统安装或备份恢复安装。
 - 生产机不拉源码、不编译，只从阿里云 ACR 拉取不可变镜像。
 - Docker Compose 管理前端、4 个后端服务和全部中间件。
-- 所有 Docker、Compose、Nginx、CI/CD 和部署配置位于后端仓库 `deploy/`。
-- 前端仓库只保存前端源码；后端 Actions 拉取前端仓库并使用后端 Dockerfile 构建。
+- 后端 Docker、Compose、Nginx 和保留的部署配置位于后端仓库 `deploy/`。
+- 前端仓库拥有自己的 Dockerfile 和 Actions，前后端镜像独立构建发布。
 - 公网入口为纯 HTTP，默认 `0.0.0.0:8988`；HTTPS 由外部反向代理提供。
 - 图片继续使用现有云存储，不恢复本地上传目录。
 - PostgreSQL 全实例备份继续由 `core_data` 内置任务每日 02:00 执行。
@@ -103,9 +103,9 @@ PostgreSQL 是灾备权威数据。Redis、RabbitMQ 和 Consul 可重建，不�
 
 ### 4.2 前端
 
-GitHub Actions 拉取公开仓库 `WXUProjects/AlgoAnalysisFront-new`。Node 构建阶段执行 `npm ci`、测试和 Vite 构建，运行阶段只包含静态产物和 Nginx。
+前端仓库的 GitHub Actions 使用当前提交。Node 构建阶段执行 `npm ci` 和 Vite 构建，运行阶段只包含静态产物和 Nginx。
 
-前端 Dockerfile 位于后端 `deploy/docker/frontend.Dockerfile`。
+正式前端 Dockerfile 位于前端仓库根目录；后端 `deploy/docker/frontend.Dockerfile` 仅作为保留的部署配置，不再被 Actions 使用。
 
 ## 5. 阿里云 ACR
 
@@ -122,14 +122,14 @@ Registry：registry.cn-hangzhou.aliyuncs.com
 单仓库通过标签区分服务：
 
 ```text
-frontend-sha-<backend-commit>
+frontend-sha-<frontend-commit>
 gateway-sha-<backend-commit>
 user-sha-<backend-commit>
 core-data-sha-<backend-commit>
 agent-sha-<backend-commit>
 ```
 
-生产发布清单同时记录每个镜像的 digest，部署按 digest 执行，不依赖可变标签。
+各 workflow 同时更新对应服务的 `*-latest` 标签。
 
 仓库保持公开，因此镜像内严禁包含任何生产凭据、私钥、配置文件或证书。GitHub Actions 推送仍使用 Repository Secrets：
 
@@ -138,57 +138,28 @@ ACR_USERNAME
 ACR_PASSWORD
 ```
 
-非敏感配置使用仓库 Variables 或工作流常量：
+非敏感配置使用各仓库的工作流常量：
 
 ```text
 ACR_REGISTRY=registry.cn-hangzhou.aliyuncs.com
-ACR_REPOSITORY=sanenchen/goalgo
-FRONTEND_REPOSITORY=WXUProjects/AlgoAnalysisFront-new
-FRONTEND_REF=main
+ACR_IMAGE=registry.cn-hangzhou.aliyuncs.com/sanenchen/goalgo
 ```
 
 ## 6. GitHub Actions
 
-后端正式仓库：`srcenchen/CWXU-Algo`。
+后端正式仓库：`WXUProjects/CWXU-Algo`；前端正式仓库：`WXUProjects/AlgoAnalysisFront-new`。
 
-### 6.1 CI
+### 6.1 前端镜像
 
-PR 和 push main 使用 GitHub-hosted Runner：
+前端 `main` push 直接运行 `front-image`，构建并推送 `frontend-sha-<frontend-commit>` 与 `frontend-latest`。流程不 checkout 后端仓库。
 
-- 后端测试、vet 和 4 个服务构建。
-- 拉取前端公开仓库，执行前端测试和构建。
-- 校验 Compose 配置。
-- 构建镜像但不访问生产 Self-hosted Runner。
+### 6.2 后端镜像
 
-Fork PR 不得获得 ACR Secret 或生产 Runner。
-
-### 6.2 候选镜像
-
-main 通过测试后构建并推送 5 个 `sha-*` 镜像，输出发布清单 Artifact：
-
-```json
-{
-  "backendCommit": "...",
-  "frontendCommit": "...",
-  "images": {
-    "frontend": "registry.../sanenchen/goalgo@sha256:...",
-    "gateway": "registry.../sanenchen/goalgo@sha256:...",
-    "user": "registry.../sanenchen/goalgo@sha256:...",
-    "coreData": "registry.../sanenchen/goalgo@sha256:...",
-    "agent": "registry.../sanenchen/goalgo@sha256:..."
-  }
-}
-```
+后端 `main` push 直接运行单个 `back-image` job，依次构建并推送 gateway、user、core-data、agent 的 commit 标签。四个镜像全部成功后再统一提升 latest 标签，避免构建失败时发布一组混合版本。流程不 checkout 前端仓库，不再等待前置 CI，也不生成发布清单。
 
 ### 6.3 生产发布
 
-- `v*` 标签触发生产工作流。
-- GitHub `production` Environment 要求 `srcenchen` 审批。
-- Environment 已限制为 `v*` 标签。
-- `concurrency.group=goalgo-production`，不取消执行中的部署。
-- Self-hosted Runner 只执行拉镜像、Compose 更新、健康检查和回滚，不构建源码。
-- 发布前调用 `core_data` 备份 API并等待 `succeeded`。
-- 首次空机恢复没有可用应用 API 时跳过发布前备份。
+自动生产部署已停用。原 workflow 保存在 `.github/workflows/production.yml.disabled`，不会被 GitHub Actions 加载；Compose、部署脚本和 `goalgo-ops` 仍保留供手工运维使用。
 
 ## 7. 新机初始化
 
@@ -294,7 +265,7 @@ config import/export/validate
 ## 10. 实施阶段
 
 1. 阶段 2A：镜像、Compose、Nginx、健康检查和本地全栈测试。
-2. 阶段 2B：GitHub CI、ACR 推送、生产审批和 Self-hosted Runner。
+2. 阶段 2B：前后端独立 GitHub Actions 与 ACR 镜像推送。
 3. 阶段 2C：旧机临时端口恢复演练，不切生产流量。
 4. 阶段 3：实现 `goalgo-ops` 和首个管理员初始化命令。
 5. 阶段 4：基于真实运行结果编写最终运维文档。
@@ -307,7 +278,7 @@ config import/export/validate
 - 所有 Compose 服务有健康检查。
 - 数据卷在停止、重启和应用回滚后保持不变。
 - PR 无法访问生产 Runner 和 ACR Secrets。
-- main 自动生成 5 个候选镜像和 digest 清单。
-- `v*` 标签经人工审批后部署。
+- 前端 main 自动发布前端镜像，后端 main 自动发布四个后端镜像。
+- 前后端 Actions 不跨仓库 checkout，也无前置 CI 或自动生产部署。
 - 生产发布失败可以恢复上一版镜像。
 - 备份、恢复和覆盖保护均经过真实 PostgreSQL 18 演练。
