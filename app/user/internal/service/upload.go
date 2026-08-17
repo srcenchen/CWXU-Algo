@@ -27,7 +27,7 @@ import (
 )
 
 const (
-	maxUploadBytes     = 3 << 20  // 3MB local avatar/site/etc
+	maxUploadBytes     = 3 << 20  // 3MB avatar/branding/local uploads
 	maxBlogUploadBytes = 12 << 20 // raw form before compress (blog/upyun)
 	staticURLPrefix    = "/api/user/static"
 	staticRoutePrefix  = "/v1/user/static"
@@ -364,9 +364,11 @@ func RegisterUploadRoutes(srv *khttp.Server, d *data.Data) {
 			})
 		}
 
-		if purpose == "site" && !auth.HasPerm(ctx, rbac.PermSiteConfigWrite) {
+		if purpose == "site" &&
+			!auth.HasPerm(ctx, rbac.PermSiteConfigWrite) &&
+			!auth.HasPerm(ctx, rbac.PermOrgInfoWrite) {
 			return ctx.JSON(http.StatusForbidden, map[string]interface{}{
-				"code": 1, "message": "需要修改站点配置权限",
+				"code": 1, "message": "需要修改站点或组织信息权限",
 			})
 		}
 		if purpose == "bulletin" && !auth.HasPerm(ctx, rbac.PermOrgBulletinManage) {
@@ -382,6 +384,10 @@ func RegisterUploadRoutes(srv *khttp.Server, d *data.Data) {
 		// —— 头像：又拍云（需站点配置，无需博客授权）——
 		if purpose == "avatar" {
 			return handleAvatarUpyunUpload(ctx, d, pd.UserID, raw, ct, hdr.Filename)
+		}
+		// —— 站点/组织品牌图：又拍云（沿用站点图床配置）——
+		if purpose == "site" {
+			return handleBrandingUpyunUpload(ctx, d, pd.UserID, raw, ct, hdr.Filename)
 		}
 
 		ext := extFromContentType(ct, hdr.Filename)
@@ -429,6 +435,59 @@ func RegisterUploadRoutes(srv *khttp.Server, d *data.Data) {
 	})
 	srv.HandlePrefix(staticRoutePrefix+"/", handler)
 	srv.HandlePrefix(staticURLPrefix+"/", handler)
+}
+
+// handleBrandingUpyunUpload PUTs site and organization logos directly to UpYun.
+func handleBrandingUpyunUpload(
+	ctx khttp.Context,
+	d *data.Data,
+	userID uint,
+	raw []byte,
+	ct string,
+	filename string,
+) error {
+	if d == nil || d.DB == nil {
+		return ctx.JSON(http.StatusServiceUnavailable, map[string]interface{}{
+			"code": 1, "message": "上传服务暂不可用",
+		})
+	}
+	client := loadUpyunFromDB(d.DB)
+	if !client.Configured() || client.PublicBaseURL() == "" {
+		return ctx.JSON(http.StatusForbidden, map[string]interface{}{
+			"code": 1, "message": "站点尚未配置图床，请联系管理员",
+		})
+	}
+
+	compressed, err := blogimg.CompressForUpload(raw, ct)
+	if err != nil {
+		return ctx.JSON(http.StatusBadRequest, map[string]interface{}{
+			"code": 1, "message": err.Error(),
+		})
+	}
+	ext := compressed.Ext
+	if ext == "" || ext == ".bin" {
+		ext = extFromContentType(compressed.ContentType, filename)
+	}
+	if ext == "" {
+		ext = ".png"
+	}
+	contentHash := blogimg.ContentHash(compressed.Data)
+	objectKey := blogimg.BrandingObjectKeyForHash(userID, contentHash, ext)
+	if objectKey == "" {
+		objectKey = fmt.Sprintf("/branding/%d/%s%s", userID, randomName(), ext)
+	}
+	if err := client.Put(objectKey, compressed.Data, compressed.ContentType); err != nil {
+		log.Errorf("upload/branding put: %v", err)
+		return ctx.JSON(http.StatusBadGateway, map[string]interface{}{
+			"code": 1, "message": "图床上传失败，请稍后重试",
+		})
+	}
+	return ctx.JSON(http.StatusOK, map[string]interface{}{
+		"code":    0,
+		"message": "success",
+		"url":     client.PublicURL(objectKey),
+		"hash":    contentHash,
+	})
 }
 
 // handleBlogUpyunUpload compresses (clarity-first) and PUTs to UpYun.
