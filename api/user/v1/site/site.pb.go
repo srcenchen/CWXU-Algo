@@ -267,12 +267,14 @@ type GetAdminConfigRes struct {
 	// Agent OpenAI 兼容服务地址（非敏感）
 	AgentEndpoint string `protobuf:"bytes,57,opt,name=agent_endpoint,json=agentEndpoint,proto3" json:"agent_endpoint,omitempty"`
 	// 配置乐观并发版本（每次更新 +1；0=旧数据）
-	ConfigVersion int64  `protobuf:"varint,58,opt,name=config_version,json=configVersion,proto3" json:"config_version,omitempty"`
-	BackupEnabled bool   `protobuf:"varint,59,opt,name=backup_enabled,json=backupEnabled,proto3" json:"backup_enabled,omitempty"`
-	BackupTime    string `protobuf:"bytes,60,opt,name=backup_time,json=backupTime,proto3" json:"backup_time,omitempty"`
-	BackupPrefix  string `protobuf:"bytes,61,opt,name=backup_prefix,json=backupPrefix,proto3" json:"backup_prefix,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	ConfigVersion             int64  `protobuf:"varint,58,opt,name=config_version,json=configVersion,proto3" json:"config_version,omitempty"`
+	BackupEnabled             bool   `protobuf:"varint,59,opt,name=backup_enabled,json=backupEnabled,proto3" json:"backup_enabled,omitempty"`
+	BackupTime                string `protobuf:"bytes,60,opt,name=backup_time,json=backupTime,proto3" json:"backup_time,omitempty"`
+	BackupPrefix              string `protobuf:"bytes,61,opt,name=backup_prefix,json=backupPrefix,proto3" json:"backup_prefix,omitempty"`
+	SpiderConcurrency         int32  `protobuf:"varint,62,opt,name=spider_concurrency,json=spiderConcurrency,proto3" json:"spider_concurrency,omitempty"`
+	ProblemAnalyzeConcurrency int32  `protobuf:"varint,63,opt,name=problem_analyze_concurrency,json=problemAnalyzeConcurrency,proto3" json:"problem_analyze_concurrency,omitempty"`
+	unknownFields             protoimpl.UnknownFields
+	sizeCache                 protoimpl.SizeCache
 }
 
 func (x *GetAdminConfigRes) Reset() {
@@ -732,6 +734,20 @@ func (x *GetAdminConfigRes) GetBackupPrefix() string {
 	return ""
 }
 
+func (x *GetAdminConfigRes) GetSpiderConcurrency() int32 {
+	if x != nil {
+		return x.SpiderConcurrency
+	}
+	return 0
+}
+
+func (x *GetAdminConfigRes) GetProblemAnalyzeConcurrency() int32 {
+	if x != nil {
+		return x.ProblemAnalyzeConcurrency
+	}
+	return 0
+}
+
 type UpdateConfigReq struct {
 	state     protoimpl.MessageState `protogen:"open.v1"`
 	SiteTitle string                 `protobuf:"bytes,1,opt,name=site_title,json=siteTitle,proto3" json:"site_title,omitempty"`
@@ -786,17 +802,19 @@ type UpdateConfigReq struct {
 	ClearPayfmSecret bool   `protobuf:"varint,38,opt,name=clear_payfm_secret,json=clearPayfmSecret,proto3" json:"clear_payfm_secret,omitempty"`
 	// 支付方式（如 aloop=支付宝轮循池；空=默认 aloop）
 	PayfmPayType string `protobuf:"bytes,39,opt,name=payfm_pay_type,json=payfmPayType,proto3" json:"payfm_pay_type,omitempty"`
-	// 保存分区：basic | email | ai | upyun | oj | payment | backup | all（空=all）
+	// 保存分区：basic | email | ai | upyun | oj | payment | backup | ops | all（空=all）
 	Section string `protobuf:"bytes,40,opt,name=section,proto3" json:"section,omitempty"`
 	// Agent OpenAI 兼容服务地址（非敏感）
 	AgentEndpoint string `protobuf:"bytes,41,opt,name=agent_endpoint,json=agentEndpoint,proto3" json:"agent_endpoint,omitempty"`
 	// 期望的 config_version；>0 时校验，不匹配返回冲突；0=兼容旧客户端
-	ExpectedConfigVersion int64  `protobuf:"varint,42,opt,name=expected_config_version,json=expectedConfigVersion,proto3" json:"expected_config_version,omitempty"`
-	BackupEnabled         bool   `protobuf:"varint,43,opt,name=backup_enabled,json=backupEnabled,proto3" json:"backup_enabled,omitempty"`
-	BackupTime            string `protobuf:"bytes,44,opt,name=backup_time,json=backupTime,proto3" json:"backup_time,omitempty"`
-	BackupPrefix          string `protobuf:"bytes,45,opt,name=backup_prefix,json=backupPrefix,proto3" json:"backup_prefix,omitempty"`
-	unknownFields         protoimpl.UnknownFields
-	sizeCache             protoimpl.SizeCache
+	ExpectedConfigVersion     int64  `protobuf:"varint,42,opt,name=expected_config_version,json=expectedConfigVersion,proto3" json:"expected_config_version,omitempty"`
+	BackupEnabled             bool   `protobuf:"varint,43,opt,name=backup_enabled,json=backupEnabled,proto3" json:"backup_enabled,omitempty"`
+	BackupTime                string `protobuf:"bytes,44,opt,name=backup_time,json=backupTime,proto3" json:"backup_time,omitempty"`
+	BackupPrefix              string `protobuf:"bytes,45,opt,name=backup_prefix,json=backupPrefix,proto3" json:"backup_prefix,omitempty"`
+	SpiderConcurrency         int32  `protobuf:"varint,46,opt,name=spider_concurrency,json=spiderConcurrency,proto3" json:"spider_concurrency,omitempty"`
+	ProblemAnalyzeConcurrency int32  `protobuf:"varint,47,opt,name=problem_analyze_concurrency,json=problemAnalyzeConcurrency,proto3" json:"problem_analyze_concurrency,omitempty"`
+	unknownFields             protoimpl.UnknownFields
+	sizeCache                 protoimpl.SizeCache
 }
 
 func (x *UpdateConfigReq) Reset() {
@@ -1142,6 +1160,20 @@ func (x *UpdateConfigReq) GetBackupPrefix() string {
 		return x.BackupPrefix
 	}
 	return ""
+}
+
+func (x *UpdateConfigReq) GetSpiderConcurrency() int32 {
+	if x != nil {
+		return x.SpiderConcurrency
+	}
+	return 0
+}
+
+func (x *UpdateConfigReq) GetProblemAnalyzeConcurrency() int32 {
+	if x != nil {
+		return x.ProblemAnalyzeConcurrency
+	}
+	return 0
 }
 
 type UpdateConfigRes struct {
@@ -2207,7 +2239,7 @@ const file_user_v1_site_site_proto_rawDesc = "" +
 	"\n" +
 	"footer_icp\x18\x06 \x01(\tR\tfooterIcp\x12)\n" +
 	"\x10payfm_configured\x18\a \x01(\bR\x0fpayfmConfigured\"\x13\n" +
-	"\x11GetAdminConfigReq\"\x97\x13\n" +
+	"\x11GetAdminConfigReq\"\x86\x14\n" +
 	"\x11GetAdminConfigRes\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\x03R\x04code\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12\x1d\n" +
@@ -2276,7 +2308,9 @@ const file_user_v1_site_site_proto_rawDesc = "" +
 	"\x0ebackup_enabled\x18; \x01(\bR\rbackupEnabled\x12\x1f\n" +
 	"\vbackup_time\x18< \x01(\tR\n" +
 	"backupTime\x12#\n" +
-	"\rbackup_prefix\x18= \x01(\tR\fbackupPrefix\"\x83\x0e\n" +
+	"\rbackup_prefix\x18= \x01(\tR\fbackupPrefix\x12-\n" +
+	"\x12spider_concurrency\x18> \x01(\x05R\x11spiderConcurrency\x12>\n" +
+	"\x1bproblem_analyze_concurrency\x18? \x01(\x05R\x19problemAnalyzeConcurrency\"\xf2\x0e\n" +
 	"\x0fUpdateConfigReq\x12\x1d\n" +
 	"\n" +
 	"site_title\x18\x01 \x01(\tR\tsiteTitle\x12\x1b\n" +
@@ -2327,7 +2361,9 @@ const file_user_v1_site_site_proto_rawDesc = "" +
 	"\x0ebackup_enabled\x18+ \x01(\bR\rbackupEnabled\x12\x1f\n" +
 	"\vbackup_time\x18, \x01(\tR\n" +
 	"backupTime\x12#\n" +
-	"\rbackup_prefix\x18- \x01(\tR\fbackupPrefix\"\xb4\x01\n" +
+	"\rbackup_prefix\x18- \x01(\tR\fbackupPrefix\x12-\n" +
+	"\x12spider_concurrency\x18. \x01(\x05R\x11spiderConcurrency\x12>\n" +
+	"\x1bproblem_analyze_concurrency\x18/ \x01(\x05R\x19problemAnalyzeConcurrency\"\xb4\x01\n" +
 	"\x0fUpdateConfigRes\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\x03R\x04code\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12\x1d\n" +

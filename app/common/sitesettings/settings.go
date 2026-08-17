@@ -67,7 +67,9 @@ type Runtime struct {
 	SmtpErrMsg        string `json:"smtpErrMsg"`
 	OpsNotifyEmails   string `json:"opsNotifyEmails"`
 	// DataDiskPath 运维磁盘统计目录（数据盘挂载点；空=默认 /data，未挂载回退 /）
-	DataDiskPath string `json:"dataDiskPath"`
+	DataDiskPath              string `json:"dataDiskPath"`
+	SpiderConcurrency         int    `json:"spiderConcurrency,omitempty"`
+	ProblemAnalyzeConcurrency int    `json:"problemAnalyzeConcurrency,omitempty"`
 	// 支付FM（C 端订阅在线支付；聚合支付 https://docs.zhifux.com）
 	PayFmApiBase    string `json:"payfmApiBase"`
 	PayFmMerchantNo string `json:"payfmMerchantNo"`
@@ -77,51 +79,53 @@ type Runtime struct {
 
 // Row 与 site_configs 表对齐（轻量，避免依赖 user/internal）
 type Row struct {
-	ID                uint   `gorm:"primaryKey"`
-	SiteTitle         string `gorm:"column:site_title"`
-	BackupEnabled     bool   `gorm:"column:backup_enabled"`
-	BackupTime        string `gorm:"column:backup_time"`
-	BackupPrefix      string `gorm:"column:backup_prefix"`
-	UpyunBucket       string `gorm:"column:upyun_bucket"`
-	UpyunOperator     string `gorm:"column:upyun_operator"`
-	UpyunPassword     string `gorm:"column:upyun_password"`
-	SMTPHost          string `gorm:"column:smtp_host"`
-	SMTPPort          int    `gorm:"column:smtp_port"`
-	SMTPUsername      string `gorm:"column:smtp_username"`
-	SMTPPassword      string `gorm:"column:smtp_password"`
-	SMTPFrom          string `gorm:"column:smtp_from"`
-	AgentModel        string `gorm:"column:agent_model"`
-	AgentSecret       string `gorm:"column:agent_secret"`
-	AgentEndpoint     string `gorm:"column:agent_endpoint"`
-	ConfigVersion     int64  `gorm:"column:config_version"`
-	AiAnalyzeEndpoint string `gorm:"column:ai_analyze_endpoint"`
-	AiAnalyzeModel    string `gorm:"column:ai_analyze_model"`
-	AiAnalyzeSecret   string `gorm:"column:ai_analyze_secret"`
-	OjLuoguUsername   string `gorm:"column:oj_luogu_username"`
-	OjLuoguPassword   string `gorm:"column:oj_luogu_password"`
-	OjQojUsername     string `gorm:"column:oj_qoj_username"`
-	OjQojPassword     string `gorm:"column:oj_qoj_password"`
-	OjLuoguStatus     string `gorm:"column:oj_luogu_status"`
-	OjLuoguStatusAt   int64  `gorm:"column:oj_luogu_status_at"`
-	OjLuoguErrMsg     string `gorm:"column:oj_luogu_err_msg"`
-	OjQojStatus       string `gorm:"column:oj_qoj_status"`
-	OjQojStatusAt     int64  `gorm:"column:oj_qoj_status_at"`
-	OjQojErrMsg       string `gorm:"column:oj_qoj_err_msg"`
-	AgentStatus       string `gorm:"column:agent_status"`
-	AgentStatusAt     int64  `gorm:"column:agent_status_at"`
-	AgentErrMsg       string `gorm:"column:agent_err_msg"`
-	AiAnalyzeStatus   string `gorm:"column:ai_analyze_status"`
-	AiAnalyzeStatusAt int64  `gorm:"column:ai_analyze_status_at"`
-	AiAnalyzeErrMsg   string `gorm:"column:ai_analyze_err_msg"`
-	SmtpStatus        string `gorm:"column:smtp_status"`
-	SmtpStatusAt      int64  `gorm:"column:smtp_status_at"`
-	SmtpErrMsg        string `gorm:"column:smtp_err_msg"`
-	OpsNotifyEmails   string `gorm:"column:ops_notify_emails"`
-	DataDiskPath      string `gorm:"column:data_disk_path"`
-	PayFmApiBase      string `gorm:"column:payfm_api_base"`
-	PayFmMerchantNo   string `gorm:"column:payfm_merchant_no"`
-	PayFmSecret       string `gorm:"column:payfm_secret"`
-	PayFmPayType      string `gorm:"column:payfm_pay_type"`
+	ID                        uint   `gorm:"primaryKey"`
+	SiteTitle                 string `gorm:"column:site_title"`
+	BackupEnabled             bool   `gorm:"column:backup_enabled"`
+	BackupTime                string `gorm:"column:backup_time"`
+	BackupPrefix              string `gorm:"column:backup_prefix"`
+	UpyunBucket               string `gorm:"column:upyun_bucket"`
+	UpyunOperator             string `gorm:"column:upyun_operator"`
+	UpyunPassword             string `gorm:"column:upyun_password"`
+	SMTPHost                  string `gorm:"column:smtp_host"`
+	SMTPPort                  int    `gorm:"column:smtp_port"`
+	SMTPUsername              string `gorm:"column:smtp_username"`
+	SMTPPassword              string `gorm:"column:smtp_password"`
+	SMTPFrom                  string `gorm:"column:smtp_from"`
+	AgentModel                string `gorm:"column:agent_model"`
+	AgentSecret               string `gorm:"column:agent_secret"`
+	AgentEndpoint             string `gorm:"column:agent_endpoint"`
+	ConfigVersion             int64  `gorm:"column:config_version"`
+	AiAnalyzeEndpoint         string `gorm:"column:ai_analyze_endpoint"`
+	AiAnalyzeModel            string `gorm:"column:ai_analyze_model"`
+	AiAnalyzeSecret           string `gorm:"column:ai_analyze_secret"`
+	OjLuoguUsername           string `gorm:"column:oj_luogu_username"`
+	OjLuoguPassword           string `gorm:"column:oj_luogu_password"`
+	OjQojUsername             string `gorm:"column:oj_qoj_username"`
+	OjQojPassword             string `gorm:"column:oj_qoj_password"`
+	OjLuoguStatus             string `gorm:"column:oj_luogu_status"`
+	OjLuoguStatusAt           int64  `gorm:"column:oj_luogu_status_at"`
+	OjLuoguErrMsg             string `gorm:"column:oj_luogu_err_msg"`
+	OjQojStatus               string `gorm:"column:oj_qoj_status"`
+	OjQojStatusAt             int64  `gorm:"column:oj_qoj_status_at"`
+	OjQojErrMsg               string `gorm:"column:oj_qoj_err_msg"`
+	AgentStatus               string `gorm:"column:agent_status"`
+	AgentStatusAt             int64  `gorm:"column:agent_status_at"`
+	AgentErrMsg               string `gorm:"column:agent_err_msg"`
+	AiAnalyzeStatus           string `gorm:"column:ai_analyze_status"`
+	AiAnalyzeStatusAt         int64  `gorm:"column:ai_analyze_status_at"`
+	AiAnalyzeErrMsg           string `gorm:"column:ai_analyze_err_msg"`
+	SmtpStatus                string `gorm:"column:smtp_status"`
+	SmtpStatusAt              int64  `gorm:"column:smtp_status_at"`
+	SmtpErrMsg                string `gorm:"column:smtp_err_msg"`
+	OpsNotifyEmails           string `gorm:"column:ops_notify_emails"`
+	DataDiskPath              string `gorm:"column:data_disk_path"`
+	SpiderConcurrency         int    `gorm:"column:spider_concurrency"`
+	ProblemAnalyzeConcurrency int    `gorm:"column:problem_analyze_concurrency"`
+	PayFmApiBase              string `gorm:"column:payfm_api_base"`
+	PayFmMerchantNo           string `gorm:"column:payfm_merchant_no"`
+	PayFmSecret               string `gorm:"column:payfm_secret"`
+	PayFmPayType              string `gorm:"column:payfm_pay_type"`
 }
 
 func (Row) TableName() string { return "site_configs" }
@@ -138,6 +142,8 @@ func (r *Row) ToRuntimeChecked() (*Runtime, error) {
 	if title == "" {
 		title = "GoAlgo"
 	}
+	spiderConcurrency := normalizeConcurrency(r.SpiderConcurrency)
+	problemAnalyzeConcurrency := normalizeConcurrency(r.ProblemAnalyzeConcurrency)
 	secrets := map[string]string{
 		"smtp_password": r.SMTPPassword, "agent_secret": r.AgentSecret,
 		"ai_analyze_secret": r.AiAnalyzeSecret, "oj_luogu_password": r.OjLuoguPassword,
@@ -149,51 +155,60 @@ func (r *Row) ToRuntimeChecked() (*Runtime, error) {
 		}
 	}
 	return &Runtime{
-		SiteTitle:         title,
-		BackupEnabled:     r.BackupEnabled,
-		BackupTime:        NormalizeBackupTime(r.BackupTime),
-		BackupPrefix:      strings.Trim(strings.TrimSpace(r.BackupPrefix), "/"),
-		UpyunBucket:       strings.TrimSpace(r.UpyunBucket),
-		UpyunOperator:     strings.TrimSpace(r.UpyunOperator),
-		UpyunPassword:     r.UpyunPassword,
-		SMTPHost:          strings.TrimSpace(r.SMTPHost),
-		SMTPPort:          port,
-		SMTPUsername:      strings.TrimSpace(r.SMTPUsername),
-		SMTPPassword:      r.SMTPPassword,
-		SMTPFrom:          strings.TrimSpace(r.SMTPFrom),
-		AgentModel:        strings.TrimSpace(r.AgentModel),
-		AgentSecret:       r.AgentSecret,
-		AgentEndpoint:     strings.TrimSpace(r.AgentEndpoint),
-		ConfigVersion:     r.ConfigVersion,
-		AiAnalyzeEndpoint: strings.TrimSpace(r.AiAnalyzeEndpoint),
-		AiAnalyzeModel:    strings.TrimSpace(r.AiAnalyzeModel),
-		AiAnalyzeSecret:   r.AiAnalyzeSecret,
-		OjLuoguUsername:   strings.TrimSpace(r.OjLuoguUsername),
-		OjLuoguPassword:   r.OjLuoguPassword,
-		OjQojUsername:     strings.TrimSpace(r.OjQojUsername),
-		OjQojPassword:     r.OjQojPassword,
-		OjLuoguStatus:     r.OjLuoguStatus,
-		OjLuoguStatusAt:   r.OjLuoguStatusAt,
-		OjLuoguErrMsg:     r.OjLuoguErrMsg,
-		OjQojStatus:       r.OjQojStatus,
-		OjQojStatusAt:     r.OjQojStatusAt,
-		OjQojErrMsg:       r.OjQojErrMsg,
-		AgentStatus:       r.AgentStatus,
-		AgentStatusAt:     r.AgentStatusAt,
-		AgentErrMsg:       r.AgentErrMsg,
-		AiAnalyzeStatus:   r.AiAnalyzeStatus,
-		AiAnalyzeStatusAt: r.AiAnalyzeStatusAt,
-		AiAnalyzeErrMsg:   r.AiAnalyzeErrMsg,
-		SmtpStatus:        r.SmtpStatus,
-		SmtpStatusAt:      r.SmtpStatusAt,
-		SmtpErrMsg:        r.SmtpErrMsg,
-		OpsNotifyEmails:   strings.TrimSpace(r.OpsNotifyEmails),
-		DataDiskPath:      strings.TrimSpace(r.DataDiskPath),
-		PayFmApiBase:      strings.TrimSpace(r.PayFmApiBase),
-		PayFmMerchantNo:   strings.TrimSpace(r.PayFmMerchantNo),
-		PayFmSecret:       r.PayFmSecret,
-		PayFmPayType:      strings.TrimSpace(r.PayFmPayType),
+		SiteTitle:                 title,
+		BackupEnabled:             r.BackupEnabled,
+		BackupTime:                NormalizeBackupTime(r.BackupTime),
+		BackupPrefix:              strings.Trim(strings.TrimSpace(r.BackupPrefix), "/"),
+		UpyunBucket:               strings.TrimSpace(r.UpyunBucket),
+		UpyunOperator:             strings.TrimSpace(r.UpyunOperator),
+		UpyunPassword:             r.UpyunPassword,
+		SMTPHost:                  strings.TrimSpace(r.SMTPHost),
+		SMTPPort:                  port,
+		SMTPUsername:              strings.TrimSpace(r.SMTPUsername),
+		SMTPPassword:              r.SMTPPassword,
+		SMTPFrom:                  strings.TrimSpace(r.SMTPFrom),
+		AgentModel:                strings.TrimSpace(r.AgentModel),
+		AgentSecret:               r.AgentSecret,
+		AgentEndpoint:             strings.TrimSpace(r.AgentEndpoint),
+		ConfigVersion:             r.ConfigVersion,
+		AiAnalyzeEndpoint:         strings.TrimSpace(r.AiAnalyzeEndpoint),
+		AiAnalyzeModel:            strings.TrimSpace(r.AiAnalyzeModel),
+		AiAnalyzeSecret:           r.AiAnalyzeSecret,
+		OjLuoguUsername:           strings.TrimSpace(r.OjLuoguUsername),
+		OjLuoguPassword:           r.OjLuoguPassword,
+		OjQojUsername:             strings.TrimSpace(r.OjQojUsername),
+		OjQojPassword:             r.OjQojPassword,
+		OjLuoguStatus:             r.OjLuoguStatus,
+		OjLuoguStatusAt:           r.OjLuoguStatusAt,
+		OjLuoguErrMsg:             r.OjLuoguErrMsg,
+		OjQojStatus:               r.OjQojStatus,
+		OjQojStatusAt:             r.OjQojStatusAt,
+		OjQojErrMsg:               r.OjQojErrMsg,
+		AgentStatus:               r.AgentStatus,
+		AgentStatusAt:             r.AgentStatusAt,
+		AgentErrMsg:               r.AgentErrMsg,
+		AiAnalyzeStatus:           r.AiAnalyzeStatus,
+		AiAnalyzeStatusAt:         r.AiAnalyzeStatusAt,
+		AiAnalyzeErrMsg:           r.AiAnalyzeErrMsg,
+		SmtpStatus:                r.SmtpStatus,
+		SmtpStatusAt:              r.SmtpStatusAt,
+		SmtpErrMsg:                r.SmtpErrMsg,
+		OpsNotifyEmails:           strings.TrimSpace(r.OpsNotifyEmails),
+		DataDiskPath:              strings.TrimSpace(r.DataDiskPath),
+		SpiderConcurrency:         spiderConcurrency,
+		ProblemAnalyzeConcurrency: problemAnalyzeConcurrency,
+		PayFmApiBase:              strings.TrimSpace(r.PayFmApiBase),
+		PayFmMerchantNo:           strings.TrimSpace(r.PayFmMerchantNo),
+		PayFmSecret:               r.PayFmSecret,
+		PayFmPayType:              strings.TrimSpace(r.PayFmPayType),
 	}, nil
+}
+
+func normalizeConcurrency(value int) int {
+	if value < 1 || value > 32 {
+		return 4
+	}
+	return value
 }
 
 func ValidateBackupTime(value string) error {

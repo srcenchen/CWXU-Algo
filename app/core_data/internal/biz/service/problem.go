@@ -2616,13 +2616,14 @@ func (uc *ProblemUseCase) queueStats() []struct {
 		Consumers   int64
 		Concurrency int64
 	}, 0, 2)
+	analyzeConcurrency := runtimeConcurrency(context.Background(), uc.data.RDB, analyzeConcurrencySetting)
 	for _, q := range []struct {
 		name string
 		conc int64
 		stat string
 	}{
 		{"problem_fetch", int64(problemFetchConcurrency), model.ProblemStatusPending},
-		{"problem_analyze", int64(problemAnalyzeConcurrency), model.ProblemStatusTagging},
+		{"problem_analyze", int64(analyzeConcurrency), model.ProblemStatusTagging},
 	} {
 		var msgs, consumers int64
 		inspected := false

@@ -2,6 +2,7 @@ package sitesettings
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -25,6 +26,46 @@ func TestRowToRuntimeReadsPlaintextSecrets(t *testing.T) {
 	if !rt.BackupEnabled || rt.BackupTime != "03:15" || rt.BackupPrefix != "disaster" ||
 		rt.UpyunBucket != "bucket" || rt.UpyunOperator != "operator" || rt.UpyunPassword != "upyun-plain" {
 		t.Fatalf("backup runtime fields were not copied: %#v", rt)
+	}
+}
+
+func TestRowToRuntimeConcurrencyDefaults(t *testing.T) {
+	rt, err := (&Row{}).ToRuntimeChecked()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rt.SpiderConcurrency != 4 || rt.ProblemAnalyzeConcurrency != 4 {
+		t.Fatalf("concurrency defaults = %d/%d, want 4/4", rt.SpiderConcurrency, rt.ProblemAnalyzeConcurrency)
+	}
+
+	rt, err = (&Row{SpiderConcurrency: 12, ProblemAnalyzeConcurrency: 7}).ToRuntimeChecked()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rt.SpiderConcurrency != 12 || rt.ProblemAnalyzeConcurrency != 7 {
+		t.Fatalf("concurrency mapping = %d/%d, want 12/7", rt.SpiderConcurrency, rt.ProblemAnalyzeConcurrency)
+	}
+}
+
+func TestRuntimeJSONBackwardCompatibleConcurrency(t *testing.T) {
+	var old Runtime
+	if err := json.Unmarshal([]byte(`{"siteTitle":"GoAlgo","configVersion":1}`), &old); err != nil {
+		t.Fatal(err)
+	}
+	if old.SpiderConcurrency != 0 || old.ProblemAnalyzeConcurrency != 0 {
+		t.Fatalf("old JSON must preserve unset concurrency, got %#v", old)
+	}
+
+	b, err := json.Marshal(Runtime{SpiderConcurrency: 8, ProblemAnalyzeConcurrency: 6})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var current Runtime
+	if err := json.Unmarshal(b, &current); err != nil {
+		t.Fatal(err)
+	}
+	if current.SpiderConcurrency != 8 || current.ProblemAnalyzeConcurrency != 6 {
+		t.Fatalf("JSON round trip = %#v", current)
 	}
 }
 

@@ -15,9 +15,6 @@ import (
 	"github.com/streadway/amqp"
 )
 
-// defaultSpiderConcurrency 默认 4；可用 CWXU_SPIDER_CONCURRENCY 覆盖（1–32）
-const defaultSpiderConcurrency = 4
-
 type Consumer struct {
 	mq         *event.RabbitMQ
 	spider     *SpiderUseCase
@@ -40,15 +37,18 @@ func (c *Consumer) Stop() {
 }
 
 func (c *Consumer) Consume() {
-	conc := mqconsume.ConcurrencyFromEnv("CWXU_SPIDER_CONCURRENCY", defaultSpiderConcurrency)
+	rdb := c.spider.data.RDB
+	concurrencySource := runtimeConcurrencySource(rdb, spiderConcurrencySetting)
+	conc := concurrencySource()
 	log.Infof("spider consumer 循环启动 concurrency=%d", conc)
 	_ = mqconsume.Run(c.mq, mqconsume.Options{
-		Name:             "spider",
-		Queue:            "spider",
-		Concurrency:      conc,
-		MaxRetry:         3,
-		DeclareOnMissing: true,
-		Stop:             c.stopCh,
+		Name:              "spider",
+		Queue:             "spider",
+		Concurrency:       conc,
+		ConcurrencySource: concurrencySource,
+		MaxRetry:          3,
+		DeclareOnMissing:  true,
+		Stop:              c.stopCh,
 		Handler: func(body []byte, _ amqp.Table) error {
 			msg := event.SpiderEvent{}
 			if err := json.Unmarshal(body, &msg); err != nil {

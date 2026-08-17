@@ -213,8 +213,8 @@ func TestSectionUnknown(t *testing.T) {
 
 func TestSectionDefaultAll(t *testing.T) {
 	updates, err := buildSectionUpdatesWith(&model.SiteConfig{}, &site.UpdateConfigReq{
-		SmtpHost:  "smtp.example.com",
-		SiteTitle: "GoAlgo",
+		SmtpHost:      "smtp.example.com",
+		SiteTitle:     "GoAlgo",
 		BackupEnabled: true,
 		BackupTime:    "02:00",
 		BackupPrefix:  "goalgo/backup",
@@ -236,5 +236,43 @@ func TestEndpointValidationInAI(t *testing.T) {
 	}
 	if _, err := buildSectionUpdatesWith(&model.SiteConfig{}, &site.UpdateConfigReq{AiAnalyzeEndpoint: "https://x.com/v1?k=v"}, fakeEncrypt, "ai"); err == nil {
 		t.Fatal("ai endpoint with query should be rejected")
+	}
+}
+
+func TestSectionProjectionOpsOnly(t *testing.T) {
+	updates, err := buildSectionUpdatesWith(&model.SiteConfig{}, &site.UpdateConfigReq{
+		SpiderConcurrency:         9,
+		ProblemAnalyzeConcurrency: 6,
+		SmtpHost:                  "smtp.example.com",
+	}, fakeEncrypt, "ops")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updates["spider_concurrency"] != 9 || updates["problem_analyze_concurrency"] != 6 {
+		t.Fatalf("ops updates = %#v", updates)
+	}
+	if _, ok := updates["smtp_host"]; ok {
+		t.Fatal("ops section must not touch smtp_host")
+	}
+}
+
+func TestSectionProjectionOpsRejectsConcurrencyOutsideRange(t *testing.T) {
+	for _, value := range []int32{0, 33} {
+		_, err := buildSectionUpdatesWith(&model.SiteConfig{}, &site.UpdateConfigReq{
+			SpiderConcurrency: value, ProblemAnalyzeConcurrency: 4,
+		}, fakeEncrypt, "ops")
+		if err == nil || !strings.Contains(err.Error(), "1") || !strings.Contains(err.Error(), "32") {
+			t.Fatalf("spider concurrency %d error = %v", value, err)
+		}
+	}
+}
+
+func TestRowToRuntimeIncludesConcurrency(t *testing.T) {
+	rt, err := rowToRuntime(&model.SiteConfig{SpiderConcurrency: 11, ProblemAnalyzeConcurrency: 5})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rt.SpiderConcurrency != 11 || rt.ProblemAnalyzeConcurrency != 5 {
+		t.Fatalf("runtime concurrency = %#v", rt)
 	}
 }

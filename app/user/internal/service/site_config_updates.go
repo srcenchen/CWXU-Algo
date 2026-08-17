@@ -14,7 +14,7 @@ type secretEncryptor func(string) (string, error)
 
 var validSections = map[string]bool{
 	"basic": true, "email": true, "ai": true,
-	"upyun": true, "oj": true, "payment": true, "backup": true, "all": true,
+	"upyun": true, "oj": true, "payment": true, "backup": true, "ops": true, "all": true,
 }
 
 func normalizeSection(section string) string {
@@ -149,6 +149,21 @@ func buildSectionUpdatesWith(row *model.SiteConfig, req *site.UpdateConfigReq, e
 		updates["backup_enabled"] = req.BackupEnabled
 		updates["backup_time"] = backupTime
 		updates["backup_prefix"] = prefix
+	}
+	if isSection(section, "ops") {
+		spider := int(req.SpiderConcurrency)
+		analyze := int(req.ProblemAnalyzeConcurrency)
+		if section == "all" && spider == 0 {
+			spider = normalizeRuntimeConcurrency(row.SpiderConcurrency)
+		}
+		if section == "all" && analyze == 0 {
+			analyze = normalizeRuntimeConcurrency(row.ProblemAnalyzeConcurrency)
+		}
+		if spider < 1 || spider > 32 || analyze < 1 || analyze > 32 {
+			return nil, fmt.Errorf("消费并发必须在 1..32 之间")
+		}
+		updates["spider_concurrency"] = spider
+		updates["problem_analyze_concurrency"] = analyze
 	}
 	return updates, nil
 }

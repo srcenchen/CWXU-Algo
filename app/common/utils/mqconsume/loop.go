@@ -2,6 +2,8 @@ package mqconsume
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"os"
 	"strconv"
 	"strings"
@@ -21,6 +23,9 @@ type Options struct {
 	Name        string
 	Queue       string
 	Concurrency int
+	// ConcurrencySource 可选；值变化时停止拉取新消息，排空在途任务后重建 channel/QoS。
+	ConcurrencySource func() int
+	ReloadInterval    time.Duration
 	// MaxRetry 失败后最大重试次数（不含首次）。超过则 drop（Nack requeue=false）。
 	MaxRetry int
 	// DeclareOnMissing 消费失败时是否尝试 QueueDeclare 后重试（spider/summary 需要）
@@ -32,6 +37,8 @@ type Options struct {
 	// Stop 可选：关闭时退出循环。
 	Stop <-chan struct{}
 }
+
+var errConcurrencyChanged = errors.New("consumer concurrency changed")
 
 // ConcurrencyFromEnv 读取正整数环境变量；空/非法时返回 def（def≤0 时回落为 1）。
 // 用于 2c4g 默认低并发，强机可用 CWXU_*_CONCURRENCY 覆盖。
@@ -63,6 +70,9 @@ func Run(mq *event.RabbitMQ, opts Options) error {
 	}
 
 	for {
+		if opts.ConcurrencySource != nil {
+			opts.Concurrency = normalizeConcurrency(opts.ConcurrencySource(), opts.Concurrency)
+		}
 		if opts.Stop != nil {
 			select {
 			case <-opts.Stop:
@@ -71,6 +81,9 @@ func Run(mq *event.RabbitMQ, opts Options) error {
 			}
 		}
 		err := runOnce(mq, opts)
+		if errors.Is(err, errConcurrencyChanged) {
+			continue
+		}
 		if err == nil {
 			// channel closed normally
 		} else {
@@ -98,7 +111,8 @@ func runOnce(mq *event.RabbitMQ, opts Options) error {
 	if err := ch.Qos(opts.Concurrency, 0, false); err != nil {
 		return err
 	}
-	msgs, err := ch.Consume(opts.Queue, "", false, false, false, false, nil)
+	consumerTag := fmt.Sprintf("%s-%d", opts.Name, time.Now().UnixNano())
+	msgs, err := ch.Consume(opts.Queue, consumerTag, false, false, false, false, nil)
 	if err != nil {
 		if !opts.DeclareOnMissing {
 			return err
@@ -115,7 +129,7 @@ func runOnce(mq *event.RabbitMQ, opts Options) error {
 		if err := ch.Qos(opts.Concurrency, 0, false); err != nil {
 			return err
 		}
-		msgs, err = ch.Consume(opts.Queue, "", false, false, false, false, nil)
+		msgs, err = ch.Consume(opts.Queue, consumerTag, false, false, false, false, nil)
 		if err != nil {
 			return err
 		}
@@ -125,12 +139,30 @@ func runOnce(mq *event.RabbitMQ, opts Options) error {
 
 	sem := make(chan struct{}, opts.Concurrency)
 	var wg sync.WaitGroup
+	var reload <-chan time.Time
+	var ticker *time.Ticker
+	if opts.ConcurrencySource != nil {
+		interval := opts.ReloadInterval
+		if interval <= 0 {
+			interval = 2 * time.Second
+		}
+		ticker = time.NewTicker(interval)
+		defer ticker.Stop()
+		reload = ticker.C
+	}
 
 	for {
 		select {
 		case <-opts.Stop:
+			_ = ch.Cancel(consumerTag, false)
 			wg.Wait()
 			return nil
+		case <-reload:
+			if normalizeConcurrency(opts.ConcurrencySource(), opts.Concurrency) != opts.Concurrency {
+				_ = ch.Cancel(consumerTag, false)
+				wg.Wait()
+				return errConcurrencyChanged
+			}
 		case d, ok := <-msgs:
 			if !ok {
 				wg.Wait()
@@ -161,6 +193,16 @@ func runOnce(mq *event.RabbitMQ, opts Options) error {
 			}(d)
 		}
 	}
+}
+
+func normalizeConcurrency(value, fallback int) int {
+	if value < 1 {
+		return fallback
+	}
+	if value > 32 {
+		return 32
+	}
+	return value
 }
 
 func handleFail(mq *event.RabbitMQ, opts Options, d amqp.Delivery, err error, fromPanic bool) error {

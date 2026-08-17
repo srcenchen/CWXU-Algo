@@ -153,6 +153,8 @@ message GetAdminConfigRes {
   bool backup_enabled = 59;
   string backup_time = 60;
   string backup_prefix = 61;
+  int32 spider_concurrency = 62;
+  int32 problem_analyze_concurrency = 63;
 }
 
 message UpdateConfigReq {
@@ -208,7 +210,7 @@ message UpdateConfigReq {
   bool clear_payfm_secret = 38;
   // 支付方式（如 aloop=支付宝轮循池；空=默认 aloop）
   string payfm_pay_type = 39;
-  // 保存分区：basic | email | ai | upyun | oj | payment | backup | all（空=all）
+  // 保存分区：basic | email | ai | upyun | oj | payment | backup | ops | all（空=all）
   string section = 40;
   // Agent OpenAI 兼容服务地址（非敏感）
   string agent_endpoint = 41;
@@ -217,6 +219,8 @@ message UpdateConfigReq {
   bool backup_enabled = 43;
   string backup_time = 44;
   string backup_prefix = 45;
+  int32 spider_concurrency = 46;
+  int32 problem_analyze_concurrency = 47;
 }
 
 message UpdateConfigRes {

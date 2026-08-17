@@ -12731,6 +12731,12 @@ components:
                     type: string
                 backupPrefix:
                     type: string
+                spiderConcurrency:
+                    type: integer
+                    format: int32
+                problemAnalyzeConcurrency:
+                    type: integer
+                    format: int32
         api.user.v1.site.GetConfigRes:
             type: object
             properties:
@@ -12873,7 +12879,7 @@ components:
                     description: 支付方式（如 aloop=支付宝轮循池；空=默认 aloop）
                 section:
                     type: string
-                    description: 保存分区：basic | email | ai | upyun | oj | payment | backup | all（空=all）
+                    description: 保存分区：basic | email | ai | upyun | oj | payment | backup | ops | all（空=all）
                 agentEndpoint:
                     type: string
                     description: Agent OpenAI 兼容服务地址（非敏感）
@@ -12886,6 +12892,12 @@ components:
                     type: string
                 backupPrefix:
                     type: string
+                spiderConcurrency:
+                    type: integer
+                    format: int32
+                problemAnalyzeConcurrency:
+                    type: integer
+                    format: int32
         api.user.v1.site.UpdateConfigRes:
             type: object
             properties:
