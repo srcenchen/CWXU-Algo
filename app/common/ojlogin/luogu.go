@@ -18,7 +18,7 @@ import (
 
 const (
 	luoguCaptchaURL = "https://www.luogu.com.cn/lg4/captcha"
-	luoguOCRURL     = "https://api.alistgo.com/ocr/file"
+	luoguOCRURL     = "http://ocr.alistgo.com/ocr/file"
 	luoguLoginURL   = "https://www.luogu.com.cn/do-auth/password"
 	luoguMaxRetry   = 3
 	luoguBaseDelay  = 800 * time.Millisecond

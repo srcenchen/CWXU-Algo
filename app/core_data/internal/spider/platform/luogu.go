@@ -138,7 +138,7 @@ func (lg *NewLuoGu) doLogin(
 func (lg *NewLuoGu) login(username, password string) (*http.Client, error) {
 	const (
 		captchaURL = "https://www.luogu.com.cn/lg4/captcha"
-		ocrURL     = "https://api.alistgo.com/ocr/file"
+		ocrURL     = "http://ocr.alistgo.com/ocr/file"
 		loginURL   = "https://www.luogu.com.cn/do-auth/password"
 		maxRetry   = luoguLoginMaxRetry
 	)
