@@ -62,6 +62,7 @@ func TestIsUserSideSpiderErr(t *testing.T) {
 		{"leetcode ranking not found", `leetcode ranking: user abc not found in nearby pages for weekly-contest-400`, true},
 		{"codeforces handle not found", `codeforces user.rating: handles: User with handle xxx not found`, true},
 		{"luogu fe injection missing", `LuoGu sync failed user=35: 未找到 _feInjection`, true},
+		{"luogu records page empty", `LuoGu sync failed user=46: luogu records page empty while count=103`, true},
 		{"timeout", `发起http请求失败: context deadline exceeded`, false},
 		{"403 html", `请求响应码错误 403, <html>Forbidden</html>`, false},
 		{"rate limited", `429 too many requests`, false},
@@ -94,6 +95,20 @@ func TestFormatSpiderLastError_LuoGuFeInjection(t *testing.T) {
 	}
 	if strings.Contains(got, "一般不是账号问题") {
 		t.Fatalf("transient must not say system: %q", got)
+	}
+}
+
+func TestFormatSpiderLastError_LuoGuRecordsPageEmpty(t *testing.T) {
+	raw := errors.New(`LuoGu sync failed user=46: luogu records page empty while count=103`)
+	got := FormatSpiderLastError("LuoGu", raw)
+	if !strings.Contains(got, "洛谷") {
+		t.Fatalf("want platform name, got %q", got)
+	}
+	if strings.Contains(got, "请检查绑定的用户名") {
+		t.Fatalf("records-page-empty must not blame username: %q", got)
+	}
+	if strings.Contains(got, "一般不是账号问题") {
+		t.Fatalf("records-page-empty must not be system: %q", got)
 	}
 }
 

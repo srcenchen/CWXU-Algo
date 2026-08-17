@@ -136,6 +136,22 @@ func TestSectionProjectionBackupRejectsInvalidTime(t *testing.T) {
 	}
 }
 
+func TestSectionProjectionBackupRequiresPrefix(t *testing.T) {
+	for _, prefix := range []string{"", "  ", "/"} {
+		_, err := buildSectionUpdatesWith(&model.SiteConfig{}, &site.UpdateConfigReq{BackupEnabled: true, BackupTime: "02:00", BackupPrefix: prefix}, fakeEncrypt, "backup")
+		if err == nil || !strings.Contains(err.Error(), "存储目录") {
+			t.Fatalf("empty prefix %q error = %v", prefix, err)
+		}
+	}
+	u, err := buildSectionUpdatesWith(&model.SiteConfig{}, &site.UpdateConfigReq{BackupEnabled: true, BackupTime: "02:00", BackupPrefix: "/goalgo/backup/"}, fakeEncrypt, "backup")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if u["backup_prefix"] != "goalgo/backup" {
+		t.Fatalf("backup_prefix = %v, want normalized goalgo/backup", u["backup_prefix"])
+	}
+}
+
 func TestRowToRuntimeIncludesBackupEnabled(t *testing.T) {
 	rt, err := rowToRuntime(&model.SiteConfig{BackupEnabled: true, BackupTime: "04:30", BackupPrefix: "bak", UpyunBucket: "b", UpyunOperator: "o", UpyunPassword: "p"})
 	if err != nil {
@@ -173,7 +189,7 @@ func TestNewSiteSecretsAreStoredAsPlaintext(t *testing.T) {
 	u, err := buildSectionUpdates("all", &model.SiteConfig{}, &site.UpdateConfigReq{
 		SmtpPassword: "smtp", AgentSecret: "agent", AiAnalyzeSecret: "analyze",
 		UpyunPassword: "upyun", OjLuoguPassword: "luogu", OjQojPassword: "qoj",
-		PayfmSecret: "payfm",
+		PayfmSecret: "payfm", BackupEnabled: true, BackupTime: "02:00", BackupPrefix: "goalgo/backup",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -199,6 +215,9 @@ func TestSectionDefaultAll(t *testing.T) {
 	updates, err := buildSectionUpdatesWith(&model.SiteConfig{}, &site.UpdateConfigReq{
 		SmtpHost:  "smtp.example.com",
 		SiteTitle: "GoAlgo",
+		BackupEnabled: true,
+		BackupTime:    "02:00",
+		BackupPrefix:  "goalgo/backup",
 	}, fakeEncrypt, "")
 	if err != nil {
 		t.Fatal(err)

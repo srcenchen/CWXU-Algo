@@ -5128,57 +5128,6 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/api.user.v1.site.GetAdminConfigRes'
-    /v1/user/site/backup/export:
-        post:
-            tags:
-                - Backup
-            description: 创建全量/按 scope 导出任务；返回任务 id（jobId），后台慢慢导出
-            operationId: Backup_Export
-            requestBody:
-                content:
-                    application/json:
-                        schema:
-                            $ref: '#/components/schemas/api.user.v1.site.backup.ExportReq'
-                required: true
-            responses:
-                "200":
-                    description: OK
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/api.user.v1.site.backup.ExportRes'
-    /v1/user/site/backup/jobs:
-        get:
-            tags:
-                - Backup
-            description: 最近备份任务列表
-            operationId: Backup_ListJobs
-            responses:
-                "200":
-                    description: OK
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/api.user.v1.site.backup.ListJobsRes'
-    /v1/user/site/backup/jobs/{id}:
-        get:
-            tags:
-                - Backup
-            description: 单个任务状态：pending|running|done|failed、progress、message、downloadable
-            operationId: Backup_GetJob
-            parameters:
-                - name: id
-                  in: path
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: OK
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/api.user.v1.site.backup.GetJobRes'
     /v1/user/site/config:
         get:
             tags:
@@ -12994,77 +12943,6 @@ components:
                 counted:
                     type: boolean
                     description: 是否计入本次人次（节流内重复访问为 false）
-        api.user.v1.site.backup.ExportReq:
-            type: object
-            properties:
-                scopes:
-                    type: array
-                    items:
-                        type: string
-        api.user.v1.site.backup.ExportRes:
-            type: object
-            properties:
-                code:
-                    type: integer
-                    format: int32
-                message:
-                    type: string
-                jobId:
-                    type: string
-        api.user.v1.site.backup.GetJobRes:
-            type: object
-            properties:
-                code:
-                    type: integer
-                    format: int32
-                message:
-                    type: string
-                job:
-                    $ref: '#/components/schemas/api.user.v1.site.backup.JobInfo'
-        api.user.v1.site.backup.JobInfo:
-            type: object
-            properties:
-                id:
-                    type: string
-                kind:
-                    type: string
-                status:
-                    type: string
-                scopes:
-                    type: array
-                    items:
-                        type: string
-                progress:
-                    type: integer
-                    format: int32
-                message:
-                    type: string
-                fileSize:
-                    type: string
-                createdBy:
-                    type: string
-                errorDetail:
-                    type: string
-                createdAt:
-                    type: string
-                startedAt:
-                    type: string
-                finishedAt:
-                    type: string
-                downloadable:
-                    type: boolean
-        api.user.v1.site.backup.ListJobsRes:
-            type: object
-            properties:
-                code:
-                    type: integer
-                    format: int32
-                message:
-                    type: string
-                jobs:
-                    type: array
-                    items:
-                        $ref: '#/components/schemas/api.user.v1.site.backup.JobInfo'
         api.user.v1.social.CountsRes:
             type: object
             properties:
@@ -13658,13 +13536,6 @@ components:
 tags:
     - name: Auth
       description: Auth 认证服务
-    - name: Backup
-      description: |-
-        站点数据备份/恢复任务（仅站点管理员；后台异步执行）。
-         路径前缀：/v1/user/site/backup/*
-
-         注：import（multipart 大文件上传）与 jobs/{id}/download（zip 流式下载）以及
-         jobs/{id} 删除仍为手写路由（见 app/user/internal/service/backup.go RegisterBackupRoutes）。
     - name: Backup
     - name: Blog
       description: |-

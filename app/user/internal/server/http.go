@@ -15,7 +15,6 @@ import (
 	rbacpb "cwxu-algo/api/user/v1/rbac"
 	"cwxu-algo/api/user/v1/role"
 	"cwxu-algo/api/user/v1/site"
-	backuppb "cwxu-algo/api/user/v1/site/backup"
 	"cwxu-algo/api/user/v1/social"
 	subscriptionpb "cwxu-algo/api/user/v1/subscription"
 	ticketpb "cwxu-algo/api/user/v1/ticket"
@@ -160,8 +159,6 @@ func NewHTTPServer(
 	notificationpb.RegisterNotificationHTTPServer(srv, notificationService)
 	blog.RegisterBlogHTTPServer(srv, blogService)
 	service.RegisterSEORoutes(srv, seoService)
-	service.RegisterBackupRoutes(srv, d)
-	backuppb.RegisterBackupHTTPServer(srv, service.NewBackupService(d))
 	// C 端订阅（套餐/订单/站管管理）
 	subscriptionpb.RegisterSubscriptionHTTPServer(srv, subscriptionService)
 	// 工单（对接外部客户中心，全部需登录）

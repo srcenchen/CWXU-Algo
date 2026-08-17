@@ -93,6 +93,9 @@ func (r *Runner) cloudConfig(ctx context.Context) (CloudConfig, error) {
 	if cloud.Bucket == "" || cloud.Operator == "" || strings.TrimSpace(cloud.Password) == "" {
 		return CloudConfig{}, errors.New("自动灾备已开启，但站点又拍云服务名、操作员或密码配置不完整")
 	}
+	if cloud.Prefix == "" {
+		return CloudConfig{}, errors.New("自动灾备已开启，但存储目录未填写")
+	}
 	return cloud, nil
 }
 
@@ -244,7 +247,7 @@ func (r *Runner) Run(ctx context.Context) (Result, error) {
 	if err := r.verifyFile(ctx, encryptedPath, len(dbs)); err != nil {
 		return Result{}, fmt.Errorf("verify local archive: %w", err)
 	}
-	archiveKey := path.Join(cloud.Prefix, "algobak")
+	archiveKey := path.Join(cloud.Prefix, backupArchiveName(r.dep.Now()))
 	temporaryKey := archiveKey + ".uploading-" + r.dep.UploadID()
 	archive, err := os.Open(encryptedPath)
 	if err != nil {
@@ -389,8 +392,11 @@ func (r *Runner) cleanup(ctx context.Context, store ObjectStore, prefix, current
 			if path.Dir(key) != strings.TrimSuffix(prefix, "/") && !(prefix == "" && path.Dir(key) == ".") {
 				continue
 			}
-			legacyArchive := strings.HasPrefix(base, "core-") && strings.HasSuffix(base, ".cwxubak")
-			if key != current && (base == "latest.json" || legacyArchive || strings.HasPrefix(base, "algobak.uploading-")) {
+			managed := base == "latest.json" ||
+				(strings.HasPrefix(base, "core-") && strings.HasSuffix(base, ".cwxubak")) ||
+				strings.HasPrefix(base, "algobak") ||
+				strings.HasPrefix(base, "bak_")
+			if key != current && managed {
 				if err := store.Delete(ctx, key); err != nil {
 					return err
 				}
@@ -402,6 +408,21 @@ func (r *Runner) cleanup(ctx context.Context, store ObjectStore, prefix, current
 		token = next
 	}
 }
+
+// backupArchiveName 生成远端归档名：bak_<Asia/Shanghai 时间>.algobak（只保留最新一份，旧归档上传成功后清理）
+func backupArchiveName(now time.Time) string {
+	const layout = "20060102_150405"
+	return "bak_" + now.In(shanghaiLoc).Format(layout) + ".algobak"
+}
+
+// shanghaiLoc Asia/Shanghai（与备份调度时区一致）
+var shanghaiLoc = func() *time.Location {
+	loc, err := time.LoadLocation("Asia/Shanghai")
+	if err != nil {
+		return time.FixedZone("CST", 8*3600)
+	}
+	return loc
+}()
 
 func writeTar(ctx context.Context, out *io.PipeWriter, files []string) error {
 	tw := tar.NewWriter(out)

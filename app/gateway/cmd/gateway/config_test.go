@@ -172,12 +172,8 @@ func TestConfigUnmarshaler(t *testing.T) {
 	if gateway.Name != "cwxu-algo" || gateway.Version != "v1" {
 		t.Errorf("unexpected gateway identity: %s %s", gateway.Name, gateway.Version)
 	}
-	if len(gateway.Endpoints) != 6 {
-		t.Errorf("expected six service endpoints, got %d", len(gateway.Endpoints))
-	}
-	// 备份大文件端点必须早于 /v1/user/* 注册（gorilla mux 按注册顺序匹配）且为流式
-	if gateway.Endpoints[0].Path != "/v1/user/site/backup/*" || !gateway.Endpoints[0].Stream {
-		t.Errorf("backup endpoint must be first and streamed, got %+v", gateway.Endpoints[0])
+	if len(gateway.Endpoints) != 5 {
+		t.Errorf("expected five service endpoints, got %d", len(gateway.Endpoints))
 	}
 	if len(gateway.Middlewares) != 1 || gateway.Middlewares[0].Name != "jwt" {
 		t.Errorf("global jwt middleware must be enabled")

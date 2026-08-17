@@ -142,9 +142,13 @@ func buildSectionUpdatesWith(row *model.SiteConfig, req *site.UpdateConfigReq, e
 		if err := sitesettings.ValidateBackupTime(backupTime); err != nil {
 			return nil, err
 		}
+		prefix := strings.Trim(strings.TrimSpace(req.BackupPrefix), "/")
+		if prefix == "" {
+			return nil, fmt.Errorf("存储目录不能为空")
+		}
 		updates["backup_enabled"] = req.BackupEnabled
 		updates["backup_time"] = backupTime
-		updates["backup_prefix"] = strings.Trim(strings.TrimSpace(req.BackupPrefix), "/")
+		updates["backup_prefix"] = prefix
 	}
 	return updates, nil
 }

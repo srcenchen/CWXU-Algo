@@ -188,16 +188,43 @@ func validConfig(t *testing.T) Config {
 func TestCleanupAtBucketRootOnlyDeletesOwnedLegacyBackupNames(t *testing.T) {
 	store := newMemoryStore()
 	store.listPages = [][]string{{
-		"latest.json", "core-20260816T000000Z.cwxubak", "algobak.uploading-old",
-		"algobak", "customer.txt", "nested/latest.json", "other-core-1.cwxubak",
+		"latest.json", "core-20260816T000000Z.cwxubak",
+		"bak_20260815T000000Z.algobak", "bak_20260815T000000Z.algobak.uploading-old",
+		"algobak.uploading-old", "algobak",
+		"customer.txt", "nested/latest.json", "other-core-1.cwxubak",
 	}}
 	runner := &Runner{}
-	if err := runner.cleanup(context.Background(), store, "", "algobak"); err != nil {
+	if err := runner.cleanup(context.Background(), store, "", "bak_20260816T000000Z.algobak"); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"latest.json", "core-20260816T000000Z.cwxubak", "algobak.uploading-old"}
+	want := []string{
+		"latest.json", "core-20260816T000000Z.cwxubak",
+		"bak_20260815T000000Z.algobak", "bak_20260815T000000Z.algobak.uploading-old",
+		"algobak.uploading-old", "algobak",
+	}
 	if !reflect.DeepEqual(store.deleted, want) {
 		t.Fatalf("bucket-root cleanup deleted wrong objects: %v, want %v", store.deleted, want)
+	}
+}
+
+func TestCleanupDeletesOlderTimeBasedArchivesOutsidePrefix(t *testing.T) {
+	store := newMemoryStore()
+	store.listPages = [][]string{{
+		"backups/core/bak_20260815T000000Z.algobak",
+		"backups/core/bak_20260816T000000Z.algobak",
+		"backups/core/bak_20260816T000000Z.algobak.uploading-old",
+		"backups/core/customer.txt", "backups/core/note.txt",
+	}}
+	runner := &Runner{}
+	if err := runner.cleanup(context.Background(), store, "backups/core", "backups/core/bak_20260816T000000Z.algobak"); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		"backups/core/bak_20260815T000000Z.algobak",
+		"backups/core/bak_20260816T000000Z.algobak.uploading-old",
+	}
+	if !reflect.DeepEqual(store.deleted, want) {
+		t.Fatalf("prefix cleanup deleted wrong objects: %v, want %v", store.deleted, want)
 	}
 }
 
@@ -216,7 +243,7 @@ func TestRunnerCommandsArtifactAndPublicationOrder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantKey := "backups/core/algobak"
+	wantKey := "backups/core/bak_20260816_203456.algobak"
 	if result.ArchiveKey != wantKey || result.SHA256 == "" || result.Databases != 2 {
 		t.Fatalf("result = %+v", result)
 	}
@@ -266,7 +293,7 @@ func TestRunnerCommandsArtifactAndPublicationOrder(t *testing.T) {
 	}
 
 	archive := store.objects[wantKey]
-	tempKey := "backups/core/algobak.uploading-test-id"
+	tempKey := "backups/core/bak_20260816_203456.algobak.uploading-test-id"
 	if store.putReaders[tempKey] != "*os.File" {
 		t.Fatalf("archive uploaded from %s, want bounded-memory file stream", store.putReaders[tempKey])
 	}
@@ -307,8 +334,8 @@ func TestRunnerFailureDoesNotPublishOrCleanup(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			store := newMemoryStore()
-			archive := "backups/core/algobak.uploading-test-id"
-			store.objects["backups/core/algobak"] = []byte("old")
+			archive := "backups/core/bak_20260816_203456.algobak.uploading-test-id"
+			store.objects["backups/core/bak_20260815T000000Z.algobak"] = []byte("old")
 			tc.configure(store, archive)
 			runner, err := NewRunner(validConfig(t), Dependencies{Commands: &fakeCommands{}, Store: store, CloudConfig: func(context.Context) (CloudConfig, error) {
 				return CloudConfig{Bucket: "bucket", Operator: "operator", Password: "password", Prefix: "backups/core"}, nil
@@ -321,8 +348,8 @@ func TestRunnerFailureDoesNotPublishOrCleanup(t *testing.T) {
 			if _, err := runner.Run(context.Background()); err == nil {
 				t.Fatal("Run succeeded, want failure")
 			}
-			if got := string(store.objects["backups/core/algobak"]); got != "old" {
-				t.Fatalf("old fixed object changed on failure: %q", got)
+			if got := string(store.objects["backups/core/bak_20260815T000000Z.algobak"]); got != "old" {
+				t.Fatalf("old archive changed on failure: %q", got)
 			}
 			if _, ok := store.objects[archive]; ok {
 				t.Fatal("temporary object was not cleaned after failure")
@@ -330,7 +357,7 @@ func TestRunnerFailureDoesNotPublishOrCleanup(t *testing.T) {
 			wantEvents := map[string][]string{
 				"upload":  {"put:" + archive, "delete:" + archive},
 				"verify":  {"put:" + archive, "get:" + archive, "delete:" + archive},
-				"replace": {"put:" + archive, "get:" + archive, "move:" + archive + ":backups/core/algobak", "delete:" + archive},
+				"replace": {"put:" + archive, "get:" + archive, "move:" + archive + ":backups/core/bak_20260816_203456.algobak", "delete:" + archive},
 			}[tc.name]
 			if !reflect.DeepEqual(store.events, wantEvents) {
 				t.Fatalf("failure events = %v, want %v", store.events, wantEvents)
@@ -386,6 +413,34 @@ func TestRunnerValidateReportsIncompleteRuntimeUpyunConfiguration(t *testing.T) 
 	}
 	if err := runner.Validate(context.Background()); err == nil || !strings.Contains(err.Error(), "站点又拍云") {
 		t.Fatalf("Validate error = %v", err)
+	}
+}
+
+func TestRunnerValidateRejectsEmptyBackupPrefix(t *testing.T) {
+	runner, err := NewRunner(validConfig(t), Dependencies{CloudConfig: func(context.Context) (CloudConfig, error) {
+		return CloudConfig{Bucket: "bucket", Operator: "operator", Password: "password", Prefix: ""}, nil
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := runner.Validate(context.Background()); err == nil || !strings.Contains(err.Error(), "存储目录") {
+		t.Fatalf("Validate error = %v", err)
+	}
+}
+
+func TestRunnerRunRejectsEmptyBackupPrefixBeforeCommands(t *testing.T) {
+	commands := &fakeCommands{}
+	runner, err := NewRunner(validConfig(t), Dependencies{Commands: commands, Store: newMemoryStore(), CloudConfig: func(context.Context) (CloudConfig, error) {
+		return CloudConfig{Bucket: "bucket", Operator: "operator", Password: "password", Prefix: "  "}, nil
+	}, DiskFree: func(string) (uint64, error) { return 1 << 40, nil }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runner.Run(context.Background()); err == nil || !strings.Contains(err.Error(), "存储目录") {
+		t.Fatalf("Run error = %v", err)
+	}
+	if len(commands.calls) != 0 {
+		t.Fatalf("commands ran before prefix preflight: %v", commands.calls)
 	}
 }
 

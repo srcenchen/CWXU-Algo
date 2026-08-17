@@ -6,12 +6,6 @@ middlewares:
       '@type': type.googleapis.com/gateway.middleware.jwt.v1.JWT
       secret: ""
 endpoints:
-  - path: /v1/user/site/backup/*
-    timeout: 600s
-    protocol: HTTP
-    stream: true
-    backends:
-      - target: discovery:///user
   - path: /v1/payment/*
     timeout: 30s
     protocol: HTTP

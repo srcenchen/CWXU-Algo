@@ -130,6 +130,10 @@ func classifySpiderErr(raw string) (spiderFaultKind, string) {
 	if strings.Contains(lower, "未找到 _feinjection") || strings.Contains(lower, "_feinjection") {
 		return spiderFaultTransient, "对方页面暂时无法解析"
 	}
+	// 用户记录数 >0 但记录列表为空：多为该用户记录页不可见/需登录，属用户侧，不算平台异常
+	if strings.Contains(lower, "records page empty") {
+		return spiderFaultTransient, "对方记录页暂时不可见"
+	}
 
 	// —— 系统侧：封禁 / 网关 / 超时 / HTML 墙 ——
 	if strings.Contains(lower, "403") || strings.Contains(lower, "forbidden") {

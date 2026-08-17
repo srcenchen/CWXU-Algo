@@ -175,7 +175,6 @@ func migrateModels(db *gorm.DB) {
 		&model.PlanQuota{},
 		&model.Paste{},
 		&model.SiteVisitDaily{},
-		&model.BackupJob{},
 		&model.UserFollow{},
 		&model.Notification{},
 		&model.BlogArticle{},
@@ -218,7 +217,6 @@ func migrateModels(db *gorm.DB) {
 	seedRbac(db)
 	backfillLastLoginAt(db)
 	ensureSiteInactiveDays(db)
-	ensureBackupActiveJobIndex(db)
 	backfillBlogModerationApproved(db)
 	backfillBlogActivationForExistingAuthors(db)
 	if err := backfillBlogFixedPages(db); err != nil {
@@ -752,18 +750,6 @@ func completeSchemaPatch(db *gorm.DB, key string) error {
 	return db.Clauses(clause.OnConflict{DoNothing: true}).Create(&model.SchemaPatch{
 		Key: key, AppliedAt: time.Now(),
 	}).Error
-}
-
-// ensureBackupActiveJobIndex 并发保护：同 kind 同时只允许一个 pending/running 备份任务。
-// 与 service 层 hasActiveJob 检查配合，消除「检查-创建」竞态。
-func ensureBackupActiveJobIndex(db *gorm.DB) {
-	if db == nil || !db.Migrator().HasTable(&model.BackupJob{}) {
-		return
-	}
-	if err := db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS uniq_backup_jobs_active_kind
-		ON backup_jobs (kind) WHERE status IN ('pending', 'running')`).Error; err != nil {
-		log.Warnf("ensure backup active job unique index: %v", err)
-	}
 }
 
 // backfillBlogModerationApproved 旧文章默认视为已通过审核（SchemaPatch 一次性执行）
