@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"cwxu-algo/internal/opscompose"
+	"cwxu-algo/internal/opsdata"
 	"cwxu-algo/internal/opsrelease"
 	"cwxu-algo/internal/opsroot"
 )
@@ -78,6 +79,73 @@ func TestDotenvValueOrDefault(t *testing.T) {
 type recordingRunner struct {
 	output string
 	calls  [][]string
+}
+
+func TestRuntimeUpgradePullsLatestTagsAndStoresResolvedDigests(t *testing.T) {
+	dataPath := filepath.Join(t.TempDir(), "ops.data.json")
+	t.Setenv("GOALGO_OPS_DATA_FILE", dataPath)
+	root, err := opsroot.Resolve(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(root.Join(".env"), []byte("GOALGO_ROOT="+root.Path+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(root.Join("compose.yaml"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := testRelease('a').WriteFile(root.Join("release.env")); err != nil {
+		t.Fatal(err)
+	}
+
+	runner := &upgradeRunner{}
+	compose := &opscompose.Compose{Root: root, Run: runner, SmokeCheck: func(context.Context) error { return nil }}
+	if code := runtimeUpgrade(context.Background(), compose); code != 0 {
+		t.Fatalf("upgrade exit code = %d", code)
+	}
+
+	active, err := opsrelease.ParseFile(root.Join("release.env"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !releaseSame(active, opsrelease.LatestTagRelease()) {
+		t.Fatalf("upgrade must keep latest tags in release.env, got %v", active.Images)
+	}
+	data, err := opsdata.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, service := range []string{"frontend", "gateway", "user", "core-data", "agent"} {
+		key := strings.ToUpper(strings.ReplaceAll(service, "-", "_")) + "_IMAGE"
+		want := opsrelease.Repository + "@sha256:" + strings.Repeat(string(rune('b'+i)), 64)
+		if got := data.Deploy.LastDigests[key]; got != want {
+			t.Errorf("stored %s = %q, want %q", key, got, want)
+		}
+	}
+}
+
+type upgradeRunner struct{}
+
+func (r *upgradeRunner) CombinedOutput(_ context.Context, name string, args ...string) (string, error) {
+	joined := name + " " + strings.Join(args, " ")
+	for i, service := range []string{"frontend", "gateway", "user", "core-data", "agent"} {
+		if joined == "docker manifest inspect --verbose "+opsrelease.Repository+":"+service+"-latest" {
+			return `{"Descriptor":{"digest":"sha256:` + strings.Repeat(string(rune('b'+i)), 64) + `"}}`, nil
+		}
+	}
+	if strings.Contains(joined, " ps --format json") {
+		services := []string{"frontend", "gateway", "user", "core-data", "agent", "postgres", "redis", "rabbitmq", "consul", "nginx"}
+		parts := make([]string, 0, len(services))
+		for _, service := range services {
+			parts = append(parts, fmt.Sprintf(`{"Service":%q,"State":"running","Health":"healthy"}`, service))
+		}
+		return "[" + strings.Join(parts, ",") + "]", nil
+	}
+	return "", nil
+}
+
+func (r *upgradeRunner) Run(context.Context, io.Reader, io.Writer, io.Writer, string, ...string) error {
+	return nil
 }
 
 func TestApplyReleaseFailureRestoresFilesAndRunningRelease(t *testing.T) {

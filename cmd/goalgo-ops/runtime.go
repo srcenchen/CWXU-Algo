@@ -163,7 +163,7 @@ func runtimeUpgrade(ctx context.Context, compose *opscompose.Compose) int {
 	if err != nil && !os.IsNotExist(err) {
 		return fail("升级", err)
 	}
-	if err := applyRelease(ctx, compose, latest, active, previous); err != nil {
+	if err := applyRelease(ctx, compose, opsrelease.LatestTagRelease(), active, previous); err != nil {
 		return fail("升级", err)
 	}
 	data.Deploy.LastDigests = latest.Images

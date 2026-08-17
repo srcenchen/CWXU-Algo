@@ -28,7 +28,7 @@ type Options struct {
 	ReloadInterval    time.Duration
 	// MaxRetry 失败后最大重试次数（不含首次）。超过则 drop（Nack requeue=false）。
 	MaxRetry int
-	// DeclareOnMissing 消费失败时是否尝试 QueueDeclare 后重试（spider/summary 需要）
+	// DeclareOnMissing 启动消费前声明持久队列，并在消费失败时再次声明后重试。
 	DeclareOnMissing bool
 	// Handler 返回 error 则按重试策略处理；nil 则 Ack。
 	Handler func(body []byte, headers amqp.Table) error
@@ -102,6 +102,11 @@ func Run(mq *event.RabbitMQ, opts Options) error {
 }
 
 func runOnce(mq *event.RabbitMQ, opts Options) error {
+	if opts.DeclareOnMissing {
+		if _, err := mq.QueueDeclare(opts.Queue, true, false, false, false, nil); err != nil {
+			return err
+		}
+	}
 	ch, err := mq.OpenChannel()
 	if err != nil {
 		return err

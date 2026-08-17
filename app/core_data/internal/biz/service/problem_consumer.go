@@ -283,7 +283,9 @@ func (c *ProblemFetchConsumer) Consume() {
 }
 
 func (c *ProblemFetchConsumer) consumeOnce() error {
-	// 队列由发布侧创建；此处禁止 QueueDeclare（args 不一致会 PRECONDITION 杀 channel）
+	if err := c.problem.declareProblemQueue(problemFetchQueue); err != nil {
+		return fmt.Errorf("declare queue %s: %w", problemFetchQueue, err)
+	}
 	ch, err := c.mq.OpenChannel()
 	if err != nil {
 		return err
@@ -416,7 +418,9 @@ func (c *ProblemAnalyzeConsumer) Consume() {
 }
 
 func (c *ProblemAnalyzeConsumer) consumeOnce(concurrency int, concurrencySource func() int) (bool, error) {
-	// 队列由发布侧创建；此处禁止 QueueDeclare（args 不一致会 PRECONDITION 杀 channel）
+	if err := c.problem.declareProblemQueue("problem_analyze"); err != nil {
+		return false, fmt.Errorf("declare queue problem_analyze: %w", err)
+	}
 	ch, err := c.mq.OpenChannel()
 	if err != nil {
 		return false, err

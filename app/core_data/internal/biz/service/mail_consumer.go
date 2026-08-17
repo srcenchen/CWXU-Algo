@@ -37,6 +37,10 @@ type MailConsumer struct {
 	stopOnce sync.Once
 }
 
+type mailQueueDeclarer interface {
+	QueueDeclare(name string, durable, autoDelete, exclusive, noWait bool, args amqp.Table) (amqp.Queue, error)
+}
+
 func NewMailConsumer(mq *event.RabbitMQ, data *data.Data) *MailConsumer {
 	return &MailConsumer{
 		mq:     mq,
@@ -77,7 +81,9 @@ func (c *MailConsumer) consumeOnce() error {
 	if c.mq == nil {
 		return fmt.Errorf("mq not ready")
 	}
-	// 队列由发布侧声明（mailqueue.Enqueue）；此处禁止 QueueDeclare（args 不一致会 PRECONDITION 杀 channel）
+	if err := ensureMailQueue(c.mq); err != nil {
+		return fmt.Errorf("declare queue %s: %w", mailqueue.Queue, err)
+	}
 	ch, err := c.mq.OpenChannel()
 	if err != nil {
 		return err
@@ -134,6 +140,11 @@ func (c *MailConsumer) consumeOnce() error {
 	}
 	wg.Wait()
 	return nil
+}
+
+func ensureMailQueue(mq mailQueueDeclarer) error {
+	_, err := mq.QueueDeclare(mailqueue.Queue, true, false, false, false, nil)
+	return err
 }
 
 // sendMail 从站点配置取 SMTP 发送；失败返回 error 走重试。
