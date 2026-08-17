@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"strings"
 )
@@ -13,16 +14,45 @@ type Command interface {
 	Run(ctx context.Context, stdin io.Reader, stdout, stderr io.Writer, name string, args ...string) error
 }
 
-type Real struct{}
+// Real 直接在本机执行命令。Env 非空时作为环境变量覆盖层注入子进程：
+// 会先从继承环境里剔除同名键，再按 map 顺序写入，保证覆盖层优先于 shell 环境。
+type Real struct {
+	Env map[string]string
+}
 
-func (Real) CombinedOutput(ctx context.Context, name string, args ...string) (string, error) {
+func (r Real) mergedEnv() []string {
+	if len(r.Env) == 0 {
+		return nil
+	}
+	env := os.Environ()
+	for key, value := range r.Env {
+		prefix := key + "="
+		filtered := env[:0]
+		for _, item := range env {
+			if !strings.HasPrefix(item, prefix) {
+				filtered = append(filtered, item)
+			}
+		}
+		env = filtered
+		env = append(env, prefix+value)
+	}
+	return env
+}
+
+func (r Real) CombinedOutput(ctx context.Context, name string, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, name, args...)
+	if env := r.mergedEnv(); env != nil {
+		cmd.Env = env
+	}
 	output, err := cmd.CombinedOutput()
 	return string(output), err
 }
 
-func (Real) Run(ctx context.Context, stdin io.Reader, stdout, stderr io.Writer, name string, args ...string) error {
+func (r Real) Run(ctx context.Context, stdin io.Reader, stdout, stderr io.Writer, name string, args ...string) error {
 	cmd := exec.CommandContext(ctx, name, args...)
+	if env := r.mergedEnv(); env != nil {
+		cmd.Env = env
+	}
 	cmd.Stdin = stdin
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr

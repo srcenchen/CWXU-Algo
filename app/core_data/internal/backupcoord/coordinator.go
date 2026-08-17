@@ -377,7 +377,7 @@ func (c *Coordinator) RunScheduled(now time.Time) {
 		return
 	}
 	configuredMinutes := configuredAt.Hour()*60 + configuredAt.Minute()
-	if local.Hour()*60+local.Minute() < configuredMinutes {
+	if local.Hour()*60+local.Minute() != configuredMinutes {
 		return
 	}
 	day := local.Format("2006-01-02")

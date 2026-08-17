@@ -176,7 +176,6 @@ func applyOwnership(root string) error {
 		"data/redis":    999,
 		"data/rabbitmq": 100,
 		"data/consul":   100,
-		"data/backups":  10001,
 	}
 	for relative, uid := range owners {
 		target := filepath.Join(root, relative)

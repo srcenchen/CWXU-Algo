@@ -17,6 +17,64 @@ import (
 	"cwxu-algo/internal/opsroot"
 )
 
+func TestRuntimeUninstallPreservesEnvFile(t *testing.T) {
+	t.Setenv("GOALGO_OPS_DATA_FILE", filepath.Join(t.TempDir(), "ops.data.json"))
+	root, err := opsroot.Resolve(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	envContent := "GOALGO_ROOT=" + root.Path + "\nGOALGO_HTTP_PORT=8988\n"
+	if err := os.WriteFile(root.Join(".env"), []byte(envContent), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(root.Join("compose.yaml"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	compose := &opscompose.Compose{Root: root, Run: &transactionRunner{}}
+	if code := runtimeUninstall(context.Background(), compose, []string{"--yes"}); code != 0 {
+		t.Fatalf("uninstall exit code = %d", code)
+	}
+	got, err := os.ReadFile(root.Join(".env"))
+	if err != nil {
+		t.Fatalf("preserved .env not readable: %v", err)
+	}
+	if string(got) != envContent {
+		t.Fatalf("preserved .env changed: %q", got)
+	}
+}
+
+func TestRuntimeUninstallWithoutEnvStillSucceeds(t *testing.T) {
+	t.Setenv("GOALGO_OPS_DATA_FILE", filepath.Join(t.TempDir(), "ops.data.json"))
+	root, err := opsroot.Resolve(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	compose := &opscompose.Compose{Root: root, Run: &transactionRunner{}}
+	if code := runtimeUninstall(context.Background(), compose, []string{"--yes"}); code != 0 {
+		t.Fatalf("uninstall exit code = %d", code)
+	}
+	if _, err := os.Stat(root.Path); !os.IsNotExist(err) {
+		t.Fatalf("root dir should be removed, got %v", err)
+	}
+}
+
+func TestDotenvValueOrDefault(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".env")
+	if err := os.WriteFile(path, []byte("GOALGO_ROOT=/a/b\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := dotenvValueOrDefault(path, "GOALGO_ROOT"); got != "/a/b" {
+		t.Fatalf("got %q", got)
+	}
+	if got := dotenvValueOrDefault(path, "NOPE"); got != "" {
+		t.Fatalf("expected empty, got %q", got)
+	}
+	if got := dotenvValueOrDefault(filepath.Join(dir, "missing.env"), "GOALGO_ROOT"); got != "" {
+		t.Fatalf("expected empty for missing file, got %q", got)
+	}
+}
+
 type recordingRunner struct {
 	output string
 	calls  [][]string

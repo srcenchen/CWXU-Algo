@@ -64,14 +64,17 @@ class ContainerRuntimeTests(unittest.TestCase):
         compose = read("compose.yaml")
         self.assertNotIn("/run/secrets/goalgo:ro", compose)
         self.assertIn("backup_encryption_key:/run/secrets/backup_encryption_key:ro", compose)
-        self.assertIn("/data/backups:/var/lib/goalgo/backups", compose)
+        self.assertNotIn("/data/backups:/var/lib/goalgo/backups", compose)
         self.assertIn("CWXU_BACKUP_WORK_DIR: /var/lib/goalgo/backups", compose)
         self.assertIn("CWXU_BACKUP_ENCRYPTION_KEY_FILE: /run/secrets/backup_encryption_key", compose)
+        dockerfile = read("docker/backend.Dockerfile")
+        self.assertIn("install -d -m 0700 /var/lib/goalgo/backups", dockerfile)
+        self.assertIn("chown goalgo:goalgo /var/lib/goalgo/backups", dockerfile)
         provision = read("scripts/provision-root.sh")
         self.assertIn("10001:10001", provision)
         for owner in ("999:999", "999:1000", "100:101", "100:1000"):
             self.assertIn(owner, provision)
-        self.assertIn("data/backups", provision)
+        self.assertNotIn("data/backups", provision)
 
     def test_backend_dockerfile_has_exact_targets_and_commands(self):
         dockerfile = read("docker/backend.Dockerfile")

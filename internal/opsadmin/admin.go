@@ -45,8 +45,10 @@ func Bootstrap(ctx context.Context, root *opsroot.Root, compose *opscompose.Comp
 		return err
 	}
 	const containerMount = "/run/admin.env"
+	// 必须以可写方式挂载：容器内 admin-init 成功创建后会删除自己的配置文件
+	// （os.Remove /run/admin.env）以清除凭据；只读挂载会导致删除失败并让 run 返回非零。
 	if _, err := compose.RunService(ctx, "user",
-		[]string{"--user", "root", "--entrypoint", "/app/admin-init", "-v", configPath + ":" + containerMount + ":ro"},
+		[]string{"--user", "root", "--entrypoint", "/app/admin-init", "-v", configPath + ":" + containerMount},
 		"--admin-config", containerMount); err != nil {
 		return fmt.Errorf("docker compose run 失败：%w", err)
 	}

@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"cwxu-algo/internal/opsexec"
 	"cwxu-algo/internal/opsrelease"
 	"cwxu-algo/internal/opsroot"
 )
@@ -26,6 +27,39 @@ type Compose struct {
 	Root       *opsroot.Root
 	Run        Runner
 	SmokeCheck func(context.Context) error
+}
+
+// runner 返回用于执行 docker 命令的 Runner。对真实的 opsexec.Real，
+// 会把 .env 与 release.env 里的变量注入子进程环境，避免 shell 里残留的
+// GOALGO_ROOT 等空值/旧值覆盖 docker compose 的 --env-file 插值。
+func (c *Compose) runner() Runner {
+	if real, ok := c.Run.(opsexec.Real); ok {
+		real.Env = c.envOverlay()
+		return real
+	}
+	return c.Run
+}
+
+// envOverlay 收集 .env 与 release.env 中的键值对作为子进程环境覆盖层。
+func (c *Compose) envOverlay() map[string]string {
+	overlay := map[string]string{}
+	for _, file := range []string{".env", "release.env"} {
+		content, err := readFile(c.Root.Join(file))
+		if err != nil {
+			continue
+		}
+		for _, line := range strings.Split(content, "\n") {
+			line = strings.TrimSpace(line)
+			if line == "" || strings.HasPrefix(line, "#") {
+				continue
+			}
+			key, value, ok := strings.Cut(line, "=")
+			if ok {
+				overlay[strings.TrimSpace(key)] = strings.TrimSpace(value)
+			}
+		}
+	}
+	return overlay
 }
 
 func (c *Compose) baseArgs() []string {
@@ -42,7 +76,7 @@ func (c *Compose) Command(ctx context.Context, args ...string) (string, error) {
 		return "", err
 	}
 	full := append(c.baseArgs(), args...)
-	return c.Run.CombinedOutput(ctx, "docker", full...)
+	return c.runner().CombinedOutput(ctx, "docker", full...)
 }
 
 // CommandWithStdin 运行命令并把 data 作为 stdin 传入（用于 psql/pg_restore 管道）。
@@ -53,7 +87,7 @@ func (c *Compose) CommandWithStdin(ctx context.Context, data []byte, args ...str
 	full := append(c.baseArgs(), args...)
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
-	err := c.Run.Run(ctx, bytes.NewReader(data), &stdout, &stderr, "docker", full...)
+	err := c.runner().Run(ctx, bytes.NewReader(data), &stdout, &stderr, "docker", full...)
 	output := stdout.String()
 	if stderr.Len() > 0 {
 		if output != "" {
@@ -68,7 +102,7 @@ func (c *Compose) Up(ctx context.Context, timeout string) error {
 	if err := c.ValidateRoot(); err != nil {
 		return err
 	}
-	err := c.Run.Run(ctx, nil, os.Stdout, os.Stderr, "docker", append(c.baseArgs(), "up", "-d", "--wait", "--wait-timeout", timeout)...)
+	err := c.runner().Run(ctx, nil, os.Stdout, os.Stderr, "docker", append(c.baseArgs(), "up", "-d", "--wait", "--wait-timeout", timeout)...)
 	if err != nil {
 		return fmt.Errorf("compose up：%w", err)
 	}
@@ -79,7 +113,7 @@ func (c *Compose) Pull(ctx context.Context) error {
 	if err := c.ValidateRoot(); err != nil {
 		return err
 	}
-	err := c.Run.Run(ctx, nil, os.Stdout, os.Stderr, "docker", append(c.baseArgs(), "pull")...)
+	err := c.runner().Run(ctx, nil, os.Stdout, os.Stderr, "docker", append(c.baseArgs(), "pull")...)
 	if err != nil {
 		return fmt.Errorf("compose pull：%w", err)
 	}
@@ -148,7 +182,7 @@ func (c *Compose) Logs(ctx context.Context, args ...string) error {
 	if err := c.ValidateRoot(); err != nil {
 		return err
 	}
-	err := c.Run.Run(ctx, nil, os.Stdout, os.Stderr, "docker", append(c.baseArgs(), full...)...)
+	err := c.runner().Run(ctx, nil, os.Stdout, os.Stderr, "docker", append(c.baseArgs(), full...)...)
 	if err != nil {
 		return fmt.Errorf("compose logs：%w", err)
 	}
@@ -171,7 +205,7 @@ func (c *Compose) ValidateRoot() error {
 }
 
 func (c *Compose) Version(ctx context.Context) error {
-	_, err := c.Run.CombinedOutput(ctx, "docker", "compose", "version")
+	_, err := c.runner().CombinedOutput(ctx, "docker", "compose", "version")
 	return err
 }
 
@@ -191,7 +225,7 @@ func (c *Compose) RunService(ctx context.Context, service string, runOptions []s
 	full = append(full, runOptions...)
 	full = append(full, service)
 	full = append(full, args...)
-	err := c.Run.Run(ctx, nil, os.Stdout, os.Stderr, "docker", append(c.baseArgs(), full...)...)
+	err := c.runner().Run(ctx, nil, os.Stdout, os.Stderr, "docker", append(c.baseArgs(), full...)...)
 	if err != nil {
 		return "", fmt.Errorf("compose run：%w", err)
 	}
@@ -279,7 +313,7 @@ func (c *Compose) ResolveLatest(ctx context.Context) (*opsrelease.Release, error
 	release := &opsrelease.Release{Images: map[string]string{}}
 	for _, service := range latestServices {
 		ref := opsrelease.Repository + ":" + service + "-latest"
-		output, err := c.Run.CombinedOutput(ctx, "docker", "manifest", "inspect", "--verbose", ref)
+		output, err := c.runner().CombinedOutput(ctx, "docker", "manifest", "inspect", "--verbose", ref)
 		if err != nil {
 			return nil, fmt.Errorf("解析 %s：%w", ref, err)
 		}

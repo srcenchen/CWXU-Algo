@@ -34,14 +34,32 @@ func dotenvValue(path, key string) (string, error) {
 }
 
 // resolveInstallRoot 仅用于尚未注册的 init/install 根选择。
+// 显式 --root > GOALGO_ROOT 环境变量 > 已有 .env 中记录的 GOALGO_ROOT > 默认目录。
 func resolveInstallRoot(path string) (*opsroot.Root, error) {
+	return resolveInstallRootFrom(path, opsroot.JoinDefault(".env"))
+}
+
+// resolveInstallRootFrom 与 resolveInstallRoot 相同，但允许注入 .env 候选路径（便于测试）。
+func resolveInstallRootFrom(path, envFile string) (*opsroot.Root, error) {
 	if path != "" {
 		return opsroot.Resolve(path)
 	}
 	if env := os.Getenv("GOALGO_ROOT"); env != "" {
 		return opsroot.Resolve(env)
 	}
+	if configured := dotenvValueOrDefault(envFile, "GOALGO_ROOT"); configured != "" {
+		return opsroot.Resolve(configured)
+	}
 	return opsroot.Resolve("")
+}
+
+// dotenvValueOrDefault 读取 env 文件中指定键的值，文件缺失或键不存在时返回空串。
+func dotenvValueOrDefault(path, key string) string {
+	value, err := dotenvValue(path, key)
+	if err != nil {
+		return ""
+	}
+	return value
 }
 
 func resolveRegisteredRoot(explicit string) (*opsroot.Root, error) {
@@ -208,8 +226,22 @@ func runtimeUninstall(ctx context.Context, compose *opscompose.Compose, args []s
 		}
 	}
 	opsprogress.Note(os.Stderr, "删除配置、密钥与数据目录")
+	envPath := compose.Root.Join(".env")
+	var savedEnv []byte
+	if data, err := os.ReadFile(envPath); err == nil {
+		savedEnv = data
+	}
 	if err := os.RemoveAll(compose.Root.Path); err != nil {
 		return fail("卸载", err)
+	}
+	if savedEnv != nil {
+		opsprogress.Note(os.Stderr, "保留 .env（重新安装可复用）")
+		if err := os.MkdirAll(compose.Root.Path, 0o755); err != nil {
+			return fail("卸载", err)
+		}
+		if err := os.WriteFile(envPath, savedEnv, 0o600); err != nil {
+			return fail("卸载", err)
+		}
 	}
 	if dataPath := opsdata.Path(); fileExists(dataPath) {
 		if err := os.Remove(dataPath); err != nil {

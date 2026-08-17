@@ -68,6 +68,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends curl gnupg zstd
     && rm -rf /var/lib/apt/lists/*
 
 FROM core-data-runtime AS core-data
+RUN install -d -m 0700 /var/lib/goalgo/backups \
+    && chown goalgo:goalgo /var/lib/goalgo/backups
 COPY --from=backend-builder --chown=goalgo:goalgo /out/core-data /app/core-data
 USER goalgo
 EXPOSE 8001 9001

@@ -78,7 +78,6 @@ services:
       - ${GOALGO_ROOT:-/opt/goalgo}/config:/etc/goalgo/config:ro
       - ${GOALGO_ROOT:-/opt/goalgo}/secrets/jwt_public_key.pem:/run/secrets/jwt_public_key.pem:ro
       - ${GOALGO_ROOT:-/opt/goalgo}/secrets/backup_encryption_key:/run/secrets/backup_encryption_key:ro
-      - ${GOALGO_ROOT:-/opt/goalgo}/data/backups:/var/lib/goalgo/backups
     environment:
       CWXU_BACKUP_WORK_DIR: /var/lib/goalgo/backups
       CWXU_BACKUP_ENCRYPTION_KEY_FILE: /run/secrets/backup_encryption_key

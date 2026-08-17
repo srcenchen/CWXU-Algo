@@ -38,6 +38,35 @@ func TestResolveInstallRootPrefersEnvVar(t *testing.T) {
 	}
 }
 
+func TestResolveInstallRootReadsRootFromEnvFile(t *testing.T) {
+	t.Setenv("GOALGO_OPS_DATA_FILE", filepath.Join(t.TempDir(), "ops.data.json"))
+	t.Setenv("GOALGO_ROOT", "")
+	dir := t.TempDir()
+	envFile := filepath.Join(dir, "env")
+	if err := os.WriteFile(envFile, []byte("GOALGO_ROOT=/custom/data/root\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	root, err := resolveInstallRootFrom("", envFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if root.Path != "/custom/data/root" {
+		t.Fatalf("got %s, want /custom/data/root", root.Path)
+	}
+}
+
+func TestResolveInstallRootEnvFileMissingFallsBackToDefault(t *testing.T) {
+	t.Setenv("GOALGO_OPS_DATA_FILE", filepath.Join(t.TempDir(), "ops.data.json"))
+	t.Setenv("GOALGO_ROOT", "")
+	root, err := resolveInstallRootFrom("", filepath.Join(t.TempDir(), "missing.env"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if root.Path != "/opt/goalgo" {
+		t.Fatalf("got %s, want /opt/goalgo", root.Path)
+	}
+}
+
 func TestResolveInstallRootExplicitWins(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("GOALGO_OPS_DATA_FILE", filepath.Join(t.TempDir(), "ops.data.json"))

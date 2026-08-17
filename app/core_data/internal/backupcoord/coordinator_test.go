@@ -313,18 +313,14 @@ func TestScheduledTimeMatchSameDayDedupAndNextDay(t *testing.T) {
 	}
 }
 
-func TestScheduledBackupCatchesUpAfterConfiguredMinute(t *testing.T) {
+func TestScheduledDoesNotCatchUpOutsideConfiguredMinute(t *testing.T) {
 	runner := &fakeRunner{started: make(chan struct{}), release: make(chan struct{})}
 	c := NewForTestSchedule(func(context.Context) Schedule { return Schedule{Enabled: true, Time: "03:15"} }, runner, &fakeStore{})
 	loc, _ := time.LoadLocation("Asia/Shanghai")
 	c.RunScheduled(time.Date(2026, 8, 16, 4, 7, 0, 0, loc))
-	select {
-	case <-runner.started:
-	case <-time.After(time.Second):
-		t.Fatal("missed-minute backup was not caught up")
+	if runner.runs != 0 {
+		t.Fatalf("ran outside configured minute: %d", runner.runs)
 	}
-	close(runner.release)
-	waitState(t, c, StateSucceeded)
 }
 
 func TestScheduledFailureReleasesDayForRetryButSuccessKeepsDone(t *testing.T) {
@@ -355,7 +351,7 @@ func TestExpiredRunningClaimCanRetryAfterServiceRestart(t *testing.T) {
 	runner := &resultRunner{done: make(chan struct{})}
 	c := NewForTestSchedule(func(context.Context) Schedule { return Schedule{Enabled: true, Time: "03:15"} }, runner, store)
 	loc, _ := time.LoadLocation("Asia/Shanghai")
-	c.RunScheduled(time.Date(2026, 8, 16, 4, 0, 0, 0, loc))
+	c.RunScheduled(time.Date(2026, 8, 16, 3, 15, 0, 0, loc))
 	select {
 	case <-runner.done:
 	case <-time.After(time.Second):

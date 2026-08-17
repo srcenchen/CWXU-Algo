@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"strings"
 	"testing"
 )
 
@@ -51,4 +52,38 @@ func TestShowError(t *testing.T) {
 	if err := ShowError(runner, nil, output); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
+}
+
+func TestRealEnvOverlayOverridesExistingAndKeepsOthers(t *testing.T) {
+	t.Setenv("GOALGO_ROOT", "")
+	t.Setenv("KEEP_ME", "stay")
+	env := mergedEnvForTest(map[string]string{"GOALGO_ROOT": "/custom/root"})
+	var goalgo, keep string
+	for _, kv := range env {
+		switch {
+		case kv == "GOALGO_ROOT=/custom/root":
+			goalgo = kv
+		case kv == "KEEP_ME=stay":
+			keep = kv
+		}
+	}
+	if goalgo != "GOALGO_ROOT=/custom/root" {
+		t.Fatalf("GOALGO_ROOT not injected: %v", env)
+	}
+	if keep != "KEEP_ME=stay" {
+		t.Fatalf("unrelated env dropped: %v", env)
+	}
+	var count int
+	for _, kv := range env {
+		if strings.HasPrefix(kv, "GOALGO_ROOT=") {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("expected exactly one GOALGO_ROOT, got %d: %v", count, env)
+	}
+}
+
+func mergedEnvForTest(overlay map[string]string) []string {
+	return (Real{Env: overlay}).mergedEnv()
 }

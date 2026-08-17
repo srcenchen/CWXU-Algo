@@ -10,7 +10,6 @@ command -v python3 >/dev/null 2>&1 || { printf '%s\n' 'python3 is required' >&2;
 install -d "$root/config" "$root/scripts" "$root/state" "$root/logs" "$root/restore"
 install -d -m 0700 "$root/secrets"
 install -d "$root/data/postgres" "$root/data/redis" "$root/data/rabbitmq" "$root/data/consul"
-install -d -m 0700 "$root/data/backups"
 cp "$deploy/compose.yaml" "$root/compose.yaml"
 cp "$deploy"/config/*.yaml "$root/config/"
 cp "$deploy/config/postgres-init.sh" "$root/config/"
@@ -86,9 +85,8 @@ if [ "$(id -u)" -eq 0 ]; then
     chown -R 999:1000 "$root/data/redis"
     chown -R 100:101 "$root/data/rabbitmq"
     chown -R 100:1000 "$root/data/consul"
-    chown -R 10001:10001 "$root/data/backups"
 elif [ "${GOALGO_ALLOW_INSECURE_TEST_PERMISSIONS:-}" = 1 ]; then
-    chmod 0777 "$root/data/postgres" "$root/data/redis" "$root/data/rabbitmq" "$root/data/consul" "$root/data/backups"
+    chmod 0777 "$root/data/postgres" "$root/data/redis" "$root/data/rabbitmq" "$root/data/consul"
 else
     printf '%s\n' 'provision-root.sh must run as root to assign container data ownership' >&2
     exit 1

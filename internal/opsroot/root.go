@@ -11,6 +11,19 @@ type Root struct {
 	Path string
 }
 
+// DefaultPath 返回未指定 root 且无 GOALGO_ROOT 环境变量时的默认根目录。
+func DefaultPath() string {
+	if env := os.Getenv("GOALGO_ROOT"); env != "" {
+		return env
+	}
+	return "/opt/goalgo"
+}
+
+// JoinDefault 返回默认根目录下拼接相对路径的结果。
+func JoinDefault(parts ...string) string {
+	return filepath.Join(append([]string{DefaultPath()}, parts...)...)
+}
+
 func Resolve(path string) (*Root, error) {
 	if path == "" {
 		path = os.Getenv("GOALGO_ROOT")
