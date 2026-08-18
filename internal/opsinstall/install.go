@@ -1,6 +1,7 @@
 package opsinstall
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -93,6 +94,81 @@ func writeManaged(root string, asset managedAsset) error {
 		mode = 0o755
 	}
 	return atomicWrite(target, content, mode)
+}
+
+// templatesBackupDir 升级刷新受管模板前对旧内容的快照目录，升级失败时用于回滚。
+const templatesBackupDir = "state/templates.previous"
+
+// RefreshManaged 用内嵌模板刷新受管文件（compose.yaml、config/*.yaml、postgres-init.sh、
+// nginx.conf、rabbitmq-entrypoint.sh），使升级同时带上编排与配置模板更新。
+// 被替换的旧内容先快照到 state/templates.previous/，内容一致时跳过。
+// 返回是否有文件被更新。
+func RefreshManaged(root *opsroot.Root) (bool, error) {
+	if err := root.EnsureLayout(); err != nil {
+		return false, err
+	}
+	changed := false
+	for _, managed := range managedAssets() {
+		content, err := ReadAsset(managed.source)
+		if err != nil {
+			return false, err
+		}
+		target := filepath.Join(root.Path, managed.destination)
+		existing, err := os.ReadFile(target)
+		if err == nil && bytes.Equal(existing, content) {
+			continue
+		}
+		if err != nil && !os.IsNotExist(err) {
+			return false, err
+		}
+		if len(existing) > 0 {
+			backup := filepath.Join(root.Path, templatesBackupDir, managed.destination)
+			if err := os.MkdirAll(filepath.Dir(backup), 0o755); err != nil {
+				return false, err
+			}
+			if err := atomicWrite(backup, existing, 0o600); err != nil {
+				return false, err
+			}
+		}
+		mode := os.FileMode(0o644)
+		if filepath.Ext(managed.destination) == ".sh" {
+			mode = 0o755
+		}
+		if err := atomicWrite(target, content, mode); err != nil {
+			return false, err
+		}
+		changed = true
+	}
+	return changed, nil
+}
+
+// RestoreManaged 从 state/templates.previous/ 恢复受管模板快照并清理快照。
+// 无快照时静默跳过。返回是否有文件被恢复。
+func RestoreManaged(root *opsroot.Root) (bool, error) {
+	restored := false
+	for _, managed := range managedAssets() {
+		backup := filepath.Join(root.Path, templatesBackupDir, managed.destination)
+		existing, err := os.ReadFile(backup)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return false, err
+		}
+		target := filepath.Join(root.Path, managed.destination)
+		mode := os.FileMode(0o644)
+		if filepath.Ext(managed.destination) == ".sh" {
+			mode = 0o755
+		}
+		if err := atomicWrite(target, existing, mode); err != nil {
+			return false, err
+		}
+		if err := os.Remove(backup); err != nil {
+			return false, err
+		}
+		restored = true
+	}
+	return restored, nil
 }
 
 func writeEnvIfMissing(root string) error {

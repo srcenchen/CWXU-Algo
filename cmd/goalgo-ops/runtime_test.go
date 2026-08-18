@@ -14,6 +14,7 @@ import (
 
 	"cwxu-algo/internal/opscompose"
 	"cwxu-algo/internal/opsdata"
+	"cwxu-algo/internal/opsinstall"
 	"cwxu-algo/internal/opsrelease"
 	"cwxu-algo/internal/opsroot"
 )
@@ -164,7 +165,9 @@ func TestRuntimeUpgradeMigratesLatestReleaseWhenDigestsAlreadyRecorded(t *testin
 	}
 }
 
-type upgradeRunner struct{}
+type upgradeRunner struct {
+	upCalls int
+}
 
 func (r *upgradeRunner) CombinedOutput(_ context.Context, name string, args ...string) (string, error) {
 	joined := name + " " + strings.Join(args, " ")
@@ -184,8 +187,48 @@ func (r *upgradeRunner) CombinedOutput(_ context.Context, name string, args ...s
 	return "", nil
 }
 
-func (r *upgradeRunner) Run(context.Context, io.Reader, io.Writer, io.Writer, string, ...string) error {
+func (r *upgradeRunner) Run(_ context.Context, _ io.Reader, _, _ io.Writer, _ string, args ...string) error {
+	for _, arg := range args {
+		if arg == "up" {
+			r.upCalls++
+		}
+	}
 	return nil
+}
+
+func TestRuntimeUpgradeReportsLatestWhenEverythingInSync(t *testing.T) {
+	dataPath := filepath.Join(t.TempDir(), "ops.data.json")
+	t.Setenv("GOALGO_OPS_DATA_FILE", dataPath)
+	root, err := opsroot.Resolve(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(root.Join(".env"), []byte("GOALGO_ROOT="+root.Path+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runner := &upgradeRunner{}
+	if _, err := opsinstall.RefreshManaged(root); err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := (&opscompose.Compose{Root: root, Run: runner}).ResolveLatest(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := resolved.WriteFile(root.Join("release.env")); err != nil {
+		t.Fatal(err)
+	}
+	data := &opsdata.Data{}
+	data.Deploy.LastDigests = resolved.Images
+	if err := data.Save(); err != nil {
+		t.Fatal(err)
+	}
+	compose := &opscompose.Compose{Root: root, Run: runner, SmokeCheck: func(context.Context) error { return nil }}
+	if code := runtimeUpgrade(context.Background(), compose); code != 0 {
+		t.Fatalf("upgrade exit code = %d, want 0 (already latest)", code)
+	}
+	if runner.upCalls != 0 {
+		t.Fatalf("already-latest upgrade must not bring containers up, up calls=%d", runner.upCalls)
+	}
 }
 
 func TestApplyReleaseFailureRestoresFilesAndRunningRelease(t *testing.T) {
@@ -210,7 +253,7 @@ func TestApplyReleaseFailureRestoresFilesAndRunningRelease(t *testing.T) {
 	}
 	runner := &transactionRunner{runErrors: []error{nil, errors.New("candidate up failed"), nil, nil}}
 	compose := &opscompose.Compose{Root: root, Run: runner, SmokeCheck: func(context.Context) error { return nil }}
-	err = applyRelease(context.Background(), compose, candidate, current, previous)
+	err = applyRelease(context.Background(), compose, candidate, current, previous, false)
 	if err == nil || !strings.Contains(err.Error(), "candidate up failed") {
 		t.Fatalf("expected candidate error, got %v", err)
 	}
@@ -268,7 +311,7 @@ func TestApplyReleaseCancellationDuringPullOnlyRestoresFiles(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	runner := &cancelThenRequireLiveRunner{cancel: cancel}
 	compose := &opscompose.Compose{Root: root, Run: runner, SmokeCheck: func(ctx context.Context) error { return ctx.Err() }}
-	err := applyRelease(ctx, compose, candidate, current, previous)
+	err := applyRelease(ctx, compose, candidate, current, previous, false)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("applyRelease() error = %v, want context.Canceled", err)
 	}

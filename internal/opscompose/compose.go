@@ -112,6 +112,21 @@ func (c *Compose) Up(ctx context.Context, timeout string) error {
 	return nil
 }
 
+// UpForce 强制重建应用容器（frontend/gateway/user/core-data/agent）并等待健康，
+// 用于编排/配置模板变更后让新配置生效；基础设施容器（postgres/redis/rabbitmq/consul）不重建。
+func (c *Compose) UpForce(ctx context.Context, timeout string) error {
+	if err := c.ValidateRoot(); err != nil {
+		return err
+	}
+	err := c.runner().Run(ctx, nil, os.Stdout, os.Stderr, "docker",
+		append(c.baseArgs(), "up", "-d", "--force-recreate", "--wait", "--wait-timeout", timeout,
+			"frontend", "gateway", "user", "core-data", "agent")...)
+	if err != nil {
+		return fmt.Errorf("compose up --force-recreate：%w", err)
+	}
+	return nil
+}
+
 func (c *Compose) Pull(ctx context.Context) error {
 	if err := c.ValidateRoot(); err != nil {
 		return err

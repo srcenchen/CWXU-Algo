@@ -63,7 +63,7 @@ func usage() {
   install [--root 目录] [--release-file 文件]   初始化目录并启动服务（默认解析 latest）
   admin-init [--root 目录] [--admin-config 文件] 创建首个站点管理员
   deploy [release-file] [--root 目录]           部署一个不可变发布版本
-  upgrade [--root 目录]                        从 ACR 拉取最新镜像并升级（失败自动回滚）
+  upgrade [--root 目录]                        刷新编排/配置模板并从 ACR 升级镜像（失败自动回滚）
   uninstall [--root 目录] [--yes]              彻底删除配置/密钥/数据/容器，并询问是否删除镜像
   rollback [--root 目录]                        回滚到上一个发布版本
   start | stop | restart | status | logs [参数] [--root 目录]
@@ -289,7 +289,7 @@ func runtimeDeploy(ctx context.Context, compose *opscompose.Compose, args []stri
 		fmt.Fprintln(os.Stdout, "当前版本已在运行")
 		return 0
 	}
-	if err := applyRelease(ctx, compose, release, current, previous); err != nil {
+	if err := applyRelease(ctx, compose, release, current, previous, false); err != nil {
 		return fail("部署", err)
 	}
 	return 0
@@ -308,7 +308,9 @@ func restoreReleaseFiles(compose *opscompose.Compose, current, previous *opsrele
 	return previous.WriteFile(compose.Root.Join("release.previous.env"))
 }
 
-func applyRelease(ctx context.Context, compose *opscompose.Compose, candidate, current, previous *opsrelease.Release) error {
+// applyRelease 拉取并启动候选版本。forceRecreate=true 时（升级刷新了模板/编排）
+// 强制重建应用容器使新配置生效；失败时先恢复模板快照，再回滚版本文件与运行实例。
+func applyRelease(ctx context.Context, compose *opscompose.Compose, candidate, current, previous *opsrelease.Release, forceRecreate bool) error {
 	if err := current.WriteFile(compose.Root.Join("release.previous.env")); err != nil {
 		return err
 	}
@@ -327,7 +329,13 @@ func applyRelease(ctx context.Context, compose *opscompose.Compose, candidate, c
 		}
 		opsprogress.Note(os.Stderr, "创建并启动容器")
 		runtimeMayHaveChanged = true
-		if err := compose.Up(ctx, compose.WaitTimeout()); err != nil {
+		var err error
+		if forceRecreate {
+			err = compose.UpForce(ctx, compose.WaitTimeout())
+		} else {
+			err = compose.Up(ctx, compose.WaitTimeout())
+		}
+		if err != nil {
 			return err
 		}
 		if err := compose.Health(ctx); err != nil {
@@ -336,6 +344,9 @@ func applyRelease(ctx context.Context, compose *opscompose.Compose, candidate, c
 		return compose.Smoke(ctx)
 	}
 	if err := apply(); err != nil {
+		if _, restoreErr := opsinstall.RestoreManaged(compose.Root); restoreErr != nil {
+			return errors.Join(err, fmt.Errorf("恢复模板快照失败：%w", restoreErr))
+		}
 		if !runtimeMayHaveChanged {
 			if restoreErr := restoreReleaseFiles(compose, current, previous); restoreErr != nil {
 				return errors.Join(err, fmt.Errorf("恢复版本文件失败：%w", restoreErr))
@@ -378,7 +389,7 @@ func runtimeRollback(ctx context.Context, compose *opscompose.Compose) int {
 	if err != nil {
 		return fail("回滚", err)
 	}
-	if err := applyRelease(ctx, compose, previous, current, previous); err != nil {
+	if err := applyRelease(ctx, compose, previous, current, previous, false); err != nil {
 		return fail("回滚", err)
 	}
 	return 0

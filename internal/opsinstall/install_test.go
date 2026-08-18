@@ -275,3 +275,101 @@ func splitLines(content string) []string {
 	}
 	return lines
 }
+
+func TestRefreshManagedWritesMissingTemplatesAndSnapshots(t *testing.T) {
+	root, err := opsroot.Resolve(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(root.Join("compose.yaml"), []byte("old-compose\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	changed, err := RefreshManaged(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !changed {
+		t.Fatal("missing templates must be reported as changed")
+	}
+	for _, relative := range []string{
+		"compose.yaml",
+		"config/gateway.yaml",
+		"config/user.yaml",
+		"config/core-data.yaml",
+		"config/agent.yaml",
+		"config/postgres-init.sh",
+		"config/nginx.conf",
+		"config/rabbitmq-entrypoint.sh",
+	} {
+		if _, err := os.Stat(root.Join(relative)); err != nil {
+			t.Errorf("missing %s: %v", relative, err)
+		}
+	}
+	got, err := os.ReadFile(root.Join("compose.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) == "old-compose\n" {
+		t.Fatal("compose.yaml was not refreshed from embedded template")
+	}
+	snapshot, err := os.ReadFile(root.Join(templatesBackupDir, "compose.yaml"))
+	if err != nil {
+		t.Fatalf("snapshot missing: %v", err)
+	}
+	if string(snapshot) != "old-compose\n" {
+		t.Fatalf("snapshot content = %q, want old-compose", snapshot)
+	}
+	// 内容一致时跳过，不再产生变化。
+	changed, err = RefreshManaged(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if changed {
+		t.Fatal("identical templates must not be reported as changed")
+	}
+}
+
+func TestRestoreManagedRestoresSnapshotAndCleansUp(t *testing.T) {
+	root, err := opsroot.Resolve(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(root.Join("config"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(root.Join("config", "gateway.yaml"), []byte("old-gateway\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	changed, err := RefreshManaged(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !changed {
+		t.Fatal("expected refresh to change files")
+	}
+	if _, err := os.Stat(root.Join(templatesBackupDir, "config", "gateway.yaml")); err != nil {
+		t.Fatalf("snapshot missing: %v", err)
+	}
+	restored, err := RestoreManaged(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !restored {
+		t.Fatal("expected restore to change files")
+	}
+	got, err := os.ReadFile(root.Join("config", "gateway.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "old-gateway\n" {
+		t.Fatalf("gateway.yaml after restore = %q, want old-gateway", got)
+	}
+	if _, err := os.Stat(root.Join(templatesBackupDir, "config", "gateway.yaml")); !os.IsNotExist(err) {
+		t.Fatalf("snapshot should be removed after restore, stat error = %v", err)
+	}
+	// 无快照时静默无操作。
+	restored, err = RestoreManaged(root)
+	if err != nil || restored {
+		t.Fatalf("restore without snapshot: restored=%v err=%v", restored, err)
+	}
+}

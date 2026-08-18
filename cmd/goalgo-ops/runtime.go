@@ -12,6 +12,7 @@ import (
 	"cwxu-algo/internal/opscompose"
 	"cwxu-algo/internal/opsdata"
 	"cwxu-algo/internal/opsexec"
+	"cwxu-algo/internal/opsinstall"
 	"cwxu-algo/internal/opsprogress"
 	"cwxu-algo/internal/opsprompt"
 	"cwxu-algo/internal/opsrelease"
@@ -142,6 +143,15 @@ func runtimeUpgrade(ctx context.Context, compose *opscompose.Compose) int {
 	if err := compose.Root.RequireFiles(); err != nil {
 		return fail("升级", err)
 	}
+	// 升级同时用内嵌模板刷新编排/配置文件（compose.yaml、config/*.yaml 等），
+	// 旧内容先快照；模板有变化时本次升级需重建应用容器使新配置生效。
+	refreshed, err := opsinstall.RefreshManaged(compose.Root)
+	if err != nil {
+		return fail("升级", err)
+	}
+	if refreshed {
+		fmt.Fprintln(os.Stdout, "已刷新 compose/配置模板（compose.yaml、config/*.yaml 等），将重建应用容器使新配置生效")
+	}
 	latest, err := compose.ResolveLatest(ctx)
 	if err != nil {
 		return fail("升级", err)
@@ -154,7 +164,7 @@ func runtimeUpgrade(ctx context.Context, compose *opscompose.Compose) int {
 	if err != nil {
 		return fail("升级", err)
 	}
-	if sameDigests(data.Deploy.LastDigests, latest.Images) && releaseSame(active, latest) {
+	if !refreshed && sameDigests(data.Deploy.LastDigests, latest.Images) && releaseSame(active, latest) {
 		fmt.Fprintln(os.Stdout, "已是最新版本")
 		return 0
 	}
@@ -162,7 +172,7 @@ func runtimeUpgrade(ctx context.Context, compose *opscompose.Compose) int {
 	if err != nil && !os.IsNotExist(err) {
 		return fail("升级", err)
 	}
-	if err := applyRelease(ctx, compose, latest, active, previous); err != nil {
+	if err := applyRelease(ctx, compose, latest, active, previous, refreshed); err != nil {
 		return fail("升级", err)
 	}
 	data.Deploy.LastDigests = latest.Images
