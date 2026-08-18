@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -284,12 +285,18 @@ func TestRefreshManagedWritesMissingTemplatesAndSnapshots(t *testing.T) {
 	if err := os.WriteFile(root.Join("compose.yaml"), []byte("old-compose\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	changed, err := RefreshManaged(root)
+	changed, skipped, backup, err := RefreshManaged(root)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !changed {
 		t.Fatal("missing templates must be reported as changed")
+	}
+	if len(skipped) != 0 {
+		t.Fatalf("first refresh must not skip files, skipped=%v", skipped)
+	}
+	if backup == "" {
+		t.Fatal("backup dir must be reported")
 	}
 	for _, relative := range []string{
 		"compose.yaml",
@@ -312,24 +319,60 @@ func TestRefreshManagedWritesMissingTemplatesAndSnapshots(t *testing.T) {
 	if string(got) == "old-compose\n" {
 		t.Fatal("compose.yaml was not refreshed from embedded template")
 	}
-	snapshot, err := os.ReadFile(root.Join(templatesBackupDir, "compose.yaml"))
+	snapshot, err := os.ReadFile(filepath.Join(backup, "compose.yaml"))
 	if err != nil {
 		t.Fatalf("snapshot missing: %v", err)
 	}
 	if string(snapshot) != "old-compose\n" {
 		t.Fatalf("snapshot content = %q, want old-compose", snapshot)
 	}
+	if _, err := os.Stat(root.Join(templatesManifestFile)); err != nil {
+		t.Fatalf("baseline manifest missing: %v", err)
+	}
 	// 内容一致时跳过，不再产生变化。
-	changed, err = RefreshManaged(root)
+	changed, skipped, _, err = RefreshManaged(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if changed || len(skipped) != 0 {
+		t.Fatalf("identical templates must not be reported as changed: changed=%v skipped=%v", changed, skipped)
+	}
+}
+
+func TestRefreshManagedSkipsLocallyModifiedTemplates(t *testing.T) {
+	root, err := opsroot.Resolve(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 先建立基线。
+	if _, _, _, err := RefreshManaged(root); err != nil {
+		t.Fatal(err)
+	}
+	// 本地手工修改 config/gateway.yaml（与基线不一致）。
+	handEdited := "local: custom endpoint\n"
+	if err := os.WriteFile(root.Join("config", "gateway.yaml"), []byte(handEdited), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	changed, skipped, _, err := RefreshManaged(root)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if changed {
-		t.Fatal("identical templates must not be reported as changed")
+		t.Fatal("local modification must not be reported as changed")
+	}
+	if len(skipped) != 1 || skipped[0] != "config/gateway.yaml" {
+		t.Fatalf("want skip config/gateway.yaml, got %v", skipped)
+	}
+	got, err := os.ReadFile(root.Join("config", "gateway.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != handEdited {
+		t.Fatalf("locally modified template was overwritten: %q", got)
 	}
 }
 
-func TestRestoreManagedRestoresSnapshotAndCleansUp(t *testing.T) {
+func TestRestoreBackupRestoresAndCleansUp(t *testing.T) {
 	root, err := opsroot.Resolve(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -340,17 +383,14 @@ func TestRestoreManagedRestoresSnapshotAndCleansUp(t *testing.T) {
 	if err := os.WriteFile(root.Join("config", "gateway.yaml"), []byte("old-gateway\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	changed, err := RefreshManaged(root)
+	_, _, backup, err := RefreshManaged(root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !changed {
-		t.Fatal("expected refresh to change files")
-	}
-	if _, err := os.Stat(root.Join(templatesBackupDir, "config", "gateway.yaml")); err != nil {
+	if _, err := os.Stat(filepath.Join(backup, "config", "gateway.yaml")); err != nil {
 		t.Fatalf("snapshot missing: %v", err)
 	}
-	restored, err := RestoreManaged(root)
+	restored, err := RestoreBackup(root, backup)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -364,12 +404,14 @@ func TestRestoreManagedRestoresSnapshotAndCleansUp(t *testing.T) {
 	if string(got) != "old-gateway\n" {
 		t.Fatalf("gateway.yaml after restore = %q, want old-gateway", got)
 	}
-	if _, err := os.Stat(root.Join(templatesBackupDir, "config", "gateway.yaml")); !os.IsNotExist(err) {
-		t.Fatalf("snapshot should be removed after restore, stat error = %v", err)
+	if _, err := os.Stat(backup); !os.IsNotExist(err) {
+		t.Fatalf("backup dir should be removed after restore, stat error = %v", err)
 	}
-	// 无快照时静默无操作。
-	restored, err = RestoreManaged(root)
-	if err != nil || restored {
-		t.Fatalf("restore without snapshot: restored=%v err=%v", restored, err)
+	// 空备份路径与不存在目录时静默无操作。
+	if restored, err := RestoreBackup(root, ""); err != nil || restored {
+		t.Fatalf("restore with empty backup: restored=%v err=%v", restored, err)
+	}
+	if restored, err := RestoreBackup(root, root.Join("state", "templates.backup", "19700101-000000")); err != nil || restored {
+		t.Fatalf("restore without backup dir: restored=%v err=%v", restored, err)
 	}
 }

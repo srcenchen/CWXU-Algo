@@ -3,6 +3,8 @@ package opsinstall
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/url"
@@ -33,10 +35,14 @@ func (i *Installer) Scaffold() error {
 	if err := i.Root.EnsureLayout(); err != nil {
 		return err
 	}
+	manifest := templatesManifest{Version: 1, Files: map[string]string{}}
 	for _, managed := range managedAssets() {
-		if err := writeManaged(i.Root.Path, managed); err != nil {
+		if err := writeManagedWithManifest(i.Root.Path, managed, &manifest); err != nil {
 			return err
 		}
+	}
+	if err := saveManifest(i.Root, manifest); err != nil {
+		return err
 	}
 	return writeEnvIfMissing(i.Root.Path)
 }
@@ -80,93 +86,184 @@ func managedAssets() []managedAsset {
 	}
 }
 
-func writeManaged(root string, asset managedAsset) error {
+func writeManagedWithManifest(root string, asset managedAsset, manifest *templatesManifest) error {
 	content, err := ReadAsset(asset.source)
 	if err != nil {
 		return err
 	}
-	target := filepath.Join(root, asset.destination)
+	if err := writeAsset(root, asset.destination, content); err != nil {
+		return err
+	}
+	manifest.Files[asset.destination] = hashContent(content)
+	return nil
+}
+
+func writeAsset(root, relative string, content []byte) error {
+	target := filepath.Join(root, relative)
 	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 		return err
 	}
 	mode := os.FileMode(0o644)
-	if filepath.Ext(asset.destination) == ".sh" {
+	if filepath.Ext(relative) == ".sh" {
 		mode = 0o755
 	}
 	return atomicWrite(target, content, mode)
 }
 
-// templatesBackupDir 升级刷新受管模板前对旧内容的快照目录，升级失败时用于回滚。
-const templatesBackupDir = "state/templates.previous"
+// templatesManifestFile 记录受管模板的发布基线哈希（install/刷新时写入），
+// 用于识别本地手工改动：与基线一致才覆盖，不一致视为用户配置跳过。
+const templatesManifestFile = "state/templates.json"
+
+// templatesBackupDir 每次刷新被替换的旧内容快照目录（按时间戳分层），可人工恢复。
+const templatesBackupDir = "state/templates.backup"
+
+type templatesManifest struct {
+	Version int               `json:"version"`
+	Files   map[string]string `json:"files"`
+}
+
+func loadManifest(root *opsroot.Root) (templatesManifest, bool) {
+	m := templatesManifest{Version: 1, Files: map[string]string{}}
+	data, err := os.ReadFile(filepath.Join(root.Path, templatesManifestFile))
+	if err != nil {
+		return m, false
+	}
+	if err := json.Unmarshal(data, &m); err != nil {
+		return templatesManifest{Version: 1, Files: map[string]string{}}, false
+	}
+	if m.Files == nil {
+		m.Files = map[string]string{}
+	}
+	return m, true
+}
+
+func saveManifest(root *opsroot.Root, m templatesManifest) error {
+	data, err := json.MarshalIndent(m, "", "  ")
+	if err != nil {
+		return err
+	}
+	return atomicWrite(filepath.Join(root.Path, templatesManifestFile), data, 0o644)
+}
+
+func hashContent(content []byte) string {
+	sum := sha256.Sum256(content)
+	return hex.EncodeToString(sum[:])
+}
 
 // RefreshManaged 用内嵌模板刷新受管文件（compose.yaml、config/*.yaml、postgres-init.sh、
 // nginx.conf、rabbitmq-entrypoint.sh），使升级同时带上编排与配置模板更新。
-// 被替换的旧内容先快照到 state/templates.previous/，内容一致时跳过。
-// 返回是否有文件被更新。
-func RefreshManaged(root *opsroot.Root) (bool, error) {
+//
+// 保护策略（避免覆盖用户配置）：
+//   - 凭据与用户数据（.env、release.env、secrets/*）不在受管范围，绝不会被触碰；
+//   - 以 state/templates.json 记录发布基线：文件与基线一致（我们写的、未被手改）才覆盖，
+//     与基线不一致视为本地手工改动，跳过不碰并返回提示；
+//   - 首次升级尚无基线时（老安装迁移），以新模板覆盖一次并留底，此后即受基线保护；
+//   - 被替换的旧内容快照到 state/templates.backup/<时间戳>/，可随时人工恢复。
+//
+// 返回：是否有文件被更新；被跳过（本地手改）的路径列表；本次刷新使用的备份目录。
+func RefreshManaged(root *opsroot.Root) (changed bool, skipped []string, backup string, err error) {
 	if err := root.EnsureLayout(); err != nil {
-		return false, err
+		return false, nil, "", err
 	}
-	changed := false
+	manifest, _ := loadManifest(root)
+	backup = filepath.Join(root.Path, templatesBackupDir, time.Now().Format("20060102-150405"))
 	for _, managed := range managedAssets() {
 		content, err := ReadAsset(managed.source)
 		if err != nil {
-			return false, err
+			return false, skipped, "", err
 		}
 		target := filepath.Join(root.Path, managed.destination)
-		existing, err := os.ReadFile(target)
-		if err == nil && bytes.Equal(existing, content) {
-			continue
-		}
-		if err != nil && !os.IsNotExist(err) {
-			return false, err
-		}
-		if len(existing) > 0 {
-			backup := filepath.Join(root.Path, templatesBackupDir, managed.destination)
-			if err := os.MkdirAll(filepath.Dir(backup), 0o755); err != nil {
-				return false, err
+		onDisk, err := os.ReadFile(target)
+		hash := hashContent(content)
+		switch {
+		case err == nil && bytes.Equal(onDisk, content):
+			// 已同步；刷新基线防止误判。
+			manifest.Files[managed.destination] = hash
+		case err != nil && os.IsNotExist(err):
+			// 缺失：直接写入并记录基线。
+			if err := writeAsset(root.Path, managed.destination, content); err != nil {
+				return false, skipped, "", err
 			}
-			if err := atomicWrite(backup, existing, 0o600); err != nil {
-				return false, err
-			}
-		}
-		mode := os.FileMode(0o644)
-		if filepath.Ext(managed.destination) == ".sh" {
-			mode = 0o755
-		}
-		if err := atomicWrite(target, content, mode); err != nil {
-			return false, err
-		}
-		changed = true
-	}
-	return changed, nil
-}
-
-// RestoreManaged 从 state/templates.previous/ 恢复受管模板快照并清理快照。
-// 无快照时静默跳过。返回是否有文件被恢复。
-func RestoreManaged(root *opsroot.Root) (bool, error) {
-	restored := false
-	for _, managed := range managedAssets() {
-		backup := filepath.Join(root.Path, templatesBackupDir, managed.destination)
-		existing, err := os.ReadFile(backup)
-		if err != nil {
-			if os.IsNotExist(err) {
+			manifest.Files[managed.destination] = hash
+			changed = true
+		case err != nil:
+			return false, skipped, "", err
+		default:
+			// 磁盘内容与内嵌模板不一致。
+			baseline, tracked := manifest.Files[managed.destination]
+			if tracked && baseline != hashContent(onDisk) {
+				// 本地手工改动：跳过，不覆盖用户配置。
+				skipped = append(skipped, managed.destination)
 				continue
 			}
-			return false, err
+			// 与基线一致（我们写的、未被改过）或首次迁移尚无基线 → 快照后覆盖。
+			if len(onDisk) > 0 {
+				snapshot := filepath.Join(backup, managed.destination)
+				if err := os.MkdirAll(filepath.Dir(snapshot), 0o755); err != nil {
+					return false, skipped, "", err
+				}
+				if err := atomicWrite(snapshot, onDisk, 0o600); err != nil {
+					return false, skipped, "", err
+				}
+			}
+			if err := writeAsset(root.Path, managed.destination, content); err != nil {
+				return false, skipped, "", err
+			}
+			manifest.Files[managed.destination] = hash
+			changed = true
 		}
-		target := filepath.Join(root.Path, managed.destination)
-		mode := os.FileMode(0o644)
-		if filepath.Ext(managed.destination) == ".sh" {
-			mode = 0o755
+	}
+	if err := saveManifest(root, manifest); err != nil {
+		return false, skipped, "", err
+	}
+	return changed, skipped, backup, nil
+}
+
+// RestoreBackup 从指定备份目录恢复本次刷新被替换的旧文件并删除该备份目录。
+// backup 为空或目录不存在时静默跳过。返回是否有文件被恢复。
+func RestoreBackup(root *opsroot.Root, backup string) (bool, error) {
+	if backup == "" {
+		return false, nil
+	}
+	info, err := os.Stat(backup)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
 		}
-		if err := atomicWrite(target, existing, mode); err != nil {
-			return false, err
+		return false, err
+	}
+	if !info.IsDir() {
+		return false, fmt.Errorf("备份路径不是目录：%s", backup)
+	}
+	restored := false
+	err = filepath.WalkDir(backup, func(path string, d os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
 		}
-		if err := os.Remove(backup); err != nil {
-			return false, err
+		if d.IsDir() {
+			return nil
+		}
+		rel, err := filepath.Rel(backup, path)
+		if err != nil {
+			return err
+		}
+		content, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		if err := writeAsset(root.Path, rel, content); err != nil {
+			return err
 		}
 		restored = true
+		return nil
+	})
+	if err != nil {
+		return false, err
+	}
+	if restored {
+		if err := os.RemoveAll(backup); err != nil {
+			return false, err
+		}
 	}
 	return restored, nil
 }

@@ -101,7 +101,7 @@ func TestRuntimeUpgradeAppliesAndStoresResolvedDigests(t *testing.T) {
 
 	runner := &upgradeRunner{}
 	compose := &opscompose.Compose{Root: root, Run: runner, SmokeCheck: func(context.Context) error { return nil }}
-	if code := runtimeUpgrade(context.Background(), compose); code != 0 {
+	if code := runtimeUpgrade(context.Background(), compose, nil); code != 0 {
 		t.Fatalf("upgrade exit code = %d", code)
 	}
 
@@ -153,7 +153,7 @@ func TestRuntimeUpgradeMigratesLatestReleaseWhenDigestsAlreadyRecorded(t *testin
 	}
 
 	compose := &opscompose.Compose{Root: root, Run: runner, SmokeCheck: func(context.Context) error { return nil }}
-	if code := runtimeUpgrade(context.Background(), compose); code != 0 {
+	if code := runtimeUpgrade(context.Background(), compose, nil); code != 0 {
 		t.Fatalf("upgrade exit code = %d", code)
 	}
 	active, err := opsrelease.ParseFile(root.Join("release.env"))
@@ -196,6 +196,39 @@ func (r *upgradeRunner) Run(_ context.Context, _ io.Reader, _, _ io.Writer, _ st
 	return nil
 }
 
+func TestRuntimeUpgradeWithoutAllLeavesTemplatesUntouched(t *testing.T) {
+	dataPath := filepath.Join(t.TempDir(), "ops.data.json")
+	t.Setenv("GOALGO_OPS_DATA_FILE", dataPath)
+	root, err := opsroot.Resolve(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(root.Join(".env"), []byte("GOALGO_ROOT="+root.Path+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(root.Join("compose.yaml"), []byte("user-edited\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := testRelease('a').WriteFile(root.Join("release.env")); err != nil {
+		t.Fatal(err)
+	}
+	runner := &upgradeRunner{}
+	compose := &opscompose.Compose{Root: root, Run: runner, SmokeCheck: func(context.Context) error { return nil }}
+	if code := runtimeUpgrade(context.Background(), compose, nil); code != 0 {
+		t.Fatalf("upgrade exit code = %d", code)
+	}
+	got, err := os.ReadFile(root.Join("compose.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "user-edited\n" {
+		t.Fatalf("plain upgrade must not touch templates, compose.yaml = %q", got)
+	}
+	if _, err := os.Stat(root.Join("config", "gateway.yaml")); !os.IsNotExist(err) {
+		t.Fatalf("plain upgrade must not scaffold templates, stat error = %v", err)
+	}
+}
+
 func TestRuntimeUpgradeReportsLatestWhenEverythingInSync(t *testing.T) {
 	dataPath := filepath.Join(t.TempDir(), "ops.data.json")
 	t.Setenv("GOALGO_OPS_DATA_FILE", dataPath)
@@ -207,7 +240,7 @@ func TestRuntimeUpgradeReportsLatestWhenEverythingInSync(t *testing.T) {
 		t.Fatal(err)
 	}
 	runner := &upgradeRunner{}
-	if _, err := opsinstall.RefreshManaged(root); err != nil {
+	if _, _, _, err := opsinstall.RefreshManaged(root); err != nil {
 		t.Fatal(err)
 	}
 	resolved, err := (&opscompose.Compose{Root: root, Run: runner}).ResolveLatest(context.Background())
@@ -223,7 +256,7 @@ func TestRuntimeUpgradeReportsLatestWhenEverythingInSync(t *testing.T) {
 		t.Fatal(err)
 	}
 	compose := &opscompose.Compose{Root: root, Run: runner, SmokeCheck: func(context.Context) error { return nil }}
-	if code := runtimeUpgrade(context.Background(), compose); code != 0 {
+	if code := runtimeUpgrade(context.Background(), compose, []string{"--all"}); code != 0 {
 		t.Fatalf("upgrade exit code = %d, want 0 (already latest)", code)
 	}
 	if runner.upCalls != 0 {
@@ -253,7 +286,7 @@ func TestApplyReleaseFailureRestoresFilesAndRunningRelease(t *testing.T) {
 	}
 	runner := &transactionRunner{runErrors: []error{nil, errors.New("candidate up failed"), nil, nil}}
 	compose := &opscompose.Compose{Root: root, Run: runner, SmokeCheck: func(context.Context) error { return nil }}
-	err = applyRelease(context.Background(), compose, candidate, current, previous, false)
+	err = applyRelease(context.Background(), compose, candidate, current, previous, false, "")
 	if err == nil || !strings.Contains(err.Error(), "candidate up failed") {
 		t.Fatalf("expected candidate error, got %v", err)
 	}
@@ -311,7 +344,7 @@ func TestApplyReleaseCancellationDuringPullOnlyRestoresFiles(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	runner := &cancelThenRequireLiveRunner{cancel: cancel}
 	compose := &opscompose.Compose{Root: root, Run: runner, SmokeCheck: func(ctx context.Context) error { return ctx.Err() }}
-	err := applyRelease(ctx, compose, candidate, current, previous, false)
+	err := applyRelease(ctx, compose, candidate, current, previous, false, "")
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("applyRelease() error = %v, want context.Canceled", err)
 	}

@@ -139,18 +139,33 @@ func deployCandidate(rootPath, current string, prompt *opsprompt.Prompter) (stri
 }
 
 // runtimeUpgrade 解析 ACR <svc>-latest 为不可变 digest；有更新则原子升级，失败自动回滚。
-func runtimeUpgrade(ctx context.Context, compose *opscompose.Compose) int {
+func runtimeUpgrade(ctx context.Context, compose *opscompose.Compose, args []string) int {
+	flags := flag.NewFlagSet("upgrade", flag.ContinueOnError)
+	all := flags.Bool("all", false, "同时刷新编排/配置模板（compose.yaml、config/*.yaml 等），本地手改过的文件跳过")
+	if err := flags.Parse(args); err != nil {
+		return fail("升级", err)
+	}
 	if err := compose.Root.RequireFiles(); err != nil {
 		return fail("升级", err)
 	}
-	// 升级同时用内嵌模板刷新编排/配置文件（compose.yaml、config/*.yaml 等），
-	// 旧内容先快照；模板有变化时本次升级需重建应用容器使新配置生效。
-	refreshed, err := opsinstall.RefreshManaged(compose.Root)
-	if err != nil {
-		return fail("升级", err)
-	}
-	if refreshed {
-		fmt.Fprintln(os.Stdout, "已刷新 compose/配置模板（compose.yaml、config/*.yaml 等），将重建应用容器使新配置生效")
+	// 仅 `upgrade --all` 刷新编排/配置文件：普通 upgrade 不碰配置。
+	// 刷新用内嵌模板覆盖，本地手工改过的模板不会被覆盖（跳过并提示）；
+	// 被替换的旧内容留底到 state/templates.backup/<时间戳>/，失败回滚时恢复。
+	var refreshed bool
+	var templateBackup string
+	if *all {
+		var skipped []string
+		var err error
+		refreshed, skipped, templateBackup, err = opsinstall.RefreshManaged(compose.Root)
+		if err != nil {
+			return fail("升级", err)
+		}
+		for _, relative := range skipped {
+			fmt.Fprintf(os.Stdout, "跳过 %s：与本地手改不一致，未覆盖（如需强制刷新请先删除该文件再重跑 upgrade --all）\n", relative)
+		}
+		if refreshed {
+			fmt.Fprintln(os.Stdout, "已刷新 compose/配置模板（compose.yaml、config/*.yaml 等），旧内容留底于 state/templates.backup/，将重建应用容器使新配置生效")
+		}
 	}
 	latest, err := compose.ResolveLatest(ctx)
 	if err != nil {
@@ -172,7 +187,7 @@ func runtimeUpgrade(ctx context.Context, compose *opscompose.Compose) int {
 	if err != nil && !os.IsNotExist(err) {
 		return fail("升级", err)
 	}
-	if err := applyRelease(ctx, compose, latest, active, previous, refreshed); err != nil {
+	if err := applyRelease(ctx, compose, latest, active, previous, refreshed, templateBackup); err != nil {
 		return fail("升级", err)
 	}
 	data.Deploy.LastDigests = latest.Images
