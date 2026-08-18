@@ -107,7 +107,7 @@ type nodeApplier struct {
 func (na *nodeApplier) apply(ctx context.Context) error {
 	var nodes []selector.Node
 	for _, backend := range na.endpoint.Backends {
-		target, err := parseTarget(backend.Target)
+		target, err := ParseTarget(backend.Target)
 		if err != nil {
 			return err
 		}

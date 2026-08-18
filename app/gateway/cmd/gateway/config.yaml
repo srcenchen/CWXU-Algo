@@ -38,6 +38,9 @@ endpoints:
   - path: /v1/user/*
     timeout: 5s
     protocol: HTTP
+    retry:
+      # 传输层失败重试一次，平滑冷启动/瞬时抖动
+      attempts: 2
     backends:
 #      - target: '127.0.0.1:8001'
       - target: 'discovery:///user'
@@ -46,10 +49,10 @@ endpoints:
       - name: circuitbreaker
         options:
           '@type': type.googleapis.com/gateway.middleware.circuitbreaker.v1.CircuitBreaker
-          # 10s 窗口内请求数 ≥ 50 且成功率低于 60% 时熔断，熔断期间直接返回 503
+          # 10s 窗口内请求数 ≥ 100 且成功率低于 50% 才熔断（降温：冷启动瞬断不误伤），熔断期间直接返回 503
           successRatio:
-            success: 0.6
-            request: 50
+            success: 0.5
+            request: 100
             bucket: 10
             window: 10s
           responseData:
@@ -62,6 +65,8 @@ endpoints:
     # 题库补全近期 / 重置队列等管理接口可能超过 5s
     timeout: 120s
     protocol: HTTP
+    retry:
+      attempts: 2
     backends:
       - target: 'discovery:///core-data'
     middlewares:
@@ -69,8 +74,8 @@ endpoints:
         options:
           '@type': type.googleapis.com/gateway.middleware.circuitbreaker.v1.CircuitBreaker
           successRatio:
-            success: 0.6
-            request: 50
+            success: 0.5
+            request: 100
             bucket: 10
             window: 10s
           responseData:
@@ -84,6 +89,8 @@ endpoints:
     # 10s 覆盖冷启动时 DB/队列读写即可。
     timeout: 10s
     protocol: HTTP
+    retry:
+      attempts: 2
     backends:
       - target: 'discovery:///agent'
     middlewares:
@@ -91,8 +98,8 @@ endpoints:
         options:
           '@type': type.googleapis.com/gateway.middleware.circuitbreaker.v1.CircuitBreaker
           successRatio:
-            success: 0.6
-            request: 50
+            success: 0.5
+            request: 100
             bucket: 10
             window: 10s
           responseData:

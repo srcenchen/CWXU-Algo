@@ -21,7 +21,15 @@ func NewConsulRegister(data *conf.Server) *Register {
 	if err != nil {
 		panic("注册中心链接失败" + err.Error())
 	}
-	return &Register{Reg: consul.New(client)}
+	// 缩短健康检查与陈旧注册清理时间：
+	// 默认 DeregisterCriticalServiceAfter=600s 会让冷启动后残留的旧实例
+	// 在 Consul 里挂 10 分钟；改 60s 后旧注册（容器 IP 已失效）尽快清除，
+	// 网关 discovery（passingOnly）只看到存活实例，降低转发到死节点的概率。
+	reg := consul.New(client,
+		consul.WithHealthCheckInterval(5),
+		consul.WithDeregisterCriticalServiceAfter(60),
+	)
+	return &Register{Reg: reg}
 }
 
 var ProvideSet = wire.NewSet(NewConsulRegister)

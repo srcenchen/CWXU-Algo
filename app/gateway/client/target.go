@@ -13,7 +13,8 @@ type Target struct {
 	Endpoint  string
 }
 
-func parseTarget(endpoint string) (*Target, error) {
+// ParseTarget parses a backend target string, e.g. "discovery:///user".
+func ParseTarget(endpoint string) (*Target, error) {
 	if !strings.Contains(endpoint, "://") {
 		endpoint = "direct:///" + endpoint
 	}

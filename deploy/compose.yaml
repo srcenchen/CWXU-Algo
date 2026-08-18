@@ -46,7 +46,9 @@ services:
       agent:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:8080/healthz"]
+      # /readyz 在全部 discovery 后端解析出实例前返回 503；
+      # 避免冷启动期间网关已被判 healthy、但上游尚未就绪时对外吐 503/502。
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:8080/readyz"]
       interval: 10s
       timeout: 3s
       retries: 5

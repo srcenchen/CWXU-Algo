@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/go-kratos/gateway/client"
+	configv1 "github.com/go-kratos/gateway/api/gateway/config/v1"
 	"github.com/go-kratos/gateway/config"
 	configLoader "github.com/go-kratos/gateway/config/config-loader"
 	"github.com/go-kratos/gateway/discovery"
@@ -91,16 +92,53 @@ func makeDiscovery() registry.Discovery {
 	return d
 }
 
-func withLocalHealth(next http.Handler) http.Handler {
+// discoveryEndpoints 收集配置中所有 discovery:/// 后端名（去重），用于就绪门控。
+func discoveryEndpoints(bc *configv1.Gateway) []string {
+	seen := make(map[string]struct{})
+	var endpoints []string
+	for _, e := range bc.Endpoints {
+		for _, backend := range e.Backends {
+			t, err := client.ParseTarget(backend.Target)
+			if err != nil || t.Scheme != "discovery" || t.Endpoint == "" {
+				continue
+			}
+			if _, ok := seen[t.Endpoint]; ok {
+				continue
+			}
+			seen[t.Endpoint] = struct{}{}
+			endpoints = append(endpoints, t.Endpoint)
+		}
+	}
+	return endpoints
+}
+
+// withLocalHealth 处理 /healthz 与 /readyz：
+// /healthz 恒 200 作存活探针；/readyz 在全部 discovery 后端解析出实例前返回 503，
+// 使 compose 健康检查/上游依赖在冷启动完成前不把网关判为可用。
+func withLocalHealth(next http.Handler, requiredEndpoints []string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/healthz" || r.URL.Path == "/readyz" {
 			w.Header().Set("Content-Type", "application/json")
+			if r.URL.Path == "/readyz" && !allServicesResolved(requiredEndpoints) {
+				w.WriteHeader(http.StatusServiceUnavailable)
+				_, _ = w.Write([]byte(`{"status":"not_ready"}`))
+				return
+			}
 			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write([]byte(`{"status":"ok"}`))
 			return
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+func allServicesResolved(endpoints []string) bool {
+	for _, ep := range endpoints {
+		if !client.ServiceResolved(ep) {
+			return false
+		}
+	}
+	return true
 }
 
 func main() {
@@ -168,7 +206,7 @@ func main() {
 	}
 	confLoader.Watch(reloader)
 
-	var serverHandler http.Handler = withLocalHealth(p)
+	var serverHandler http.Handler = withLocalHealth(p, discoveryEndpoints(bc))
 	if withDebug {
 		debug.Register("proxy", p)
 		debug.Register("config", confLoader)

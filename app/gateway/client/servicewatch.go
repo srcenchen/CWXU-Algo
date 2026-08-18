@@ -22,9 +22,10 @@ var ErrCancelWatch = errors.New("cancel watch")
 var globalServiceWatcher = newServiceWatcher()
 var LOG = log.NewHelper(log.With(log.GetLogger(), "source", "servicewatch"))
 
-// _initialResolveTimeout 初始服务解析默认 5s 超时，避免注册中心异常时启动无限阻塞；
-// 可用 INITIAL_RESOLVE_TIMEOUT 覆盖。
-var _initialResolveTimeout = 5 * time.Second
+// _initialResolveTimeout 初始服务解析默认 60s 超时，覆盖服务器冷启动时
+// 后端（如 core-data 迁移数分钟）晚于网关注册的窗口，尽量在首拨内直接拿到实例、
+// 避免以空节点对外；可用 INITIAL_RESOLVE_TIMEOUT 覆盖。
+var _initialResolveTimeout = 60 * time.Second
 
 func init() {
 	debug.Register("watcher", globalServiceWatcher)
@@ -93,6 +94,24 @@ func (s *serviceWatcher) getSelectedCache(endpoint string) ([]*registry.ServiceI
 		return ws.selectedInstances, true
 	}
 	return nil, false
+}
+
+// ServiceResolved reports whether the discovery endpoint currently has at
+// least one selected instance. It drives the gateway readiness (/readyz) gate
+// so the gateway does not accept traffic before upstreams resolve after a
+// server cold start.
+func ServiceResolved(endpoint string) bool {
+	return globalServiceWatcher.serviceResolved(endpoint)
+}
+
+func (s *serviceWatcher) serviceResolved(endpoint string) bool {
+	s.lock.RLock()
+	defer s.lock.RUnlock()
+	ws, ok := s.watcherStatus[endpoint]
+	if !ok || ws == nil {
+		return false
+	}
+	return len(ws.selectedInstances) > 0
 }
 
 func (s *serviceWatcher) getAppliers(endpoint string) (map[string]Applier, bool) {

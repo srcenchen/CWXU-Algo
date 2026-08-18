@@ -6,21 +6,25 @@ middlewares:
       '@type': type.googleapis.com/gateway.middleware.jwt.v1.JWT
       secret: ""
 endpoints:
+  # 支付FM回调：支付FM服务器直达 user 服务；回调为 GET query / POST form，需放宽超时
   - path: /v1/payment/*
     timeout: 30s
     protocol: HTTP
     backends:
       - target: discovery:///user
+  # 客户中心 webhook 回调：客户中心直达 user 服务；需放宽超时
   - path: /v1/support/events
     timeout: 30s
     protocol: HTTP
     backends:
       - target: discovery:///user
+  # 支持中心智能问答需等待 LLM 完整生成；必须放在通用 /v1/user/* 之前。
   - path: /v1/user/tickets/ai/answer
     timeout: 500s
     protocol: HTTP
     backends:
       - target: discovery:///user
+  # 图片上传包含解码、压缩和对象存储写入，单独放宽总超时并限制请求体。
   - path: /v1/user/upload
     timeout: 90s
     protocol: HTTP
@@ -31,15 +35,71 @@ endpoints:
   - path: /v1/user/*
     timeout: 5s
     protocol: HTTP
+    retry:
+      # 传输层失败重试一次，平滑冷启动/瞬时抖动
+      attempts: 2
     backends:
       - target: discovery:///user
+    middlewares:
+      - name: circuitbreaker
+        options:
+          '@type': type.googleapis.com/gateway.middleware.circuitbreaker.v1.CircuitBreaker
+          # 10s 窗口内请求数 ≥ 100 且成功率低于 50% 才熔断（降温：冷启动瞬断不误伤），熔断期间直接返回 503
+          successRatio:
+            success: 0.5
+            request: 100
+            bucket: 10
+            window: 10s
+          responseData:
+            statusCode: 503
+            header:
+              - key: Content-Type
+                value: ["application/json"]
+            body: "eyJjb2RlIjogMSwgIm1lc3NhZ2UiOiAi5pyN5Yqh5pqC5pe25LiN5Y+v55So77yM6K+356iN5ZCO6YeN6K+VIn0="
   - path: /v1/core/*
+    # 题库补全近期 / 重置队列等管理接口可能超过 5s
     timeout: 120s
     protocol: HTTP
+    retry:
+      attempts: 2
     backends:
       - target: discovery:///core-data
+    middlewares:
+      - name: circuitbreaker
+        options:
+          '@type': type.googleapis.com/gateway.middleware.circuitbreaker.v1.CircuitBreaker
+          successRatio:
+            success: 0.5
+            request: 100
+            bucket: 10
+            window: 10s
+          responseData:
+            statusCode: 503
+            header:
+              - key: Content-Type
+                value: ["application/json"]
+            body: "eyJjb2RlIjogMSwgIm1lc3NhZ2UiOiAi5pyN5Yqh5pqC5pe25LiN5Y+v55So77yM6K+356iN5ZCO6YeN6K+VIn0="
   - path: /v1/agent/*
+    # agent 端点均为异步设计（训练报告为后台 job），LLM 调用不在请求路径上；
+    # 10s 覆盖冷启动时 DB/队列读写即可。
     timeout: 10s
     protocol: HTTP
+    retry:
+      attempts: 2
     backends:
       - target: discovery:///agent
+    middlewares:
+      - name: circuitbreaker
+        options:
+          '@type': type.googleapis.com/gateway.middleware.circuitbreaker.v1.CircuitBreaker
+          successRatio:
+            success: 0.5
+            request: 100
+            bucket: 10
+            window: 10s
+          responseData:
+            statusCode: 503
+            header:
+              - key: Content-Type
+                value: ["application/json"]
+            body: "eyJjb2RlIjogMSwgIm1lc3NhZ2UiOiAi5pyN5Yqh5pqC5pe25LiN5Y+v55So77yM6K+356iN5ZCO6YeN6K+VIn0="
