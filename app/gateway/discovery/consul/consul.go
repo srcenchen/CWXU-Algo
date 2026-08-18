@@ -4,7 +4,6 @@ import (
 	"net/url"
 
 	"github.com/go-kratos/gateway/discovery"
-	"github.com/go-kratos/kratos/contrib/registry/consul/v2"
 	"github.com/go-kratos/kratos/v2/registry"
 	"github.com/hashicorp/consul/api"
 )
@@ -29,5 +28,5 @@ func New(dsn *url.URL) (registry.Discovery, error) {
 	if err != nil {
 		return nil, err
 	}
-	return consul.New(client), nil
+	return NewRegistry(client), nil
 }
