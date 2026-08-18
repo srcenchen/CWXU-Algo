@@ -61,6 +61,7 @@ func TestIsUserSideSpiderErr(t *testing.T) {
 		{"leetcode user not found", `leetcode 用户不存在或资料不可见: abc`, true},
 		{"leetcode ranking not found", `leetcode ranking: user abc not found in nearby pages for weekly-contest-400`, true},
 		{"codeforces handle not found", `codeforces user.rating: handles: User with handle xxx not found`, true},
+		{"luogu account uid resolution parse failed", `LuoGu sync failed user=260: resolve luogu uid "abc3521256362": luogu search 解析失败: invalid character '<' looking for beginning of value`, true},
 		{"luogu fe injection missing", `LuoGu sync failed user=35: 未找到 _feInjection`, true},
 		{"luogu records page empty", `LuoGu sync failed user=46: luogu records page empty while count=103`, true},
 		{"timeout", `发起http请求失败: context deadline exceeded`, false},
@@ -78,6 +79,17 @@ func TestIsUserSideSpiderErr(t *testing.T) {
 	}
 	if IsUserSideSpiderErr("LeetCode", nil) {
 		t.Fatal("nil error must not be user-side")
+	}
+}
+
+func TestFormatSpiderLastError_LuoGuAccountUIDResolutionFailed(t *testing.T) {
+	raw := errors.New(`LuoGu sync failed user=260: resolve luogu uid "abc3521256362": luogu search 解析失败: invalid character '<' looking for beginning of value`)
+	got := FormatSpiderLastError("LuoGu", raw)
+	if !strings.Contains(got, "请检查绑定的用户名") {
+		t.Fatalf("account resolution failure must be a user fault: %q", got)
+	}
+	if strings.Contains(got, "一般不是账号问题") {
+		t.Fatalf("account resolution failure must not say system: %q", got)
 	}
 }
 

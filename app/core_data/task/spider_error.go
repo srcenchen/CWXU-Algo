@@ -124,6 +124,9 @@ func classifySpiderErr(raw string) (spiderFaultKind, string) {
 			return spiderFaultUser, "未找到该用户"
 		}
 	}
+	if strings.Contains(lower, "resolve luogu uid") && strings.Contains(lower, "luogu search 解析失败") {
+		return spiderFaultUser, "无法识别该用户"
+	}
 
 	// —— 暂态：页面结构变化 / 需要登录 / 风控页 ——
 	// 不 blame 用户名，也不算平台故障；按用户侧处理（只提示本人，不刷运维）
