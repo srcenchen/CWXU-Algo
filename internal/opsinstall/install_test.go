@@ -11,6 +11,12 @@ import (
 	"cwxu-algo/internal/opsroot"
 )
 
+// TestMain 关闭远端模板拉取：单测只验证本地逻辑，不依赖网络。
+func TestMain(m *testing.M) {
+	_ = os.Setenv("GOALGO_CONFIG_REMOTE", "0")
+	os.Exit(m.Run())
+}
+
 func TestAppEnvIncludesEscapedBackupPostgresURI(t *testing.T) {
 	root, err := opsroot.Resolve(t.TempDir())
 	if err != nil {
@@ -285,7 +291,7 @@ func TestRefreshManagedWritesMissingTemplatesAndSnapshots(t *testing.T) {
 	if err := os.WriteFile(root.Join("compose.yaml"), []byte("old-compose\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	changed, skipped, backup, err := RefreshManaged(root)
+	changed, skipped, backup, err := RefreshManaged(context.Background(), root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -330,7 +336,7 @@ func TestRefreshManagedWritesMissingTemplatesAndSnapshots(t *testing.T) {
 		t.Fatalf("baseline manifest missing: %v", err)
 	}
 	// 内容一致时跳过，不再产生变化。
-	changed, skipped, _, err = RefreshManaged(root)
+	changed, skipped, _, err = RefreshManaged(context.Background(), root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -345,7 +351,7 @@ func TestRefreshManagedSkipsLocallyModifiedTemplates(t *testing.T) {
 		t.Fatal(err)
 	}
 	// 先建立基线。
-	if _, _, _, err := RefreshManaged(root); err != nil {
+	if _, _, _, err := RefreshManaged(context.Background(), root); err != nil {
 		t.Fatal(err)
 	}
 	// 本地手工修改 config/gateway.yaml（与基线不一致）。
@@ -353,7 +359,7 @@ func TestRefreshManagedSkipsLocallyModifiedTemplates(t *testing.T) {
 	if err := os.WriteFile(root.Join("config", "gateway.yaml"), []byte(handEdited), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	changed, skipped, _, err := RefreshManaged(root)
+	changed, skipped, _, err := RefreshManaged(context.Background(), root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -383,7 +389,7 @@ func TestRestoreBackupRestoresAndCleansUp(t *testing.T) {
 	if err := os.WriteFile(root.Join("config", "gateway.yaml"), []byte("old-gateway\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	_, _, backup, err := RefreshManaged(root)
+	_, _, backup, err := RefreshManaged(context.Background(), root)
 	if err != nil {
 		t.Fatal(err)
 	}

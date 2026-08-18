@@ -116,8 +116,7 @@ class ContainerRuntimeTests(unittest.TestCase):
     def test_nginx_preserves_api_spa_and_seo_routes(self):
         nginx = read("docker/nginx.conf")
         self.assertRegex(nginx, r"location \^~ /api/")
-        self.assertIn("proxy_pass http://gateway:8080/v1/;", nginx)
-        self.assertIn("proxy_pass http://frontend:8080;", nginx)
+        self.assertIn("rewrite ^/api/(.*) /v1/$1 break;", nginx)
         self.assertIn("rewrite ^ /index.html break;", nginx)
         self.assertIn("X-Original-URI $request_uri", nginx)
         self.assertIn("/v1/user/seo/html", nginx)
@@ -132,6 +131,22 @@ class ContainerRuntimeTests(unittest.TestCase):
             "/sitemap.xml",
         ):
             self.assertIn(route, nginx)
+
+    def test_nginx_re_resolves_upstream_dns_per_request(self):
+        nginx = read("docker/nginx.conf")
+        # 后端容器重建换 IP 后，nginx 必须通过 Docker DNS 重新解析而非缓存启动时 IP
+        self.assertIn("resolver 127.0.0.11 valid=10s ipv6=off;", nginx)
+        self.assertIn("set $upstream_user http://user:8000;", nginx)
+        self.assertIn("set $upstream_frontend http://frontend:8080;", nginx)
+        self.assertIn("set $upstream_gateway http://gateway:8080;", nginx)
+        self.assertIn("proxy_pass $upstream_user;", nginx)
+        self.assertIn("proxy_pass $upstream_user/v1/user/seo/html;", nginx)
+        self.assertIn("proxy_pass $upstream_user/v1/user/seo/sitemap.xml;", nginx)
+        self.assertIn("proxy_pass $upstream_frontend;", nginx)
+        self.assertIn("proxy_pass $upstream_gateway;", nginx)
+        self.assertNotIn("proxy_pass http://user:8000;", nginx)
+        self.assertNotIn("proxy_pass http://frontend:8080;", nginx)
+        self.assertNotIn("proxy_pass http://gateway:8080/v1/;", nginx)
 
     def test_nginx_only_preserves_sanitized_forwarded_headers_from_trusted_proxies(self):
         nginx = read("docker/nginx.conf")

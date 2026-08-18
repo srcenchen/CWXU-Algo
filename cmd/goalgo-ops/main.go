@@ -478,7 +478,7 @@ func cmdInstall(args []string, runner opsexec.Command) int {
 	inst := opsinstall.New(root)
 
 	progress.Step("初始化目录结构与模板")
-	if err := inst.Scaffold(); err != nil {
+	if err := inst.Scaffold(ctx); err != nil {
 		return fail("安装", err)
 	}
 	compose := &opscompose.Compose{Root: root, Run: runner}

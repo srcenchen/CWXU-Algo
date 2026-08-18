@@ -156,7 +156,7 @@ func runtimeUpgrade(ctx context.Context, compose *opscompose.Compose, args []str
 	if *all {
 		var skipped []string
 		var err error
-		refreshed, skipped, templateBackup, err = opsinstall.RefreshManaged(compose.Root)
+		refreshed, skipped, templateBackup, err = opsinstall.RefreshManaged(ctx, compose.Root)
 		if err != nil {
 			return fail("升级", err)
 		}

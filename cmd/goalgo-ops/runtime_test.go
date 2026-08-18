@@ -240,7 +240,7 @@ func TestRuntimeUpgradeReportsLatestWhenEverythingInSync(t *testing.T) {
 		t.Fatal(err)
 	}
 	runner := &upgradeRunner{}
-	if _, _, _, err := opsinstall.RefreshManaged(root); err != nil {
+	if _, _, _, err := opsinstall.RefreshManaged(context.Background(), root); err != nil {
 		t.Fatal(err)
 	}
 	resolved, err := (&opscompose.Compose{Root: root, Run: runner}).ResolveLatest(context.Background())

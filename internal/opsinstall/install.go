@@ -25,19 +25,19 @@ func New(root *opsroot.Root) *Installer {
 }
 
 func (i *Installer) Install(ctx context.Context) error {
-	if err := i.Scaffold(); err != nil {
+	if err := i.Scaffold(ctx); err != nil {
 		return err
 	}
 	return i.Secrets()
 }
 
-func (i *Installer) Scaffold() error {
+func (i *Installer) Scaffold(ctx context.Context) error {
 	if err := i.Root.EnsureLayout(); err != nil {
 		return err
 	}
 	manifest := templatesManifest{Version: 1, Files: map[string]string{}}
 	for _, managed := range managedAssets() {
-		if err := writeManagedWithManifest(i.Root.Path, managed, &manifest); err != nil {
+		if err := writeManagedWithManifest(ctx, i.Root.Path, managed, &manifest); err != nil {
 			return err
 		}
 	}
@@ -86,8 +86,8 @@ func managedAssets() []managedAsset {
 	}
 }
 
-func writeManagedWithManifest(root string, asset managedAsset, manifest *templatesManifest) error {
-	content, err := ReadAsset(asset.source)
+func writeManagedWithManifest(ctx context.Context, root string, asset managedAsset, manifest *templatesManifest) error {
+	content, err := FetchAsset(ctx, asset.source)
 	if err != nil {
 		return err
 	}
@@ -161,14 +161,14 @@ func hashContent(content []byte) string {
 //   - 被替换的旧内容快照到 state/templates.backup/<时间戳>/，可随时人工恢复。
 //
 // 返回：是否有文件被更新；被跳过（本地手改）的路径列表；本次刷新使用的备份目录。
-func RefreshManaged(root *opsroot.Root) (changed bool, skipped []string, backup string, err error) {
+func RefreshManaged(ctx context.Context, root *opsroot.Root) (changed bool, skipped []string, backup string, err error) {
 	if err := root.EnsureLayout(); err != nil {
 		return false, nil, "", err
 	}
 	manifest, _ := loadManifest(root)
 	backup = filepath.Join(root.Path, templatesBackupDir, time.Now().Format("20060102-150405"))
 	for _, managed := range managedAssets() {
-		content, err := ReadAsset(managed.source)
+		content, err := FetchAsset(ctx, managed.source)
 		if err != nil {
 			return false, skipped, "", err
 		}
