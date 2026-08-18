@@ -16,8 +16,13 @@ env:
   ACR_IMAGE: registry.cn-hangzhou.aliyuncs.com/sanenchen/goalgo
 
 jobs:
-  build-and-push:
+  build:
+    name: build-${{ matrix.target }}
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [gateway, user, core-data, agent]
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
@@ -26,46 +31,27 @@ jobs:
           registry: ${{ env.ACR_REGISTRY }}
           username: ${{ secrets.ACR_USERNAME }}
           password: ${{ secrets.ACR_PASSWORD }}
-      - name: Build and push gateway
+      - name: Build and push ${{ matrix.target }}
         uses: docker/build-push-action@v6
         with:
           context: .
           file: deploy/docker/backend.Dockerfile
-          target: gateway
+          target: ${{ matrix.target }}
           push: true
           provenance: false
           sbom: false
-          tags: ${{ env.ACR_IMAGE }}:gateway-sha-${{ github.sha }}
-      - name: Build and push user
-        uses: docker/build-push-action@v6
+          tags: ${{ env.ACR_IMAGE }}:${{ matrix.target }}-sha-${{ github.sha }}
+
+  promote-latest:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
         with:
-          context: .
-          file: deploy/docker/backend.Dockerfile
-          target: user
-          push: true
-          provenance: false
-          sbom: false
-          tags: ${{ env.ACR_IMAGE }}:user-sha-${{ github.sha }}
-      - name: Build and push core-data
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: deploy/docker/backend.Dockerfile
-          target: core-data
-          push: true
-          provenance: false
-          sbom: false
-          tags: ${{ env.ACR_IMAGE }}:core-data-sha-${{ github.sha }}
-      - name: Build and push agent
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: deploy/docker/backend.Dockerfile
-          target: agent
-          push: true
-          provenance: false
-          sbom: false
-          tags: ${{ env.ACR_IMAGE }}:agent-sha-${{ github.sha }}
+          registry: ${{ env.ACR_REGISTRY }}
+          username: ${{ secrets.ACR_USERNAME }}
+          password: ${{ secrets.ACR_PASSWORD }}
       - name: Promote backend latest tags
         run: |
           for target in gateway user core-data agent; do

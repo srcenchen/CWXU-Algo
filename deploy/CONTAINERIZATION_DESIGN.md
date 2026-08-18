@@ -155,7 +155,7 @@ ACR_IMAGE=registry.cn-hangzhou.aliyuncs.com/sanenchen/goalgo
 
 ### 6.2 后端镜像
 
-后端 `main` push 直接运行单个 `back-image` job，依次构建并推送 gateway、user、core-data、agent 的 commit 标签。四个镜像全部成功后再统一提升 latest 标签，避免构建失败时发布一组混合版本。流程不 checkout 前端仓库，不再等待前置 CI，也不生成发布清单。
+后端 `main` push 直接运行 `back-image`：用 matrix 拆成 gateway、user、core-data、agent 四个并行 job，各自构建并推送 commit 标签（`gateway-sha-*` 等），缩短整体构建时间。四个 job 全部成功后，`promote-latest` 统一提升 `*-latest` 标签，避免构建失败时发布一组混合版本。流程不 checkout 前端仓库，不再等待前置 CI，也不生成发布清单。
 
 ### 6.3 生产发布
 

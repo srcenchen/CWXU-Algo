@@ -180,12 +180,18 @@ class WorkflowTests(unittest.TestCase):
         self.assertNotIn("frontend", workflow)
         self.assertNotIn("repository:", workflow)
         self.assertIn("cancel-in-progress: false", workflow)
-        for service in ("gateway", "user", "core-data", "agent"):
-            self.assertIn(service, workflow)
-            self.assertIn(f":{service}-sha-${{{{ github.sha }}}}", workflow)
+        # 四个服务并行构建：matrix 同时覆盖四个 target，各自推送 commit 标签
+        self.assertIn("strategy:", workflow)
+        self.assertIn("matrix:", workflow)
+        self.assertIn("fail-fast: false", workflow)
+        self.assertIn("target: [gateway, user, core-data, agent]", workflow)
+        self.assertIn("${{ matrix.target }}-sha-${{ github.sha }}", workflow)
+        # latest 标签在四个镜像全部成功后统一提升（matrix job 全绿才触发）
+        self.assertIn("promote-latest", workflow)
+        self.assertIn("needs: build", workflow)
         self.assertIn('${target}-latest', workflow)
-        self.assertEqual(workflow.count("provenance: false"), 4)
-        self.assertEqual(workflow.count("sbom: false"), 4)
+        self.assertEqual(workflow.count("provenance: false"), 1)
+        self.assertEqual(workflow.count("sbom: false"), 1)
 
     def test_production_workflow_is_preserved_but_disabled(self):
         disabled = REPO / ".github/workflows/production.yml.disabled"
