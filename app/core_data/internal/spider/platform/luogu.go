@@ -104,6 +104,9 @@ func (lg *NewLuoGu) ocrImage(client *http.Client, url string, img []byte) (strin
 	if err != nil {
 		return "", err
 	}
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("OCR 返回 %d: %s", resp.StatusCode, truncateForErr(string(b), 200))
+	}
 	return string(b), nil
 }
 func (lg *NewLuoGu) doLogin(
@@ -128,6 +131,10 @@ func (lg *NewLuoGu) doLogin(
 		return false, "", err
 	}
 	body = string(b)
+	// 非 200 一律失败；再按 JSON errorCode / 文本错误细化（405 等错误页可能不含 errorCode）
+	if resp.StatusCode != http.StatusOK {
+		return false, body, nil
+	}
 	// 只要出现 errorCode，就认为失败，交给外层重试
 	if strings.Contains(body, "errorCode") {
 		return false, body, nil
@@ -138,7 +145,7 @@ func (lg *NewLuoGu) doLogin(
 func (lg *NewLuoGu) login(username, password string) (*http.Client, error) {
 	const (
 		captchaURL = "https://www.luogu.com.cn/lg4/captcha"
-		ocrURL     = "http://ocr.alistgo.com/ocr/file"
+		ocrURL     = "https://ocr.alistgo.com/ocr/file"
 		loginURL   = "https://www.luogu.com.cn/do-auth/password"
 		maxRetry   = luoguLoginMaxRetry
 	)
@@ -236,17 +243,22 @@ func (lg *NewLuoGu) isSessionValid(client *http.Client) bool {
 	if client == nil {
 		return false
 	}
-	resp, err := client.Get("https://www.luogu.com.cn/api/user/search?user=sanenchen")
+	// 用实际抓取入口探测：有效会话会返回含 _feInjection 的记录列表页；
+	// 未登录时会被 302 到 /auth/login，最终页面不含 _feInjection。
+	resp, err := client.Get(lg.recordListBaseURL(1) + "1")
 	if err != nil {
 		return false
 	}
-	io.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
 	resp.Body.Close()
-	// If redirected to login page, session is invalid
-	if resp.StatusCode == http.StatusMovedPermanently || resp.StatusCode == http.StatusFound || resp.StatusCode == http.StatusTemporaryRedirect {
+	if err != nil {
 		return false
 	}
-	return true
+	// 302 到登录页或页面不含注入数据 → 会话失效
+	if strings.Contains(resp.Request.URL.Path, "/auth/login") {
+		return false
+	}
+	return strings.Contains(string(body), "_feInjection")
 }
 
 // getClient returns a cached client or creates a new one via login

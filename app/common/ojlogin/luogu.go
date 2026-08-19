@@ -18,7 +18,7 @@ import (
 
 const (
 	luoguCaptchaURL = "https://www.luogu.com.cn/lg4/captcha"
-	luoguOCRURL     = "http://ocr.alistgo.com/ocr/file"
+	luoguOCRURL     = "https://ocr.alistgo.com/ocr/file"
 	luoguLoginURL   = "https://www.luogu.com.cn/do-auth/password"
 	luoguMaxRetry   = 3
 	luoguBaseDelay  = 800 * time.Millisecond
@@ -149,6 +149,10 @@ func doLuoguLogin(client *http.Client, username, password, captcha string) (bool
 		return false, "", fmt.Errorf("读取登录响应失败: %w", err)
 	}
 	body := string(b)
+	// 非 200 一律失败；再按 JSON errorCode / 文本错误细化（405 等错误页可能不含 errorCode）
+	if resp.StatusCode != http.StatusOK {
+		return false, body, nil
+	}
 	if strings.Contains(body, "errorCode") {
 		return false, body, nil
 	}
