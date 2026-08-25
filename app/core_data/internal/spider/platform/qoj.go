@@ -43,6 +43,7 @@ type NewQOJ struct {
 func normalizeQOJResult(raw string) (string, error) {
 	result := strings.TrimSpace(raw)
 	upper := strings.ToUpper(result)
+	upper = strings.TrimSpace(strings.TrimRight(upper, "✓✔✅"))
 	switch {
 	case upper == "AC", strings.HasPrefix(upper, "ACCEPTED"):
 		return "AC", nil

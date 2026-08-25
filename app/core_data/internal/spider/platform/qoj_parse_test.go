@@ -21,6 +21,7 @@ func TestNormalizeQOJResult(t *testing.T) {
 		{name: "partial score", raw: "99", status: "WA"},
 		{name: "zero score", raw: "0", status: "WA"},
 		{name: "accepted text", raw: "Accepted", status: "AC"},
+		{name: "accepted marker", raw: "AC ✓", status: "AC"},
 		{name: "compile error", raw: "CE", status: "CE"},
 		{name: "judging", raw: "Judging", status: "JUDGING"},
 		{name: "waiting", raw: "Waiting", status: "WAITING"},
