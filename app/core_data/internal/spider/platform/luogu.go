@@ -70,11 +70,12 @@ var luoguLanguageName = map[int]string{
 }
 
 type NewLuoGu struct {
-	mu       sync.RWMutex
-	client   *http.Client
-	lastUsed time.Time
-	username string
-	password string
+	mu            sync.RWMutex
+	client        *http.Client
+	lastUsed      time.Time
+	username      string
+	password      string
+	configVersion int64
 }
 
 func (lg *NewLuoGu) ocrImage(client *http.Client, url string, img []byte) (string, error) {
@@ -331,13 +332,9 @@ func (lg *NewLuoGu) getClient() (*http.Client, error) {
 	if cached != nil && !expired {
 		// Validate session without holding lock（用快照，不再无锁读共享字段）
 		if lg.isSessionValid(cached) {
-			// 会话命中：刷新 lastUsed，活跃会话不被 30 分钟窗口误判过期
-			lg.mu.Lock()
-			if lg.client == cached {
-				lg.lastUsed = time.Now()
+			if lg.cachedClientStillUsable(cached) {
+				return cached, nil
 			}
-			lg.mu.Unlock()
-			return cached, nil
 		}
 	}
 
@@ -363,6 +360,16 @@ func (lg *NewLuoGu) getClient() (*http.Client, error) {
 	return client, nil
 }
 
+func (lg *NewLuoGu) cachedClientStillUsable(client *http.Client) bool {
+	lg.mu.Lock()
+	defer lg.mu.Unlock()
+	if lg.client != client || strings.TrimSpace(lg.username) == "" || strings.TrimSpace(lg.password) == "" {
+		return false
+	}
+	lg.lastUsed = time.Now()
+	return true
+}
+
 func (lg *NewLuoGu) FetchSubmitLog(ctx context.Context, userId int64, username string, needAll bool) ([]model.SubmitLog, error) {
 	logs, _, err := lg.FetchSubmitLogComplete(ctx, userId, username, needAll)
 	return logs, err
@@ -380,6 +387,10 @@ func (lg *NewLuoGu) FetchSubmitLogForRecovery(ctx context.Context, userId int64,
 func (lg *NewLuoGu) fetchSubmitLogComplete(ctx context.Context, userId int64, username string, needAll bool) ([]model.SubmitLog, bool, int64, error) {
 	if ctx == nil {
 		ctx = context.Background()
+	}
+	username = strings.TrimSpace(username)
+	if username == "" {
+		return nil, false, 0, fmt.Errorf("luogu username 为空: %w", spider.ErrEmptyPlatformUsername)
 	}
 	client, err := lg.getClient()
 	if err != nil {
@@ -538,6 +549,23 @@ func (lg *NewLuoGu) FetchPublicProfile(ctx context.Context, username string) (sp
 func (lg *NewLuoGu) SetCredentials(username, password string) {
 	lg.mu.Lock()
 	defer lg.mu.Unlock()
+	lg.setCredentialsLocked(username, password)
+}
+
+// SetCredentialsVersioned prevents an older runtime snapshot from restoring cleared credentials.
+func (lg *NewLuoGu) SetCredentialsVersioned(username, password string, configVersion int64) {
+	lg.mu.Lock()
+	defer lg.mu.Unlock()
+	if configVersion < lg.configVersion && strings.TrimSpace(username) != "" {
+		return
+	}
+	if configVersion > lg.configVersion {
+		lg.configVersion = configVersion
+	}
+	lg.setCredentialsLocked(username, password)
+}
+
+func (lg *NewLuoGu) setCredentialsLocked(username, password string) {
 	if lg.username != username || lg.password != password {
 		lg.client = nil
 		lg.username = username

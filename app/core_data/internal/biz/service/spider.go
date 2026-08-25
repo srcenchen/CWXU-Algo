@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -622,23 +623,48 @@ func (uc *SpiderUseCase) recordOjStatus(ctx context.Context, platform, status, e
 
 // injectOjCredentials 从站点设置读取 OJ 凭证并注入到爬虫客户端
 func (uc *SpiderUseCase) injectOjCredentials(ctx context.Context) {
-	if uc.data == nil || uc.data.RDB == nil {
+	if uc.data == nil {
 		return
 	}
 	rt := sitesettings.Load(ctx, uc.data.RDB, nil)
-	if rt == nil {
-		return
-	}
+	var luoguSetter, qojSetter interface{ SetCredentials(string, string) }
 	if p, ok := spider.Get(spider.LuoGu); ok {
 		if setter, ok := p.(interface{ SetCredentials(string, string) }); ok {
-			setter.SetCredentials(rt.OjLuoguUsername, rt.OjLuoguPassword)
+			luoguSetter = setter
 		}
 	}
 	if p, ok := spider.Get(spider.QOJ); ok {
 		if setter, ok := p.(interface{ SetCredentials(string, string) }); ok {
-			setter.SetCredentials(rt.OjQojUsername, rt.OjQojPassword)
+			qojSetter = setter
 		}
 	}
+	applyOjCredentials(rt, luoguSetter, qojSetter)
+}
+
+func applyOjCredentials(rt *sitesettings.Runtime, luogu, qoj interface{ SetCredentials(string, string) }) {
+	if rt == nil {
+		rt = &sitesettings.Runtime{}
+	}
+	if luogu != nil {
+		if setter, ok := luogu.(interface {
+			SetCredentialsVersioned(string, string, int64)
+		}); ok {
+			setter.SetCredentialsVersioned(rt.OjLuoguUsername, rt.OjLuoguPassword, rt.ConfigVersion)
+		} else {
+			luogu.SetCredentials(rt.OjLuoguUsername, rt.OjLuoguPassword)
+		}
+	}
+	if qoj != nil {
+		qoj.SetCredentials(rt.OjQojUsername, rt.OjQojPassword)
+	}
+}
+
+func shouldUseLuoGuPublicFallback(rdb *redis.Client, platform string, hasCredentials bool) bool {
+	if platform != spider.LuoGu || hasCredentials {
+		return false
+	}
+	paused, err := task.IsPlatformPausedSafe(rdb, platform)
+	return err == nil && !paused
 }
 
 // loadOnePlatform 返回 (是否有数据变更, error)
@@ -655,7 +681,7 @@ func (uc *SpiderUseCase) loadOnePlatform(ctx context.Context, userId int64, plat
 	}
 	p, _ := spider.Get(plat.Platform)
 	if plat.Platform == spider.LuoGu {
-		if fallback, ok := p.(spider.PublicProfileFallbackFetcher); ok && !fallback.HasLoginCredentials() {
+		if fallback, ok := p.(spider.PublicProfileFallbackFetcher); ok && shouldUseLuoGuPublicFallback(uc.data.RDB, plat.Platform, fallback.HasLoginCredentials()) {
 			genAtStart := int64(0)
 			if uc.data != nil && uc.data.RDB != nil {
 				genAtStart = task.CurrentGeneration(uc.data.RDB, userId, plat.Platform)
@@ -755,6 +781,9 @@ func (uc *SpiderUseCase) loadOnePlatform(ctx context.Context, userId int64, plat
 			return anyChange, nil
 		}
 		lastErr = err
+		if errors.Is(err, spider.ErrEmptyPlatformUsername) {
+			return anyChange, err
+		}
 		uc.recordOjStatus(ctx, plat.Platform, "fail", err.Error())
 		if strings.Contains(err.Error(), "平台") {
 			log.Errorf(

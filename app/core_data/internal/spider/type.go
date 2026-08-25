@@ -2,10 +2,13 @@ package spider
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"cwxu-algo/app/core_data/internal/data/model"
 )
+
+var ErrEmptyPlatformUsername = errors.New("platform username is empty")
 
 // Provider 做题记录提供器
 type Provider interface {
