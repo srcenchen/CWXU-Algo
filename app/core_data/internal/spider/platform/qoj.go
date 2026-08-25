@@ -2,15 +2,17 @@ package platform
 
 import (
 	"context"
-	"cwxu-algo/app/common/utils/ojhttp"
 	"crypto/md5"
+	"cwxu-algo/app/common/utils/ojhttp"
 	"encoding/hex"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -26,8 +28,8 @@ const (
 	qojLoginMaxRetry = 5
 	// qojLoginBaseDelay 登录重试退避基数（指数递增）
 	qojLoginBaseDelay = 500 * time.Millisecond
-	// qojMaxPagesAll needAll 翻页硬顶（对齐洛谷 200 页），防无界翻页
-	qojMaxPagesAll = 200
+	// qojProductionMaxPages 为 0 时按远端 next 持续抓取，资源上限由调用方 ctx 控制。
+	qojProductionMaxPages = 0
 )
 
 type NewQOJ struct {
@@ -36,6 +38,31 @@ type NewQOJ struct {
 	lastUsed time.Time
 	username string
 	password string
+}
+
+func normalizeQOJResult(raw string) (string, error) {
+	result := strings.TrimSpace(raw)
+	upper := strings.ToUpper(result)
+	switch {
+	case upper == "AC", strings.HasPrefix(upper, "ACCEPTED"):
+		return "AC", nil
+	case upper == "CE", strings.HasPrefix(upper, "COMPILE ERROR"):
+		return "CE", nil
+	case upper == "JUDGING", upper == "PENDING", upper == "TESTING":
+		return upper, nil
+	case upper == "WAITING", upper == "WJ", upper == "QUEUE", upper == "IN QUEUE", upper == "IN_QUEUE":
+		return upper, nil
+	}
+	if score, err := strconv.ParseFloat(result, 64); err == nil {
+		if math.IsNaN(score) || math.IsInf(score, 0) || score < 0 || score > 100 {
+			return "", fmt.Errorf("异常 QOJ 分数: %q", result)
+		}
+		if score == 100 {
+			return "AC", nil
+		}
+		return "WA", nil
+	}
+	return "", fmt.Errorf("未知 QOJ 结果: %q", result)
 }
 
 // 模拟真实浏览器的请求头
@@ -235,109 +262,113 @@ func qojProblemFromCell(cellHTML string) string {
 }
 
 func (q *NewQOJ) FetchSubmitLog(ctx context.Context, userId int64, username string, needAll bool) ([]model.SubmitLog, error) {
+	logs, _, err := q.FetchSubmitLogComplete(ctx, userId, username, needAll)
+	return logs, err
+}
+
+func (q *NewQOJ) FetchSubmitLogComplete(ctx context.Context, userId int64, username string, needAll bool) ([]model.SubmitLog, bool, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	baseUrl := fmt.Sprintf("https://qoj.ac/submissions?submitter=%s&page=", url.QueryEscape(username))
 	client, err := q.getClient()
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
+	return fetchQOJSubmitLogs(ctx, client, baseUrl, userId, needAll, qojProductionMaxPages, func() { time.Sleep(500 * time.Millisecond) })
+}
 
+func fetchQOJSubmitLogs(ctx context.Context, client *http.Client, baseURL string, userID int64, needAll bool, maxPages int, pause func()) ([]model.SubmitLog, bool, error) {
 	var res []model.SubmitLog
-	page := 1
-
-	for {
+	seen := make(map[string]struct{})
+	for page := 1; maxPages <= 0 || page <= maxPages; page++ {
 		if err := ctx.Err(); err != nil {
-			return nil, err
+			return nil, false, err
 		}
-		reqURL := fmt.Sprintf("%s%d", baseUrl, page)
+		reqURL := fmt.Sprintf("%s%d", baseURL, page)
 		req, err := http.NewRequestWithContext(ctx, "GET", reqURL, nil)
 		if err != nil {
-			return nil, err
+			return nil, false, err
 		}
 		setBrowserHeaders(req)
 		req.Header.Set("Referer", "https://qoj.ac/")
 
 		resp, err := client.Do(req)
 		if err != nil {
-			return nil, err
+			return nil, false, err
 		}
 
 		rb, err := io.ReadAll(resp.Body)
 		resp.Body.Close()
 		if err != nil {
-			return nil, err
+			return nil, false, err
+		}
+		if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+			return nil, false, fmt.Errorf("QOJ submissions page %d HTTP %d", page, resp.StatusCode)
 		}
 
 		html := string(rb)
-
-		tbodyRe := regexp.MustCompile(`(?s)<tbody>(.*?)</tbody>`)
-		tbodyMatch := tbodyRe.FindStringSubmatch(html)
-		if len(tbodyMatch) < 2 {
-			break
+		logs, hasNext, err := parseQOJSubmissionPage(html, userID, page+1, seen)
+		if err != nil {
+			return nil, false, fmt.Errorf("QOJ submissions page %d: %w", page, err)
 		}
-
-		rowRe := regexp.MustCompile(`(?s)<tr>(.*?)</tr>`)
-		rows := rowRe.FindAllStringSubmatch(tbodyMatch[1], -1)
-
-		if len(rows) == 0 {
-			break
-		}
-
-		for _, row := range rows {
-			cellRe := regexp.MustCompile(`(?s)<td[^>]*>(.*?)</td>`)
-			cells := cellRe.FindAllStringSubmatch(row[1], -1)
-
-			if len(cells) < 9 {
-				continue
-			}
-
-			submitID := strings.TrimLeft(stripTags(cells[0][1]), "#")
-			// 题名优先取 /problem/{id} 链接文本（「#19004. Title」），避免单元格杂讯
-			problem := qojProblemFromCell(cells[1][1])
-			rawStatus := stripTags(cells[3][1])
-			lang := stripTags(cells[6][1])
-			timeStr := stripTags(cells[8][1])
-
-			status := "WA"
-			if strings.HasPrefix(rawStatus, "AC") || strings.HasPrefix(rawStatus, "Accepted") {
-				status = "AC"
-			} else if strings.HasPrefix(rawStatus, "CE") {
-				status = "CE"
-			}
-
-			t, _ := time.ParseInLocation("2006-01-02 15:04:05", timeStr, time.Local)
-
-			res = append(res, model.SubmitLog{
-				UserID:   userId,
-				Platform: "QOJ",
-				SubmitID: submitID,
-				Problem:  problem,
-				Lang:     lang,
-				Status:   status,
-				Time:     t,
-			})
-		}
+		res = append(res, logs...)
 
 		if !needAll {
-			break
+			return res, false, nil
 		}
-		// 翻页硬顶（对齐洛谷 200 页），防异常用户/解析漂移导致无界翻页
-		if page >= qojMaxPagesAll {
-			break
+		if !hasNext {
+			return res, true, nil
 		}
-
-		nextPageStr := fmt.Sprintf("page=%d", page+1)
-		if !strings.Contains(html, nextPageStr) {
-			break
+		if (maxPages <= 0 || page < maxPages) && pause != nil {
+			pause()
 		}
-
-		page++
-		time.Sleep(500 * time.Millisecond) // 防止翻页过快再次触发 Cloudflare 拦截
 	}
+	return res, false, nil
+}
 
-	return res, nil
+var (
+	qojTbodyRe = regexp.MustCompile(`(?is)<tbody[^>]*>(.*?)</tbody>`)
+	qojRowRe   = regexp.MustCompile(`(?is)<tr[^>]*>(.*?)</tr>`)
+	qojCellRe  = regexp.MustCompile(`(?is)<td[^>]*>(.*?)</td>`)
+)
+
+func parseQOJSubmissionPage(html string, userID int64, nextPage int, seen map[string]struct{}) ([]model.SubmitLog, bool, error) {
+	tbody := qojTbodyRe.FindStringSubmatch(html)
+	if len(tbody) < 2 {
+		return nil, false, fmt.Errorf("submission table body missing")
+	}
+	rows := qojRowRe.FindAllStringSubmatch(tbody[1], -1)
+	logs := make([]model.SubmitLog, 0, len(rows))
+	for rowIndex, row := range rows {
+		cells := qojCellRe.FindAllStringSubmatch(row[1], -1)
+		if len(cells) < 9 {
+			return nil, false, fmt.Errorf("row %d has %d columns, want at least 9", rowIndex+1, len(cells))
+		}
+		submitID := strings.TrimSpace(strings.TrimLeft(stripTags(cells[0][1]), "#"))
+		if submitID == "" {
+			return nil, false, fmt.Errorf("row %d has empty submit ID", rowIndex+1)
+		}
+		if _, exists := seen[submitID]; exists {
+			return nil, false, fmt.Errorf("duplicate submit ID %q", submitID)
+		}
+		seen[submitID] = struct{}{}
+		status, err := normalizeQOJResult(stripTags(cells[3][1]))
+		if err != nil {
+			return nil, false, fmt.Errorf("submission %s: %w", submitID, err)
+		}
+		timeText := stripTags(cells[8][1])
+		submittedAt, err := time.ParseInLocation("2006-01-02 15:04:05", timeText, time.Local)
+		if err != nil {
+			return nil, false, fmt.Errorf("submission %s time %q: %w", submitID, timeText, err)
+		}
+		logs = append(logs, model.SubmitLog{
+			UserID: userID, Platform: spider.QOJ, SubmitID: submitID,
+			Problem: qojProblemFromCell(cells[1][1]), Lang: stripTags(cells[6][1]), Status: status, Time: submittedAt,
+		})
+	}
+	nextPageRe := regexp.MustCompile(fmt.Sprintf(`(?is)(?:[?&]|&amp;)page=%d(?:[^0-9]|$)`, nextPage))
+	return logs, nextPageRe.MatchString(html), nil
 }
 
 // SetCredentials 注入爬虫登录凭证（从站点设置读取）

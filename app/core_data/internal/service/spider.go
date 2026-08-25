@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -29,6 +31,12 @@ import (
 	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 )
+
+var spiderPlatformWriteUnlockScript = redis.NewScript(`
+if redis.call("GET", KEYS[1]) == ARGV[1] then
+  return redis.call("DEL", KEYS[1])
+end
+return 0`)
 
 var (
 	SetForbidden    = errors.Forbidden("权限错误", "权限不允许，设置失败")
@@ -221,25 +229,12 @@ func (s SpiderService) SetSpider(ctx context.Context, req *spider.SetSpiderReq) 
 		Platform: platformName,
 		Username: username,
 	}
-	if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Where("user_id = ? AND platform = ?", req.UserId, platformName).Delete(&model.Platform{}).Error; err != nil {
-			return err
-		}
-		if err := tx.Where("user_id = ? AND platform = ?", req.UserId, platformName).Delete(&model.SubmitLog{}).Error; err != nil {
-			return err
-		}
-		if err := tx.Where("user_id = ? AND platform = ?", req.UserId, platformName).Delete(&model.ContestLog{}).Error; err != nil {
-			return err
-		}
-		// 按平台剪枝预聚合，再全量重爬该平台
-		if err := dal.DeletePlatformDailyStats(ctx, tx, req.UserId, platformName); err != nil {
-			return err
-		}
-		if err := dal.DeletePlatformUserAC(ctx, tx, req.UserId, platformName); err != nil {
-			return err
-		}
-		return tx.Create(&platform).Error
-	}); err != nil {
+	unlock, locked := trySpiderPlatformWriteLock(ctx, s.rdb, req.UserId, platformName)
+	if !locked {
+		return nil, errors.Conflict("绑定冲突", "该 OJ 正在同步，请稍后重试")
+	}
+	defer unlock()
+	if err := replaceSpiderBinding(ctx, s.db, platform); err != nil {
 		log.Errorf("SetSpider transaction failed: %v", err)
 		return nil, InternalError
 	}
@@ -254,6 +249,7 @@ func (s SpiderService) SetSpider(ctx context.Context, req *spider.SetSpiderReq) 
 	}
 	_ = s.rdb.Incr(ctx, fmt.Sprintf("core:contest_log:user:%d:ver", req.UserId)).Err()
 	_ = s.rdb.Incr(ctx, fmt.Sprintf("statistic:user:%d:ver", req.UserId)).Err()
+	_ = s.rdb.Incr(ctx, "statistic:period:global:ver").Err()
 	// 递增代数：正在跑的旧全量任务写入前会发现代数过期并丢弃，避免把已删数据写回叠统计
 	s.spider.BumpGeneration(req.UserId, platformName)
 	// 强制允许本次入队（旧全量任务可能仍占 pending/inflight）
@@ -274,7 +270,106 @@ func (s SpiderService) SetSpider(ctx context.Context, req *spider.SetSpiderReq) 
 	}, nil
 }
 
+func trySpiderPlatformWriteLock(ctx context.Context, rdb *redis.Client, userID int64, platform string) (func(), bool) {
+	if rdb == nil {
+		return func() {}, true
+	}
+	tokenBytes := make([]byte, 16)
+	if _, err := rand.Read(tokenBytes); err != nil {
+		return func() {}, false
+	}
+	token := hex.EncodeToString(tokenBytes)
+	key := fmt.Sprintf("spider:writelock:%d:%s", userID, platform)
+	for {
+		ok, err := rdb.SetNX(ctx, key, token, 2*time.Minute).Result()
+		if err != nil {
+			return func() {}, false
+		}
+		if ok {
+			return func() {
+				_ = spiderPlatformWriteUnlockScript.Run(context.Background(), rdb, []string{key}, token).Err()
+			}, true
+		}
+		select {
+		case <-ctx.Done():
+			return func() {}, false
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+}
+
+func replaceSpiderBinding(ctx context.Context, db *gorm.DB, platform model.Platform) error {
+	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("user_id = ? AND platform = ?", platform.UserID, platform.Platform).Delete(&model.Platform{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("user_id = ? AND platform = ?", platform.UserID, platform.Platform).Delete(&model.SubmitLog{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("user_id = ? AND platform = ?", platform.UserID, platform.Platform).Delete(&model.ContestLog{}).Error; err != nil {
+			return err
+		}
+		// 按平台剪枝预聚合，再全量重爬该平台
+		if err := dal.DeletePlatformDailyStats(ctx, tx, platform.UserID, platform.Platform); err != nil {
+			return err
+		}
+		if err := dal.DeletePlatformUserAC(ctx, tx, platform.UserID, platform.Platform); err != nil {
+			return err
+		}
+		if platform.Platform == spiderregistry.LuoGu {
+			if err := tx.Where("user_id = ? AND platform = ?", platform.UserID, platform.Platform).Delete(&model.LuoGuPublicSnapshot{}).Error; err != nil {
+				return err
+			}
+		}
+		if err := tx.Where("user_id = ? AND platform = ?", platform.UserID, platform.Platform).Delete(&model.SpiderRepairState{}).Error; err != nil {
+			return err
+		}
+		return tx.Create(&platform).Error
+	})
+}
+
 const purgeSubmitsConfirm = "PURGE_SUBMITS"
+
+var purgeUserPlatforms = []string{
+	spiderregistry.AtCoder,
+	spiderregistry.CodeForces,
+	spiderregistry.LeetCode,
+	spiderregistry.LOJ,
+	spiderregistry.LuoGu,
+	spiderregistry.NowCoder,
+	spiderregistry.POJ,
+	spiderregistry.QOJ,
+	spiderregistry.UOJ,
+}
+
+func withPurgeUserPlatformGuards(
+	ctx context.Context,
+	platforms []string,
+	bump func(string),
+	lock func(context.Context, string) (func(), bool),
+	remove func() error,
+) error {
+	for _, platform := range platforms {
+		bump(platform)
+	}
+	unlocks := make([]func(), 0, len(platforms))
+	defer func() {
+		for i := len(unlocks) - 1; i >= 0; i-- {
+			unlocks[i]()
+		}
+	}()
+	for _, platform := range platforms {
+		unlock, ok := lock(ctx, platform)
+		if !ok {
+			if err := ctx.Err(); err != nil {
+				return fmt.Errorf("acquire purge write lock for %s: %w", platform, err)
+			}
+			return fmt.Errorf("acquire purge write lock for %s", platform)
+		}
+		unlocks = append(unlocks, unlock)
+	}
+	return remove()
+}
 
 // SubmitInventory 运维：真实入库提交库存（仅站点管理员）
 // 结果在 Redis 短缓存（5 分钟），避免每次打开运维页对 67 万行做全表 COUNT。
@@ -563,21 +658,41 @@ func (s SpiderService) PurgeUserData(ctx context.Context, req *spider.PurgeUserD
 		return &spider.PurgeUserDataRes{Code: 1, Message: "用户ID无效"}, nil
 	}
 	uid := req.UserId
-	if err := s.db.WithContext(ctx).Where("user_id = ?", uid).Delete(&model.Platform{}).Error; err != nil {
-		log.Errorf("PurgeUserData: platform user=%d: %v", uid, err)
+	err := withPurgeUserPlatformGuards(ctx, purgeUserPlatforms,
+		func(platform string) { s.spider.BumpGeneration(uid, platform) },
+		func(lockCtx context.Context, platform string) (func(), bool) {
+			return trySpiderPlatformWriteLock(lockCtx, s.rdb, uid, platform)
+		},
+		func() error { return s.purgeUserDataLocked(ctx, uid) },
+	)
+	if err != nil {
+		log.Errorf("PurgeUserData: guard/delete user=%d: %v", uid, err)
+		if ctx.Err() != nil {
+			return nil, errors.Conflict("删除冲突", "该用户的 OJ 数据正在同步，请稍后重试")
+		}
 		return nil, InternalError
+	}
+	return &spider.PurgeUserDataRes{Code: 0, Message: "已清空该用户的训练与绑定数据"}, nil
+}
+
+func (s SpiderService) purgeUserDataLocked(ctx context.Context, uid int64) error {
+	if err := s.db.WithContext(ctx).Where("user_id = ?", uid).Delete(&model.Platform{}).Error; err != nil {
+		return fmt.Errorf("platform: %w", err)
 	}
 	if err := s.db.WithContext(ctx).Where("user_id = ?", uid).Delete(&model.SubmitLog{}).Error; err != nil {
-		log.Errorf("PurgeUserData: submit_log user=%d: %v", uid, err)
-		return nil, InternalError
+		return fmt.Errorf("submit_log: %w", err)
 	}
 	if err := s.db.WithContext(ctx).Where("user_id = ?", uid).Delete(&model.ContestLog{}).Error; err != nil {
-		log.Errorf("PurgeUserData: contest_log user=%d: %v", uid, err)
-		return nil, InternalError
+		return fmt.Errorf("contest_log: %w", err)
 	}
 	if err := dal.DeleteUserPreagg(ctx, s.db, uid); err != nil {
-		log.Errorf("PurgeUserData: preagg user=%d: %v", uid, err)
-		return nil, InternalError
+		return fmt.Errorf("preagg: %w", err)
+	}
+	if err := s.db.WithContext(ctx).Where("user_id = ?", uid).Delete(&model.LuoGuPublicSnapshot{}).Error; err != nil {
+		return fmt.Errorf("luogu public snapshot: %w", err)
+	}
+	if err := purgeSpiderRepairStates(ctx, s.db, uid); err != nil {
+		return fmt.Errorf("spider repair state: %w", err)
 	}
 	// 缓存 / 爬虫 inflight / 上次同步
 	keys := []string{
@@ -593,15 +708,19 @@ func (s SpiderService) PurgeUserData(ctx context.Context, req *spider.PurgeUserD
 	if err := s.rdb.Del(ctx, keys...).Err(); err != nil {
 		log.Warnf("PurgeUserData: redis del user=%d: %v", uid, err)
 	}
-	// 按平台的 pending/inflight 键（扫描可能较多，仅删常见平台前缀）
-	for _, p := range []string{"AtCoder", "Codeforces", "LuoGu", "NowCoder", "QOJ", "LeetCode", "LOJ", "UOJ", "POJ"} {
+	_ = s.rdb.Incr(ctx, "statistic:period:global:ver").Err()
+	// 按平台清除任务去重状态；写锁由 owner-safe unlock 释放，代数必须保留以拦截旧任务。
+	for _, p := range purgeUserPlatforms {
 		_ = s.rdb.Del(ctx,
 			fmt.Sprintf("spider:pending:%d:%s", uid, p),
 			fmt.Sprintf("spider:inflight:%d:%s", uid, p),
-			fmt.Sprintf("spider:writelock:%d:%s", uid, p),
 		).Err()
 	}
-	return &spider.PurgeUserDataRes{Code: 0, Message: "已清空该用户的训练与绑定数据"}, nil
+	return nil
+}
+
+func purgeSpiderRepairStates(ctx context.Context, db *gorm.DB, userID int64) error {
+	return db.WithContext(ctx).Where("user_id = ?", userID).Delete(&model.SpiderRepairState{}).Error
 }
 
 func NewSpiderService(data *data.Data, spider *task.SpiderTask, reg *discovery.Register) *SpiderService {

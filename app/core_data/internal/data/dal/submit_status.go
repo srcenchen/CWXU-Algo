@@ -7,7 +7,6 @@ import (
 
 	"cwxu-algo/app/core_data/internal/data/model"
 
-	"github.com/go-kratos/kratos/v2/log"
 	"gorm.io/gorm"
 )
 
@@ -16,9 +15,9 @@ import (
 // 用于回读时跳过绝大多数已终态短码行，避免整批回读扫描。
 const sqlRefreshableStatus = `(
 	status IS NULL
-	OR btrim(status) = ''
-	OR btrim(status) IN ('正在评测', '评测中', '等待评测', '排队中')
-	OR UPPER(btrim(status)) IN (
+	OR TRIM(status) = ''
+	OR TRIM(status) IN ('正在评测', '评测中', '等待评测', '排队中')
+	OR UPPER(TRIM(status)) IN (
 		'TESTING', 'PENDING', 'JUDGING', 'IN_QUEUE', 'IN QUEUE', 'WAITING', 'WJ', 'QUEUE',
 		'WRONG_ANSWER', 'TIME_LIMIT_EXCEEDED', 'MEMORY_LIMIT_EXCEEDED', 'RUNTIME_ERROR',
 		'COMPILATION_ERROR', 'PRESENTATION_ERROR', 'IDLENESS_LIMIT_EXCEEDED', 'SECURITY_VIOLATED'
@@ -71,9 +70,9 @@ func RefreshPendingSubmitVerdicts(ctx context.Context, db *gorm.DB, fetched []mo
 			var existing []model.SubmitLog
 			// 只回读必要列 + 库内仍可回写（pending/长码）的行
 			if err := db.WithContext(ctx).Model(&model.SubmitLog{}).
-				Select("submit_id", "platform", "user_id", "status", "is_ac", "time").
+				Select("submit_id", "platform", "user_id", "problem", "problem_id", "external_id", "status", "is_ac", "time").
 				Where("platform = ? AND user_id = ? AND submit_id IN ?", g.plat, g.uid, part).
-				Where(sqlRefreshableStatus).
+				Where("(" + sqlRefreshableStatus + " OR (platform = 'QOJ' AND UPPER(TRIM(status)) = 'WA'))").
 				Find(&existing).Error; err != nil {
 				return updated, err
 			}
@@ -104,51 +103,64 @@ func refreshExistingVerdicts(ctx context.Context, db *gorm.DB, existing []model.
 			continue
 		}
 		// 仅：旧 pending，或长名→短码归一
-		if !model.IsPendingSubmitStatus(oldStatus) && !shouldRewriteFinalStatus(oldStatus, newStatus) {
+		if !model.IsPendingSubmitStatus(oldStatus) && !shouldRewriteFetchedStatus(old.Platform, oldStatus, newStatus) {
 			continue
 		}
 
 		newIsAC := model.IsAcceptedStatus(newStatus)
 		oldIsAC := old.IsAC || model.IsAcceptedStatus(oldStatus)
 
-		res := db.WithContext(ctx).Model(&model.SubmitLog{}).
-			Where("platform = ? AND user_id = ? AND submit_id = ? AND status = ?",
-				old.Platform, old.UserID, old.SubmitID, old.Status).
-			Updates(map[string]interface{}{
-				"status": newStatus,
-				"is_ac":  newIsAC,
-			})
-		if res.Error != nil {
-			return updated, res.Error
-		}
-		if res.RowsAffected == 0 {
-			continue
-		}
-		updated += res.RowsAffected
+		var rowsAffected int64
+		err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			res := tx.Model(&model.SubmitLog{}).
+				Where("platform = ? AND user_id = ? AND submit_id = ? AND status = ?",
+					old.Platform, old.UserID, old.SubmitID, old.Status).
+				Updates(map[string]interface{}{
+					"status": newStatus,
+					"is_ac":  newIsAC,
+				})
+			if res.Error != nil || res.RowsAffected == 0 {
+				rowsAffected = res.RowsAffected
+				return res.Error
+			}
+			rowsAffected = res.RowsAffected
+			if oldIsAC || !newIsAC {
+				return nil
+			}
 
-		if !oldIsAC && newIsAC {
 			row := old
 			row.Status = newStatus
 			row.IsAC = true
-			if err := ApplyUserACFromSubmits(ctx, db, []model.SubmitLog{row}); err != nil {
-				log.Warnf("RefreshPending: ApplyUserAC submit=%s: %v", old.SubmitID, err)
+			if err := ApplyUserACFromSubmits(ctx, tx, []model.SubmitLog{row}); err != nil {
+				return err
 			}
 			day := time.Date(row.Time.Year(), row.Time.Month(), row.Time.Day(), 0, 0, 0, 0, row.Time.Location())
 			plat := strings.TrimSpace(row.Platform)
 			if plat == "" {
 				plat = "?"
 			}
-			if err := ApplyDailyDeltas(ctx, db, []DailyDelta{{
+			return ApplyDailyDeltas(ctx, tx, []DailyDelta{{
 				UserID:   row.UserID,
 				Day:      day,
 				Platform: plat,
 				AcCnt:    1,
-			}}); err != nil {
-				log.Warnf("RefreshPending: ApplyDailyAC submit=%s: %v", old.SubmitID, err)
-			}
+			}})
+		})
+		if err != nil {
+			return updated, err
 		}
+		updated += rowsAffected
 	}
 	return updated, nil
+}
+
+func shouldRewriteFetchedStatus(platform, oldStatus, newStatus string) bool {
+	oldNorm := strings.ToUpper(strings.TrimSpace(oldStatus))
+	newNorm := strings.ToUpper(strings.TrimSpace(newStatus))
+	if platform == "QOJ" && oldNorm == "WA" && newNorm == "AC" {
+		return true
+	}
+	return shouldRewriteFinalStatus(oldStatus, newStatus)
 }
 
 // shouldRewriteFinalStatus 允许把 CF 原始长 verdict 归一成短码（不重计）

@@ -47,6 +47,28 @@ type SubmitLogFetcher interface {
 	FetchSubmitLog(ctx context.Context, userId int64, username string, needAll bool) ([]model.SubmitLog, error)
 }
 
+// CompleteSubmitLogFetcher atomically reports whether a full fetch was untruncated.
+type CompleteSubmitLogFetcher interface {
+	FetchSubmitLogComplete(ctx context.Context, userId int64, username string, needAll bool) ([]model.SubmitLog, bool, error)
+}
+
+// LuoGuRecoveryFetcher reports the resolved account identity for a full recovery fetch.
+type LuoGuRecoveryFetcher interface {
+	FetchSubmitLogForRecovery(ctx context.Context, userId int64, username string) ([]model.SubmitLog, bool, int64, error)
+}
+
+type PublicProfile struct {
+	RemoteUID   int64
+	TotalSolved int64
+	TotalSubmit int64
+}
+
+// PublicProfileFallbackFetcher is an optional fallback for platforms whose public profile exposes totals.
+type PublicProfileFallbackFetcher interface {
+	HasLoginCredentials() bool
+	FetchPublicProfile(ctx context.Context, username string) (PublicProfile, error)
+}
+
 // SubmitContestFetcher 提交记录 Fetcher
 type SubmitContestFetcher interface {
 	// FetchContestLog 获取提交记录

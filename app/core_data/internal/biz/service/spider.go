@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"strings"
 	"time"
@@ -20,6 +22,12 @@ import (
 	"gorm.io/gorm/clause"
 )
 
+var platformWriteUnlockScript = redis.NewScript(`
+if redis.call("GET", KEYS[1]) == ARGV[1] then
+  return redis.call("DEL", KEYS[1])
+end
+return 0`)
+
 const (
 	// submitInsertBatchSize 批量 upsert；2c4g 上 300 比 500 更平滑
 	submitInsertBatchSize = 300
@@ -34,6 +42,8 @@ const (
 	pendingVerdictMaxRounds = 72
 	// pendingVerdictScheduleTTL 调度占坑 TTL，略长于 delay，防并发叠多个 timer
 	pendingVerdictScheduleTTL = pendingVerdictRetryDelay + time.Minute
+	qojFullScoreRepairKey     = "historical-full-score"
+	qojFullScoreRepairVersion = 1
 )
 
 type SpiderUseCase struct {
@@ -109,14 +119,14 @@ func (uc *SpiderUseCase) LoadData(userId int64, needAll bool, platform string) e
 }
 
 // fetchAndSave 拉取并写入提交；返回新插入行数。fetchCtx 为整次爬取超时（透传到 HTTP）
-func (uc *SpiderUseCase) fetchAndSave(fetchCtx context.Context, userId int64, plat model.Platform, needAll bool) (int64, error) {
+func (uc *SpiderUseCase) fetchAndSave(fetchCtx context.Context, userId int64, plat model.Platform, needAll, repairRequired bool) (int64, bool, int64, error) {
 	p, ok := spider.Get(plat.Platform)
 	if !ok {
-		return 0, fmt.Errorf("平台插件不存在")
+		return 0, false, 0, fmt.Errorf("平台插件不存在")
 	}
 	sbFetch, ok := p.(spider.SubmitLogFetcher)
 	if !ok {
-		return 0, fmt.Errorf("平台未实现 SubmitLogFetcher")
+		return 0, false, 0, fmt.Errorf("平台未实现 SubmitLogFetcher")
 	}
 
 	// 拉取前记录代数；重绑会 BumpGeneration，写入前再比对，丢弃过期全量结果
@@ -125,12 +135,19 @@ func (uc *SpiderUseCase) fetchAndSave(fetchCtx context.Context, userId int64, pl
 		genAtStart = task.CurrentGeneration(uc.data.RDB, userId, plat.Platform)
 	}
 
-	tmp, err := sbFetch.FetchSubmitLog(fetchCtx, userId, plat.Username, needAll)
-	if err != nil {
-		return 0, err
+	var tmp []model.SubmitLog
+	complete := false
+	var remoteUID int64
+	var err error
+	if rf, ok := p.(spider.LuoGuRecoveryFetcher); ok && plat.Platform == spider.LuoGu && needAll {
+		tmp, complete, remoteUID, err = rf.FetchSubmitLogForRecovery(fetchCtx, userId, plat.Username)
+	} else if cf, ok := p.(spider.CompleteSubmitLogFetcher); ok {
+		tmp, complete, err = cf.FetchSubmitLogComplete(fetchCtx, userId, plat.Username, needAll)
+	} else {
+		tmp, err = sbFetch.FetchSubmitLog(fetchCtx, userId, plat.Username, needAll)
 	}
-	if len(tmp) == 0 {
-		return 0, nil
+	if err != nil {
+		return 0, false, remoteUID, err
 	}
 
 	// 写入前归一化 is_ac，读路径不再 UPPER(BTRIM(status))
@@ -145,15 +162,21 @@ func (uc *SpiderUseCase) fetchAndSave(fetchCtx context.Context, userId int64, pl
 	// 否则两次全量爬虫并发时都会把整批当成「新行」叠 daily/user_ac（重绑连点常见）。
 	unlock, locked := uc.tryPlatformWriteLock(ctx, userId, plat.Platform)
 	if !locked {
-		return 0, fmt.Errorf("平台写入锁占用 user=%d platform=%s", userId, plat.Platform)
+		return 0, false, remoteUID, fmt.Errorf("平台写入锁占用 user=%d platform=%s", userId, plat.Platform)
 	}
 	defer unlock()
 
 	if uc.data != nil && uc.data.RDB != nil {
 		if cur := task.CurrentGeneration(uc.data.RDB, userId, plat.Platform); cur != genAtStart {
 			log.Infof("Spider: drop stale fetch user=%d platform=%s gen %d→%d", userId, plat.Platform, genAtStart, cur)
-			return 0, nil
+			return 0, false, remoteUID, nil
 		}
+	}
+	if len(tmp) == 0 {
+		if err := finishRepair(ctx, uc.data.DB, userId, plat.Platform, repairRequired, complete, nil); err != nil {
+			return 0, false, remoteUID, err
+		}
+		return 0, complete, remoteUID, nil
 	}
 
 	// 力扣：先清历史重复最近通过，再过滤待插入（同题只留一条）
@@ -167,7 +190,7 @@ func (uc *SpiderUseCase) fetchAndSave(fetchCtx context.Context, userId int64, pl
 	// 回写已入库的 pending/空状态（CF 评测中先入库后终态不会再进 FilterNew）
 	nRefresh, rerr := dal.RefreshPendingSubmitVerdicts(ctx, uc.data.DB, tmp)
 	if rerr != nil {
-		log.Warnf("Spider: refresh pending status user=%d platform=%s: %v", userId, plat.Platform, rerr)
+		return 0, false, remoteUID, fmt.Errorf("refresh submit status user=%d platform=%s: %w", userId, plat.Platform, rerr)
 	} else if nRefresh > 0 {
 		log.Infof("Spider: refreshed pending status user=%d platform=%s n=%d", userId, plat.Platform, nRefresh)
 	}
@@ -184,7 +207,7 @@ func (uc *SpiderUseCase) fetchAndSave(fetchCtx context.Context, userId int64, pl
 	// submit_logs 去重：已有 submit_id 不再累加预聚合（防全量重爬双计）
 	neu, err := dal.FilterNewSubmitLogs(ctx, uc.data.DB, tmp)
 	if err != nil {
-		return 0, err
+		return 0, false, remoteUID, err
 	}
 	var inserted int64
 	if len(neu) > 0 {
@@ -209,7 +232,7 @@ func (uc *SpiderUseCase) fetchAndSave(fetchCtx context.Context, userId int64, pl
 			}).CreateInBatches(&neu, submitInsertBatchSize).Error
 		})
 		if err != nil {
-			return 0, err
+			return 0, false, remoteUID, err
 		}
 		inserted = int64(len(neu))
 		spidermetrics.IncRows(plat.Platform, inserted)
@@ -217,8 +240,13 @@ func (uc *SpiderUseCase) fetchAndSave(fetchCtx context.Context, userId int64, pl
 
 	// 赛后/评测中：本批仍有 Judging 等非终态 → 5 分钟后增量爬，直到没有为止
 	uc.maybeSchedulePendingVerdictRetry(userId, plat.Platform, tmp)
+	// Keep the write lock until the repair marker is durable so a concurrent rebind
+	// cannot delete the old state and then have this stale fetch recreate it.
+	if err := finishRepair(ctx, uc.data.DB, userId, plat.Platform, repairRequired, complete, nil); err != nil {
+		return 0, false, remoteUID, err
+	}
 
-	return inserted + nRefresh, nil
+	return inserted + nRefresh, complete, remoteUID, nil
 }
 
 // countRecentPendingSubmits 统计 maxAge 内仍为评测中的提交数
@@ -328,6 +356,12 @@ func (uc *SpiderUseCase) tryPlatformWriteLock(ctx context.Context, userId int64,
 	if uc.data == nil || uc.data.RDB == nil {
 		return func() {}, true
 	}
+	tokenBytes := make([]byte, 16)
+	if _, err := rand.Read(tokenBytes); err != nil {
+		log.Warnf("Spider: writelock token error (allow): %v", err)
+		return func() {}, true
+	}
+	token := hex.EncodeToString(tokenBytes)
 	key := fmt.Sprintf("spider:writelock:%d:%s", userId, platform)
 	const (
 		waitStep = 2 * time.Second
@@ -336,14 +370,14 @@ func (uc *SpiderUseCase) tryPlatformWriteLock(ctx context.Context, userId int64,
 	deadline := time.Now().Add(waitMax)
 	for {
 		// 与 loadDataTimeout 同量级，防止进程崩溃后死锁
-		ok, err := uc.data.RDB.SetNX(ctx, key, "1", loadDataTimeout).Result()
+		ok, err := uc.data.RDB.SetNX(ctx, key, token, loadDataTimeout).Result()
 		if err != nil {
 			log.Warnf("Spider: writelock redis error (allow): %v", err)
 			return func() {}, true
 		}
 		if ok {
 			return func() {
-				_ = uc.data.RDB.Del(context.Background(), key).Err()
+				_ = platformWriteUnlockScript.Run(context.Background(), uc.data.RDB, []string{key}, token).Err()
 			}, true
 		}
 		if time.Now().After(deadline) {
@@ -610,6 +644,57 @@ func (uc *SpiderUseCase) injectOjCredentials(ctx context.Context) {
 // loadOnePlatform 返回 (是否有数据变更, error)
 func (uc *SpiderUseCase) loadOnePlatform(ctx context.Context, userId int64, plat model.Platform, needAll bool) (bool, error) {
 	uc.injectOjCredentials(ctx)
+	var repairRequired bool
+	if plat.Platform == spider.QOJ {
+		var err error
+		needAll, err = forceRepairFetch(ctx, uc.data.DB, userId, plat.Platform, needAll)
+		if err != nil {
+			return false, err
+		}
+		repairRequired = needAll
+	}
+	p, _ := spider.Get(plat.Platform)
+	if plat.Platform == spider.LuoGu {
+		if fallback, ok := p.(spider.PublicProfileFallbackFetcher); ok && !fallback.HasLoginCredentials() {
+			genAtStart := int64(0)
+			if uc.data != nil && uc.data.RDB != nil {
+				genAtStart = task.CurrentGeneration(uc.data.RDB, userId, plat.Platform)
+			}
+			profile, err := fallback.FetchPublicProfile(ctx, plat.Username)
+			if err != nil {
+				return false, err
+			}
+			unlock, locked := uc.tryPlatformWriteLock(context.Background(), userId, plat.Platform)
+			if !locked {
+				return false, fmt.Errorf("平台写入锁占用 user=%d platform=%s", userId, plat.Platform)
+			}
+			defer unlock()
+			if uc.data != nil && uc.data.RDB != nil && task.CurrentGeneration(uc.data.RDB, userId, plat.Platform) != genAtStart {
+				return false, nil
+			}
+			realSolved, realSubmit, err := dal.LuoGuRealCounts(ctx, uc.data.DB, userId)
+			if err != nil {
+				return false, err
+			}
+			now := time.Now()
+			realTodaySolved, realTodayAC, realTodaySubmit, err := dal.LuoGuRealTodayCounts(ctx, uc.data.DB, userId, now)
+			if err != nil {
+				return false, err
+			}
+			changed, err := dal.UpsertLuoGuPublicSnapshot(ctx, uc.data.DB, userId, profile.RemoteUID, profile.TotalSolved, profile.TotalSubmit, realSolved, realSubmit, realTodaySolved, realTodayAC, realTodaySubmit, now)
+			if err == nil {
+				uc.recordOjStatus(ctx, plat.Platform, "ok", "")
+			}
+			return changed, err
+		}
+		_, active, err := dal.ActiveLuoGuPublicSnapshot(ctx, uc.data.DB, userId)
+		if err != nil {
+			return false, err
+		}
+		if active {
+			needAll = true
+		}
+	}
 	// needAll 全量：最多 3 次（原先 12 次会把 worker 占死、队列堆积）
 	maxRetries := 1
 	if needAll {
@@ -618,7 +703,16 @@ func (uc *SpiderUseCase) loadOnePlatform(ctx context.Context, userId int64, plat
 	var anyChange bool
 	var lastErr error
 	for i := 0; i < maxRetries; i++ {
-		rows, err := uc.fetchAndSave(ctx, userId, plat, needAll)
+		var recoverySnapshot model.LuoGuPublicSnapshot
+		var recoveryActive bool
+		var err error
+		if plat.Platform == spider.LuoGu {
+			recoverySnapshot, recoveryActive, err = dal.ActiveLuoGuPublicSnapshot(ctx, uc.data.DB, userId)
+			if err != nil {
+				return anyChange, err
+			}
+		}
+		rows, complete, remoteUID, err := uc.fetchAndSave(ctx, userId, plat, needAll, repairRequired)
 		if rows > 0 {
 			anyChange = true
 		}
@@ -631,6 +725,24 @@ func (uc *SpiderUseCase) loadOnePlatform(ctx context.Context, userId int64, plat
 			anyChange = true
 		}
 		if err == nil {
+			if plat.Platform == spider.LuoGu {
+				closed := false
+				var closeErr error
+				if recoveryActive {
+					unlock, locked := uc.tryPlatformWriteLock(context.Background(), userId, plat.Platform)
+					if !locked {
+						return anyChange, fmt.Errorf("平台写入锁占用 user=%d platform=%s", userId, plat.Platform)
+					}
+					closed, closeErr = finishLuoGuRecovery(ctx, uc.data.DB, userId, remoteUID, recoverySnapshot.ObservedAt, complete, nil)
+					unlock()
+				}
+				if closeErr != nil {
+					return anyChange, closeErr
+				}
+				if closed {
+					anyChange = true
+				}
+			}
 			// 与提交/比赛一并刷新 rating（未实现 RatingFetcher 的平台自动跳过）
 			uc.fetchAndSaveRating(plat)
 			log.Infof("Spider: %s %s 成功 new_rows=%d", plat.Platform, plat.Username, rows)
@@ -674,6 +786,44 @@ func (uc *SpiderUseCase) loadOnePlatform(ctx context.Context, userId int64, plat
 		return anyChange, lastErr
 	}
 	return anyChange, fmt.Errorf("platform %s max retries exceeded", plat.Platform)
+}
+
+func forceRepairFetch(ctx context.Context, db *gorm.DB, userID int64, platform string, requestedAll bool) (bool, error) {
+	if platform != spider.QOJ {
+		return requestedAll, nil
+	}
+	var state model.SpiderRepairState
+	err := db.WithContext(ctx).Where("user_id = ? AND platform = ? AND repair_key = ?", userID, platform, qojFullScoreRepairKey).First(&state).Error
+	if err == nil {
+		return requestedAll || state.Version < qojFullScoreRepairVersion, nil
+	}
+	if err == gorm.ErrRecordNotFound {
+		return true, nil
+	}
+	return false, err
+}
+
+func finishRepair(ctx context.Context, db *gorm.DB, userID int64, platform string, attemptedAll, complete bool, fetchErr error) error {
+	if fetchErr != nil {
+		return fetchErr
+	}
+	if platform != spider.QOJ || !attemptedAll || !complete {
+		return nil
+	}
+	state := model.SpiderRepairState{UserID: userID, Platform: platform, RepairKey: qojFullScoreRepairKey, Version: qojFullScoreRepairVersion, CompletedAt: time.Now()}
+	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		return tx.Clauses(clause.OnConflict{
+			Columns:   []clause.Column{{Name: "user_id"}, {Name: "platform"}, {Name: "repair_key"}},
+			DoUpdates: clause.AssignmentColumns([]string{"version", "completed_at"}),
+		}).Create(&state).Error
+	})
+}
+
+func finishLuoGuRecovery(ctx context.Context, db *gorm.DB, userID, remoteUID int64, observedAt time.Time, complete bool, fetchErr error) (bool, error) {
+	if fetchErr != nil {
+		return false, fetchErr
+	}
+	return dal.CloseLuoGuPublicSnapshot(ctx, db, userID, remoteUID, observedAt, complete)
 }
 
 func (uc *SpiderUseCase) invalidateCache(userId int64) {

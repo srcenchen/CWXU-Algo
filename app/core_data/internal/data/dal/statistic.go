@@ -247,7 +247,7 @@ func (d *StatisticDal) GetPeriodCountScoped(userId int64, memberIDs []int64) (Pe
 			return PeriodSubmitCount{}, PeriodAcCount{}, err
 		}
 		ac.TotalRaw = ac.Total
-		return submit, ac, nil
+		return ApplyLuoGuPublicPeriodOverride(d.db, userId, memberIDs, submit, ac)
 	}
 
 	// 个人 AC 去重：预聚合表（写入时维护）；表空则回退明细 DISTINCT
@@ -270,7 +270,7 @@ func (d *StatisticDal) GetPeriodCountScoped(userId int64, memberIDs []int64) (Pe
 			}
 		}
 	}
-	return submit, ac, nil
+	return ApplyLuoGuPublicPeriodOverride(d.db, userId, memberIDs, submit, ac)
 }
 
 // periodAcDistinctFromSubmitLogs 回退：与历史 COUNT(DISTINCT) 语义一致

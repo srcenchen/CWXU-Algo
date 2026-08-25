@@ -209,7 +209,7 @@ func ListUserPlatformAC(db *gorm.DB, userID int64) ([]PlatformACCount, error) {
 	if len(out) == 0 && firstErr != nil {
 		return nil, firstErr
 	}
-	return out, nil
+	return ApplyLuoGuPublicPlatformACOverride(db, userID, out)
 }
 
 // PeriodAcDistinctFromPreagg 个人 AC 去重时段统计（读预聚合，不扫 submit_logs）
