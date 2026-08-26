@@ -17,21 +17,42 @@ func TestNormalizeQOJResult(t *testing.T) {
 		wantErr bool
 	}{
 		{name: "integer full score", raw: "100", status: "AC"},
+		{name: "integer full score marker", raw: "100 ✓", status: "AC"},
 		{name: "decimal full score", raw: "100.0", status: "AC"},
 		{name: "partial score", raw: "99", status: "WA"},
 		{name: "zero score", raw: "0", status: "WA"},
 		{name: "accepted text", raw: "Accepted", status: "AC"},
 		{name: "accepted marker", raw: "AC ✓", status: "AC"},
 		{name: "compile error", raw: "CE", status: "CE"},
+		{name: "compilation error", raw: "Compilation Error", status: "CE"},
+		{name: "wrong answer", raw: "Wrong Answer", status: "WA"},
+		{name: "time limit exceeded", raw: "Time Limit Exceeded", status: "TLE"},
+		{name: "memory limit exceeded", raw: "Memory Limit Exceeded", status: "MLE"},
+		{name: "runtime error", raw: "Runtime Error", status: "RE"},
+		{name: "output limit exceeded", raw: "Output Limit Exceeded", status: "OLE"},
+		{name: "presentation error", raw: "Presentation Error", status: "PE"},
+		{name: "idleness limit exceeded", raw: "Idleness Limit Exceeded", status: "ILE"},
+		{name: "security violated", raw: "Security Violated", status: "SV"},
+		{name: "judgement failed", raw: "Judgement Failed", status: "JF"},
 		{name: "judging", raw: "Judging", status: "JUDGING"},
 		{name: "waiting", raw: "Waiting", status: "WAITING"},
+		{name: "waiting rejudge", raw: "Waiting Rejudge", status: "WAITING"},
+		{name: "judged waiting", raw: "Judged, Waiting", status: "WAITING"},
+		{name: "judged judging", raw: "Judged, Judging", status: "JUDGING"},
+		{name: "ellipsis pending", raw: "…", status: "JUDGING"},
+		{name: "three dots pending", raw: "...", status: "JUDGING"},
+		{name: "future qoj result", raw: "Validator Failed", status: "VALIDATOR FAILED"},
+		{name: "unknown future qoj result", raw: "Partially Correct", status: "PARTIALLY CORRECT"},
 		{name: "nan score", raw: "NaN", wantErr: true},
+		{name: "nan score marker", raw: "NaN ✓", wantErr: true},
 		{name: "infinite score", raw: "+Inf", wantErr: true},
 		{name: "negative score", raw: "-1", wantErr: true},
 		{name: "score above full", raw: "101", wantErr: true},
-		{name: "ac prefix anomaly", raw: "Access denied", wantErr: true},
-		{name: "ce prefix anomaly", raw: "Central failure", wantErr: true},
-		{name: "unknown", raw: "unexpected result", wantErr: true},
+		{name: "score above full marker", raw: "101 ✓", wantErr: true},
+		{name: "authentication error is not a verdict", raw: "Access denied", wantErr: true},
+		{name: "service error is not a verdict", raw: "Central failure", wantErr: true},
+		{name: "overlong result is not a verdict", raw: strings.Repeat("A", 65), wantErr: true},
+		{name: "empty", raw: "  ", wantErr: true},
 	}
 
 	for _, tt := range tests {
@@ -74,8 +95,11 @@ func TestParseQOJSubmissionPageRejectsBadRowsAndDuplicateIDs(t *testing.T) {
 		html string
 	}{
 		{name: "too few columns", html: `<tbody><tr><td>#1</td></tr></tbody>`},
+		{name: "empty table body", html: `<tbody></tbody>`},
+		{name: "unknown single-cell row", html: `<tbody><tr><td colspan="233">Service unavailable</td></tr></tbody>`},
+		{name: "data colspan is not the official empty state", html: `<tbody><tr><td data-colspan="233">None</td></tr></tbody>`},
 		{name: "empty submit id", html: `<tbody>` + qojTestRow("", "100", "2026-08-24 12:00:00") + `</tbody>`},
-		{name: "bad status", html: `<tbody>` + qojTestRow("1", "mystery", "2026-08-24 12:00:00") + `</tbody>`},
+		{name: "empty status", html: `<tbody>` + qojTestRow("1", " ", "2026-08-24 12:00:00") + `</tbody>`},
 		{name: "bad time", html: `<tbody>` + qojTestRow("1", "100", "not-a-time") + `</tbody>`},
 		{name: "duplicate submit id", html: `<tbody>` + valid + valid + `</tbody>`},
 	}
@@ -85,6 +109,23 @@ func TestParseQOJSubmissionPageRejectsBadRowsAndDuplicateIDs(t *testing.T) {
 				t.Fatal("expected parse error")
 			}
 		})
+	}
+}
+
+func TestParseQOJSubmissionPageAcceptsOfficialEmptyState(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		cell string
+	}{
+		{name: "double quoted", cell: `<td colspan="233">None</td>`},
+		{name: "single quoted", cell: `<td colspan='233'>无</td>`},
+		{name: "unquoted", cell: `<td colspan=233>None</td>`},
+	} {
+		html := `<tbody><tr>` + tt.cell + `</tr></tbody>`
+		logs, hasNext, err := parseQOJSubmissionPage(html, 7, 2, map[string]struct{}{})
+		if err != nil || len(logs) != 0 || hasNext {
+			t.Fatalf("name=%q logs=%d hasNext=%v err=%v", tt.name, len(logs), hasNext, err)
+		}
 	}
 }
 

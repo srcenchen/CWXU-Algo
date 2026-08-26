@@ -6,6 +6,7 @@ import (
 	"cwxu-algo/app/common/utils/ojhttp"
 	"encoding/hex"
 	"fmt"
+	stdhtml "html"
 	"io"
 	"math"
 	"net/http"
@@ -16,6 +17,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"cwxu-algo/app/core_data/internal/data/model"
 	"cwxu-algo/app/core_data/internal/spider"
@@ -40,30 +42,83 @@ type NewQOJ struct {
 	password string
 }
 
+const qojMaxVerdictLength = 64
+
+var (
+	qojReasonableVerdictRe = regexp.MustCompile(`^[\p{L}\p{N}][\p{L}\p{N} .,:;()/_+-]*$`)
+	qojErrorResultTerms    = []string{
+		"ACCESS DENIED", "UNAUTHORIZED", "AUTHENTICATION", "FORBIDDEN",
+		"LOGIN", "SIGN IN", "SESSION EXPIRED", "CENTRAL FAILURE",
+		"SERVICE UNAVAILABLE", "SERVER ERROR", "INTERNAL ERROR", "GATEWAY ERROR",
+		"BAD GATEWAY", "REQUEST TIMEOUT", "NETWORK ERROR",
+	}
+)
+
+func isQOJReasonableVerdict(result string) bool {
+	if utf8.RuneCountInString(result) > qojMaxVerdictLength || !qojReasonableVerdictRe.MatchString(result) {
+		return false
+	}
+	for _, term := range qojErrorResultTerms {
+		if strings.Contains(result, term) {
+			return false
+		}
+	}
+	return true
+}
+
 func normalizeQOJResult(raw string) (string, error) {
-	result := strings.TrimSpace(raw)
+	result := strings.TrimSpace(stdhtml.UnescapeString(raw))
+	if result == "" {
+		return "", fmt.Errorf("QOJ 结果为空")
+	}
 	upper := strings.ToUpper(result)
 	upper = strings.TrimSpace(strings.TrimRight(upper, "✓✔✅"))
-	switch {
-	case upper == "AC", strings.HasPrefix(upper, "ACCEPTED"):
-		return "AC", nil
-	case upper == "CE", strings.HasPrefix(upper, "COMPILE ERROR"):
-		return "CE", nil
-	case upper == "JUDGING", upper == "PENDING", upper == "TESTING":
-		return upper, nil
-	case upper == "WAITING", upper == "WJ", upper == "QUEUE", upper == "IN QUEUE", upper == "IN_QUEUE":
-		return upper, nil
+	if upper == "" {
+		return "", fmt.Errorf("QOJ 结果为空")
 	}
-	if score, err := strconv.ParseFloat(result, 64); err == nil {
+	switch upper {
+	case "AC", "ACCEPTED":
+		return "AC", nil
+	case "CE", "COMPILE ERROR", "COMPILATION ERROR":
+		return "CE", nil
+	case "WA", "WRONG ANSWER":
+		return "WA", nil
+	case "TLE", "TIME LIMIT EXCEEDED":
+		return "TLE", nil
+	case "MLE", "MEMORY LIMIT EXCEEDED":
+		return "MLE", nil
+	case "RE", "RUNTIME ERROR":
+		return "RE", nil
+	case "OLE", "OUTPUT LIMIT EXCEEDED":
+		return "OLE", nil
+	case "PE", "PRESENTATION ERROR":
+		return "PE", nil
+	case "ILE", "IDLENESS LIMIT EXCEEDED":
+		return "ILE", nil
+	case "SV", "SECURITY VIOLATED":
+		return "SV", nil
+	case "JF", "JUDGEMENT FAILED", "JUDGMENT FAILED":
+		return "JF", nil
+	case "JUDGING", "PENDING", "TESTING", "JUDGED, JUDGING", "…", "...":
+		return "JUDGING", nil
+	case "WAITING", "WAITING REJUDGE", "JUDGED, WAITING", "WJ", "QUEUE", "IN QUEUE", "IN_QUEUE":
+		return "WAITING", nil
+	}
+	if score, err := strconv.ParseFloat(upper, 64); err == nil {
 		if math.IsNaN(score) || math.IsInf(score, 0) || score < 0 || score > 100 {
-			return "", fmt.Errorf("异常 QOJ 分数: %q", result)
+			return "", fmt.Errorf("异常 QOJ 分数: %q", upper)
 		}
 		if score == 100 {
 			return "AC", nil
 		}
 		return "WA", nil
 	}
-	return "", fmt.Errorf("未知 QOJ 结果: %q", result)
+	if isQOJReasonableVerdict(upper) {
+		// QOJ may add compact verdict labels independently. Preserve those labels so
+		// one new verdict cannot abort the entire submissions page.
+		return upper, nil
+	}
+	return "", fmt.Errorf("未知或异常 QOJ 结果: %q", result)
 }
 
 // 模拟真实浏览器的请求头
@@ -329,10 +384,19 @@ func fetchQOJSubmitLogs(ctx context.Context, client *http.Client, baseURL string
 }
 
 var (
-	qojTbodyRe = regexp.MustCompile(`(?is)<tbody[^>]*>(.*?)</tbody>`)
-	qojRowRe   = regexp.MustCompile(`(?is)<tr[^>]*>(.*?)</tr>`)
-	qojCellRe  = regexp.MustCompile(`(?is)<td[^>]*>(.*?)</td>`)
+	qojTbodyRe       = regexp.MustCompile(`(?is)<tbody[^>]*>(.*?)</tbody>`)
+	qojRowRe         = regexp.MustCompile(`(?is)<tr[^>]*>(.*?)</tr>`)
+	qojCellRe        = regexp.MustCompile(`(?is)<td[^>]*>(.*?)</td>`)
+	qojColspanCellRe = regexp.MustCompile(`(?is)^<td\b[^>]*\scolspan\s*=\s*(?:"\d+"|'\d+'|\d+(?:\s|>))`)
 )
+
+func isQOJEmptySubmissionCell(cellTag, cellHTML string) bool {
+	if !qojColspanCellRe.MatchString(strings.TrimSpace(cellTag)) {
+		return false
+	}
+	text := strings.Join(strings.Fields(stdhtml.UnescapeString(stripTags(cellHTML))), " ")
+	return strings.EqualFold(text, "none") || text == "无"
+}
 
 func parseQOJSubmissionPage(html string, userID int64, nextPage int, seen map[string]struct{}) ([]model.SubmitLog, bool, error) {
 	tbody := qojTbodyRe.FindStringSubmatch(html)
@@ -340,10 +404,16 @@ func parseQOJSubmissionPage(html string, userID int64, nextPage int, seen map[st
 		return nil, false, fmt.Errorf("submission table body missing")
 	}
 	rows := qojRowRe.FindAllStringSubmatch(tbody[1], -1)
+	if len(rows) == 0 {
+		return nil, false, fmt.Errorf("submission table body has no rows")
+	}
 	logs := make([]model.SubmitLog, 0, len(rows))
 	for rowIndex, row := range rows {
 		cells := qojCellRe.FindAllStringSubmatch(row[1], -1)
 		if len(cells) < 9 {
+			if len(rows) == 1 && len(cells) == 1 && isQOJEmptySubmissionCell(cells[0][0], cells[0][1]) {
+				return logs, false, nil
+			}
 			return nil, false, fmt.Errorf("row %d has %d columns, want at least 9", rowIndex+1, len(cells))
 		}
 		submitID := strings.TrimSpace(strings.TrimLeft(stripTags(cells[0][1]), "#"))
