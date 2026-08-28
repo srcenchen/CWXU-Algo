@@ -141,6 +141,8 @@ func migrateModels(db *gorm.DB) {
 		&model.ProblemTag{},
 		&model.UserProblemStatus{},
 		&model.UserTagAC{},
+		&model.AbilityModelState{},
+		&model.ProblemAbilityStat{},
 		&model.ProblemComment{},
 		&model.ProblemUserSolution{},
 		&model.ActivityFeed{},
