@@ -497,7 +497,7 @@ func validateLuoguStartRequest(req *spiderpb.StartLuoguSyncReq, identity luoguPl
 		return kratoserrors.BadRequest("GOALGO_CONNECT_REQUIRED", "客户端授权不匹配")
 	}
 	version := strings.TrimSpace(req.ClientVersion)
-	if version == "" || len(version) > 64 || version != strings.TrimSpace(identity.ClientVersion) || identity.UserID <= 0 || identity.AuthorizationID == 0 || !luoguUIDPattern.MatchString(identity.LuoguUID) {
+	if version == "" || len(version) > 64 || identity.UserID <= 0 || identity.AuthorizationID == 0 || !luoguUIDPattern.MatchString(identity.LuoguUID) {
 		return kratoserrors.BadRequest("GOALGO_CONNECT_REQUIRED", "客户端授权无效")
 	}
 	return nil

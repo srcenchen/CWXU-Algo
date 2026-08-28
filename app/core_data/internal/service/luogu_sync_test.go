@@ -503,16 +503,16 @@ func TestLuoguSyncGenerationFailureDoesNotConsumeCooldown(t *testing.T) {
 	}
 }
 
-func TestLuoguSyncStartRejectsMismatchedClientVersion(t *testing.T) {
+func TestLuoguSyncStartKeepsAuthorizationAfterClientUpgrade(t *testing.T) {
 	svc, _, rdb, _, _ := newLuoguSyncServiceTest(t)
-	_, err := svc.StartLuoguSync(luoguHeaderContext(luoguPluginTokenHeader, "device-token"), &spiderpb.StartLuoguSyncReq{
+	res, err := svc.StartLuoguSync(luoguHeaderContext(luoguPluginTokenHeader, "device-token"), &spiderpb.StartLuoguSyncReq{
 		ClientKind: "userscript", ClientVersion: "2.0.0", RequestId: strings.Repeat("a", 43),
 	})
-	if luoguReason(err) != "GOALGO_CONNECT_REQUIRED" {
-		t.Fatalf("err=%v", err)
+	if err != nil || res == nil || res.SessionToken == "" {
+		t.Fatalf("res=%+v err=%v", res, err)
 	}
-	if exists, _ := rdb.Exists(context.Background(), luoguSyncCooldownKey(7, "2245873")).Result(); exists != 0 {
-		t.Fatal("client version mismatch consumed cooldown")
+	if exists, _ := rdb.Exists(context.Background(), luoguSyncCooldownKey(7, "2245873")).Result(); exists != 1 {
+		t.Fatal("upgraded client did not create a session")
 	}
 }
 
