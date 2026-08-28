@@ -55,6 +55,9 @@ func (s *SpiderService) ResolveLuoguUser(ctx context.Context, req *spider.Resolv
 		return nil, kratoserrors.New(400, "LUOGU_USER_INVALID", "请输入有效的洛谷 UID 或用户名")
 	}
 	key := strings.ToLower(query)
+	if user, ok := resolveNumericLuoguUID(query); ok {
+		return &spider.ResolveLuoguUserRes{Uid: user.UID, Username: user.Username}, nil
+	}
 	if cached, ok := luoguResolverCache.Load(key); ok {
 		entry := cached.(luoguResolverCacheEntry)
 		if time.Now().Before(entry.expiresAt) {
@@ -73,11 +76,7 @@ func (s *SpiderService) ResolveLuoguUser(ctx context.Context, req *spider.Resolv
 	client := luoguResolverClient
 	var user luoguResolvedUser
 	var err error
-	if uid, parseErr := strconv.ParseInt(query, 10, 64); parseErr == nil && uid > 0 {
-		user, err = fetchLuoguInfo(ctx, client, uid)
-	} else {
-		user, err = fetchLuoguSearch(ctx, client, query)
-	}
+	user, err = fetchLuoguSearch(ctx, client, query)
 	if err != nil {
 		if strings.Contains(err.Error(), "not found") {
 			return nil, kratoserrors.NotFound("LUOGU_USER_NOT_FOUND", "洛谷无法识别该用户，请检查用户名或 UID")
@@ -86,6 +85,15 @@ func (s *SpiderService) ResolveLuoguUser(ctx context.Context, req *spider.Resolv
 	}
 	luoguResolverCache.Store(key, luoguResolverCacheEntry{user: user, expiresAt: time.Now().Add(luoguResolverCacheTTL)})
 	return &spider.ResolveLuoguUserRes{Uid: user.UID, Username: user.Username}, nil
+}
+
+func resolveNumericLuoguUID(query string) (luoguResolvedUser, bool) {
+	uid, err := strconv.ParseInt(query, 10, 64)
+	if err != nil || uid <= 0 {
+		return luoguResolvedUser{}, false
+	}
+	value := strconv.FormatInt(uid, 10)
+	return luoguResolvedUser{UID: value, Username: value}, true
 }
 
 const luoguResolverUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"

@@ -2,6 +2,16 @@ package service
 
 import "testing"
 
+func TestResolveNumericLuoguUIDWithoutRemoteLookup(t *testing.T) {
+	user, ok := resolveNumericLuoguUID("2245875")
+	if !ok || user.UID != "2245875" || user.Username != "2245875" {
+		t.Fatalf("unexpected user=%+v ok=%v", user, ok)
+	}
+	if _, ok := resolveNumericLuoguUID("srcenchen"); ok {
+		t.Fatal("username must still use remote lookup")
+	}
+}
+
 func TestParseLuoguSearchBody(t *testing.T) {
 	user, err := parseLuoguSearchBody([]byte(`{"users":[{"uid":2245873,"name":"srcenchen"}]}`), "srcenchen")
 	if err != nil || user.UID != "2245873" || user.Username != "srcenchen" {
