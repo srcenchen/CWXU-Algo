@@ -121,6 +121,9 @@ var ensureContestSem = make(chan struct{}, 4)
 // 无绑定平台时成功返回；有平台且全部失败则返回 error（consumer 可重试）。
 // 仅在有新写入时失效缓存，避免空跑爬虫打穿 period/heatmap 缓存。
 func (uc *SpiderUseCase) LoadData(userId int64, needAll bool, platform string) error {
+	if platform != "" && task.IsLegacyServerCrawlerDisabled(platform) {
+		return nil
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), loadDataTimeout)
 	defer cancel()
 
@@ -132,6 +135,16 @@ func (uc *SpiderUseCase) LoadData(userId int64, needAll bool, platform string) e
 	if err := q.Find(&platforms).Error; err != nil {
 		return err
 	}
+	if len(platforms) == 0 {
+		return nil
+	}
+	filtered := platforms[:0]
+	for _, plat := range platforms {
+		if !task.IsLegacyServerCrawlerDisabled(plat.Platform) {
+			filtered = append(filtered, plat)
+		}
+	}
+	platforms = filtered
 	if len(platforms) == 0 {
 		return nil
 	}

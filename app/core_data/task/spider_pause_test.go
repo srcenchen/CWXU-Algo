@@ -126,3 +126,12 @@ func TestDoPlatformSkipsWhenPaused(t *testing.T) {
 		t.Fatalf("暂停平台仍应计入尝试平台数，got %d", res.Platforms)
 	}
 }
+
+func TestDoPlatformSkipsLegacyLuoGuCrawler(t *testing.T) {
+	// mq=nil：若未在入队边界禁用旧洛谷爬虫，会返回 mq not ready。
+	tk := NewSpiderTask(nil, nil, nil)
+	res := tk.DoPlatform(1, "LuoGu", false)
+	if res.Published != 0 || res.Failed != 0 || res.Deduped != 0 || res.Platforms != 1 {
+		t.Fatalf("旧洛谷爬虫应直接跳过，got %+v", res)
+	}
+}

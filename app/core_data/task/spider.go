@@ -245,6 +245,10 @@ func (t *SpiderTask) DoPlatform(userId int64, platform string, needAll bool) Enq
 	if platform == "" {
 		return t.Do(userId, needAll)
 	}
+	if IsLegacyServerCrawlerDisabled(platform) {
+		log.Debugf("SpiderTask: skip enqueue user=%d platform=%q (browser sync only)", userId, platform)
+		return EnqueueResult{Platforms: 1}
+	}
 	// 站管已暂停该 OJ：不占 pending、不入队（恢复后自然继续）
 	if IsPlatformPaused(t.rdb, platform) {
 		log.Debugf("SpiderTask: skip enqueue user=%d platform=%q (paused by ops)", userId, platform)
@@ -298,6 +302,12 @@ func (t *SpiderTask) DoPlatform(userId int64, platform string, needAll bool) Enq
 	}
 	spidermetrics.IncEnqueued(platform)
 	return EnqueueResult{Platforms: 1, Published: 1}
+}
+
+// IsLegacyServerCrawlerDisabled identifies platforms whose server-side crawler
+// has been replaced by a browser-local synchronization flow.
+func IsLegacyServerCrawlerDisabled(platform string) bool {
+	return strings.EqualFold(strings.TrimSpace(platform), "LuoGu")
 }
 
 func (t *SpiderTask) clearPending(userId int64, platform string) {

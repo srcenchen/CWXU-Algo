@@ -56,6 +56,10 @@ func (c *Consumer) Consume() {
 				log.Warnf("RabbitMQ(Spider): 解析json失败，丢弃消息: %v", err)
 				return nil
 			}
+			if task.IsLegacyServerCrawlerDisabled(msg.Platform) {
+				log.Infof("RabbitMQ(Spider): skip platform=%s user=%d (browser sync only)", msg.Platform, msg.UserId)
+				return nil
+			}
 			// 站管已暂停该 OJ：直接 Ack 丢弃（消息可能是暂停前入队的）
 			if c.spiderTask != nil && c.spiderTask.IsPlatformPaused(msg.Platform) {
 				log.Infof("RabbitMQ(Spider): skip platform=%s user=%d (paused by ops)", msg.Platform, msg.UserId)
