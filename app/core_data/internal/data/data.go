@@ -132,7 +132,6 @@ func migrateModels(db *gorm.DB) {
 		&model.DailyUserStat{},
 		&model.UserACProblem{},
 		&model.UserACProblemDay{},
-		&model.LuoGuPublicSnapshot{},
 		&model.SpiderRepairState{},
 		&model.ContestCalendar{},
 		&model.ContestCalendarSub{},

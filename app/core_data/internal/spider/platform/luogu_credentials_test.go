@@ -41,13 +41,13 @@ func TestOlderCredentialSnapshotCannotRestoreClearedCredentials(t *testing.T) {
 	lg.SetCredentialsVersioned("", "", 2)
 	lg.SetCredentialsVersioned("stale-user", "stale-password", 1)
 
-	if lg.HasLoginCredentials() {
+	if lg.username != "" {
 		t.Fatal("older runtime snapshot restored cleared credentials")
 	}
 
 	lg.SetCredentialsVersioned("current-user", "current-password", 3)
 	lg.SetCredentialsVersioned("", "", 0)
-	if lg.HasLoginCredentials() {
+	if lg.username != "" {
 		t.Fatal("unreadable runtime must fail safe by clearing credentials")
 	}
 }

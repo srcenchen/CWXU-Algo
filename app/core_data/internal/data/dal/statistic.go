@@ -65,7 +65,7 @@ func (d *StatisticDal) HeatmapQueryScoped(ctx context.Context, startDate, endDat
 		q = q.Where("user_id IN ?", memberIDs)
 	}
 	var result []DailyCount
-	err := q.Group("day").Having("SUM("+cntCol+") > 0").Order("day").Scan(&result).Error
+	err := q.Group("day").Having("SUM(" + cntCol + ") > 0").Order("day").Scan(&result).Error
 	if err != nil {
 		return nil, err
 	}
@@ -247,7 +247,7 @@ func (d *StatisticDal) GetPeriodCountScoped(userId int64, memberIDs []int64) (Pe
 			return PeriodSubmitCount{}, PeriodAcCount{}, err
 		}
 		ac.TotalRaw = ac.Total
-		return ApplyLuoGuPublicPeriodOverride(d.db, userId, memberIDs, submit, ac)
+		return submit, ac, nil
 	}
 
 	// 个人 AC 去重：预聚合表（写入时维护）；表空则回退明细 DISTINCT
@@ -270,7 +270,7 @@ func (d *StatisticDal) GetPeriodCountScoped(userId int64, memberIDs []int64) (Pe
 			}
 		}
 	}
-	return ApplyLuoGuPublicPeriodOverride(d.db, userId, memberIDs, submit, ac)
+	return submit, ac, nil
 }
 
 // periodAcDistinctFromSubmitLogs 回退：与历史 COUNT(DISTINCT) 语义一致
@@ -544,7 +544,7 @@ func (d *StatisticDal) countAcDistinct(userId int64, memberIDs []int64, start, e
 		key = `(user_id::text || '|' || ` + acProblemKeySQL + `)`
 	}
 	query := d.db.Table("submit_logs").
-		Select("COUNT(DISTINCT "+key+")").
+		Select("COUNT(DISTINCT " + key + ")").
 		Where("is_ac = true")
 	if useRange {
 		query = query.Where("time >= ? AND time < ?", start, end)

@@ -316,11 +316,6 @@ func replaceSpiderBinding(ctx context.Context, db *gorm.DB, platform model.Platf
 		if err := dal.DeletePlatformUserAC(ctx, tx, platform.UserID, platform.Platform); err != nil {
 			return err
 		}
-		if platform.Platform == spiderregistry.LuoGu {
-			if err := tx.Where("user_id = ? AND platform = ?", platform.UserID, platform.Platform).Delete(&model.LuoGuPublicSnapshot{}).Error; err != nil {
-				return err
-			}
-		}
 		if err := tx.Where("user_id = ? AND platform = ?", platform.UserID, platform.Platform).Delete(&model.SpiderRepairState{}).Error; err != nil {
 			return err
 		}
@@ -688,9 +683,6 @@ func (s SpiderService) purgeUserDataLocked(ctx context.Context, uid int64) error
 	if err := dal.DeleteUserPreagg(ctx, s.db, uid); err != nil {
 		return fmt.Errorf("preagg: %w", err)
 	}
-	if err := s.db.WithContext(ctx).Where("user_id = ?", uid).Delete(&model.LuoGuPublicSnapshot{}).Error; err != nil {
-		return fmt.Errorf("luogu public snapshot: %w", err)
-	}
 	if err := purgeSpiderRepairStates(ctx, s.db, uid); err != nil {
 		return fmt.Errorf("spider repair state: %w", err)
 	}
@@ -819,8 +811,9 @@ func (s SpiderService) GetSpiderMonitor(ctx context.Context, _ *spider.SpiderMon
 		return out
 	}()
 
-	// 账号状态只取一次（洛谷/QOJ）
+	// 账号状态只取一次（洛谷/QOJ）；未配置账号时忽略 Redis 中可能残留的旧成功状态。
 	accountStatus := sitesettings.GetAllServiceStatus(ctx, s.rdb)
+	siteRuntime := sitesettings.Load(ctx, s.rdb, nil)
 
 	now := time.Now()
 	stats := make([]*spider.SpiderPlatformStat, 0, len(ojCaps))
@@ -861,6 +854,9 @@ func (s SpiderService) GetSpiderMonitor(ctx context.Context, _ *spider.SpiderMon
 			acc, ok := accountStatus[cap.account]
 			if !ok {
 				acc = sitesettings.GetServiceStatus(ctx, s.rdb, cap.account)
+			}
+			if !crawlerAccountConfigured(siteRuntime, cap.account) {
+				acc = sitesettings.ServiceStatus{Status: sitesettings.StatusUnchecked}
 			}
 			st.HasAccount = true
 			st.AccountStatus = acc.Status
@@ -1138,6 +1134,9 @@ func (s SpiderService) TogglePlatform(ctx context.Context, req *spider.TogglePla
 	if _, ok := spiderregistry.Get(plat); !ok {
 		return &spider.TogglePlatformRes{Code: 1, Message: "不支持的平台: " + plat}, nil
 	}
+	if module == "submit" && req.GetEnabled() && plat == spiderregistry.LuoGu && !luoguCrawlerAccountConfigured(ctx, s.rdb) {
+		return &spider.TogglePlatformRes{Code: 1, Message: "洛谷未配置爬虫账号，无法启用提交记录同步"}, nil
+	}
 	if err := setter(s.rdb, plat, !req.GetEnabled()); err != nil {
 		log.Warnf("SpiderService: toggle platform=%s module=%s: %v", plat, module, err)
 		return &spider.TogglePlatformRes{Code: 1, Message: "操作失败"}, nil
@@ -1148,4 +1147,22 @@ func (s SpiderService) TogglePlatform(ctx context.Context, req *spider.TogglePla
 	}
 	log.Infof("SpiderService: platform %s module %s paused", plat, module)
 	return &spider.TogglePlatformRes{Code: 0, Message: "已暂停"}, nil
+}
+
+func luoguCrawlerAccountConfigured(ctx context.Context, rdb *redis.Client) bool {
+	return crawlerAccountConfigured(sitesettings.Load(ctx, rdb, nil), sitesettings.ServiceLuoGu)
+}
+
+func crawlerAccountConfigured(rt *sitesettings.Runtime, service string) bool {
+	if rt == nil {
+		return false
+	}
+	switch service {
+	case sitesettings.ServiceLuoGu:
+		return strings.TrimSpace(rt.OjLuoguUsername) != "" && strings.TrimSpace(rt.OjLuoguPassword) != ""
+	case sitesettings.ServiceQOJ:
+		return strings.TrimSpace(rt.OjQojUsername) != "" && strings.TrimSpace(rt.OjQojPassword) != ""
+	default:
+		return true
+	}
 }

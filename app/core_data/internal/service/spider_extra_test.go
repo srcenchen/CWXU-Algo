@@ -63,6 +63,15 @@ func TestTogglePlatformDispatchesModuleAndReportsRedisFailure(t *testing.T) {
 	}
 
 	r = spiderExtraRequest(server, http.MethodPost, "/v1/core/spider/toggle-platform", admin,
+		`{"platform":"LuoGu","enabled":true,"module":"submit"}`)
+	if err := json.Unmarshal(r.Body.Bytes(), &body); err != nil {
+		t.Fatalf("luogu no-account toggle invalid json: %v", err)
+	}
+	if body["code"] != "1" || task.IsPlatformPaused(rdb, "LuoGu") {
+		t.Fatalf("洛谷无账号时不应允许开启提交同步，body=%s", r.Body.String())
+	}
+
+	r = spiderExtraRequest(server, http.MethodPost, "/v1/core/spider/toggle-platform", admin,
 		`{"platform":"NowCoder","enabled":false,"module":"contest"}`)
 	if err := json.Unmarshal(r.Body.Bytes(), &body); err != nil {
 		t.Fatalf("invalid module json: %v", err)

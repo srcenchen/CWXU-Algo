@@ -202,66 +202,6 @@ type Injection struct {
 	} `json:"currentData"`
 }
 
-type luoguPublicInjection struct {
-	Code        int `json:"code"`
-	CurrentData struct {
-		User struct {
-			UID                   int64  `json:"uid"`
-			PassedProblemCount    *int64 `json:"passedProblemCount"`
-			SubmittedProblemCount *int64 `json:"submittedProblemCount"`
-		} `json:"user"`
-	} `json:"currentData"`
-}
-
-type luoguLentilleContext struct {
-	Status int `json:"status"`
-	Data   struct {
-		User struct {
-			UID                   int64  `json:"uid"`
-			PassedProblemCount    *int64 `json:"passedProblemCount"`
-			SubmittedProblemCount *int64 `json:"submittedProblemCount"`
-		} `json:"user"`
-	} `json:"data"`
-}
-
-func parseLuoGuPublicProfile(html string) (spider.PublicProfile, error) {
-	lentilleRE := regexp.MustCompile(`<script[^>]+id=["']lentille-context["'][^>]*>([\s\S]*?)</script>`)
-	if m := lentilleRE.FindStringSubmatch(html); len(m) == 2 {
-		var page luoguLentilleContext
-		if err := json.Unmarshal([]byte(m[1]), &page); err != nil {
-			return spider.PublicProfile{}, fmt.Errorf("luogu lentille profile 解析失败: %w", err)
-		}
-		if page.Status != http.StatusOK || page.Data.User.UID <= 0 || page.Data.User.PassedProblemCount == nil || page.Data.User.SubmittedProblemCount == nil {
-			return spider.PublicProfile{}, fmt.Errorf("luogu public profile missing totals")
-		}
-		return spider.PublicProfile{
-			RemoteUID: page.Data.User.UID, TotalSolved: *page.Data.User.PassedProblemCount,
-			TotalSubmit: *page.Data.User.SubmittedProblemCount,
-		}, nil
-	}
-
-	re := regexp.MustCompile(`window\._feInjection\s*=\s*JSON\.parse\(decodeURIComponent\("(.+?)"\)\)`)
-	m := re.FindStringSubmatch(html)
-	if len(m) != 2 {
-		return spider.PublicProfile{}, fmt.Errorf("未找到公开主页 _feInjection")
-	}
-	decoded, err := url.QueryUnescape(m[1])
-	if err != nil {
-		return spider.PublicProfile{}, err
-	}
-	var inj luoguPublicInjection
-	if err := json.Unmarshal([]byte(decoded), &inj); err != nil {
-		return spider.PublicProfile{}, fmt.Errorf("luogu public profile 解析失败: %w", err)
-	}
-	if inj.Code != http.StatusOK || inj.CurrentData.User.UID <= 0 || inj.CurrentData.User.PassedProblemCount == nil || inj.CurrentData.User.SubmittedProblemCount == nil {
-		return spider.PublicProfile{}, fmt.Errorf("luogu public profile missing totals")
-	}
-	return spider.PublicProfile{
-		RemoteUID: inj.CurrentData.User.UID, TotalSolved: *inj.CurrentData.User.PassedProblemCount,
-		TotalSubmit: *inj.CurrentData.User.SubmittedProblemCount,
-	}, nil
-}
-
 type Record struct {
 	ID         int64 `json:"id"`
 	SubmitTime int64 `json:"submitTime"`
@@ -376,51 +316,47 @@ func (lg *NewLuoGu) FetchSubmitLog(ctx context.Context, userId int64, username s
 }
 
 func (lg *NewLuoGu) FetchSubmitLogComplete(ctx context.Context, userId int64, username string, needAll bool) ([]model.SubmitLog, bool, error) {
-	logs, complete, _, err := lg.fetchSubmitLogComplete(ctx, userId, username, needAll)
+	logs, complete, err := lg.fetchSubmitLogComplete(ctx, userId, username, needAll)
 	return logs, complete, err
 }
 
-func (lg *NewLuoGu) FetchSubmitLogForRecovery(ctx context.Context, userId int64, username string) ([]model.SubmitLog, bool, int64, error) {
-	return lg.fetchSubmitLogComplete(ctx, userId, username, true)
-}
-
-func (lg *NewLuoGu) fetchSubmitLogComplete(ctx context.Context, userId int64, username string, needAll bool) ([]model.SubmitLog, bool, int64, error) {
+func (lg *NewLuoGu) fetchSubmitLogComplete(ctx context.Context, userId int64, username string, needAll bool) ([]model.SubmitLog, bool, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	username = strings.TrimSpace(username)
 	if username == "" {
-		return nil, false, 0, fmt.Errorf("luogu username 为空: %w", spider.ErrEmptyPlatformUsername)
+		return nil, false, fmt.Errorf("luogu username 为空: %w", spider.ErrEmptyPlatformUsername)
 	}
 	client, err := lg.getClient()
 	if err != nil {
-		return nil, false, 0, err
+		return nil, false, err
 	}
 	uid, err := lg.resolveUID(client, username)
 	if err != nil {
-		return nil, false, 0, fmt.Errorf("resolve luogu uid %q: %w", username, err)
+		return nil, false, fmt.Errorf("resolve luogu uid %q: %w", username, err)
 	}
 	baseUrl := lg.recordListBaseURL(uid)
 	req, _ := http.NewRequestWithContext(ctx, "GET", baseUrl+"1", nil)
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, false, uid, err
+		return nil, false, err
 	}
 	rb, readErr := io.ReadAll(resp.Body)
 	resp.Body.Close()
 	if readErr != nil {
-		return nil, false, uid, readErr
+		return nil, false, readErr
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, false, uid, fmt.Errorf("luogu records 状态码 %d: %s", resp.StatusCode, truncateForErr(string(rb), 200))
+		return nil, false, fmt.Errorf("luogu records 状态码 %d: %s", resp.StatusCode, truncateForErr(string(rb), 200))
 	}
 	var subs []Record
 	inj, err := lg.parseLuoGuHTML(string(rb))
 	if err != nil {
-		return nil, false, uid, err
+		return nil, false, err
 	}
 	if err := validateLuoGuRecordPage(inj.CurrentData.Records.Count, inj.CurrentData.Records.PerPage, 1, inj); err != nil {
-		return nil, false, uid, err
+		return nil, false, err
 	}
 	subs = inj.CurrentData.Records.Result
 	totalRecords := inj.CurrentData.Records.Count
@@ -434,33 +370,33 @@ func (lg *NewLuoGu) fetchSubmitLogComplete(ctx context.Context, userId int64, us
 		totPage, pagePlanComplete := luoguFullFetchPlan(totalRecords, perPage)
 		for i := 2; i <= totPage; i++ {
 			if err := ctx.Err(); err != nil {
-				return nil, false, uid, err
+				return nil, false, err
 			}
 			time.Sleep(300 * time.Millisecond)
 			req, _ := http.NewRequestWithContext(ctx, "GET", baseUrl+fmt.Sprint(i), nil)
 			resp, err := client.Do(req)
 			if err != nil {
-				return nil, false, uid, err
+				return nil, false, err
 			}
 			rb, readErr := io.ReadAll(resp.Body)
 			resp.Body.Close()
 			if readErr != nil {
-				return nil, false, uid, readErr
+				return nil, false, readErr
 			}
 			if resp.StatusCode != http.StatusOK {
-				return nil, false, uid, fmt.Errorf("luogu records page=%d 状态码 %d: %s", i, resp.StatusCode, truncateForErr(string(rb), 200))
+				return nil, false, fmt.Errorf("luogu records page=%d 状态码 %d: %s", i, resp.StatusCode, truncateForErr(string(rb), 200))
 			}
 			inj, err := lg.parseLuoGuHTML(string(rb))
 			if err != nil {
-				return nil, false, uid, err
+				return nil, false, err
 			}
 			if err := validateLuoGuRecordPage(totalRecords, perPage, i, inj); err != nil {
-				return nil, false, uid, err
+				return nil, false, err
 			}
 			subs = append(subs, inj.CurrentData.Records.Result...)
 		}
 		if err := validateLuoGuRecords(totalRecords, subs); err != nil {
-			return nil, false, uid, err
+			return nil, false, err
 		}
 		complete = pagePlanComplete
 	}
@@ -487,7 +423,7 @@ func (lg *NewLuoGu) fetchSubmitLogComplete(ctx context.Context, userId int64, us
 			Time:     time.Unix(sub.SubmitTime, 0),
 		})
 	}
-	return res, complete, uid, nil
+	return res, complete, nil
 }
 
 func luoguFullFetchPlan(totalRecords, perPage int) (pages int, complete bool) {
@@ -499,50 +435,6 @@ func luoguFullFetchPlan(totalRecords, perPage int) (pages int, complete bool) {
 		pages = 1
 	}
 	return pages, true
-}
-
-func (lg *NewLuoGu) HasLoginCredentials() bool {
-	lg.mu.RLock()
-	defer lg.mu.RUnlock()
-	return strings.TrimSpace(lg.username) != ""
-}
-
-func (lg *NewLuoGu) FetchPublicProfile(ctx context.Context, username string) (spider.PublicProfile, error) {
-	username = strings.TrimSpace(username)
-	if username == "" {
-		return spider.PublicProfile{}, fmt.Errorf("luogu username 为空")
-	}
-	jar, _ := cookiejar.New(nil)
-	client := ojhttp.NewWithJar(jar)
-	uid, err := lg.resolveUID(client, username)
-	if err != nil {
-		return spider.PublicProfile{}, fmt.Errorf("resolve luogu uid %q: %w", username, err)
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("https://www.luogu.com.cn/user/%d", uid), nil)
-	if err != nil {
-		return spider.PublicProfile{}, err
-	}
-	req.Header.Set("User-Agent", "Mozilla/5.0 (compatible; GoAlgoSpider/1.0)")
-	resp, err := client.Do(req)
-	if err != nil {
-		return spider.PublicProfile{}, fmt.Errorf("luogu public profile 请求失败: %w", err)
-	}
-	body, err := io.ReadAll(resp.Body)
-	resp.Body.Close()
-	if err != nil {
-		return spider.PublicProfile{}, err
-	}
-	if resp.StatusCode != http.StatusOK {
-		return spider.PublicProfile{}, fmt.Errorf("luogu public profile 状态码 %d: %s", resp.StatusCode, truncateForErr(string(body), 200))
-	}
-	profile, err := parseLuoGuPublicProfile(string(body))
-	if err != nil {
-		return spider.PublicProfile{}, err
-	}
-	if profile.RemoteUID != uid {
-		return spider.PublicProfile{}, fmt.Errorf("luogu public profile uid mismatch: want=%d got=%d", uid, profile.RemoteUID)
-	}
-	return profile, nil
 }
 
 // SetCredentials 注入爬虫登录凭证（从站点设置读取）

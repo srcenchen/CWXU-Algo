@@ -141,18 +141,6 @@ func IsPlatformPaused(rdb *redis.Client, platform string) bool {
 	return isPlatformPaused(rdb, pausedPlatformsKey, platform)
 }
 
-// IsPlatformPausedSafe returns an error when the submit-sync switch cannot be read.
-func IsPlatformPausedSafe(rdb *redis.Client, platform string) (bool, error) {
-	if rdb == nil {
-		return false, fmt.Errorf("submit platform pause: redis unavailable")
-	}
-	paused, err := rdb.SIsMember(context.Background(), pausedPlatformsKey, strings.TrimSpace(platform)).Result()
-	if err != nil {
-		return false, fmt.Errorf("submit platform pause: %w", err)
-	}
-	return paused, nil
-}
-
 // SetPlatformPaused 暂停 / 恢复某 OJ 的爬虫同步
 func SetPlatformPaused(rdb *redis.Client, platform string, paused bool) error {
 	return setPlatformPaused(rdb, pausedPlatformsKey, platform, paused)

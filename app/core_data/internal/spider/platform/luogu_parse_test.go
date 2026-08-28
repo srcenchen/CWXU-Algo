@@ -5,41 +5,6 @@ import (
 	"testing"
 )
 
-func TestParseLuoGuPublicProfile(t *testing.T) {
-	html := `<script>window._feInjection = JSON.parse(decodeURIComponent("%7B%22code%22%3A200%2C%22currentData%22%3A%7B%22user%22%3A%7B%22uid%22%3A100544%2C%22passedProblemCount%22%3A321%2C%22submittedProblemCount%22%3A987%7D%7D%7D"))</script>`
-	profile, err := parseLuoGuPublicProfile(html)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if profile.RemoteUID != 100544 || profile.TotalSolved != 321 || profile.TotalSubmit != 987 {
-		t.Fatalf("profile=%+v", profile)
-	}
-}
-
-func TestParseLuoGuPublicProfileLentilleContext(t *testing.T) {
-	html := `<script id="lentille-context" type="application/json">{"instance":"main","status":200,"data":{"user":{"uid":100544,"passedProblemCount":1838,"submittedProblemCount":1874}}}</script>`
-	profile, err := parseLuoGuPublicProfile(html)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if profile.RemoteUID != 100544 || profile.TotalSolved != 1838 || profile.TotalSubmit != 1874 {
-		t.Fatalf("profile=%+v", profile)
-	}
-}
-
-func TestParseLuoGuPublicProfileRejectsMissingTotals(t *testing.T) {
-	html := `<script>window._feInjection = JSON.parse(decodeURIComponent("%7B%22code%22%3A200%2C%22currentData%22%3A%7B%22user%22%3A%7B%22uid%22%3A100544%7D%7D%7D"))</script>`
-	if _, err := parseLuoGuPublicProfile(html); err == nil {
-		t.Fatal("missing public totals must fail")
-	}
-}
-
-func TestFetchLuoGuPublicProfileRejectsEmptyBinding(t *testing.T) {
-	if _, err := (&NewLuoGu{}).FetchPublicProfile(nil, "  "); err == nil {
-		t.Fatal("empty binding must fail before any request")
-	}
-}
-
 func TestLuoGuFullFetchPlanDoesNotTruncateAtTwoHundredPages(t *testing.T) {
 	pages, complete := luoguFullFetchPlan(4001, 20)
 	if pages != 201 || !complete {

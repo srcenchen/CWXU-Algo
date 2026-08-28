@@ -43,18 +43,6 @@ func TestSetPlatformPausedRoundtrip(t *testing.T) {
 	}
 }
 
-func TestIsPlatformPausedSafeReturnsRedisError(t *testing.T) {
-	if paused, err := IsPlatformPausedSafe(nil, "LuoGu"); err == nil || paused {
-		t.Fatalf("nil Redis paused=%v err=%v", paused, err)
-	}
-
-	mr, rdb := newTestRedis(t)
-	mr.Close()
-	if paused, err := IsPlatformPausedSafe(rdb, "LuoGu"); err == nil || paused {
-		t.Fatalf("closed Redis paused=%v err=%v", paused, err)
-	}
-}
-
 func TestSubmitAndProblemPlatformPauseAreIsolated(t *testing.T) {
 	_, rdb := newTestRedis(t)
 

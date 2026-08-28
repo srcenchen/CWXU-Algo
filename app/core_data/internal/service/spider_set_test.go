@@ -175,10 +175,7 @@ func TestReplaceSpiderBindingDeletesPlatformRepairState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.AutoMigrate(&model.Platform{}, &model.SubmitLog{}, &model.ContestLog{}, &model.DailyUserStat{}, &model.UserACProblem{}, &model.UserACProblemDay{}, &model.LuoGuPublicSnapshot{}, &model.SpiderRepairState{}); err != nil {
-		t.Fatal(err)
-	}
-	if err := db.Create(&model.LuoGuPublicSnapshot{UserID: 7, Platform: "LuoGu", RemoteUID: 11, Active: true, ObservedAt: time.Now()}).Error; err != nil {
+	if err := db.AutoMigrate(&model.Platform{}, &model.SubmitLog{}, &model.ContestLog{}, &model.DailyUserStat{}, &model.UserACProblem{}, &model.UserACProblemDay{}, &model.SpiderRepairState{}); err != nil {
 		t.Fatal(err)
 	}
 	if err := db.Create(&model.SpiderRepairState{UserID: 7, Platform: "LuoGu", RepairKey: "test", Version: 1}).Error; err != nil {
@@ -188,12 +185,6 @@ func TestReplaceSpiderBindingDeletesPlatformRepairState(t *testing.T) {
 		t.Fatal(err)
 	}
 	var count int64
-	if err := db.Model(&model.LuoGuPublicSnapshot{}).Where("user_id = ? AND platform = ?", 7, "LuoGu").Count(&count).Error; err != nil {
-		t.Fatal(err)
-	}
-	if count != 0 {
-		t.Fatalf("snapshot count=%d want=0", count)
-	}
 	if err := db.Model(&model.SpiderRepairState{}).Where("user_id = ? AND platform = ?", 7, "LuoGu").Count(&count).Error; err != nil {
 		t.Fatal(err)
 	}
