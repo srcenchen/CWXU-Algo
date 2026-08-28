@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/cookiejar"
 	"net/url"
 	"regexp"
 	"strconv"
@@ -34,6 +35,16 @@ type luoguResolverCacheEntry struct {
 
 var luoguResolverCache sync.Map // map[string]luoguResolverCacheEntry
 
+// luoguResolverClient 携带 cookie jar，用于通过洛谷 C3VK 反爬（首次请求 302+Set-Cookie，
+// 跟随重定向时带上 cookie 才能拿到 JSON）。公开接口免登录即可访问。
+var luoguResolverClient = func() *http.Client {
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		jar = nil
+	}
+	return &http.Client{Timeout: 10 * time.Second, Jar: jar}
+}()
+
 // ResolveLuoguUser 公开解析洛谷 UID/用户名；写入 GoAlgo 绑定仍由 SetSpider 的 JWT 保护。
 func (s *SpiderService) ResolveLuoguUser(ctx context.Context, req *spider.ResolveLuoguUserReq) (*spider.ResolveLuoguUserRes, error) {
 	if req == nil {
@@ -59,7 +70,7 @@ func (s *SpiderService) ResolveLuoguUser(ctx context.Context, req *spider.Resolv
 		return nil, kratoserrors.New(429, "LUOGU_RESOLVER_RATE_LIMIT", "请求过于频繁，请稍后再试")
 	}
 
-	client := &http.Client{Timeout: 10 * time.Second}
+	client := luoguResolverClient
 	var user luoguResolvedUser
 	var err error
 	if uid, parseErr := strconv.ParseInt(query, 10, 64); parseErr == nil && uid > 0 {
@@ -77,11 +88,14 @@ func (s *SpiderService) ResolveLuoguUser(ctx context.Context, req *spider.Resolv
 	return &spider.ResolveLuoguUserRes{Uid: user.UID, Username: user.Username}, nil
 }
 
+const luoguResolverUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+
 func fetchLuoguInfo(ctx context.Context, client *http.Client, uid int64) (luoguResolvedUser, error) {
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("https://www.luogu.com.cn/api/user/info/%d", uid), nil)
 	if err != nil {
 		return luoguResolvedUser{}, err
 	}
+	request.Header.Set("User-Agent", luoguResolverUserAgent)
 	response, err := client.Do(request)
 	if err != nil {
 		return luoguResolvedUser{}, err
@@ -114,6 +128,7 @@ func fetchLuoguSearch(ctx context.Context, client *http.Client, query string) (l
 	if err != nil {
 		return luoguResolvedUser{}, err
 	}
+	request.Header.Set("User-Agent", luoguResolverUserAgent)
 	response, err := client.Do(request)
 	if err != nil {
 		return luoguResolvedUser{}, err
