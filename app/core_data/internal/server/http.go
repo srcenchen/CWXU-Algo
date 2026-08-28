@@ -80,6 +80,7 @@ func NewWhiteListMatcher() selector.MatchFunc {
 		"/api.core.v1.spider.Spider/StartLuoguSync":      "",
 		"/api.core.v1.spider.Spider/LuoguSyncStatus":     "",
 		"/api.core.v1.spider.Spider/UploadLuoguSyncPage": "",
+		"/api.core.v1.spider.Spider/ResolveLuoguUser":    "",
 	}
 	return func(ctx context.Context, operation string) bool {
 		//log.Info(operation)

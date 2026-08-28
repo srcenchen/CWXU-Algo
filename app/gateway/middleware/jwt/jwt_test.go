@@ -145,6 +145,8 @@ func TestLuoguSyncOnlyExposesExactPluginTokenEndpoints(t *testing.T) {
 		"/api/core/spider/luogu-sync/status",
 		"/v1/core/spider/luogu-sync/page",
 		"/api/core/spider/luogu-sync/page",
+		"/v1/core/spider/luogu/resolve-user",
+		"/api/core/spider/luogu/resolve-user",
 	} {
 		if _, ok := publicExact[publicPath]; !ok {
 			t.Errorf("Luogu sync path missing from JWT whitelist: %s", publicPath)

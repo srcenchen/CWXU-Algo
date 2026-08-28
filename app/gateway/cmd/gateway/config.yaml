@@ -13,6 +13,7 @@ middlewares:
       '@type': type.googleapis.com/gateway.middleware.cors.v1.Cors
       allowOrigins:
         - chrome-extension://phbnnpidffgnnajfdmgglbphjkbindkd
+        - https://algo.zhiyuansofts.cn
       allowHeaders:
         - Content-Type
         - X-GoAlgo-Plugin-Token

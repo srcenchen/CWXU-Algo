@@ -190,7 +190,7 @@ func TestConfigUnmarshaler(t *testing.T) {
 	if err := anypb.UnmarshalTo(gateway.Middlewares[1].Options, corsOptions, proto.UnmarshalOptions{}); err != nil {
 		t.Fatalf("decode gateway CORS config: %v", err)
 	}
-	if got, want := corsOptions.AllowOrigins, []string{"chrome-extension://phbnnpidffgnnajfdmgglbphjkbindkd"}; !proto.Equal(corsOptions, &corsv1.Cors{AllowOrigins: want, AllowHeaders: []string{"Content-Type", "X-GoAlgo-Plugin-Token", "X-GoAlgo-Sync-Session"}}) {
+	if got, want := corsOptions.AllowOrigins, []string{"chrome-extension://phbnnpidffgnnajfdmgglbphjkbindkd", "https://algo.zhiyuansofts.cn"}; !proto.Equal(corsOptions, &corsv1.Cors{AllowOrigins: want, AllowHeaders: []string{"Content-Type", "X-GoAlgo-Plugin-Token", "X-GoAlgo-Sync-Session"}}) {
 		t.Fatalf("gateway CORS = %#v, want origins %v and Luogu sync headers", corsOptions, got)
 	}
 }

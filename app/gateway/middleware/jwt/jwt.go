@@ -68,6 +68,9 @@ var publicExact = map[string]struct{}{
 	"/api/core/spider/luogu-sync/status": {},
 	"/v1/core/spider/luogu-sync/page":    {},
 	"/api/core/spider/luogu-sync/page":   {},
+	// 洛谷 UID/用户名解析为公开只读接口；绑定保存仍需 GoAlgo JWT。
+	"/v1/core/spider/luogu/resolve-user":  {},
+	"/api/core/spider/luogu/resolve-user": {},
 	// 支付FM回调（GET query / POST form，签名验签由 user 服务完成）
 	"/v1/payment/notify":  {},
 	"/api/payment/notify": {},

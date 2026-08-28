@@ -113,6 +113,12 @@ service Spider {
       body: "*"
     };
   }
+  // 公开只读：将洛谷 UID 或用户名规范化为成对身份。
+  rpc ResolveLuoguUser (ResolveLuoguUserReq) returns (ResolveLuoguUserRes) {
+    option (google.api.http) = {
+      get: "/v1/core/spider/luogu/resolve-user"
+    };
+  }
 }
 
 message SetSpiderReq {
@@ -435,4 +441,13 @@ message UploadLuoguSyncPageRes {
   int32 processed_pages = 8;
   int32 total_pages = 9;
   int64 next_available_at = 10;
+}
+
+message ResolveLuoguUserReq {
+  string query = 1;
+}
+
+message ResolveLuoguUserRes {
+  string uid = 1;
+  string username = 2;
 }

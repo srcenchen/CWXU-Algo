@@ -1815,6 +1815,24 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/api.core.v1.spider.LuoguSyncStatusRes'
+    /v1/core/spider/luogu/resolve-user:
+        get:
+            tags:
+                - Spider
+            description: 公开只读：将洛谷 UID 或用户名规范化为成对身份。
+            operationId: Spider_ResolveLuoguUser
+            parameters:
+                - name: query
+                  in: query
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.core.v1.spider.ResolveLuoguUserRes'
     /v1/core/spider/monitor:
         get:
             tags:
@@ -8640,6 +8658,13 @@ components:
                         type: integer
                         format: int32
                     description: '各项修复计数（key: submit_external_id / practice_cells_to_upsolve / relative_sec_updated）'
+        api.core.v1.spider.ResolveLuoguUserRes:
+            type: object
+            properties:
+                uid:
+                    type: string
+                username:
+                    type: string
         api.core.v1.spider.SetSpiderRep:
             type: object
             properties:

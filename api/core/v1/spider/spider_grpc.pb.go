@@ -37,6 +37,7 @@ const (
 	Spider_StartLuoguSync_FullMethodName         = "/api.core.v1.spider.Spider/StartLuoguSync"
 	Spider_LuoguSyncStatus_FullMethodName        = "/api.core.v1.spider.Spider/LuoguSyncStatus"
 	Spider_UploadLuoguSyncPage_FullMethodName    = "/api.core.v1.spider.Spider/UploadLuoguSyncPage"
+	Spider_ResolveLuoguUser_FullMethodName       = "/api.core.v1.spider.Spider/ResolveLuoguUser"
 )
 
 // SpiderClient is the client API for Spider service.
@@ -78,6 +79,8 @@ type SpiderClient interface {
 	LuoguSyncStatus(ctx context.Context, in *LuoguSyncStatusReq, opts ...grpc.CallOption) (*LuoguSyncStatusRes, error)
 	// Upload one normalized Luogu record page using X-GoAlgo-Sync-Session.
 	UploadLuoguSyncPage(ctx context.Context, in *UploadLuoguSyncPageReq, opts ...grpc.CallOption) (*UploadLuoguSyncPageRes, error)
+	// 公开只读：将洛谷 UID 或用户名规范化为成对身份。
+	ResolveLuoguUser(ctx context.Context, in *ResolveLuoguUserReq, opts ...grpc.CallOption) (*ResolveLuoguUserRes, error)
 }
 
 type spiderClient struct {
@@ -268,6 +271,16 @@ func (c *spiderClient) UploadLuoguSyncPage(ctx context.Context, in *UploadLuoguS
 	return out, nil
 }
 
+func (c *spiderClient) ResolveLuoguUser(ctx context.Context, in *ResolveLuoguUserReq, opts ...grpc.CallOption) (*ResolveLuoguUserRes, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ResolveLuoguUserRes)
+	err := c.cc.Invoke(ctx, Spider_ResolveLuoguUser_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // SpiderServer is the server API for Spider service.
 // All implementations must embed UnimplementedSpiderServer
 // for forward compatibility.
@@ -307,6 +320,8 @@ type SpiderServer interface {
 	LuoguSyncStatus(context.Context, *LuoguSyncStatusReq) (*LuoguSyncStatusRes, error)
 	// Upload one normalized Luogu record page using X-GoAlgo-Sync-Session.
 	UploadLuoguSyncPage(context.Context, *UploadLuoguSyncPageReq) (*UploadLuoguSyncPageRes, error)
+	// 公开只读：将洛谷 UID 或用户名规范化为成对身份。
+	ResolveLuoguUser(context.Context, *ResolveLuoguUserReq) (*ResolveLuoguUserRes, error)
 	mustEmbedUnimplementedSpiderServer()
 }
 
@@ -370,6 +385,9 @@ func (UnimplementedSpiderServer) LuoguSyncStatus(context.Context, *LuoguSyncStat
 }
 func (UnimplementedSpiderServer) UploadLuoguSyncPage(context.Context, *UploadLuoguSyncPageReq) (*UploadLuoguSyncPageRes, error) {
 	return nil, status.Error(codes.Unimplemented, "method UploadLuoguSyncPage not implemented")
+}
+func (UnimplementedSpiderServer) ResolveLuoguUser(context.Context, *ResolveLuoguUserReq) (*ResolveLuoguUserRes, error) {
+	return nil, status.Error(codes.Unimplemented, "method ResolveLuoguUser not implemented")
 }
 func (UnimplementedSpiderServer) mustEmbedUnimplementedSpiderServer() {}
 func (UnimplementedSpiderServer) testEmbeddedByValue()                {}
@@ -716,6 +734,24 @@ func _Spider_UploadLuoguSyncPage_Handler(srv interface{}, ctx context.Context, d
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Spider_ResolveLuoguUser_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ResolveLuoguUserReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SpiderServer).ResolveLuoguUser(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Spider_ResolveLuoguUser_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SpiderServer).ResolveLuoguUser(ctx, req.(*ResolveLuoguUserReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Spider_ServiceDesc is the grpc.ServiceDesc for Spider service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -794,6 +830,10 @@ var Spider_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "UploadLuoguSyncPage",
 			Handler:    _Spider_UploadLuoguSyncPage_Handler,
+		},
+		{
+			MethodName: "ResolveLuoguUser",
+			Handler:    _Spider_ResolveLuoguUser_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

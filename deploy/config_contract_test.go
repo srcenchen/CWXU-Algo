@@ -25,7 +25,7 @@ func TestAppExamplesAndDeployTemplatesHaveMatchingKeyPaths(t *testing.T) {
 	}
 }
 
-func TestGatewayCorsConfigMatchesAppExampleAndAllowsOnlyLuoguExtension(t *testing.T) {
+func TestGatewayCorsConfigMatchesAppExampleAndAllowsOnlyConfiguredOrigins(t *testing.T) {
 	root := filepath.Clean("..")
 	app := gatewayCorsConfig(t, filepath.Join(root, "app/gateway/cmd/gateway/config.yaml"))
 	deploy := gatewayCorsConfig(t, filepath.Join(root, "deploy/config/gateway.yaml"))
@@ -34,7 +34,7 @@ func TestGatewayCorsConfigMatchesAppExampleAndAllowsOnlyLuoguExtension(t *testin
 	}
 	want := gatewayCorsOptions{
 		Type:         "type.googleapis.com/gateway.middleware.cors.v1.Cors",
-		AllowOrigins: []string{"chrome-extension://phbnnpidffgnnajfdmgglbphjkbindkd"},
+		AllowOrigins: []string{"chrome-extension://phbnnpidffgnnajfdmgglbphjkbindkd", "https://algo.zhiyuansofts.cn"},
 		AllowHeaders: []string{"Content-Type", "X-GoAlgo-Plugin-Token", "X-GoAlgo-Sync-Session"},
 	}
 	if !reflect.DeepEqual(app, want) {

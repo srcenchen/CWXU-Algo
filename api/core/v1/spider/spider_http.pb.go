@@ -26,6 +26,7 @@ const OperationSpiderPurgeSubmitsAndRecrawl = "/api.core.v1.spider.Spider/PurgeS
 const OperationSpiderRefreshSpider = "/api.core.v1.spider.Spider/RefreshSpider"
 const OperationSpiderRefreshSpiderStatus = "/api.core.v1.spider.Spider/RefreshSpiderStatus"
 const OperationSpiderRepairContestCells = "/api.core.v1.spider.Spider/RepairContestCells"
+const OperationSpiderResolveLuoguUser = "/api.core.v1.spider.Spider/ResolveLuoguUser"
 const OperationSpiderSetSpider = "/api.core.v1.spider.Spider/SetSpider"
 const OperationSpiderStartLuoguSync = "/api.core.v1.spider.Spider/StartLuoguSync"
 const OperationSpiderSubmitInventory = "/api.core.v1.spider.Spider/SubmitInventory"
@@ -51,6 +52,8 @@ type SpiderHTTPServer interface {
 	RefreshSpiderStatus(context.Context, *RefreshSpiderStatusReq) (*RefreshSpiderStatusRes, error)
 	// RepairContestCells 站管：幂等修复 AtCoder 赛时提交明细相关脏数据（external_id / 赛后练习格 / relative_sec）
 	RepairContestCells(context.Context, *RepairContestCellsReq) (*RepairContestCellsRes, error)
+	// ResolveLuoguUser 公开只读：将洛谷 UID 或用户名规范化为成对身份。
+	ResolveLuoguUser(context.Context, *ResolveLuoguUserReq) (*ResolveLuoguUserRes, error)
 	SetSpider(context.Context, *SetSpiderReq) (*SetSpiderRep, error)
 	// StartLuoguSync Browser-local Luogu sync: requires X-GoAlgo-Plugin-Token at the service.
 	StartLuoguSync(context.Context, *StartLuoguSyncReq) (*StartLuoguSyncRes, error)
@@ -85,6 +88,7 @@ func RegisterSpiderHTTPServer(s *http.Server, srv SpiderHTTPServer) {
 	r.POST("/v1/core/spider/luogu-sync/start", _Spider_StartLuoguSync0_HTTP_Handler(srv))
 	r.GET("/v1/core/spider/luogu-sync/status", _Spider_LuoguSyncStatus0_HTTP_Handler(srv))
 	r.POST("/v1/core/spider/luogu-sync/page", _Spider_UploadLuoguSyncPage0_HTTP_Handler(srv))
+	r.GET("/v1/core/spider/luogu/resolve-user", _Spider_ResolveLuoguUser0_HTTP_Handler(srv))
 }
 
 func _Spider_SetSpider0_HTTP_Handler(srv SpiderHTTPServer) func(ctx http.Context) error {
@@ -402,6 +406,25 @@ func _Spider_UploadLuoguSyncPage0_HTTP_Handler(srv SpiderHTTPServer) func(ctx ht
 	}
 }
 
+func _Spider_ResolveLuoguUser0_HTTP_Handler(srv SpiderHTTPServer) func(ctx http.Context) error {
+	return func(ctx http.Context) error {
+		var in ResolveLuoguUserReq
+		if err := ctx.BindQuery(&in); err != nil {
+			return err
+		}
+		http.SetOperation(ctx, OperationSpiderResolveLuoguUser)
+		h := ctx.Middleware(func(ctx context.Context, req interface{}) (interface{}, error) {
+			return srv.ResolveLuoguUser(ctx, req.(*ResolveLuoguUserReq))
+		})
+		out, err := h(ctx, &in)
+		if err != nil {
+			return err
+		}
+		reply := out.(*ResolveLuoguUserRes)
+		return ctx.Result(200, reply)
+	}
+}
+
 type SpiderHTTPClient interface {
 	// GetPlatformUsers 站管：某 OJ 的绑定用户列表（仅站管）
 	GetPlatformUsers(ctx context.Context, req *GetPlatformUsersReq, opts ...http.CallOption) (rsp *GetPlatformUsersRes, err error)
@@ -418,6 +441,8 @@ type SpiderHTTPClient interface {
 	RefreshSpiderStatus(ctx context.Context, req *RefreshSpiderStatusReq, opts ...http.CallOption) (rsp *RefreshSpiderStatusRes, err error)
 	// RepairContestCells 站管：幂等修复 AtCoder 赛时提交明细相关脏数据（external_id / 赛后练习格 / relative_sec）
 	RepairContestCells(ctx context.Context, req *RepairContestCellsReq, opts ...http.CallOption) (rsp *RepairContestCellsRes, err error)
+	// ResolveLuoguUser 公开只读：将洛谷 UID 或用户名规范化为成对身份。
+	ResolveLuoguUser(ctx context.Context, req *ResolveLuoguUserReq, opts ...http.CallOption) (rsp *ResolveLuoguUserRes, err error)
 	SetSpider(ctx context.Context, req *SetSpiderReq, opts ...http.CallOption) (rsp *SetSpiderRep, err error)
 	// StartLuoguSync Browser-local Luogu sync: requires X-GoAlgo-Plugin-Token at the service.
 	StartLuoguSync(ctx context.Context, req *StartLuoguSyncReq, opts ...http.CallOption) (rsp *StartLuoguSyncRes, err error)
@@ -536,6 +561,20 @@ func (c *SpiderHTTPClientImpl) RepairContestCells(ctx context.Context, in *Repai
 	opts = append(opts, http.Operation(OperationSpiderRepairContestCells))
 	opts = append(opts, http.PathTemplate(pattern))
 	err := c.cc.Invoke(ctx, "POST", path, in, &out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// ResolveLuoguUser 公开只读：将洛谷 UID 或用户名规范化为成对身份。
+func (c *SpiderHTTPClientImpl) ResolveLuoguUser(ctx context.Context, in *ResolveLuoguUserReq, opts ...http.CallOption) (*ResolveLuoguUserRes, error) {
+	var out ResolveLuoguUserRes
+	pattern := "/v1/core/spider/luogu/resolve-user"
+	path := binding.EncodeURL(pattern, in, true)
+	opts = append(opts, http.Operation(OperationSpiderResolveLuoguUser))
+	opts = append(opts, http.PathTemplate(pattern))
+	err := c.cc.Invoke(ctx, "GET", path, nil, &out, opts...)
 	if err != nil {
 		return nil, err
 	}
