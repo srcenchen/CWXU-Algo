@@ -4,10 +4,12 @@ package model
 type UserTagAC struct {
 	UserID int64  `gorm:"primaryKey;comment:用户ID"`
 	Tag    string `gorm:"primaryKey;size:64;not null;comment:算法标签"`
-	Count  int64  `gorm:"not null;default:0;comment:去重 AC 题数"`
-	// Weight 难度加权题量：简单=1 / 中等=3 / 困难=8 / 未知=2 求和。
-	// 能力雷达 score 基于它做饱和锚定，避免纯题量失真。
-	Weight float64 `gorm:"not null;default:0;comment:难度加权题量"`
+	Count  int64  `gorm:"not null;default:0;comment:标签下去重规范题数"`
+	// Weight is the unrounded quality sum Σx. It must retain enough precision
+	// for TagAbilityScore rather than retaining the retired difficulty weight.
+	Weight       float64 `gorm:"type:numeric(18,12);not null;default:0;comment:标签掌握质量和"`
+	ScoreVersion uint    `gorm:"not null;default:0;index:idx_user_tag_ac_active,priority:2;comment:个人评分语义版本"`
+	ModelVersion uint64  `gorm:"not null;default:0;index:idx_user_tag_ac_active,priority:3;comment:题目后验模型版本"`
 }
 
 func (UserTagAC) TableName() string { return "user_tag_ac" }

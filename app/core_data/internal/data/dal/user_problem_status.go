@@ -47,22 +47,6 @@ func ApplyUserProblemStatusFromSubmits(ctx context.Context, db *gorm.DB, logs []
 		return nil
 	}
 	now := time.Now()
-	// 一次批量读旧状态（(user_id, problem_id) IN），内存比对是否首次升到 AC
-	pairs := make([][]interface{}, 0, len(best))
-	for k := range best {
-		pairs = append(pairs, []interface{}{k.uid, k.pid})
-	}
-	prevMap := make(map[key]string, len(best))
-	var prevRows []model.UserProblemStatus
-	if err := db.WithContext(ctx).
-		Where("(user_id, problem_id) IN ?", pairs).
-		Find(&prevRows).Error; err != nil {
-		return err
-	}
-	for _, r := range prevRows {
-		prevMap[key{uid: r.UserID, pid: r.ProblemID}] = r.Status
-	}
-
 	// 批量 upsert；AC 永不被 TRIED 覆盖
 	rows := make([]model.UserProblemStatus, 0, len(best))
 	for k, st := range best {
@@ -87,13 +71,12 @@ func ApplyUserProblemStatusFromSubmits(ctx context.Context, db *gorm.DB, logs []
 		CreateInBatches(&rows, 200).Error; err != nil {
 		return err
 	}
-	// 首次变为 AC：标签画像 +1；待做题单自动剔除
+	// 标签能力由完整重建按固定模型版本发布。这里不能再按旧难度
+	// weight 做 +1，否则会静默污染 score_version=1 的 Σx。待做题单
+	// 仍在首次/重复 AC 事件中幂等移除。
 	for k, st := range best {
-		if st != model.UserProblemStatusAC || prevMap[k] == model.UserProblemStatusAC {
+		if st != model.UserProblemStatusAC {
 			continue
-		}
-		if err := IncUserTagACForFirstProblemAC(ctx, db, k.uid, k.pid); err != nil {
-			log.Warnf("user_tag_ac first AC user=%d problem=%d: %v", k.uid, k.pid, err)
 		}
 		if err := RemoveFromTodoOnAC(ctx, db, k.uid, k.pid); err != nil {
 			log.Warnf("RemoveFromTodoOnAC user=%d problem=%d: %v", k.uid, k.pid, err)
@@ -137,5 +120,3 @@ func GetFollowingProblemStatuses(ctx context.Context, db *gorm.DB, problemID uin
 	}
 	return out, nil
 }
-
-
