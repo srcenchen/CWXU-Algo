@@ -27,6 +27,7 @@ import (
 	"github.com/go-kratos/kratos/v2/log"
 	"github.com/go-kratos/kratos/v2/transport"
 	"github.com/redis/go-redis/v9"
+	"gorm.io/gorm"
 )
 
 const (
@@ -248,6 +249,12 @@ func (s *SpiderService) StartLuoguSync(ctx context.Context, req *spiderpb.StartL
 	binding, generation, err := s.validateLuoguBinding(ctx, identity.UserID, identity.LuoguUID)
 	if err != nil {
 		return nil, err
+	}
+	if strings.TrimSpace(binding.ClientSyncHeadSubmitID) == "" {
+		binding.ClientSyncHeadSubmitID, err = s.inferLuoguCheckpoint(ctx, identity.UserID)
+		if err != nil {
+			return nil, kratoserrors.ServiceUnavailable("SYNC_UNAVAILABLE", "同步服务暂不可用")
+		}
 	}
 
 	now := s.luoguNow()
@@ -485,7 +492,7 @@ func (s *SpiderService) mapLuoguImporterError(ctx context.Context, state *luoguS
 }
 
 func validateLuoguStartRequest(req *spiderpb.StartLuoguSyncReq, identity luoguPluginIdentity) error {
-	if req == nil || (req.ClientKind != "userscript" && req.ClientKind != "chrome-extension") || req.ClientKind != identity.ClientKind ||
+	if req == nil || req.ClientKind != "userscript" || req.ClientKind != identity.ClientKind ||
 		!luoguRequestIDPattern.MatchString(strings.TrimSpace(req.RequestId)) {
 		return kratoserrors.BadRequest("GOALGO_CONNECT_REQUIRED", "客户端授权不匹配")
 	}
@@ -499,7 +506,22 @@ func validateLuoguStartRequest(req *spiderpb.StartLuoguSyncReq, identity luoguPl
 func (s *SpiderService) validateLuoguBinding(ctx context.Context, userID int64, uid string) (model.Platform, int64, error) {
 	var binding model.Platform
 	err := s.db.WithContext(ctx).Where("user_id = ? AND platform = ?", userID, spiderregistry.LuoGu).First(&binding).Error
-	if err != nil || !luoguUIDPattern.MatchString(strings.TrimSpace(binding.Username)) || strings.TrimSpace(binding.Username) != uid {
+	if err != nil {
+		return binding, 0, kratoserrors.Conflict("LUOGU_UID_MISMATCH", "当前洛谷账号与 GoAlgo 绑定不一致")
+	}
+	boundUID := strings.TrimSpace(binding.Username)
+	if !luoguUIDPattern.MatchString(boundUID) {
+		removed, err := s.removeInvalidLuoguBinding(ctx, userID, uid)
+		if err != nil {
+			log.Errorf("remove invalid Luogu binding user=%d: %v", userID, err)
+			return binding, 0, kratoserrors.ServiceUnavailable("SYNC_UNAVAILABLE", "绑定异常，自动清理失败，请稍后重试")
+		}
+		if !removed {
+			return binding, 0, kratoserrors.Conflict("SYNC_IN_PROGRESS", "洛谷绑定正在更新，请稍后重试")
+		}
+		return binding, 0, kratoserrors.Conflict("LUOGU_BINDING_INVALID_REMOVED", "原洛谷绑定无效，相关同步数据已清理，请重新绑定")
+	}
+	if boundUID != uid {
 		return binding, 0, kratoserrors.Conflict("LUOGU_UID_MISMATCH", "当前洛谷账号与 GoAlgo 绑定不一致")
 	}
 	var owners int64
@@ -516,6 +538,91 @@ func (s *SpiderService) validateLuoguBinding(ctx context.Context, userID int64, 
 		return binding, 0, kratoserrors.ServiceUnavailable("SYNC_UNAVAILABLE", "同步服务暂不可用")
 	}
 	return binding, generation, nil
+}
+
+func (s *SpiderService) inferLuoguCheckpoint(ctx context.Context, userID int64) (string, error) {
+	rows, err := s.db.WithContext(ctx).Model(&model.SubmitLog{}).
+		Select("submit_id").Where("user_id = ? AND platform = ?", userID, spiderregistry.LuoGu).Rows()
+	if err != nil {
+		return "", err
+	}
+	defer rows.Close()
+	best := ""
+	for rows.Next() {
+		var submitID string
+		if err := rows.Scan(&submitID); err != nil {
+			return "", err
+		}
+		submitID = strings.TrimSpace(submitID)
+		if !luoguSubmitIDPattern.MatchString(submitID) {
+			continue
+		}
+		if best == "" || len(submitID) > len(best) || (len(submitID) == len(best) && submitID > best) {
+			best = submitID
+		}
+	}
+	return best, rows.Err()
+}
+
+func (s *SpiderService) removeInvalidLuoguBinding(ctx context.Context, userID int64, authorizedUID string) (bool, error) {
+	unlock, locked := trySpiderPlatformWriteLock(ctx, s.rdb, userID, spiderregistry.LuoGu)
+	if !locked {
+		return false, fmt.Errorf("acquire LuoGu write lock")
+	}
+	defer unlock()
+	var lockedBinding model.Platform
+	if err := s.db.WithContext(ctx).Where("user_id = ? AND platform = ?", userID, spiderregistry.LuoGu).First(&lockedBinding).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return false, nil
+		}
+		return false, err
+	}
+	if luoguUIDPattern.MatchString(strings.TrimSpace(lockedBinding.Username)) {
+		return false, nil
+	}
+	if _, err := s.rdb.Incr(ctx, task.GenerationKey(userID, spiderregistry.LuoGu)).Result(); err != nil {
+		return false, err
+	}
+	_ = s.rdb.Expire(ctx, task.GenerationKey(userID, spiderregistry.LuoGu), 7*24*time.Hour).Err()
+	removed := false
+	if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var current model.Platform
+		if err := tx.Where("user_id = ? AND platform = ?", userID, spiderregistry.LuoGu).First(&current).Error; err != nil {
+			if err == gorm.ErrRecordNotFound {
+				return nil
+			}
+			return err
+		}
+		if luoguUIDPattern.MatchString(strings.TrimSpace(current.Username)) {
+			return nil
+		}
+		removed = true
+		return deleteSpiderPlatformData(ctx, tx, userID, spiderregistry.LuoGu)
+	}); err != nil {
+		return false, err
+	}
+	if !removed {
+		return false, nil
+	}
+	if sessionID, err := s.rdb.Get(ctx, luoguSyncActiveKey(userID, authorizedUID)).Result(); err == nil {
+		if state, loadErr := s.loadLuoguSessionByID(ctx, sessionID); loadErr == nil {
+			s.terminateLuoguSession(ctx, state)
+		}
+	} else if err != redis.Nil {
+		return false, err
+	}
+	_ = s.rdb.Del(ctx,
+		fmt.Sprintf("core:submit_log:user:%d", userID),
+		fmt.Sprintf("user:%d:lastSubmitTime", userID),
+		"core:platforms:bound_users:v1",
+		fmt.Sprintf("core:platforms:user:%d:v1", userID),
+		fmt.Sprintf("spider:pending:%d:%s", userID, spiderregistry.LuoGu),
+		fmt.Sprintf("spider:inflight:%d:%s", userID, spiderregistry.LuoGu),
+	).Err()
+	_ = s.rdb.Incr(ctx, fmt.Sprintf("core:contest_log:user:%d:ver", userID)).Err()
+	_ = s.rdb.Incr(ctx, fmt.Sprintf("statistic:user:%d:ver", userID)).Err()
+	_ = s.rdb.Incr(ctx, "statistic:period:global:ver").Err()
+	return true, nil
 }
 
 func validateLuoguPage(req *spiderpb.UploadLuoguSyncPageReq, state *luoguSession, now time.Time) error {
@@ -552,8 +659,8 @@ func validateLuoguPage(req *spiderpb.UploadLuoguSyncPageReq, state *luoguSession
 	maxTime := now.Add(5 * time.Minute).Unix()
 	for _, record := range req.Records {
 		if record == nil || !luoguSubmitIDPattern.MatchString(record.SubmitId) || record.SubmitTime < minTime || record.SubmitTime > maxTime ||
-			record.Status < 0 || record.Status > 14 || record.Language < 1 || record.Language > 34 || record.Problem == nil ||
-			!luoguProblemID.MatchString(record.Problem.Pid) || len(record.Problem.Title) > 512 || record.Problem.Difficulty < 0 || record.Problem.Difficulty > 7 {
+			!validLuoguStatus(record.Status) || record.Language < 1 || record.Language > 34 || record.Problem == nil ||
+			!luoguProblemID.MatchString(record.Problem.Pid) || len(record.Problem.Title) > 512 || record.Problem.Difficulty < 0 || record.Problem.Difficulty > 8 {
 			return bad()
 		}
 		if _, ok := seen[record.SubmitId]; ok {
@@ -562,6 +669,10 @@ func validateLuoguPage(req *spiderpb.UploadLuoguSyncPageReq, state *luoguSession
 		seen[record.SubmitId] = struct{}{}
 	}
 	return nil
+}
+
+func validLuoguStatus(status int32) bool {
+	return (status >= 0 && status <= 14) || status == -1 || status == 21 || status == 22 || status == 23
 }
 
 func luoguProtoRecord(raw *spiderpb.LuoguSyncRecord) (platform.Record, error) {

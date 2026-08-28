@@ -48,7 +48,7 @@ func luoguChallenge(verifier string) string {
 func luoguAuthorizeReq() *pb.AuthorizeCodeReq {
 	return &pb.AuthorizeCodeReq{
 		LuoguUid:            "2245873",
-		ClientKind:          "chrome-extension",
+		ClientKind:          "userscript",
 		ClientVersion:       "0.1.0",
 		CodeChallenge:       luoguChallenge(testLuoguVerifier),
 		CodeChallengeMethod: "S256",

@@ -311,27 +311,29 @@ func replaceSpiderBindingAfterGenerationBump(ctx context.Context, spiderTask *ta
 
 func replaceSpiderBinding(ctx context.Context, db *gorm.DB, platform model.Platform) error {
 	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Where("user_id = ? AND platform = ?", platform.UserID, platform.Platform).Delete(&model.Platform{}).Error; err != nil {
-			return err
-		}
-		if err := tx.Where("user_id = ? AND platform = ?", platform.UserID, platform.Platform).Delete(&model.SubmitLog{}).Error; err != nil {
-			return err
-		}
-		if err := tx.Where("user_id = ? AND platform = ?", platform.UserID, platform.Platform).Delete(&model.ContestLog{}).Error; err != nil {
-			return err
-		}
-		// 按平台剪枝预聚合，再全量重爬该平台
-		if err := dal.DeletePlatformDailyStats(ctx, tx, platform.UserID, platform.Platform); err != nil {
-			return err
-		}
-		if err := dal.DeletePlatformUserAC(ctx, tx, platform.UserID, platform.Platform); err != nil {
-			return err
-		}
-		if err := tx.Where("user_id = ? AND platform = ?", platform.UserID, platform.Platform).Delete(&model.SpiderRepairState{}).Error; err != nil {
+		if err := deleteSpiderPlatformData(ctx, tx, platform.UserID, platform.Platform); err != nil {
 			return err
 		}
 		return tx.Create(&platform).Error
 	})
+}
+
+func deleteSpiderPlatformData(ctx context.Context, db *gorm.DB, userID int64, platform string) error {
+	for _, value := range []interface{}{&model.Platform{}, &model.SubmitLog{}, &model.ContestLog{}, &model.ContestUserProblem{}} {
+		if !db.Migrator().HasTable(value) {
+			continue
+		}
+		if err := db.WithContext(ctx).Where("user_id = ? AND platform = ?", userID, platform).Delete(value).Error; err != nil {
+			return err
+		}
+	}
+	if err := dal.DeletePlatformDailyStats(ctx, db, userID, platform); err != nil {
+		return err
+	}
+	if err := dal.DeletePlatformUserAC(ctx, db, userID, platform); err != nil {
+		return err
+	}
+	return db.WithContext(ctx).Where("user_id = ? AND platform = ?", userID, platform).Delete(&model.SpiderRepairState{}).Error
 }
 
 const purgeSubmitsConfirm = "PURGE_SUBMITS"

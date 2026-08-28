@@ -279,7 +279,10 @@ func newLuoguSyncServiceTest(t *testing.T) (*SpiderService, *gorm.DB, *redis.Cli
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.AutoMigrate(&model.Platform{}); err != nil {
+	if err := db.AutoMigrate(
+		&model.Platform{}, &model.SubmitLog{}, &model.ContestLog{}, &model.DailyUserStat{},
+		&model.UserACProblem{}, &model.UserACProblemDay{}, &model.SpiderRepairState{}, &model.ContestUserProblem{},
+	); err != nil {
 		t.Fatal(err)
 	}
 	if err := db.Create(&model.Platform{UserID: 7, Platform: "LuoGu", Username: "2245873"}).Error; err != nil {
@@ -399,21 +402,90 @@ func TestLuoguSyncStartRecoveryCooldownAndTTL(t *testing.T) {
 
 func TestLuoguSyncInvalidStartDoesNotConsumeCooldown(t *testing.T) {
 	svc, db, rdb, _, _ := newLuoguSyncServiceTest(t)
+	now := time.Now().UTC()
+	for _, value := range []interface{}{
+		&model.SubmitLog{UserID: 7, Platform: "LuoGu", SubmitID: "100", Time: now},
+		&model.ContestLog{UserID: 7, Platform: "LuoGu", ContestId: "1", Time: now},
+		&model.ContestUserProblem{UserID: 7, Platform: "LuoGu", ContestID: "1", ExternalID: "P1000"},
+		&model.DailyUserStat{UserID: 7, Platform: "LuoGu", Day: now, SubmitCnt: 1},
+		&model.UserACProblem{UserID: 7, Platform: "LuoGu", ProblemKey: "e:LuoGu:P1000", FirstACAt: now},
+		&model.UserACProblemDay{UserID: 7, Platform: "LuoGu", ProblemKey: "e:LuoGu:P1000", Day: now},
+		&model.SpiderRepairState{UserID: 7, Platform: "LuoGu", RepairKey: "test", Version: 1, CompletedAt: now},
+		&model.SubmitLog{UserID: 7, Platform: "CodeForces", SubmitID: "200", Time: now},
+	} {
+		if err := db.Create(value).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
 	if err := db.Model(&model.Platform{}).Where("user_id = ? AND platform = ?", 7, "LuoGu").Update("username", "not-a-uid").Error; err != nil {
 		t.Fatal(err)
 	}
 	_, err := svc.StartLuoguSync(luoguHeaderContext(luoguPluginTokenHeader, "device-token"), &spiderpb.StartLuoguSyncReq{ClientKind: "userscript", ClientVersion: "1.0.0", RequestId: strings.Repeat("a", 43)})
-	if luoguReason(err) != "LUOGU_UID_MISMATCH" {
+	if luoguReason(err) != "LUOGU_BINDING_INVALID_REMOVED" {
 		t.Fatalf("err=%v", err)
 	}
 	if n, _ := rdb.Exists(context.Background(), luoguSyncCooldownKey(7, "2245873")).Result(); n != 0 {
 		t.Fatal("invalid start consumed cooldown")
 	}
-	if err := db.Model(&model.Platform{}).Where("user_id = ? AND platform = ?", 7, "LuoGu").Update("username", "2245873").Error; err != nil {
+	if generation, err := task.CurrentGeneration(context.Background(), rdb, 7, "LuoGu"); err != nil || generation != 3 {
+		t.Fatalf("generation=%d err=%v", generation, err)
+	}
+	for _, value := range []interface{}{
+		&model.Platform{}, &model.SubmitLog{}, &model.ContestLog{}, &model.DailyUserStat{},
+		&model.UserACProblem{}, &model.UserACProblemDay{}, &model.SpiderRepairState{}, &model.ContestUserProblem{},
+	} {
+		var count int64
+		if err := db.Model(value).Where("user_id = ? AND platform = ?", 7, "LuoGu").Count(&count).Error; err != nil || count != 0 {
+			t.Fatalf("uncleared %T count=%d err=%v", value, count, err)
+		}
+	}
+	var otherCount int64
+	if err := db.Model(&model.SubmitLog{}).Where("user_id = ? AND platform = ?", 7, "CodeForces").Count(&otherCount).Error; err != nil || otherCount != 1 {
+		t.Fatalf("other platform count=%d err=%v", otherCount, err)
+	}
+}
+
+func TestLuoguSyncInfersFirstBrowserCheckpointFromExistingSubmits(t *testing.T) {
+	svc, db, _, clock, _ := newLuoguSyncServiceTest(t)
+	for index, id := range []string{"9", "100", "not-numeric"} {
+		if err := db.Create(&model.SubmitLog{
+			UserID: 7, Platform: "LuoGu", SubmitID: id,
+			Time: clock.Now().Add(time.Duration(index) * time.Minute),
+		}).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	started := startLuoguTestSession(t, svc)
+	state, err := svc.loadLuoguSessionByID(context.Background(), started.SessionId)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := svc.StartLuoguSync(luoguHeaderContext(luoguPluginTokenHeader, "device-token"), &spiderpb.StartLuoguSyncReq{ClientKind: "userscript", ClientVersion: "1.0.0", RequestId: strings.Repeat("a", 43)}); err != nil {
-		t.Fatal(err)
+	if state.OldCheckpoint != "100" {
+		t.Fatalf("old checkpoint=%q want 100", state.OldCheckpoint)
+	}
+	records := make([]*spiderpb.LuoguSyncRecord, 0, 20)
+	for id := 119; id >= 100; id-- {
+		records = append(records, luoguRecord(strconv.Itoa(id), clock.Now().Unix()))
+	}
+	res, err := svc.UploadLuoguSyncPage(luoguHeaderContext(luoguSyncSessionHeader, started.SessionToken), &spiderpb.UploadLuoguSyncPageReq{
+		LuoguUid: "2245873", Page: 1, RemoteCount: 200, PerPage: 20, Records: records,
+	})
+	if err != nil || !res.Done || res.CompletionReason != "checkpoint" || res.ProcessedPages != 1 {
+		t.Fatalf("res=%+v err=%v", res, err)
+	}
+}
+
+func TestLuoguSyncAcceptsCurrentLuoguRecordEnums(t *testing.T) {
+	svc, _, _, clock, _ := newLuoguSyncServiceTest(t)
+	started := startLuoguTestSession(t, svc)
+	record := luoguRecord("100", clock.Now().Unix())
+	record.Status = 21
+	record.Problem.Difficulty = 8
+	res, err := svc.UploadLuoguSyncPage(luoguHeaderContext(luoguSyncSessionHeader, started.SessionToken), &spiderpb.UploadLuoguSyncPageReq{
+		LuoguUid: "2245873", Page: 1, RemoteCount: 1, PerPage: 20, Records: []*spiderpb.LuoguSyncRecord{record},
+	})
+	if err != nil || !res.Done {
+		t.Fatalf("res=%+v err=%v", res, err)
 	}
 }
 

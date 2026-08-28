@@ -34,7 +34,7 @@ func TestGatewayCorsConfigMatchesAppExampleAndAllowsOnlyConfiguredOrigins(t *tes
 	}
 	want := gatewayCorsOptions{
 		Type:         "type.googleapis.com/gateway.middleware.cors.v1.Cors",
-		AllowOrigins: []string{"chrome-extension://phbnnpidffgnnajfdmgglbphjkbindkd", "https://algo.zhiyuansofts.cn"},
+		AllowOrigins: []string{"https://algo.zhiyuansofts.cn"},
 		AllowHeaders: []string{"Content-Type", "X-GoAlgo-Plugin-Token", "X-GoAlgo-Sync-Session"},
 	}
 	if !reflect.DeepEqual(app, want) {

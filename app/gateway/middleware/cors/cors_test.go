@@ -166,34 +166,33 @@ func TestCors(t *testing.T) {
 }
 
 func TestIsOriginAllowedMatchesConfiguredOriginSchemeAndHostExactly(t *testing.T) {
-	const extensionOrigin = "chrome-extension://phbnnpidffgnnajfdmgglbphjkbindkd"
+	const websiteOrigin = "https://algo.zhiyuansofts.cn"
 
 	for _, test := range []struct {
 		name   string
 		origin string
 		want   bool
 	}{
-		{name: "configured extension origin", origin: extensionOrigin, want: true},
-		{name: "same host with http scheme", origin: "http://phbnnpidffgnnajfdmgglbphjkbindkd", want: false},
-		{name: "same host with https scheme", origin: "https://phbnnpidffgnnajfdmgglbphjkbindkd", want: false},
-		{name: "same scheme and host with path", origin: extensionOrigin + "/not-an-origin", want: false},
-		{name: "same scheme and host with query", origin: extensionOrigin + "?x=1", want: false},
-		{name: "same scheme and host with userinfo", origin: "chrome-extension://user@phbnnpidffgnnajfdmgglbphjkbindkd", want: false},
-		{name: "same scheme and host with fragment", origin: extensionOrigin + "#fragment", want: false},
-		{name: "another extension", origin: "chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", want: false},
+		{name: "configured website origin", origin: websiteOrigin, want: true},
+		{name: "same host with http scheme", origin: "http://algo.zhiyuansofts.cn", want: false},
+		{name: "same scheme and host with path", origin: websiteOrigin + "/not-an-origin", want: false},
+		{name: "same scheme and host with query", origin: websiteOrigin + "?x=1", want: false},
+		{name: "same scheme and host with userinfo", origin: "https://user@algo.zhiyuansofts.cn", want: false},
+		{name: "same scheme and host with fragment", origin: websiteOrigin + "#fragment", want: false},
+		{name: "another host", origin: "https://evil.example", want: false},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			if got := isOriginAllowed(test.origin, []string{extensionOrigin}); got != test.want {
+			if got := isOriginAllowed(test.origin, []string{websiteOrigin}); got != test.want {
 				t.Fatalf("isOriginAllowed(%q) = %t, want %t", test.origin, got, test.want)
 			}
 		})
 	}
 }
 
-func TestCorsAllowsLuoguSyncExtensionRequestHeaders(t *testing.T) {
-	config := buildConfig([]string{"chrome-extension://phbnnpidffgnnajfdmgglbphjkbindkd"})
+func TestCorsAllowsLuoguSyncRequestHeaders(t *testing.T) {
+	config := buildConfig([]string{"https://algo.zhiyuansofts.cn"})
 	options := &v1.Cors{
-		AllowOrigins: []string{"chrome-extension://phbnnpidffgnnajfdmgglbphjkbindkd"},
+		AllowOrigins: []string{"https://algo.zhiyuansofts.cn"},
 		AllowHeaders: []string{"Content-Type", "X-GoAlgo-Plugin-Token", "X-GoAlgo-Sync-Session"},
 	}
 	encoded, err := anypb.New(options)
@@ -213,7 +212,7 @@ func TestCorsAllowsLuoguSyncExtensionRequestHeaders(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	req.Header.Set(corsOriginHeader, "chrome-extension://phbnnpidffgnnajfdmgglbphjkbindkd")
+	req.Header.Set(corsOriginHeader, "https://algo.zhiyuansofts.cn")
 	req.Header.Set(corsRequestHeadersHeader, "content-type,x-goalgo-plugin-token,x-goalgo-sync-session")
 	resp, err := do.RoundTrip(req)
 	if err != nil {

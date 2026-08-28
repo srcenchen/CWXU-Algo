@@ -170,9 +170,9 @@ func TestLuoguSyncOnlyExposesExactPluginTokenEndpoints(t *testing.T) {
 
 func TestLuoguSyncPreflightPassesThroughJWTToCORSOnlyForExactPaths(t *testing.T) {
 	t.Setenv("CWXU_JWT_PUBLIC_KEY", "")
-	extensionOrigin := "chrome-extension://phbnnpidffgnnajfdmgglbphjkbindkd"
+	websiteOrigin := "https://algo.zhiyuansofts.cn"
 	corsOptions, err := anypb.New(&corsv1.Cors{
-		AllowOrigins: []string{extensionOrigin},
+		AllowOrigins: []string{websiteOrigin},
 		AllowHeaders: []string{"Content-Type", "X-GoAlgo-Plugin-Token", "X-GoAlgo-Sync-Session"},
 	})
 	if err != nil {
@@ -208,7 +208,7 @@ func TestLuoguSyncPreflightPassesThroughJWTToCORSOnlyForExactPaths(t *testing.T)
 			if err != nil {
 				t.Fatal(err)
 			}
-			req.Header.Set("Origin", extensionOrigin)
+			req.Header.Set("Origin", websiteOrigin)
 			req.Header.Set("Access-Control-Request-Headers", "content-type,x-goalgo-plugin-token")
 			resp, err := chain.RoundTrip(req)
 			if err != nil {
@@ -217,8 +217,8 @@ func TestLuoguSyncPreflightPassesThroughJWTToCORSOnlyForExactPaths(t *testing.T)
 			if resp.StatusCode != test.want {
 				t.Fatalf("preflight status = %d, want %d", resp.StatusCode, test.want)
 			}
-			if test.want == http.StatusOK && resp.Header.Get("Access-Control-Allow-Origin") != extensionOrigin {
-				t.Fatalf("Access-Control-Allow-Origin = %q, want %q", resp.Header.Get("Access-Control-Allow-Origin"), extensionOrigin)
+			if test.want == http.StatusOK && resp.Header.Get("Access-Control-Allow-Origin") != websiteOrigin {
+				t.Fatalf("Access-Control-Allow-Origin = %q, want %q", resp.Header.Get("Access-Control-Allow-Origin"), websiteOrigin)
 			}
 		})
 	}

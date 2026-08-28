@@ -111,7 +111,7 @@ func validateLuoguAuthorizeRequest(req *pb.AuthorizeCodeReq) error {
 	if !luoguUIDPattern.MatchString(req.LuoguUid) {
 		return luoguPluginError(http.StatusBadRequest, "INVALID_LUOGU_UID", "洛谷 UID 无效")
 	}
-	if req.ClientKind != "userscript" && req.ClientKind != "chrome-extension" {
+	if req.ClientKind != "userscript" {
 		return luoguPluginError(http.StatusBadRequest, "INVALID_CLIENT_KIND", "客户端类型无效")
 	}
 	if len(strings.TrimSpace(req.ClientVersion)) == 0 || len(req.ClientVersion) > 64 {
