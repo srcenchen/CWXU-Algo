@@ -195,6 +195,7 @@ func migrateModels(db *gorm.DB) {
 		&model.BlogImageAsset{},
 		&model.BlogImageUploadRequest{},
 		&model.ObsidianPluginMeta{},
+		&model.PluginAuthorization{},
 		&model.Role{},
 		&model.RolePermission{},
 		&model.UserRole{},

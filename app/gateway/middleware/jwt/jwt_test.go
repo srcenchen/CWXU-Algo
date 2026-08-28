@@ -5,11 +5,15 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/pem"
+	"net/http"
 	"strings"
 	"testing"
 
 	config "github.com/go-kratos/gateway/api/gateway/config/v1"
+	corsv1 "github.com/go-kratos/gateway/api/gateway/middleware/cors/v1"
 	jwtv1 "github.com/go-kratos/gateway/api/gateway/middleware/jwt/v1"
+	"github.com/go-kratos/gateway/middleware"
+	corsmiddleware "github.com/go-kratos/gateway/middleware/cors"
 	"google.golang.org/protobuf/types/known/anypb"
 )
 
@@ -104,5 +108,116 @@ func TestSupportEventsIsWhitelisted(t *testing.T) {
 		if _, ok := publicExact[path]; !ok {
 			t.Errorf("support events path missing from JWT whitelist: %s", path)
 		}
+	}
+}
+
+func TestLuoguPluginTokenExchangeIsTheOnlyPublicPluginAuthorizationPath(t *testing.T) {
+	for _, publicPath := range []string{
+		"/v1/user/plugin/luogu/token",
+		"/api/user/plugin/luogu/token",
+	} {
+		if _, ok := publicExact[publicPath]; !ok {
+			t.Errorf("Luogu plugin token path missing from JWT whitelist: %s", publicPath)
+		}
+	}
+
+	for _, protectedPath := range []string{
+		"/v1/user/plugin/luogu/authorize-code",
+		"/api/user/plugin/luogu/authorize-code",
+		"/v1/user/plugin/luogu/authorizations",
+		"/api/user/plugin/luogu/authorizations",
+		"/v1/user/plugin/luogu/revoke",
+		"/api/user/plugin/luogu/revoke",
+	} {
+		if _, ok := publicExact[protectedPath]; ok {
+			t.Errorf("JWT-protected Luogu plugin path is public: %s", protectedPath)
+		}
+	}
+}
+
+func TestLuoguSyncOnlyExposesExactPluginTokenEndpoints(t *testing.T) {
+	for _, publicPath := range []string{
+		"/v1/user/plugin/luogu/token",
+		"/api/user/plugin/luogu/token",
+		"/v1/core/spider/luogu-sync/start",
+		"/api/core/spider/luogu-sync/start",
+		"/v1/core/spider/luogu-sync/status",
+		"/api/core/spider/luogu-sync/status",
+		"/v1/core/spider/luogu-sync/page",
+		"/api/core/spider/luogu-sync/page",
+	} {
+		if _, ok := publicExact[publicPath]; !ok {
+			t.Errorf("Luogu sync path missing from JWT whitelist: %s", publicPath)
+		}
+	}
+
+	for _, protectedPath := range []string{
+		"/v1/core/spider/luogu-sync",
+		"/v1/core/spider/luogu-sync/start/nearby",
+		"/v1/core/spider/luogu-sync/status-extra",
+		"/api/core/spider/luogu-sync/page/extra",
+		"/v1/user/plugin/luogu/authorize-code",
+		"/api/user/plugin/luogu/authorizations",
+		"/v1/user/plugin/luogu/revoke",
+	} {
+		if _, ok := publicExact[protectedPath]; ok {
+			t.Errorf("JWT-protected Luogu path is public: %s", protectedPath)
+		}
+	}
+}
+
+func TestLuoguSyncPreflightPassesThroughJWTToCORSOnlyForExactPaths(t *testing.T) {
+	t.Setenv("CWXU_JWT_PUBLIC_KEY", "")
+	extensionOrigin := "chrome-extension://phbnnpidffgnnajfdmgglbphjkbindkd"
+	corsOptions, err := anypb.New(&corsv1.Cors{
+		AllowOrigins: []string{extensionOrigin},
+		AllowHeaders: []string{"Content-Type", "X-GoAlgo-Plugin-Token", "X-GoAlgo-Sync-Session"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	corsFactory, err := corsmiddleware.Middleware(&config.Middleware{Name: "cors", Options: corsOptions})
+	if err != nil {
+		t.Fatal(err)
+	}
+	jwtFactory, err := Middleware(middlewareConfig(t, testPubKeyPEM(t)))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	backend := middleware.RoundTripperFunc(func(*http.Request) (*http.Response, error) {
+		return buildUnauthorizedResp("backend must not handle preflight"), nil
+	})
+	// gateway/proxy wraps global middleware in declared order: jwt is outermost,
+	// so this verifies the real JWT -> CORS preflight path.
+	chain := jwtFactory(corsFactory(backend))
+
+	for _, test := range []struct {
+		name string
+		path string
+		want int
+	}{
+		{name: "exact start", path: "/v1/core/spider/luogu-sync/start", want: http.StatusOK},
+		{name: "adjacent path", path: "/v1/core/spider/luogu-sync/start/nearby", want: http.StatusUnauthorized},
+		{name: "prefix path", path: "/v1/core/spider/luogu-sync", want: http.StatusUnauthorized},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			req, err := http.NewRequest(http.MethodOptions, test.path, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			req.Header.Set("Origin", extensionOrigin)
+			req.Header.Set("Access-Control-Request-Headers", "content-type,x-goalgo-plugin-token")
+			resp, err := chain.RoundTrip(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if resp.StatusCode != test.want {
+				t.Fatalf("preflight status = %d, want %d", resp.StatusCode, test.want)
+			}
+			if test.want == http.StatusOK && resp.Header.Get("Access-Control-Allow-Origin") != extensionOrigin {
+				t.Fatalf("Access-Control-Allow-Origin = %q, want %q", resp.Header.Get("Access-Control-Allow-Origin"), extensionOrigin)
+			}
+		})
 	}
 }

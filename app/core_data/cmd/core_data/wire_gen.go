@@ -11,11 +11,11 @@ import (
 	"cwxu-algo/app/common/discovery"
 	"cwxu-algo/app/common/event"
 	"cwxu-algo/app/core_data/internal/backupcoord"
-	service2 "cwxu-algo/app/core_data/internal/biz/service"
+	"cwxu-algo/app/core_data/internal/biz/service"
 	"cwxu-algo/app/core_data/internal/data"
 	"cwxu-algo/app/core_data/internal/data/dal"
 	"cwxu-algo/app/core_data/internal/server"
-	"cwxu-algo/app/core_data/internal/service"
+	service2 "cwxu-algo/app/core_data/internal/service"
 	"cwxu-algo/app/core_data/task"
 	"github.com/go-kratos/kratos/v2"
 	"github.com/go-kratos/kratos/v2/log"
@@ -43,39 +43,39 @@ func wireApp(confServer *conf.Server, confData *conf.Data, logger log.Logger) (*
 	db := data.NewDataDB(dataData)
 	spiderTask := task.NewSpiderTask(rabbitMQ, client, db)
 	register := discovery.NewConsulRegister(confServer)
-	spiderService := service.NewSpiderService(dataData, spiderTask, register)
-	spiderDal := dal.NewSpiderDal(dataData)
-	submitLogService := service.NewSubmitLogService(spiderDal, dataData, register)
-	statisticDal := dal.NewStatisticDal(db, client)
-	statisticUseCase := service2.NewStatisticUseCase(statisticDal, client, register)
-	statisticService := service.NewStatistic(statisticUseCase)
-	problemTagger := service2.NewProblemTagger(client)
+	problemTagger := service.NewProblemTagger(client)
 	userProfileTask := task.NewUserProfileTask(rabbitMQ, client)
-	problemUseCase := service2.NewProblemUseCase(dataData, rabbitMQ, problemTagger, register, userProfileTask)
-	contestLogService := service.NewContestLogService(spiderDal, dataData, register, problemUseCase)
+	problemUseCase := service.NewProblemUseCase(dataData, rabbitMQ, problemTagger, register, userProfileTask)
+	spiderUseCase := service.NewSpiderUseCase(dataData, problemUseCase, spiderTask)
+	spiderService := service2.NewSpiderService(dataData, spiderTask, register, spiderUseCase)
+	spiderDal := dal.NewSpiderDal(dataData)
+	submitLogService := service2.NewSubmitLogService(spiderDal, dataData, register)
+	statisticDal := dal.NewStatisticDal(db, client)
+	statisticUseCase := service.NewStatisticUseCase(statisticDal, client, register)
+	statisticService := service2.NewStatistic(statisticUseCase)
+	contestLogService := service2.NewContestLogService(spiderDal, dataData, register, problemUseCase)
 	coordinator := backupcoord.NewCoordinator(dataData)
-	backupService := service.NewBackupService(coordinator)
+	backupService := service2.NewBackupService(coordinator)
 	grpcServer := server.NewGRPCServer(confServer, logger, spiderService, submitLogService, statisticService, contestLogService, backupService)
 	bulletinDal := dal.NewBulletinDal(dataData)
-	bulletinService := service.NewBulletinService(bulletinDal)
-	problemService := service.NewProblemService(problemUseCase, register)
+	bulletinService := service2.NewBulletinService(bulletinDal)
+	problemService := service2.NewProblemService(problemUseCase, register)
 	emergencyDal := dal.NewEmergencyDal(dataData)
-	emergencyService := service.NewEmergencyService(emergencyDal)
+	emergencyService := service2.NewEmergencyService(emergencyDal)
 	contestCalendarDal := dal.NewContestCalendarDal(dataData)
-	contestCalendarService := service.NewContestCalendarService(contestCalendarDal, register, dataData, rabbitMQ)
-	communityService := service.NewCommunityService(dataData, register)
-	problemsetService := service.NewProblemsetService(dataData, problemUseCase, register)
-	healthService := service.NewHealthService(dataData, confServer)
+	contestCalendarService := service2.NewContestCalendarService(contestCalendarDal, register, dataData, rabbitMQ)
+	communityService := service2.NewCommunityService(dataData, register)
+	problemsetService := service2.NewProblemsetService(dataData, problemUseCase, register)
+	healthService := service2.NewHealthService(dataData, confServer)
 	httpServer := server.NewHTTPServer(confServer, logger, dataData, submitLogService, spiderService, statisticService, contestLogService, bulletinService, problemService, emergencyService, contestCalendarService, communityService, problemsetService, healthService, backupService)
-	spiderUseCase := service2.NewSpiderUseCase(dataData, problemUseCase, spiderTask)
-	consumer := service2.NewConsumer(rabbitMQ, spiderUseCase, spiderTask)
-	problemFetchConsumer := service2.NewProblemFetchConsumer(rabbitMQ, problemUseCase)
-	problemAnalyzeConsumer := service2.NewProblemAnalyzeConsumer(rabbitMQ, problemUseCase)
-	userProfileConsumer := service2.NewUserProfileConsumer(rabbitMQ, problemUseCase, userProfileTask)
-	mailConsumer := service2.NewMailConsumer(rabbitMQ, dataData)
+	consumer := service.NewConsumer(rabbitMQ, spiderUseCase, spiderTask)
+	problemFetchConsumer := service.NewProblemFetchConsumer(rabbitMQ, problemUseCase)
+	problemAnalyzeConsumer := service.NewProblemAnalyzeConsumer(rabbitMQ, problemUseCase)
+	userProfileConsumer := service.NewUserProfileConsumer(rabbitMQ, problemUseCase, userProfileTask)
+	mailConsumer := service.NewMailConsumer(rabbitMQ, dataData)
 	summaryTask := task.NewSummaryTask(rabbitMQ, client)
 	cronTask := task.NewCronTask(spiderTask, dataData, summaryTask, userProfileTask, register, coordinator)
-	app := newApp(logger, grpcServer, httpServer, register, consumer, problemFetchConsumer, problemAnalyzeConsumer, userProfileConsumer, mailConsumer, cronTask, coordinator)
+	app := newApp(logger, grpcServer, httpServer, register, consumer, problemFetchConsumer, problemAnalyzeConsumer, userProfileConsumer, mailConsumer, spiderUseCase, cronTask, coordinator)
 	return app, func() {
 		cleanup2()
 		cleanup()

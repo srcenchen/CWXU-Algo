@@ -25,6 +25,56 @@ func TestAppExamplesAndDeployTemplatesHaveMatchingKeyPaths(t *testing.T) {
 	}
 }
 
+func TestGatewayCorsConfigMatchesAppExampleAndAllowsOnlyLuoguExtension(t *testing.T) {
+	root := filepath.Clean("..")
+	app := gatewayCorsConfig(t, filepath.Join(root, "app/gateway/cmd/gateway/config.yaml"))
+	deploy := gatewayCorsConfig(t, filepath.Join(root, "deploy/config/gateway.yaml"))
+	if !reflect.DeepEqual(deploy, app) {
+		t.Fatalf("gateway CORS differs between app example and deploy template\napp:    %#v\ndeploy: %#v", app, deploy)
+	}
+	want := gatewayCorsOptions{
+		Type:         "type.googleapis.com/gateway.middleware.cors.v1.Cors",
+		AllowOrigins: []string{"chrome-extension://phbnnpidffgnnajfdmgglbphjkbindkd"},
+		AllowHeaders: []string{"Content-Type", "X-GoAlgo-Plugin-Token", "X-GoAlgo-Sync-Session"},
+	}
+	if !reflect.DeepEqual(app, want) {
+		t.Fatalf("gateway CORS = %#v, want %#v", app, want)
+	}
+}
+
+type gatewayCorsOptions struct {
+	Type         string   `yaml:"@type"`
+	AllowOrigins []string `yaml:"allowOrigins"`
+	AllowHeaders []string `yaml:"allowHeaders"`
+}
+
+func gatewayCorsConfig(t *testing.T, path string) gatewayCorsOptions {
+	t.Helper()
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var config struct {
+		Middlewares []struct {
+			Name    string             `yaml:"name"`
+			Options gatewayCorsOptions `yaml:"options"`
+		} `yaml:"middlewares"`
+	}
+	if err := yaml.Unmarshal(content, &config); err != nil {
+		t.Fatalf("parse %s: %v", path, err)
+	}
+	var corsMiddlewares []gatewayCorsOptions
+	for _, middleware := range config.Middlewares {
+		if middleware.Name == "cors" {
+			corsMiddlewares = append(corsMiddlewares, middleware.Options)
+		}
+	}
+	if len(corsMiddlewares) != 1 {
+		t.Fatalf("%s must configure exactly one cors middleware, got %d", path, len(corsMiddlewares))
+	}
+	return corsMiddlewares[0]
+}
+
 func TestConfigTemplatesExcludeRuntimeBusinessSettings(t *testing.T) {
 	root := filepath.Clean("..")
 	for _, path := range []string{

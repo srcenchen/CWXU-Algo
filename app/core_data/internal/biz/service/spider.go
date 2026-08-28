@@ -17,6 +17,7 @@ import (
 	"cwxu-algo/app/core_data/internal/spidermetrics"
 	"cwxu-algo/app/core_data/task"
 
+	kratoserrors "github.com/go-kratos/kratos/v2/errors"
 	"github.com/go-kratos/kratos/v2/log"
 	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
@@ -53,6 +54,54 @@ type SpiderUseCase struct {
 	spiderTask *task.SpiderTask
 }
 
+// SubmitImportResult reports database changes made by ImportSubmitLogs.
+// Inserted deliberately excludes verdict refreshes so page retries can expose
+// an exact count of newly created submit rows.
+type SubmitImportResult struct {
+	Inserted  int64
+	Refreshed int64
+}
+
+type ClientSyncPageImport struct {
+	SessionID            string
+	Restart              int32
+	Page                 int32
+	Digest               string
+	FirstSubmitID        string
+	RemoteCount          int32
+	PerPage              int32
+	InsertedBefore       int64
+	ProcessedPagesBefore int32
+	CompletionReason     string
+	NextAvailableAt      int64
+	CompletedAt          time.Time
+	ExpiresAt            time.Time
+}
+
+type ClientSyncPageImportResult struct {
+	PageInserted     int64
+	Inserted         int64
+	ProcessedPages   int32
+	NextPage         int32
+	FirstSubmitID    string
+	RemoteCount      int32
+	PerPage          int32
+	CompletionReason string
+	NextAvailableAt  int64
+	Replayed         bool
+	DigestMatched    bool
+}
+
+func (r SubmitImportResult) Changed() bool { return r.Inserted+r.Refreshed > 0 }
+
+type submitImportOptions struct {
+	repairRequired bool
+	complete       bool
+	needAll        bool
+	clientPage     *ClientSyncPageImport
+	clientResult   *ClientSyncPageImportResult
+}
+
 func NewSpiderUseCase(data *data.Data, problem *ProblemUseCase, spiderTask *task.SpiderTask) *SpiderUseCase {
 	return &SpiderUseCase{
 		data:       data,
@@ -72,13 +121,6 @@ var ensureContestSem = make(chan struct{}, 4)
 // 无绑定平台时成功返回；有平台且全部失败则返回 error（consumer 可重试）。
 // 仅在有新写入时失效缓存，避免空跑爬虫打穿 period/heatmap 缓存。
 func (uc *SpiderUseCase) LoadData(userId int64, needAll bool, platform string) error {
-	var dirty bool
-	defer func() {
-		if dirty {
-			uc.invalidateCache(userId)
-		}
-	}()
-
 	ctx, cancel := context.WithTimeout(context.Background(), loadDataTimeout)
 	defer cancel()
 
@@ -100,10 +142,7 @@ func (uc *SpiderUseCase) LoadData(userId int64, needAll bool, platform string) e
 		if err := ctx.Err(); err != nil {
 			return fmt.Errorf("load data timeout user=%d after partial: %w", userId, err)
 		}
-		changed, err := uc.loadOnePlatform(ctx, userId, plat, needAll)
-		if changed {
-			dirty = true
-		}
+		_, err := uc.loadOnePlatform(ctx, userId, plat, needAll)
 		if err != nil {
 			failCount++
 			lastErr = err
@@ -133,7 +172,11 @@ func (uc *SpiderUseCase) fetchAndSave(fetchCtx context.Context, userId int64, pl
 	// 拉取前记录代数；重绑会 BumpGeneration，写入前再比对，丢弃过期全量结果
 	var genAtStart int64
 	if uc.data != nil && uc.data.RDB != nil {
-		genAtStart = task.CurrentGeneration(uc.data.RDB, userId, plat.Platform)
+		var genErr error
+		genAtStart, genErr = task.CurrentGeneration(fetchCtx, uc.data.RDB, userId, plat.Platform)
+		if genErr != nil {
+			return 0, false, fmt.Errorf("read binding generation: %w", genErr)
+		}
 	}
 
 	var tmp []model.SubmitLog
@@ -148,37 +191,176 @@ func (uc *SpiderUseCase) fetchAndSave(fetchCtx context.Context, userId int64, pl
 		return 0, false, err
 	}
 
-	// 写入前归一化 is_ac，读路径不再 UPPER(BTRIM(status))
-	model.FillIsACBatch(tmp)
-	// 去掉误写的「平台:」前缀（如 LuoGu:286690434 → 286690434），避免外链拼错
-	model.NormalizeSubmitIDs(tmp)
+	result, err := uc.importSubmitLogs(context.Background(), userId, plat.Platform, genAtStart, tmp, submitImportOptions{
+		repairRequired: repairRequired,
+		complete:       complete,
+		needAll:        needAll,
+	})
+	if err != nil {
+		// 重绑时旧服务端 fetch 延续历史语义：静默丢弃，避免把正常交接
+		// 记录成 OJ 失败或触发额外重试。浏览器同步在 service 边界单独
+		// 映射为稳定 SESSION_EXPIRED。
+		if kratoserrors.Reason(err) == "SYNC_BINDING_CHANGED" {
+			log.Infof("Spider: discard stale fetch user=%d platform=%s", userId, plat.Platform)
+			return 0, false, nil
+		}
+		return 0, false, err
+	}
+	return result.Inserted + result.Refreshed, complete, nil
+}
 
-	// 只插入真正的新行，才能准确累加 daily_user_stats（OnConflict DoNothing 无法区分）
-	ctx := context.Background()
+// ImportSubmitLogs is the shared submit ingestion path used by server-side
+// spiders and browser-local sync. The caller must pass the binding generation
+// captured when its work/session started.
+func (uc *SpiderUseCase) ImportSubmitLogs(ctx context.Context, userID int64, platform string, generation int64, logs []model.SubmitLog) (SubmitImportResult, error) {
+	return uc.importSubmitLogs(ctx, userID, platform, generation, logs, submitImportOptions{})
+}
+
+// ImportClientSyncPage durably records the page result in the same SQL
+// transaction as new submit rows, aggregates, and the optional final
+// checkpoint. Redis can then be retried without losing page counters.
+func (uc *SpiderUseCase) ImportClientSyncPage(ctx context.Context, userID int64, platform string, generation int64, logs []model.SubmitLog, page ClientSyncPageImport) (ClientSyncPageImportResult, error) {
+	var pageResult ClientSyncPageImportResult
+	_, err := uc.importSubmitLogs(ctx, userID, platform, generation, logs, submitImportOptions{
+		clientPage: &page, clientResult: &pageResult,
+	})
+	return pageResult, err
+}
+
+// CompleteClientSync advances the browser checkpoint under the same
+// user/platform lock and generation guard as submit writes.
+func (uc *SpiderUseCase) CompleteClientSync(ctx context.Context, userID int64, platform string, generation int64, head string, completedAt time.Time) error {
+	if uc == nil || uc.data == nil || uc.data.DB == nil {
+		return fmt.Errorf("submit importer is not configured")
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	unlock, locked := uc.tryPlatformWriteLock(ctx, userID, platform)
+	if !locked {
+		return fmt.Errorf("平台写入锁占用 user=%d platform=%s", userID, platform)
+	}
+	defer unlock()
+	if uc.data.RDB != nil {
+		current, err := task.CurrentGeneration(ctx, uc.data.RDB, userID, platform)
+		if err != nil {
+			return kratoserrors.ServiceUnavailable("SYNC_UNAVAILABLE", "同步服务暂不可用")
+		}
+		if current != generation {
+			return kratoserrors.Conflict("SYNC_BINDING_CHANGED", "洛谷绑定已变化，请重新开始同步")
+		}
+	}
+	result := uc.data.DB.WithContext(ctx).Model(&model.Platform{}).
+		Where("user_id = ? AND platform = ?", userID, platform).
+		Updates(map[string]interface{}{
+			"client_sync_head_submit_id": strings.TrimSpace(head),
+			"client_sync_completed_at":   completedAt.UTC(),
+		})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected != 1 {
+		return kratoserrors.Conflict("SYNC_BINDING_CHANGED", "洛谷绑定已变化，请重新开始同步")
+	}
+	return nil
+}
+
+// ScheduleSubmitPostProcess keeps browser imports on the existing problem
+// binding path. It is safe to call more than once.
+func (uc *SpiderUseCase) ScheduleSubmitPostProcess(userID int64) {
+	if uc == nil || uc.problem == nil || userID <= 0 {
+		return
+	}
+	go uc.problem.BindSubmitsAfterSpider(userID)
+}
+
+func (uc *SpiderUseCase) importSubmitLogs(ctx context.Context, userId int64, platform string, generation int64, logs []model.SubmitLog, opts submitImportOptions) (SubmitImportResult, error) {
+	var result SubmitImportResult
+	if uc == nil || uc.data == nil || uc.data.DB == nil {
+		return result, fmt.Errorf("submit importer is not configured")
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	platform = strings.TrimSpace(platform)
+	if userId <= 0 || platform == "" {
+		return result, kratoserrors.BadRequest("INVALID_ARGUMENT", "提交归属无效")
+	}
+
+	// Own the slice before enforcing server-side identity and normalization.
+	tmp := append([]model.SubmitLog(nil), logs...)
+	for i := range tmp {
+		tmp[i].UserID = userId
+		tmp[i].Platform = platform
+	}
+	model.FillIsACBatch(tmp)
+	model.NormalizeSubmitIDs(tmp)
 
 	// 同用户同平台串行写入：FilterNew + Insert + ApplyDaily 必须原子视角，
 	// 否则两次全量爬虫并发时都会把整批当成「新行」叠 daily/user_ac（重绑连点常见）。
-	unlock, locked := uc.tryPlatformWriteLock(ctx, userId, plat.Platform)
+	unlock, locked := uc.tryPlatformWriteLock(ctx, userId, platform)
 	if !locked {
-		return 0, false, fmt.Errorf("平台写入锁占用 user=%d platform=%s", userId, plat.Platform)
+		return result, fmt.Errorf("平台写入锁占用 user=%d platform=%s", userId, platform)
 	}
 	defer unlock()
 
 	if uc.data != nil && uc.data.RDB != nil {
-		if cur := task.CurrentGeneration(uc.data.RDB, userId, plat.Platform); cur != genAtStart {
-			log.Infof("Spider: drop stale fetch user=%d platform=%s gen %d→%d", userId, plat.Platform, genAtStart, cur)
-			return 0, false, nil
+		cur, genErr := task.CurrentGeneration(ctx, uc.data.RDB, userId, platform)
+		if genErr != nil {
+			return result, kratoserrors.ServiceUnavailable("SYNC_UNAVAILABLE", "同步服务暂不可用")
+		}
+		if cur != generation {
+			return result, kratoserrors.Conflict("SYNC_BINDING_CHANGED", "洛谷绑定已变化，请重新开始同步")
+		}
+	}
+	if opts.clientPage != nil {
+		if opts.clientResult == nil || opts.clientPage.SessionID == "" || opts.clientPage.Page <= 0 || opts.clientPage.Digest == "" {
+			return result, kratoserrors.BadRequest("INVALID_ARGUMENT", "同步页回执无效")
+		}
+		replayed, receipt, found, receiptErr := loadClientSyncPageReceipt(ctx, uc.data.DB, userId, platform, generation, *opts.clientPage)
+		if receiptErr != nil {
+			return result, receiptErr
+		}
+		if found {
+			if effectErr := uc.applyClientSyncReceiptEffects(ctx, receipt); effectErr != nil {
+				return result, kratoserrors.ServiceUnavailable("SYNC_UNAVAILABLE", "同步服务暂不可用")
+			}
+			*opts.clientResult = replayed
+			return SubmitImportResult{Inserted: replayed.PageInserted}, nil
 		}
 	}
 	if len(tmp) == 0 {
-		if err := finishRepair(ctx, uc.data.DB, userId, plat.Platform, repairRequired, complete, nil); err != nil {
-			return 0, false, err
+		if opts.clientPage != nil {
+			return uc.persistClientSyncPage(ctx, userId, platform, generation, nil, idsFromSubmitLogs(tmp), tmp, opts)
 		}
-		return 0, complete, nil
+		if err := finishRepair(ctx, uc.data.DB, userId, platform, opts.repairRequired, opts.complete, nil); err != nil {
+			return result, err
+		}
+		return result, nil
+	}
+
+	// The database unique key is global per platform. Never silently treat a
+	// different user's row as an idempotent retry.
+	ids := make([]string, 0, len(tmp))
+	for i := range tmp {
+		if tmp[i].SubmitID != "" {
+			ids = append(ids, tmp[i].SubmitID)
+		}
+	}
+	if len(ids) > 0 {
+		var ownerConflicts int64
+		if err := uc.data.DB.WithContext(ctx).Model(&model.SubmitLog{}).
+			Where("platform = ? AND submit_id IN ? AND user_id <> ?", platform, ids, userId).
+			Count(&ownerConflicts).Error; err != nil {
+			return result, err
+		}
+		if ownerConflicts > 0 {
+			return result, kratoserrors.Conflict("SUBMIT_OWNER_CONFLICT", "提交记录已属于其他用户")
+		}
 	}
 
 	// 力扣：先清历史重复最近通过，再过滤待插入（同题只留一条）
-	if plat.Platform == spider.LeetCode {
+	if platform == spider.LeetCode {
 		if n, perr := dal.PruneLeetCodeProbDuplicates(ctx, uc.data.DB, userId); perr != nil {
 			log.Warnf("Spider: prune leetcode prob dups user=%d: %v", userId, perr)
 		} else if n > 0 {
@@ -188,63 +370,236 @@ func (uc *SpiderUseCase) fetchAndSave(fetchCtx context.Context, userId int64, pl
 	// 回写已入库的 pending/空状态（CF 评测中先入库后终态不会再进 FilterNew）
 	nRefresh, rerr := dal.RefreshPendingSubmitVerdicts(ctx, uc.data.DB, tmp)
 	if rerr != nil {
-		return 0, false, fmt.Errorf("refresh submit status user=%d platform=%s: %w", userId, plat.Platform, rerr)
+		return result, fmt.Errorf("refresh submit status user=%d platform=%s: %w", userId, platform, rerr)
 	} else if nRefresh > 0 {
-		log.Infof("Spider: refreshed pending status user=%d platform=%s n=%d", userId, plat.Platform, nRefresh)
+		log.Infof("Spider: refreshed pending status user=%d platform=%s n=%d", userId, platform, nRefresh)
 	}
+	result.Refreshed = nRefresh
 	// 力扣：已入库 lc-prob 补 lang / 可读标题（早期 Lang="-"、LCR 乱码 slug）
-	if plat.Platform == spider.LeetCode {
+	if platform == spider.LeetCode {
 		if nMeta, merr := dal.RefreshLeetCodeProbMeta(ctx, uc.data.DB, tmp); merr != nil {
 			log.Warnf("Spider: refresh leetcode meta user=%d: %v", userId, merr)
 		} else if nMeta > 0 {
 			log.Infof("Spider: refreshed leetcode lc-prob meta user=%d n=%d", userId, nMeta)
-			nRefresh += nMeta
+			result.Refreshed += nMeta
 		}
 	}
 
 	// submit_logs 去重：已有 submit_id 不再累加预聚合（防全量重爬双计）
 	neu, err := dal.FilterNewSubmitLogs(ctx, uc.data.DB, tmp)
 	if err != nil {
-		return 0, false, err
+		return result, err
+	}
+	if opts.clientPage != nil {
+		return uc.persistClientSyncPage(ctx, userId, platform, generation, neu, ids, tmp, opts)
 	}
 	var inserted int64
 	if len(neu) > 0 {
 		// 异常大批量：多为首次全量或明细被清后重爬
 		if len(neu) >= 2000 {
 			log.Warnf("Spider: large new batch user=%d platform=%s fetched=%d new=%d needAll=%v",
-				userId, plat.Platform, len(tmp), len(neu), needAll)
+				userId, platform, len(tmp), len(neu), opts.needAll)
 		}
 
-		// 预聚合 + 写入 submit_logs（唯一键 (platform, submit_id) + OnConflict DoNothing）
-		// 预聚合已批量化（见 dal），事务内语句数为常数级，避免逐行长事务
+		// submit_logs 的全局唯一键是 owner claim 的数据库真相。必须先让真实
+		// insert 成功，再对同一批行累计统计；跨用户竞态的 loser 会在唯一键处
+		// 回滚，不能像 ON CONFLICT DO NOTHING 那样继续污染 loser 的聚合。
 		err = uc.data.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			if err := tx.CreateInBatches(&neu, submitInsertBatchSize).Error; err != nil {
+				return err
+			}
 			if err := dal.ApplyDailyDeltas(ctx, tx, dal.AggregateSubmitDeltas(neu)); err != nil {
 				return err
 			}
 			if err := dal.ApplyUserACFromSubmits(ctx, tx, neu); err != nil {
 				return err
 			}
-			return tx.Clauses(clause.OnConflict{
-				Columns:   []clause.Column{{Name: "platform"}, {Name: "submit_id"}},
-				DoNothing: true,
-			}).CreateInBatches(&neu, submitInsertBatchSize).Error
+			return nil
 		})
 		if err != nil {
-			return 0, false, err
+			conflict, conflictErr := hasSubmitOwnerConflict(ctx, uc.data.DB, platform, ids, userId)
+			if conflictErr != nil {
+				return result, conflictErr
+			}
+			if conflict {
+				return result, kratoserrors.Conflict("SUBMIT_OWNER_CONFLICT", "提交记录已属于其他用户")
+			}
+			return result, err
 		}
 		inserted = int64(len(neu))
-		spidermetrics.IncRows(plat.Platform, inserted)
+		result.Inserted = inserted
+		spidermetrics.IncRows(platform, inserted)
 	}
 
 	// 赛后/评测中：本批仍有 Judging 等非终态 → 5 分钟后增量爬，直到没有为止
-	uc.maybeSchedulePendingVerdictRetry(userId, plat.Platform, tmp)
+	uc.maybeSchedulePendingVerdictRetry(userId, platform, tmp)
 	// Keep the write lock until the repair marker is durable so a concurrent rebind
 	// cannot delete the old state and then have this stale fetch recreate it.
-	if err := finishRepair(ctx, uc.data.DB, userId, plat.Platform, repairRequired, complete, nil); err != nil {
-		return 0, false, err
+	if err := finishRepair(ctx, uc.data.DB, userId, platform, opts.repairRequired, opts.complete, nil); err != nil {
+		return result, err
 	}
+	if result.Changed() && uc.data.RDB != nil {
+		uc.invalidateCache(userId)
+	}
+	return result, nil
+}
 
-	return inserted + nRefresh, complete, nil
+func hasSubmitOwnerConflict(ctx context.Context, db *gorm.DB, platform string, ids []string, userID int64) (bool, error) {
+	if len(ids) == 0 {
+		return false, nil
+	}
+	var count int64
+	err := db.WithContext(ctx).Model(&model.SubmitLog{}).
+		Where("platform = ? AND submit_id IN ? AND user_id <> ?", platform, ids, userID).
+		Count(&count).Error
+	return count > 0, err
+}
+
+func idsFromSubmitLogs(logs []model.SubmitLog) []string {
+	ids := make([]string, 0, len(logs))
+	for i := range logs {
+		if logs[i].SubmitID != "" {
+			ids = append(ids, logs[i].SubmitID)
+		}
+	}
+	return ids
+}
+
+func loadClientSyncPageReceipt(ctx context.Context, db *gorm.DB, userID int64, platform string, generation int64, page ClientSyncPageImport) (ClientSyncPageImportResult, *model.ClientSyncPageReceipt, bool, error) {
+	var receipt model.ClientSyncPageReceipt
+	err := db.WithContext(ctx).Where("session_id = ? AND restart = ? AND page = ?", page.SessionID, page.Restart, page.Page).First(&receipt).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return ClientSyncPageImportResult{}, nil, false, nil
+	}
+	if err != nil {
+		return ClientSyncPageImportResult{}, nil, false, err
+	}
+	if receipt.UserID != userID || receipt.Platform != platform || receipt.Generation != generation {
+		return ClientSyncPageImportResult{}, nil, false, kratoserrors.Conflict("SYNC_BINDING_CHANGED", "洛谷绑定已变化，请重新开始同步")
+	}
+	result := clientSyncPageResult(receipt, true)
+	result.DigestMatched = receipt.Digest == page.Digest
+	return result, &receipt, true, nil
+}
+
+func clientSyncPageResult(receipt model.ClientSyncPageReceipt, replayed bool) ClientSyncPageImportResult {
+	return ClientSyncPageImportResult{
+		PageInserted: receipt.PageInserted, Inserted: receipt.Inserted,
+		ProcessedPages: receipt.ProcessedPages, NextPage: receipt.NextPage,
+		FirstSubmitID: receipt.FirstSubmitID, RemoteCount: receipt.RemoteCount,
+		PerPage: receipt.PerPage, CompletionReason: receipt.CompletionReason,
+		NextAvailableAt: receipt.NextAvailableAt, Replayed: replayed, DigestMatched: true,
+	}
+}
+
+func (uc *SpiderUseCase) persistClientSyncPage(ctx context.Context, userID int64, platform string, generation int64, neu []model.SubmitLog, idsSource []string, fetched []model.SubmitLog, opts submitImportOptions) (SubmitImportResult, error) {
+	var result SubmitImportResult
+	page := *opts.clientPage
+	ids := idsSource
+	if len(ids) == 0 {
+		ids = idsFromSubmitLogs(fetched)
+	}
+	var pageResult ClientSyncPageImportResult
+	var persistedReceipt *model.ClientSyncPageReceipt
+	created := false
+	err := uc.data.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		replayed, receipt, found, err := loadClientSyncPageReceipt(ctx, tx, userID, platform, generation, page)
+		if err != nil {
+			return err
+		}
+		if found {
+			pageResult = replayed
+			persistedReceipt = receipt
+			return nil
+		}
+		if conflict, err := hasSubmitOwnerConflict(ctx, tx, platform, ids, userID); err != nil {
+			return err
+		} else if conflict {
+			return kratoserrors.Conflict("SUBMIT_OWNER_CONFLICT", "提交记录已属于其他用户")
+		}
+		if len(neu) > 0 {
+			if err := tx.CreateInBatches(&neu, submitInsertBatchSize).Error; err != nil {
+				return err
+			}
+			if err := dal.ApplyDailyDeltas(ctx, tx, dal.AggregateSubmitDeltas(neu)); err != nil {
+				return err
+			}
+			if err := dal.ApplyUserACFromSubmits(ctx, tx, neu); err != nil {
+				return err
+			}
+		}
+		if page.CompletionReason != "" {
+			updated := tx.Model(&model.Platform{}).
+				Where("user_id = ? AND platform = ?", userID, platform).
+				Updates(map[string]interface{}{
+					"client_sync_head_submit_id": strings.TrimSpace(page.FirstSubmitID),
+					"client_sync_completed_at":   page.CompletedAt.UTC(),
+				})
+			if updated.Error != nil {
+				return updated.Error
+			}
+			if updated.RowsAffected != 1 {
+				return kratoserrors.Conflict("SYNC_BINDING_CHANGED", "洛谷绑定已变化，请重新开始同步")
+			}
+		}
+		if err := uc.reserveClientSyncReceipt(ctx, tx, userID, platform, page, len(neu) > 0); err != nil {
+			if errors.Is(err, errClientSyncReceiptLimit) {
+				return kratoserrors.Conflict("LUOGU_RECORDS_CHANGED", "单次同步页数过多，请稍后重试")
+			}
+			return err
+		}
+		createdReceipt := model.ClientSyncPageReceipt{
+			SessionID: page.SessionID, Restart: page.Restart, Page: page.Page, Digest: page.Digest,
+			UserID: userID, Platform: platform, Generation: generation,
+			PageInserted: int64(len(neu)), Inserted: page.InsertedBefore + int64(len(neu)),
+			ProcessedPages: page.ProcessedPagesBefore + 1, NextPage: page.Page + 1,
+			FirstSubmitID: page.FirstSubmitID, RemoteCount: page.RemoteCount, PerPage: page.PerPage,
+			CompletionReason: page.CompletionReason, NextAvailableAt: page.NextAvailableAt,
+			HasPending: countRecentPendingSubmits(fetched, pendingVerdictMaxAge) > 0,
+			ExpiresAt:  page.ExpiresAt.UTC(),
+		}
+		if len(neu) == 0 && !createdReceipt.HasPending {
+			now := time.Now().UTC()
+			createdReceipt.EffectsAppliedAt = &now
+		}
+		if err := tx.Create(&createdReceipt).Error; err != nil {
+			return err
+		}
+		pageResult = clientSyncPageResult(createdReceipt, false)
+		persistedReceipt = &createdReceipt
+		created = true
+		return nil
+	})
+	if err != nil {
+		replayed, receipt, found, reloadErr := loadClientSyncPageReceipt(ctx, uc.data.DB, userID, platform, generation, page)
+		if reloadErr == nil && found {
+			if effectErr := uc.applyClientSyncReceiptEffects(ctx, receipt); effectErr != nil {
+				return result, kratoserrors.ServiceUnavailable("SYNC_UNAVAILABLE", "同步服务暂不可用")
+			}
+			*opts.clientResult = replayed
+			return SubmitImportResult{Inserted: replayed.PageInserted}, nil
+		}
+		if reloadErr != nil {
+			return result, reloadErr
+		}
+		conflict, conflictErr := hasSubmitOwnerConflict(ctx, uc.data.DB, platform, ids, userID)
+		if conflictErr != nil {
+			return result, conflictErr
+		}
+		if conflict {
+			return result, kratoserrors.Conflict("SUBMIT_OWNER_CONFLICT", "提交记录已属于其他用户")
+		}
+		return result, err
+	}
+	*opts.clientResult = pageResult
+	result.Inserted = pageResult.PageInserted
+	if effectErr := uc.applyClientSyncReceiptEffects(ctx, persistedReceipt); effectErr != nil {
+		return result, kratoserrors.ServiceUnavailable("SYNC_UNAVAILABLE", "同步服务暂不可用")
+	}
+	if created && result.Inserted > 0 {
+		spidermetrics.IncRows(platform, result.Inserted)
+	}
+	return result, nil
 }
 
 // countRecentPendingSubmits 统计 maxAge 内仍为评测中的提交数
@@ -687,6 +1042,10 @@ func (uc *SpiderUseCase) loadOnePlatform(ctx context.Context, userId int64, plat
 			log.Errorf("Spider: fetchAndSaveContest %s %s 失败: %v", plat.Platform, plat.Username, contestErr)
 		} else if contestChanged {
 			anyChange = true
+			// Contest writes happen after submit ingestion. Always bump once more so
+			// a reader cannot refill the newly-versioned cache in the submit/contest
+			// gap and then keep stale contest data.
+			uc.invalidateAfterContestWrite(userId, true)
 		}
 		if err == nil {
 			// 与提交/比赛一并刷新 rating（未实现 RatingFetcher 的平台自动跳过）
@@ -735,6 +1094,12 @@ func (uc *SpiderUseCase) loadOnePlatform(ctx context.Context, userId int64, plat
 		return anyChange, lastErr
 	}
 	return anyChange, fmt.Errorf("platform %s max retries exceeded", plat.Platform)
+}
+
+func (uc *SpiderUseCase) invalidateAfterContestWrite(userID int64, changed bool) {
+	if changed {
+		uc.invalidateCache(userID)
+	}
 }
 
 func forceRepairFetch(ctx context.Context, db *gorm.DB, userID int64, platform string, requestedAll bool) (bool, error) {

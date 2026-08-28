@@ -93,6 +93,26 @@ service Spider {
       get: "/v1/core/spider/refresh-status"
     };
   }
+  // Browser-local Luogu sync: requires X-GoAlgo-Plugin-Token at the service.
+  rpc StartLuoguSync (StartLuoguSyncReq) returns (StartLuoguSyncRes) {
+    option (google.api.http) = {
+      post: "/v1/core/spider/luogu-sync/start"
+      body: "*"
+    };
+  }
+  // Restore an active session using X-GoAlgo-Sync-Session.
+  rpc LuoguSyncStatus (LuoguSyncStatusReq) returns (LuoguSyncStatusRes) {
+    option (google.api.http) = {
+      get: "/v1/core/spider/luogu-sync/status"
+    };
+  }
+  // Upload one normalized Luogu record page using X-GoAlgo-Sync-Session.
+  rpc UploadLuoguSyncPage (UploadLuoguSyncPageReq) returns (UploadLuoguSyncPageRes) {
+    option (google.api.http) = {
+      post: "/v1/core/spider/luogu-sync/page"
+      body: "*"
+    };
+  }
 }
 
 message SetSpiderReq {
@@ -347,4 +367,72 @@ message RefreshSpiderStatusRes {
   int64 next_available_at = 5;
   // 当前生效自动同步间隔（分钟；min(站管覆盖, 组织 MIN, 订阅档)；失败回落默认）
   int32 sync_interval_min = 6;
+}
+
+message StartLuoguSyncReq {
+  string client_kind = 1;
+  string client_version = 2;
+  // Stable random id persisted by the browser before the first request. The
+  // same id always replays the same session issuance without rotating tokens.
+  string request_id = 3;
+}
+
+message StartLuoguSyncRes {
+  string session_id = 1;
+  string session_token = 2;
+  bool resumed = 3;
+  int32 next_page = 4;
+  int32 page_delay_ms = 5;
+  int64 expires_at = 6;
+  int64 next_available_at = 7;
+}
+
+message LuoguSyncStatusReq {}
+
+message LuoguSyncStatusRes {
+  string session_id = 1;
+  int32 next_page = 2;
+  int64 inserted = 3;
+  int32 processed_pages = 4;
+  int32 total_pages = 5;
+  int64 expires_at = 6;
+  int64 next_available_at = 7;
+  bool connected = 8;
+  bool done = 9;
+  string completion_reason = 10;
+}
+
+message LuoguSyncProblem {
+  string pid = 1;
+  string title = 2;
+  int32 difficulty = 3;
+}
+
+message LuoguSyncRecord {
+  string submit_id = 1;
+  int64 submit_time = 2;
+  int32 status = 3;
+  int32 language = 4;
+  LuoguSyncProblem problem = 5;
+}
+
+message UploadLuoguSyncPageReq {
+  string luogu_uid = 1;
+  int32 page = 2;
+  int32 remote_count = 3;
+  int32 per_page = 4;
+  repeated LuoguSyncRecord records = 5;
+}
+
+message UploadLuoguSyncPageRes {
+  bool connected = 1;
+  bool done = 2;
+  string completion_reason = 3;
+  int32 next_page = 4;
+  bool restart = 5;
+  int64 page_inserted = 6;
+  int64 inserted = 7;
+  int32 processed_pages = 8;
+  int32 total_pages = 9;
+  int64 next_available_at = 10;
 }

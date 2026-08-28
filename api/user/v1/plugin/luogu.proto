@@ -1,0 +1,128 @@
+syntax = "proto3";
+
+package api.user.v1.plugin;
+
+import "google/api/annotations.proto";
+
+option go_package = "cwxu-algo/api/user/v1/plugin;plugin";
+option java_multiple_files = true;
+option java_package = "api.user.v1.plugin";
+
+// LuoguPlugin manages browser-local Luogu sync device authorization.
+service LuoguPlugin {
+  // Requires the normal GoAlgo JWT. The returned code is single-use and
+  // expires after two minutes.
+  rpc AuthorizeCode(AuthorizeCodeReq) returns (AuthorizeCodeRes) {
+    option (google.api.http) = {
+      post: "/v1/user/plugin/luogu/authorize-code"
+      body: "*"
+    };
+  }
+
+  // Public at the JWT middleware only: the service still requires the
+  // one-time authorization code, matching state, and PKCE S256 verifier.
+  rpc Token(TokenReq) returns (TokenRes) {
+    option (google.api.http) = {
+      post: "/v1/user/plugin/luogu/token"
+      body: "*"
+    };
+  }
+
+  // Requires the normal GoAlgo JWT.
+  rpc ListAuthorizations(ListAuthorizationsReq) returns (ListAuthorizationsRes) {
+    option (google.api.http) = {
+      get: "/v1/user/plugin/luogu/authorizations"
+    };
+  }
+
+  // Requires the normal GoAlgo JWT. Set all=true to revoke every Luogu sync
+  // device belonging to the current user.
+  rpc Revoke(RevokeReq) returns (RevokeRes) {
+    option (google.api.http) = {
+      post: "/v1/user/plugin/luogu/revoke"
+      body: "*"
+    };
+  }
+
+  // Internal gRPC only. Deliberately has no google.api.http mapping.
+  rpc ValidateLuoguPluginToken(ValidateLuoguPluginTokenReq) returns (ValidateLuoguPluginTokenRes);
+}
+
+message AuthorizeCodeReq {
+  string luogu_uid = 1;
+  string client_kind = 2;
+  string client_version = 3;
+  string code_challenge = 4;
+  string code_challenge_method = 5;
+  string state = 6;
+  bool risk_accepted = 7;
+  string risk_version = 8;
+  string scope = 9;
+}
+
+message AuthorizeCodeRes {
+  string code = 1;
+  string state = 2;
+  int64 expires_at = 3;
+  string scope = 4;
+}
+
+message TokenReq {
+  string code = 1;
+  string verifier = 2;
+  string state = 3;
+  string scope = 4;
+}
+
+message TokenRes {
+  string device_token = 1;
+  uint64 authorization_id = 2;
+  int64 expires_at = 3;
+  string scope = 4;
+}
+
+message ListAuthorizationsReq {}
+
+message PluginAuthorizationInfo {
+  uint64 id = 1;
+  string provider = 2;
+  string client_kind = 3;
+  string client_version = 4;
+  string luogu_uid = 5;
+  string risk_version = 6;
+  int64 accepted_at = 7;
+  int64 expires_at = 8;
+  int64 last_used_at = 9;
+  int64 revoked_at = 10;
+  int64 created_at = 11;
+  string scope = 12;
+}
+
+message ListAuthorizationsRes {
+  repeated PluginAuthorizationInfo authorizations = 1;
+}
+
+message RevokeReq {
+  uint64 authorization_id = 1;
+  bool all = 2;
+}
+
+message RevokeRes {
+  uint32 revoked_count = 1;
+}
+
+message ValidateLuoguPluginTokenReq {
+  string token = 1;
+  string scope = 2;
+}
+
+message ValidateLuoguPluginTokenRes {
+  uint64 authorization_id = 1;
+  uint64 user_id = 2;
+  string luogu_uid = 3;
+  string client_kind = 4;
+  string client_version = 5;
+  string risk_version = 6;
+  int64 expires_at = 7;
+  string scope = 8;
+}

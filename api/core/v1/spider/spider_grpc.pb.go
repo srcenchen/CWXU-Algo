@@ -34,6 +34,9 @@ const (
 	Spider_GetPlatformUsers_FullMethodName       = "/api.core.v1.spider.Spider/GetPlatformUsers"
 	Spider_RefreshSpider_FullMethodName          = "/api.core.v1.spider.Spider/RefreshSpider"
 	Spider_RefreshSpiderStatus_FullMethodName    = "/api.core.v1.spider.Spider/RefreshSpiderStatus"
+	Spider_StartLuoguSync_FullMethodName         = "/api.core.v1.spider.Spider/StartLuoguSync"
+	Spider_LuoguSyncStatus_FullMethodName        = "/api.core.v1.spider.Spider/LuoguSyncStatus"
+	Spider_UploadLuoguSyncPage_FullMethodName    = "/api.core.v1.spider.Spider/UploadLuoguSyncPage"
 )
 
 // SpiderClient is the client API for Spider service.
@@ -69,6 +72,12 @@ type SpiderClient interface {
 	// 查询今日手动刷新做题记录状态（配额 / 剩余 / 冷却 / 生效间隔；只读）。
 	// userId=0 查询自己；站点管理员可传 userId 查询任意用户。
 	RefreshSpiderStatus(ctx context.Context, in *RefreshSpiderStatusReq, opts ...grpc.CallOption) (*RefreshSpiderStatusRes, error)
+	// Browser-local Luogu sync: requires X-GoAlgo-Plugin-Token at the service.
+	StartLuoguSync(ctx context.Context, in *StartLuoguSyncReq, opts ...grpc.CallOption) (*StartLuoguSyncRes, error)
+	// Restore an active session using X-GoAlgo-Sync-Session.
+	LuoguSyncStatus(ctx context.Context, in *LuoguSyncStatusReq, opts ...grpc.CallOption) (*LuoguSyncStatusRes, error)
+	// Upload one normalized Luogu record page using X-GoAlgo-Sync-Session.
+	UploadLuoguSyncPage(ctx context.Context, in *UploadLuoguSyncPageReq, opts ...grpc.CallOption) (*UploadLuoguSyncPageRes, error)
 }
 
 type spiderClient struct {
@@ -229,6 +238,36 @@ func (c *spiderClient) RefreshSpiderStatus(ctx context.Context, in *RefreshSpide
 	return out, nil
 }
 
+func (c *spiderClient) StartLuoguSync(ctx context.Context, in *StartLuoguSyncReq, opts ...grpc.CallOption) (*StartLuoguSyncRes, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(StartLuoguSyncRes)
+	err := c.cc.Invoke(ctx, Spider_StartLuoguSync_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *spiderClient) LuoguSyncStatus(ctx context.Context, in *LuoguSyncStatusReq, opts ...grpc.CallOption) (*LuoguSyncStatusRes, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(LuoguSyncStatusRes)
+	err := c.cc.Invoke(ctx, Spider_LuoguSyncStatus_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *spiderClient) UploadLuoguSyncPage(ctx context.Context, in *UploadLuoguSyncPageReq, opts ...grpc.CallOption) (*UploadLuoguSyncPageRes, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(UploadLuoguSyncPageRes)
+	err := c.cc.Invoke(ctx, Spider_UploadLuoguSyncPage_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // SpiderServer is the server API for Spider service.
 // All implementations must embed UnimplementedSpiderServer
 // for forward compatibility.
@@ -262,6 +301,12 @@ type SpiderServer interface {
 	// 查询今日手动刷新做题记录状态（配额 / 剩余 / 冷却 / 生效间隔；只读）。
 	// userId=0 查询自己；站点管理员可传 userId 查询任意用户。
 	RefreshSpiderStatus(context.Context, *RefreshSpiderStatusReq) (*RefreshSpiderStatusRes, error)
+	// Browser-local Luogu sync: requires X-GoAlgo-Plugin-Token at the service.
+	StartLuoguSync(context.Context, *StartLuoguSyncReq) (*StartLuoguSyncRes, error)
+	// Restore an active session using X-GoAlgo-Sync-Session.
+	LuoguSyncStatus(context.Context, *LuoguSyncStatusReq) (*LuoguSyncStatusRes, error)
+	// Upload one normalized Luogu record page using X-GoAlgo-Sync-Session.
+	UploadLuoguSyncPage(context.Context, *UploadLuoguSyncPageReq) (*UploadLuoguSyncPageRes, error)
 	mustEmbedUnimplementedSpiderServer()
 }
 
@@ -316,6 +361,15 @@ func (UnimplementedSpiderServer) RefreshSpider(context.Context, *RefreshSpiderRe
 }
 func (UnimplementedSpiderServer) RefreshSpiderStatus(context.Context, *RefreshSpiderStatusReq) (*RefreshSpiderStatusRes, error) {
 	return nil, status.Error(codes.Unimplemented, "method RefreshSpiderStatus not implemented")
+}
+func (UnimplementedSpiderServer) StartLuoguSync(context.Context, *StartLuoguSyncReq) (*StartLuoguSyncRes, error) {
+	return nil, status.Error(codes.Unimplemented, "method StartLuoguSync not implemented")
+}
+func (UnimplementedSpiderServer) LuoguSyncStatus(context.Context, *LuoguSyncStatusReq) (*LuoguSyncStatusRes, error) {
+	return nil, status.Error(codes.Unimplemented, "method LuoguSyncStatus not implemented")
+}
+func (UnimplementedSpiderServer) UploadLuoguSyncPage(context.Context, *UploadLuoguSyncPageReq) (*UploadLuoguSyncPageRes, error) {
+	return nil, status.Error(codes.Unimplemented, "method UploadLuoguSyncPage not implemented")
 }
 func (UnimplementedSpiderServer) mustEmbedUnimplementedSpiderServer() {}
 func (UnimplementedSpiderServer) testEmbeddedByValue()                {}
@@ -608,6 +662,60 @@ func _Spider_RefreshSpiderStatus_Handler(srv interface{}, ctx context.Context, d
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Spider_StartLuoguSync_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(StartLuoguSyncReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SpiderServer).StartLuoguSync(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Spider_StartLuoguSync_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SpiderServer).StartLuoguSync(ctx, req.(*StartLuoguSyncReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Spider_LuoguSyncStatus_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(LuoguSyncStatusReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SpiderServer).LuoguSyncStatus(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Spider_LuoguSyncStatus_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SpiderServer).LuoguSyncStatus(ctx, req.(*LuoguSyncStatusReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Spider_UploadLuoguSyncPage_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UploadLuoguSyncPageReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SpiderServer).UploadLuoguSyncPage(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Spider_UploadLuoguSyncPage_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SpiderServer).UploadLuoguSyncPage(ctx, req.(*UploadLuoguSyncPageReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Spider_ServiceDesc is the grpc.ServiceDesc for Spider service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -674,6 +782,18 @@ var Spider_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "RefreshSpiderStatus",
 			Handler:    _Spider_RefreshSpiderStatus_Handler,
+		},
+		{
+			MethodName: "StartLuoguSync",
+			Handler:    _Spider_StartLuoguSync_Handler,
+		},
+		{
+			MethodName: "LuoguSyncStatus",
+			Handler:    _Spider_LuoguSyncStatus_Handler,
+		},
+		{
+			MethodName: "UploadLuoguSyncPage",
+			Handler:    _Spider_UploadLuoguSyncPage_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

@@ -8,6 +8,15 @@ middlewares:
       # RSA 公钥 PEM，与 user 服务 server.jwt_public_key 一致（openssl rsa -pubout 生成）。
       # 可换行（YAML | 块）或单行以 \n 连接；环境变量 CWXU_JWT_PUBLIC_KEY 可覆盖。
       secret: ""
+  - name: cors
+    options:
+      '@type': type.googleapis.com/gateway.middleware.cors.v1.Cors
+      allowOrigins:
+        - chrome-extension://phbnnpidffgnnajfdmgglbphjkbindkd
+      allowHeaders:
+        - Content-Type
+        - X-GoAlgo-Plugin-Token
+        - X-GoAlgo-Sync-Session
 endpoints:
   # 支付FM回调：支付FM服务器直达 user 服务；回调为 GET query / POST form，需放宽超时
   - path: /v1/payment/*

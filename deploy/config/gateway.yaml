@@ -5,6 +5,15 @@ middlewares:
     options:
       '@type': type.googleapis.com/gateway.middleware.jwt.v1.JWT
       secret: ""
+  - name: cors
+    options:
+      '@type': type.googleapis.com/gateway.middleware.cors.v1.Cors
+      allowOrigins:
+        - chrome-extension://phbnnpidffgnnajfdmgglbphjkbindkd
+      allowHeaders:
+        - Content-Type
+        - X-GoAlgo-Plugin-Token
+        - X-GoAlgo-Sync-Session
 endpoints:
   # 支付FM回调：支付FM服务器直达 user 服务；回调为 GET query / POST form，需放宽超时
   - path: /v1/payment/*

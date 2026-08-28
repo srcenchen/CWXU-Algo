@@ -37,7 +37,8 @@ func wireApp(confServer *conf.Server, confData *conf.Data, logger log.Logger, su
 	profileService := service.NewProfileService(profileDal, register, profileUseCase, dataData)
 	subscriptionDal := dal.NewSubscriptionDal(dataData)
 	subscriptionService := service.NewSubscriptionService(dataData, subscriptionDal, profileDal)
-	grpcServer := server.NewGRPCServer(confServer, logger, profileService, subscriptionService)
+	luoguPluginService := service.NewLuoguPluginService(dataData)
+	grpcServer := server.NewGRPCServer(confServer, logger, profileService, subscriptionService, luoguPluginService)
 	authService := service.NewAuthService(dataData, register)
 	groupDal := dal.NewGroupDal(dataData)
 	groupUseCase := biz.NewGroupUseCase(groupDal)
@@ -53,7 +54,7 @@ func wireApp(confServer *conf.Server, confData *conf.Data, logger log.Logger, su
 	seoService := service.NewSEOService(dataData)
 	db := provideUserDB(dataData)
 	ticketService := service.NewTicketService(supportCenter, db)
-	httpServer := server.NewHTTPServer(confServer, dataData, authService, profileService, groupService, roleService, siteService, orgService, rbacService, pasteService, socialService, notificationService, blogService, seoService, subscriptionService, ticketService, logger)
+	httpServer := server.NewHTTPServer(confServer, dataData, authService, profileService, groupService, roleService, siteService, orgService, rbacService, pasteService, socialService, notificationService, blogService, seoService, subscriptionService, ticketService, luoguPluginService, logger)
 	app := newApp(logger, grpcServer, httpServer, register)
 	return app, func() {
 		cleanup()

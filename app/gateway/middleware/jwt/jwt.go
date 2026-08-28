@@ -58,6 +58,16 @@ var publicExact = map[string]struct{}{
 	"/v1/user/auth/register":       {},
 	"/v1/user/auth/send-code":      {},
 	"/v1/user/auth/reset-password": {},
+	// 洛谷浏览器同步：令牌交换与三个同步精确端点免站内 JWT；
+	// user/core 服务仍分别强制校验一次性码、PKCE、设备令牌或会话令牌。
+	"/v1/user/plugin/luogu/token":        {},
+	"/api/user/plugin/luogu/token":       {},
+	"/v1/core/spider/luogu-sync/start":   {},
+	"/api/core/spider/luogu-sync/start":  {},
+	"/v1/core/spider/luogu-sync/status":  {},
+	"/api/core/spider/luogu-sync/status": {},
+	"/v1/core/spider/luogu-sync/page":    {},
+	"/api/core/spider/luogu-sync/page":   {},
 	// 支付FM回调（GET query / POST form，签名验签由 user 服务完成）
 	"/v1/payment/notify":  {},
 	"/api/payment/notify": {},

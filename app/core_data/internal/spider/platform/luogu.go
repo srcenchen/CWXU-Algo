@@ -69,6 +69,39 @@ var luoguLanguageName = map[int]string{
 	34: "C++23",
 }
 
+// LuoGuStatusName keeps the existing analytics contract: Luogu code 12 is
+// accepted and every other terminal/non-terminal raw code is non-AC. Browser
+// sync and the server-side crawler both call this mapping.
+func LuoGuStatusName(status int) string {
+	if status == 12 {
+		return "AC"
+	}
+	return "WA"
+}
+
+// LuoGuLanguageName maps Luogu's numeric language identifier for display.
+func LuoGuLanguageName(language int) string {
+	if name, ok := luoguLanguageName[language]; ok {
+		return name
+	}
+	return "Others"
+}
+
+// LuoGuRecordToSubmitLog is the single raw-record normalization used by both
+// the authenticated server spider and browser-local page ingestion.
+func LuoGuRecordToSubmitLog(userID int64, sub Record) model.SubmitLog {
+	return model.SubmitLog{
+		UserID:     userID,
+		Platform:   spider.LuoGu,
+		SubmitID:   fmt.Sprint(sub.ID),
+		Problem:    strings.TrimSpace(sub.Problem.Pid + " " + sub.Problem.Title),
+		ExternalID: sub.Problem.Pid,
+		Lang:       LuoGuLanguageName(sub.Language),
+		Status:     LuoGuStatusName(sub.Status),
+		Time:       time.Unix(sub.SubmitTime, 0),
+	}
+}
+
 type NewLuoGu struct {
 	mu            sync.RWMutex
 	client        *http.Client
@@ -402,26 +435,7 @@ func (lg *NewLuoGu) fetchSubmitLogComplete(ctx context.Context, userId int64, us
 	}
 	var res []model.SubmitLog
 	for _, sub := range subs {
-		var status, lang string
-		if sub.Status != 12 {
-			status = "WA"
-		} else {
-			status = "AC"
-		}
-		if name, ok := luoguLanguageName[sub.Language]; ok {
-			lang = name
-		} else {
-			lang = "Others"
-		}
-		res = append(res, model.SubmitLog{
-			UserID:   userId,
-			Platform: spider.LuoGu,
-			SubmitID: fmt.Sprint(sub.ID),
-			Problem:  sub.Problem.Pid + " " + sub.Problem.Title,
-			Lang:     lang,
-			Status:   status,
-			Time:     time.Unix(sub.SubmitTime, 0),
-		})
+		res = append(res, LuoGuRecordToSubmitLog(userId, sub))
 	}
 	return res, complete, nil
 }

@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"cwxu-algo/api/user/v1/plugin"
 	"cwxu-algo/api/user/v1/profile"
 	"cwxu-algo/api/user/v1/subscription"
 
@@ -65,4 +66,14 @@ func SubscriptionClient(reg *registry.Registrar) (subscription.SubscriptionClien
 		return nil, err
 	}
 	return subscription.NewSubscriptionClient(c), nil
+}
+
+// LuoguPluginClient reuses the process-wide user connection for internal
+// device-token validation. Callers must not close the underlying connection.
+func LuoguPluginClient(reg *registry.Registrar) (plugin.LuoguPluginClient, error) {
+	c, err := Conn(reg)
+	if err != nil {
+		return nil, err
+	}
+	return plugin.NewLuoguPluginClient(c), nil
 }

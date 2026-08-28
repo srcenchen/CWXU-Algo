@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	stdhttp "net/http"
+	"strconv"
+	"strings"
 
 	backuppb "cwxu-algo/api/core/v1/backup"
 	"cwxu-algo/api/core/v1/bulletin"
@@ -26,6 +28,7 @@ import (
 	"cwxu-algo/app/core_data/internal/data"
 	"cwxu-algo/app/core_data/internal/service"
 
+	kratoserrors "github.com/go-kratos/kratos/v2/errors"
 	"github.com/go-kratos/kratos/v2/log"
 	"github.com/go-kratos/kratos/v2/middleware/auth/jwt"
 	"github.com/go-kratos/kratos/v2/middleware/recovery"
@@ -72,6 +75,11 @@ func NewWhiteListMatcher() selector.MatchFunc {
 		"/api.core.v1.community.Community/ActivityFeed":        "",
 		"/api.core.v1.community.Community/UserRecentComments":  "",
 		"/api.core.v1.community.Community/UserRecentSolutions": "",
+		// 浏览器本地同步使用独立设备/session token；这里只跳过站内 JWT，
+		// SpiderService 仍对精确 header 做强制鉴权。
+		"/api.core.v1.spider.Spider/StartLuoguSync":      "",
+		"/api.core.v1.spider.Spider/LuoguSyncStatus":     "",
+		"/api.core.v1.spider.Spider/UploadLuoguSyncPage": "",
 	}
 	return func(ctx context.Context, operation string) bool {
 		//log.Info(operation)
@@ -83,9 +91,38 @@ func NewWhiteListMatcher() selector.MatchFunc {
 	}
 }
 
+func luoguSyncErrorEncoder(w stdhttp.ResponseWriter, r *stdhttp.Request, err error) {
+	if r == nil || !strings.HasPrefix(r.URL.Path, "/v1/core/spider/luogu-sync/") {
+		http.DefaultErrorEncoder(w, r, err)
+		return
+	}
+	serviceErr := kratoserrors.FromError(err)
+	code := serviceErr.Reason
+	if code == "" {
+		code = "SYNC_UNAVAILABLE"
+	}
+	body := map[string]interface{}{"code": code, "message": serviceErr.Message}
+	for _, key := range []string{"nextAvailableAt", "retryAfterSeconds"} {
+		if raw := serviceErr.Metadata[key]; raw != "" {
+			if value, parseErr := strconv.ParseInt(raw, 10, 64); parseErr == nil {
+				body[key] = value
+			}
+		}
+	}
+	payload, marshalErr := json.Marshal(body)
+	if marshalErr != nil {
+		w.WriteHeader(stdhttp.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(int(serviceErr.Code))
+	_, _ = w.Write(payload)
+}
+
 // NewHTTPServer new an HTTP server.
 func NewHTTPServer(c *conf.Server, logger log.Logger, d *data.Data, submitService *service.SubmitLogService, spiderService *service.SpiderService, statisticService *service.StatisticService, contestLogService *service.ContestLogService, bulletinService *service.BulletinService, problemService *service.ProblemService, emergencyService *service.EmergencyService, contestCalendarService *service.ContestCalendarService, communityService *service.CommunityService, problemsetService *service.ProblemsetService, healthService *service.HealthService, backupService *service.BackupService) *http.Server {
 	var opts = []http.ServerOption{
+		http.ErrorEncoder(luoguSyncErrorEncoder),
 		http.Middleware(
 			recovery.Recovery(),
 			safeerrors.Middleware(),

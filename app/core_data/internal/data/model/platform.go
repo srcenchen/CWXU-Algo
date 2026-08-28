@@ -1,5 +1,7 @@
 package model
 
+import "time"
+
 type Platform struct {
 	Id       int64  `gorm:"primaryKey"`
 	UserID   int64  `gorm:"uniqueIndex:idx_platform_user;comment:用户ID"`
@@ -9,4 +11,8 @@ type Platform struct {
 	Rating int `gorm:"comment:OJ Rating"`
 	// HasRating 是否成功抓到有效 rating（false=未参赛/平台无 rating/抓取失败）
 	HasRating bool `gorm:"default:false;comment:是否有有效 Rating"`
+	// Browser-local sync checkpoint. It advances only after a stable scan has
+	// reached the previous checkpoint or the remote end.
+	ClientSyncHeadSubmitID string     `gorm:"size:64;comment:浏览器同步完整扫描锚点"`
+	ClientSyncCompletedAt  *time.Time `gorm:"comment:浏览器同步最近完整完成时间"`
 }

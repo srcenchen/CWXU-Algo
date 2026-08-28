@@ -2023,6 +2023,640 @@ func (x *RefreshSpiderStatusRes) GetSyncIntervalMin() int32 {
 	return 0
 }
 
+type StartLuoguSyncReq struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ClientKind    string                 `protobuf:"bytes,1,opt,name=client_kind,json=clientKind,proto3" json:"client_kind,omitempty"`
+	ClientVersion string                 `protobuf:"bytes,2,opt,name=client_version,json=clientVersion,proto3" json:"client_version,omitempty"`
+	// Stable random id persisted by the browser before the first request. The
+	// same id always replays the same session issuance without rotating tokens.
+	RequestId     string `protobuf:"bytes,3,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *StartLuoguSyncReq) Reset() {
+	*x = StartLuoguSyncReq{}
+	mi := &file_core_v1_spider_spider_proto_msgTypes[32]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *StartLuoguSyncReq) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*StartLuoguSyncReq) ProtoMessage() {}
+
+func (x *StartLuoguSyncReq) ProtoReflect() protoreflect.Message {
+	mi := &file_core_v1_spider_spider_proto_msgTypes[32]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use StartLuoguSyncReq.ProtoReflect.Descriptor instead.
+func (*StartLuoguSyncReq) Descriptor() ([]byte, []int) {
+	return file_core_v1_spider_spider_proto_rawDescGZIP(), []int{32}
+}
+
+func (x *StartLuoguSyncReq) GetClientKind() string {
+	if x != nil {
+		return x.ClientKind
+	}
+	return ""
+}
+
+func (x *StartLuoguSyncReq) GetClientVersion() string {
+	if x != nil {
+		return x.ClientVersion
+	}
+	return ""
+}
+
+func (x *StartLuoguSyncReq) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+type StartLuoguSyncRes struct {
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	SessionId       string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	SessionToken    string                 `protobuf:"bytes,2,opt,name=session_token,json=sessionToken,proto3" json:"session_token,omitempty"`
+	Resumed         bool                   `protobuf:"varint,3,opt,name=resumed,proto3" json:"resumed,omitempty"`
+	NextPage        int32                  `protobuf:"varint,4,opt,name=next_page,json=nextPage,proto3" json:"next_page,omitempty"`
+	PageDelayMs     int32                  `protobuf:"varint,5,opt,name=page_delay_ms,json=pageDelayMs,proto3" json:"page_delay_ms,omitempty"`
+	ExpiresAt       int64                  `protobuf:"varint,6,opt,name=expires_at,json=expiresAt,proto3" json:"expires_at,omitempty"`
+	NextAvailableAt int64                  `protobuf:"varint,7,opt,name=next_available_at,json=nextAvailableAt,proto3" json:"next_available_at,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *StartLuoguSyncRes) Reset() {
+	*x = StartLuoguSyncRes{}
+	mi := &file_core_v1_spider_spider_proto_msgTypes[33]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *StartLuoguSyncRes) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*StartLuoguSyncRes) ProtoMessage() {}
+
+func (x *StartLuoguSyncRes) ProtoReflect() protoreflect.Message {
+	mi := &file_core_v1_spider_spider_proto_msgTypes[33]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use StartLuoguSyncRes.ProtoReflect.Descriptor instead.
+func (*StartLuoguSyncRes) Descriptor() ([]byte, []int) {
+	return file_core_v1_spider_spider_proto_rawDescGZIP(), []int{33}
+}
+
+func (x *StartLuoguSyncRes) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+func (x *StartLuoguSyncRes) GetSessionToken() string {
+	if x != nil {
+		return x.SessionToken
+	}
+	return ""
+}
+
+func (x *StartLuoguSyncRes) GetResumed() bool {
+	if x != nil {
+		return x.Resumed
+	}
+	return false
+}
+
+func (x *StartLuoguSyncRes) GetNextPage() int32 {
+	if x != nil {
+		return x.NextPage
+	}
+	return 0
+}
+
+func (x *StartLuoguSyncRes) GetPageDelayMs() int32 {
+	if x != nil {
+		return x.PageDelayMs
+	}
+	return 0
+}
+
+func (x *StartLuoguSyncRes) GetExpiresAt() int64 {
+	if x != nil {
+		return x.ExpiresAt
+	}
+	return 0
+}
+
+func (x *StartLuoguSyncRes) GetNextAvailableAt() int64 {
+	if x != nil {
+		return x.NextAvailableAt
+	}
+	return 0
+}
+
+type LuoguSyncStatusReq struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *LuoguSyncStatusReq) Reset() {
+	*x = LuoguSyncStatusReq{}
+	mi := &file_core_v1_spider_spider_proto_msgTypes[34]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *LuoguSyncStatusReq) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*LuoguSyncStatusReq) ProtoMessage() {}
+
+func (x *LuoguSyncStatusReq) ProtoReflect() protoreflect.Message {
+	mi := &file_core_v1_spider_spider_proto_msgTypes[34]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use LuoguSyncStatusReq.ProtoReflect.Descriptor instead.
+func (*LuoguSyncStatusReq) Descriptor() ([]byte, []int) {
+	return file_core_v1_spider_spider_proto_rawDescGZIP(), []int{34}
+}
+
+type LuoguSyncStatusRes struct {
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	SessionId        string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	NextPage         int32                  `protobuf:"varint,2,opt,name=next_page,json=nextPage,proto3" json:"next_page,omitempty"`
+	Inserted         int64                  `protobuf:"varint,3,opt,name=inserted,proto3" json:"inserted,omitempty"`
+	ProcessedPages   int32                  `protobuf:"varint,4,opt,name=processed_pages,json=processedPages,proto3" json:"processed_pages,omitempty"`
+	TotalPages       int32                  `protobuf:"varint,5,opt,name=total_pages,json=totalPages,proto3" json:"total_pages,omitempty"`
+	ExpiresAt        int64                  `protobuf:"varint,6,opt,name=expires_at,json=expiresAt,proto3" json:"expires_at,omitempty"`
+	NextAvailableAt  int64                  `protobuf:"varint,7,opt,name=next_available_at,json=nextAvailableAt,proto3" json:"next_available_at,omitempty"`
+	Connected        bool                   `protobuf:"varint,8,opt,name=connected,proto3" json:"connected,omitempty"`
+	Done             bool                   `protobuf:"varint,9,opt,name=done,proto3" json:"done,omitempty"`
+	CompletionReason string                 `protobuf:"bytes,10,opt,name=completion_reason,json=completionReason,proto3" json:"completion_reason,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
+}
+
+func (x *LuoguSyncStatusRes) Reset() {
+	*x = LuoguSyncStatusRes{}
+	mi := &file_core_v1_spider_spider_proto_msgTypes[35]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *LuoguSyncStatusRes) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*LuoguSyncStatusRes) ProtoMessage() {}
+
+func (x *LuoguSyncStatusRes) ProtoReflect() protoreflect.Message {
+	mi := &file_core_v1_spider_spider_proto_msgTypes[35]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use LuoguSyncStatusRes.ProtoReflect.Descriptor instead.
+func (*LuoguSyncStatusRes) Descriptor() ([]byte, []int) {
+	return file_core_v1_spider_spider_proto_rawDescGZIP(), []int{35}
+}
+
+func (x *LuoguSyncStatusRes) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+func (x *LuoguSyncStatusRes) GetNextPage() int32 {
+	if x != nil {
+		return x.NextPage
+	}
+	return 0
+}
+
+func (x *LuoguSyncStatusRes) GetInserted() int64 {
+	if x != nil {
+		return x.Inserted
+	}
+	return 0
+}
+
+func (x *LuoguSyncStatusRes) GetProcessedPages() int32 {
+	if x != nil {
+		return x.ProcessedPages
+	}
+	return 0
+}
+
+func (x *LuoguSyncStatusRes) GetTotalPages() int32 {
+	if x != nil {
+		return x.TotalPages
+	}
+	return 0
+}
+
+func (x *LuoguSyncStatusRes) GetExpiresAt() int64 {
+	if x != nil {
+		return x.ExpiresAt
+	}
+	return 0
+}
+
+func (x *LuoguSyncStatusRes) GetNextAvailableAt() int64 {
+	if x != nil {
+		return x.NextAvailableAt
+	}
+	return 0
+}
+
+func (x *LuoguSyncStatusRes) GetConnected() bool {
+	if x != nil {
+		return x.Connected
+	}
+	return false
+}
+
+func (x *LuoguSyncStatusRes) GetDone() bool {
+	if x != nil {
+		return x.Done
+	}
+	return false
+}
+
+func (x *LuoguSyncStatusRes) GetCompletionReason() string {
+	if x != nil {
+		return x.CompletionReason
+	}
+	return ""
+}
+
+type LuoguSyncProblem struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Pid           string                 `protobuf:"bytes,1,opt,name=pid,proto3" json:"pid,omitempty"`
+	Title         string                 `protobuf:"bytes,2,opt,name=title,proto3" json:"title,omitempty"`
+	Difficulty    int32                  `protobuf:"varint,3,opt,name=difficulty,proto3" json:"difficulty,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *LuoguSyncProblem) Reset() {
+	*x = LuoguSyncProblem{}
+	mi := &file_core_v1_spider_spider_proto_msgTypes[36]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *LuoguSyncProblem) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*LuoguSyncProblem) ProtoMessage() {}
+
+func (x *LuoguSyncProblem) ProtoReflect() protoreflect.Message {
+	mi := &file_core_v1_spider_spider_proto_msgTypes[36]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use LuoguSyncProblem.ProtoReflect.Descriptor instead.
+func (*LuoguSyncProblem) Descriptor() ([]byte, []int) {
+	return file_core_v1_spider_spider_proto_rawDescGZIP(), []int{36}
+}
+
+func (x *LuoguSyncProblem) GetPid() string {
+	if x != nil {
+		return x.Pid
+	}
+	return ""
+}
+
+func (x *LuoguSyncProblem) GetTitle() string {
+	if x != nil {
+		return x.Title
+	}
+	return ""
+}
+
+func (x *LuoguSyncProblem) GetDifficulty() int32 {
+	if x != nil {
+		return x.Difficulty
+	}
+	return 0
+}
+
+type LuoguSyncRecord struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	SubmitId      string                 `protobuf:"bytes,1,opt,name=submit_id,json=submitId,proto3" json:"submit_id,omitempty"`
+	SubmitTime    int64                  `protobuf:"varint,2,opt,name=submit_time,json=submitTime,proto3" json:"submit_time,omitempty"`
+	Status        int32                  `protobuf:"varint,3,opt,name=status,proto3" json:"status,omitempty"`
+	Language      int32                  `protobuf:"varint,4,opt,name=language,proto3" json:"language,omitempty"`
+	Problem       *LuoguSyncProblem      `protobuf:"bytes,5,opt,name=problem,proto3" json:"problem,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *LuoguSyncRecord) Reset() {
+	*x = LuoguSyncRecord{}
+	mi := &file_core_v1_spider_spider_proto_msgTypes[37]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *LuoguSyncRecord) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*LuoguSyncRecord) ProtoMessage() {}
+
+func (x *LuoguSyncRecord) ProtoReflect() protoreflect.Message {
+	mi := &file_core_v1_spider_spider_proto_msgTypes[37]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use LuoguSyncRecord.ProtoReflect.Descriptor instead.
+func (*LuoguSyncRecord) Descriptor() ([]byte, []int) {
+	return file_core_v1_spider_spider_proto_rawDescGZIP(), []int{37}
+}
+
+func (x *LuoguSyncRecord) GetSubmitId() string {
+	if x != nil {
+		return x.SubmitId
+	}
+	return ""
+}
+
+func (x *LuoguSyncRecord) GetSubmitTime() int64 {
+	if x != nil {
+		return x.SubmitTime
+	}
+	return 0
+}
+
+func (x *LuoguSyncRecord) GetStatus() int32 {
+	if x != nil {
+		return x.Status
+	}
+	return 0
+}
+
+func (x *LuoguSyncRecord) GetLanguage() int32 {
+	if x != nil {
+		return x.Language
+	}
+	return 0
+}
+
+func (x *LuoguSyncRecord) GetProblem() *LuoguSyncProblem {
+	if x != nil {
+		return x.Problem
+	}
+	return nil
+}
+
+type UploadLuoguSyncPageReq struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	LuoguUid      string                 `protobuf:"bytes,1,opt,name=luogu_uid,json=luoguUid,proto3" json:"luogu_uid,omitempty"`
+	Page          int32                  `protobuf:"varint,2,opt,name=page,proto3" json:"page,omitempty"`
+	RemoteCount   int32                  `protobuf:"varint,3,opt,name=remote_count,json=remoteCount,proto3" json:"remote_count,omitempty"`
+	PerPage       int32                  `protobuf:"varint,4,opt,name=per_page,json=perPage,proto3" json:"per_page,omitempty"`
+	Records       []*LuoguSyncRecord     `protobuf:"bytes,5,rep,name=records,proto3" json:"records,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UploadLuoguSyncPageReq) Reset() {
+	*x = UploadLuoguSyncPageReq{}
+	mi := &file_core_v1_spider_spider_proto_msgTypes[38]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UploadLuoguSyncPageReq) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UploadLuoguSyncPageReq) ProtoMessage() {}
+
+func (x *UploadLuoguSyncPageReq) ProtoReflect() protoreflect.Message {
+	mi := &file_core_v1_spider_spider_proto_msgTypes[38]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UploadLuoguSyncPageReq.ProtoReflect.Descriptor instead.
+func (*UploadLuoguSyncPageReq) Descriptor() ([]byte, []int) {
+	return file_core_v1_spider_spider_proto_rawDescGZIP(), []int{38}
+}
+
+func (x *UploadLuoguSyncPageReq) GetLuoguUid() string {
+	if x != nil {
+		return x.LuoguUid
+	}
+	return ""
+}
+
+func (x *UploadLuoguSyncPageReq) GetPage() int32 {
+	if x != nil {
+		return x.Page
+	}
+	return 0
+}
+
+func (x *UploadLuoguSyncPageReq) GetRemoteCount() int32 {
+	if x != nil {
+		return x.RemoteCount
+	}
+	return 0
+}
+
+func (x *UploadLuoguSyncPageReq) GetPerPage() int32 {
+	if x != nil {
+		return x.PerPage
+	}
+	return 0
+}
+
+func (x *UploadLuoguSyncPageReq) GetRecords() []*LuoguSyncRecord {
+	if x != nil {
+		return x.Records
+	}
+	return nil
+}
+
+type UploadLuoguSyncPageRes struct {
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	Connected        bool                   `protobuf:"varint,1,opt,name=connected,proto3" json:"connected,omitempty"`
+	Done             bool                   `protobuf:"varint,2,opt,name=done,proto3" json:"done,omitempty"`
+	CompletionReason string                 `protobuf:"bytes,3,opt,name=completion_reason,json=completionReason,proto3" json:"completion_reason,omitempty"`
+	NextPage         int32                  `protobuf:"varint,4,opt,name=next_page,json=nextPage,proto3" json:"next_page,omitempty"`
+	Restart          bool                   `protobuf:"varint,5,opt,name=restart,proto3" json:"restart,omitempty"`
+	PageInserted     int64                  `protobuf:"varint,6,opt,name=page_inserted,json=pageInserted,proto3" json:"page_inserted,omitempty"`
+	Inserted         int64                  `protobuf:"varint,7,opt,name=inserted,proto3" json:"inserted,omitempty"`
+	ProcessedPages   int32                  `protobuf:"varint,8,opt,name=processed_pages,json=processedPages,proto3" json:"processed_pages,omitempty"`
+	TotalPages       int32                  `protobuf:"varint,9,opt,name=total_pages,json=totalPages,proto3" json:"total_pages,omitempty"`
+	NextAvailableAt  int64                  `protobuf:"varint,10,opt,name=next_available_at,json=nextAvailableAt,proto3" json:"next_available_at,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
+}
+
+func (x *UploadLuoguSyncPageRes) Reset() {
+	*x = UploadLuoguSyncPageRes{}
+	mi := &file_core_v1_spider_spider_proto_msgTypes[39]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UploadLuoguSyncPageRes) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UploadLuoguSyncPageRes) ProtoMessage() {}
+
+func (x *UploadLuoguSyncPageRes) ProtoReflect() protoreflect.Message {
+	mi := &file_core_v1_spider_spider_proto_msgTypes[39]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UploadLuoguSyncPageRes.ProtoReflect.Descriptor instead.
+func (*UploadLuoguSyncPageRes) Descriptor() ([]byte, []int) {
+	return file_core_v1_spider_spider_proto_rawDescGZIP(), []int{39}
+}
+
+func (x *UploadLuoguSyncPageRes) GetConnected() bool {
+	if x != nil {
+		return x.Connected
+	}
+	return false
+}
+
+func (x *UploadLuoguSyncPageRes) GetDone() bool {
+	if x != nil {
+		return x.Done
+	}
+	return false
+}
+
+func (x *UploadLuoguSyncPageRes) GetCompletionReason() string {
+	if x != nil {
+		return x.CompletionReason
+	}
+	return ""
+}
+
+func (x *UploadLuoguSyncPageRes) GetNextPage() int32 {
+	if x != nil {
+		return x.NextPage
+	}
+	return 0
+}
+
+func (x *UploadLuoguSyncPageRes) GetRestart() bool {
+	if x != nil {
+		return x.Restart
+	}
+	return false
+}
+
+func (x *UploadLuoguSyncPageRes) GetPageInserted() int64 {
+	if x != nil {
+		return x.PageInserted
+	}
+	return 0
+}
+
+func (x *UploadLuoguSyncPageRes) GetInserted() int64 {
+	if x != nil {
+		return x.Inserted
+	}
+	return 0
+}
+
+func (x *UploadLuoguSyncPageRes) GetProcessedPages() int32 {
+	if x != nil {
+		return x.ProcessedPages
+	}
+	return 0
+}
+
+func (x *UploadLuoguSyncPageRes) GetTotalPages() int32 {
+	if x != nil {
+		return x.TotalPages
+	}
+	return 0
+}
+
+func (x *UploadLuoguSyncPageRes) GetNextAvailableAt() int64 {
+	if x != nil {
+		return x.NextAvailableAt
+	}
+	return 0
+}
+
 type GetSpiderRep_Data struct {
 	state    protoimpl.MessageState `protogen:"open.v1"`
 	Platform string                 `protobuf:"bytes,1,opt,name=platform,proto3" json:"platform,omitempty"`
@@ -2043,7 +2677,7 @@ type GetSpiderRep_Data struct {
 
 func (x *GetSpiderRep_Data) Reset() {
 	*x = GetSpiderRep_Data{}
-	mi := &file_core_v1_spider_spider_proto_msgTypes[32]
+	mi := &file_core_v1_spider_spider_proto_msgTypes[40]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2055,7 +2689,7 @@ func (x *GetSpiderRep_Data) String() string {
 func (*GetSpiderRep_Data) ProtoMessage() {}
 
 func (x *GetSpiderRep_Data) ProtoReflect() protoreflect.Message {
-	mi := &file_core_v1_spider_spider_proto_msgTypes[32]
+	mi := &file_core_v1_spider_spider_proto_msgTypes[40]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2288,7 +2922,71 @@ const file_core_v1_spider_spider_proto_rawDesc = "" +
 	"\x05limit\x18\x03 \x01(\x05R\x05limit\x12\x1c\n" +
 	"\tremaining\x18\x04 \x01(\x05R\tremaining\x12*\n" +
 	"\x11next_available_at\x18\x05 \x01(\x03R\x0fnextAvailableAt\x12*\n" +
-	"\x11sync_interval_min\x18\x06 \x01(\x05R\x0fsyncIntervalMin2\x97\x0f\n" +
+	"\x11sync_interval_min\x18\x06 \x01(\x05R\x0fsyncIntervalMin\"z\n" +
+	"\x11StartLuoguSyncReq\x12\x1f\n" +
+	"\vclient_kind\x18\x01 \x01(\tR\n" +
+	"clientKind\x12%\n" +
+	"\x0eclient_version\x18\x02 \x01(\tR\rclientVersion\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x03 \x01(\tR\trequestId\"\xfd\x01\n" +
+	"\x11StartLuoguSyncRes\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x01 \x01(\tR\tsessionId\x12#\n" +
+	"\rsession_token\x18\x02 \x01(\tR\fsessionToken\x12\x18\n" +
+	"\aresumed\x18\x03 \x01(\bR\aresumed\x12\x1b\n" +
+	"\tnext_page\x18\x04 \x01(\x05R\bnextPage\x12\"\n" +
+	"\rpage_delay_ms\x18\x05 \x01(\x05R\vpageDelayMs\x12\x1d\n" +
+	"\n" +
+	"expires_at\x18\x06 \x01(\x03R\texpiresAt\x12*\n" +
+	"\x11next_available_at\x18\a \x01(\x03R\x0fnextAvailableAt\"\x14\n" +
+	"\x12LuoguSyncStatusReq\"\xe0\x02\n" +
+	"\x12LuoguSyncStatusRes\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x1b\n" +
+	"\tnext_page\x18\x02 \x01(\x05R\bnextPage\x12\x1a\n" +
+	"\binserted\x18\x03 \x01(\x03R\binserted\x12'\n" +
+	"\x0fprocessed_pages\x18\x04 \x01(\x05R\x0eprocessedPages\x12\x1f\n" +
+	"\vtotal_pages\x18\x05 \x01(\x05R\n" +
+	"totalPages\x12\x1d\n" +
+	"\n" +
+	"expires_at\x18\x06 \x01(\x03R\texpiresAt\x12*\n" +
+	"\x11next_available_at\x18\a \x01(\x03R\x0fnextAvailableAt\x12\x1c\n" +
+	"\tconnected\x18\b \x01(\bR\tconnected\x12\x12\n" +
+	"\x04done\x18\t \x01(\bR\x04done\x12+\n" +
+	"\x11completion_reason\x18\n" +
+	" \x01(\tR\x10completionReason\"Z\n" +
+	"\x10LuoguSyncProblem\x12\x10\n" +
+	"\x03pid\x18\x01 \x01(\tR\x03pid\x12\x14\n" +
+	"\x05title\x18\x02 \x01(\tR\x05title\x12\x1e\n" +
+	"\n" +
+	"difficulty\x18\x03 \x01(\x05R\n" +
+	"difficulty\"\xc3\x01\n" +
+	"\x0fLuoguSyncRecord\x12\x1b\n" +
+	"\tsubmit_id\x18\x01 \x01(\tR\bsubmitId\x12\x1f\n" +
+	"\vsubmit_time\x18\x02 \x01(\x03R\n" +
+	"submitTime\x12\x16\n" +
+	"\x06status\x18\x03 \x01(\x05R\x06status\x12\x1a\n" +
+	"\blanguage\x18\x04 \x01(\x05R\blanguage\x12>\n" +
+	"\aproblem\x18\x05 \x01(\v2$.api.core.v1.spider.LuoguSyncProblemR\aproblem\"\xc6\x01\n" +
+	"\x16UploadLuoguSyncPageReq\x12\x1b\n" +
+	"\tluogu_uid\x18\x01 \x01(\tR\bluoguUid\x12\x12\n" +
+	"\x04page\x18\x02 \x01(\x05R\x04page\x12!\n" +
+	"\fremote_count\x18\x03 \x01(\x05R\vremoteCount\x12\x19\n" +
+	"\bper_page\x18\x04 \x01(\x05R\aperPage\x12=\n" +
+	"\arecords\x18\x05 \x03(\v2#.api.core.v1.spider.LuoguSyncRecordR\arecords\"\xe5\x02\n" +
+	"\x16UploadLuoguSyncPageRes\x12\x1c\n" +
+	"\tconnected\x18\x01 \x01(\bR\tconnected\x12\x12\n" +
+	"\x04done\x18\x02 \x01(\bR\x04done\x12+\n" +
+	"\x11completion_reason\x18\x03 \x01(\tR\x10completionReason\x12\x1b\n" +
+	"\tnext_page\x18\x04 \x01(\x05R\bnextPage\x12\x18\n" +
+	"\arestart\x18\x05 \x01(\bR\arestart\x12#\n" +
+	"\rpage_inserted\x18\x06 \x01(\x03R\fpageInserted\x12\x1a\n" +
+	"\binserted\x18\a \x01(\x03R\binserted\x12'\n" +
+	"\x0fprocessed_pages\x18\b \x01(\x05R\x0eprocessedPages\x12\x1f\n" +
+	"\vtotal_pages\x18\t \x01(\x05R\n" +
+	"totalPages\x12*\n" +
+	"\x11next_available_at\x18\n" +
+	" \x01(\x03R\x0fnextAvailableAt2\xd0\x12\n" +
 	"\x06Spider\x12o\n" +
 	"\tSetSpider\x12 .api.core.v1.spider.SetSpiderReq\x1a .api.core.v1.spider.SetSpiderRep\"\x1e\x82\xd3\xe4\x93\x02\x18:\x01*\"\x13/v1/core/spider/set\x12Q\n" +
 	"\tGetSpider\x12 .api.core.v1.spider.GetSpiderReq\x1a .api.core.v1.spider.GetSpiderRep\"\x00\x12i\n" +
@@ -2304,7 +3002,10 @@ const file_core_v1_spider_spider_proto_rawDesc = "" +
 	"\x12RepairContestCells\x12).api.core.v1.spider.RepairContestCellsReq\x1a).api.core.v1.spider.RepairContestCellsRes\"/\x82\xd3\xe4\x93\x02):\x01*\"$/v1/core/spider/repair-contest-cells\x12\x8c\x01\n" +
 	"\x10GetPlatformUsers\x12'.api.core.v1.spider.GetPlatformUsersReq\x1a'.api.core.v1.spider.GetPlatformUsersRes\"&\x82\xd3\xe4\x93\x02 \x12\x1e/v1/core/spider/platform-users\x12\x7f\n" +
 	"\rRefreshSpider\x12$.api.core.v1.spider.RefreshSpiderReq\x1a$.api.core.v1.spider.RefreshSpiderRes\"\"\x82\xd3\xe4\x93\x02\x1c:\x01*\"\x17/v1/core/spider/refresh\x12\x95\x01\n" +
-	"\x13RefreshSpiderStatus\x12*.api.core.v1.spider.RefreshSpiderStatusReq\x1a*.api.core.v1.spider.RefreshSpiderStatusRes\"&\x82\xd3\xe4\x93\x02 \x12\x1e/v1/core/spider/refresh-statusB;\n" +
+	"\x13RefreshSpiderStatus\x12*.api.core.v1.spider.RefreshSpiderStatusReq\x1a*.api.core.v1.spider.RefreshSpiderStatusRes\"&\x82\xd3\xe4\x93\x02 \x12\x1e/v1/core/spider/refresh-status\x12\x8b\x01\n" +
+	"\x0eStartLuoguSync\x12%.api.core.v1.spider.StartLuoguSyncReq\x1a%.api.core.v1.spider.StartLuoguSyncRes\"+\x82\xd3\xe4\x93\x02%:\x01*\" /v1/core/spider/luogu-sync/start\x12\x8c\x01\n" +
+	"\x0fLuoguSyncStatus\x12&.api.core.v1.spider.LuoguSyncStatusReq\x1a&.api.core.v1.spider.LuoguSyncStatusRes\")\x82\xd3\xe4\x93\x02#\x12!/v1/core/spider/luogu-sync/status\x12\x99\x01\n" +
+	"\x13UploadLuoguSyncPage\x12*.api.core.v1.spider.UploadLuoguSyncPageReq\x1a*.api.core.v1.spider.UploadLuoguSyncPageRes\"*\x82\xd3\xe4\x93\x02$:\x01*\"\x1f/v1/core/spider/luogu-sync/pageB;\n" +
 	"\x12api.core.v1.spiderP\x01Z#cwxu-algo/api/core/v1/spider;spiderb\x06proto3"
 
 var (
@@ -2319,7 +3020,7 @@ func file_core_v1_spider_spider_proto_rawDescGZIP() []byte {
 	return file_core_v1_spider_spider_proto_rawDescData
 }
 
-var file_core_v1_spider_spider_proto_msgTypes = make([]protoimpl.MessageInfo, 34)
+var file_core_v1_spider_spider_proto_msgTypes = make([]protoimpl.MessageInfo, 42)
 var file_core_v1_spider_spider_proto_goTypes = []any{
 	(*SetSpiderReq)(nil),              // 0: api.core.v1.spider.SetSpiderReq
 	(*SetSpiderRep)(nil),              // 1: api.core.v1.spider.SetSpiderRep
@@ -2353,49 +3054,65 @@ var file_core_v1_spider_spider_proto_goTypes = []any{
 	(*RefreshSpiderRes)(nil),          // 29: api.core.v1.spider.RefreshSpiderRes
 	(*RefreshSpiderStatusReq)(nil),    // 30: api.core.v1.spider.RefreshSpiderStatusReq
 	(*RefreshSpiderStatusRes)(nil),    // 31: api.core.v1.spider.RefreshSpiderStatusRes
-	(*GetSpiderRep_Data)(nil),         // 32: api.core.v1.spider.GetSpiderRep.Data
-	nil,                               // 33: api.core.v1.spider.RepairContestCellsRes.DataEntry
+	(*StartLuoguSyncReq)(nil),         // 32: api.core.v1.spider.StartLuoguSyncReq
+	(*StartLuoguSyncRes)(nil),         // 33: api.core.v1.spider.StartLuoguSyncRes
+	(*LuoguSyncStatusReq)(nil),        // 34: api.core.v1.spider.LuoguSyncStatusReq
+	(*LuoguSyncStatusRes)(nil),        // 35: api.core.v1.spider.LuoguSyncStatusRes
+	(*LuoguSyncProblem)(nil),          // 36: api.core.v1.spider.LuoguSyncProblem
+	(*LuoguSyncRecord)(nil),           // 37: api.core.v1.spider.LuoguSyncRecord
+	(*UploadLuoguSyncPageReq)(nil),    // 38: api.core.v1.spider.UploadLuoguSyncPageReq
+	(*UploadLuoguSyncPageRes)(nil),    // 39: api.core.v1.spider.UploadLuoguSyncPageRes
+	(*GetSpiderRep_Data)(nil),         // 40: api.core.v1.spider.GetSpiderRep.Data
+	nil,                               // 41: api.core.v1.spider.RepairContestCellsRes.DataEntry
 }
 var file_core_v1_spider_spider_proto_depIdxs = []int32{
-	32, // 0: api.core.v1.spider.GetSpiderRep.data:type_name -> api.core.v1.spider.GetSpiderRep.Data
+	40, // 0: api.core.v1.spider.GetSpiderRep.data:type_name -> api.core.v1.spider.GetSpiderRep.Data
 	18, // 1: api.core.v1.spider.SpiderMonitorRes.platforms:type_name -> api.core.v1.spider.SpiderPlatformStat
-	33, // 2: api.core.v1.spider.RepairContestCellsRes.data:type_name -> api.core.v1.spider.RepairContestCellsRes.DataEntry
+	41, // 2: api.core.v1.spider.RepairContestCellsRes.data:type_name -> api.core.v1.spider.RepairContestCellsRes.DataEntry
 	26, // 3: api.core.v1.spider.GetPlatformUsersRes.list:type_name -> api.core.v1.spider.PlatformUserItem
-	0,  // 4: api.core.v1.spider.Spider.SetSpider:input_type -> api.core.v1.spider.SetSpiderReq
-	2,  // 5: api.core.v1.spider.Spider.GetSpider:input_type -> api.core.v1.spider.GetSpiderReq
-	4,  // 6: api.core.v1.spider.Spider.Update:input_type -> api.core.v1.spider.UpdateReq
-	6,  // 7: api.core.v1.spider.Spider.UpdateAll:input_type -> api.core.v1.spider.UpdateAllReq
-	8,  // 8: api.core.v1.spider.Spider.PurgeUserData:input_type -> api.core.v1.spider.PurgeUserDataReq
-	10, // 9: api.core.v1.spider.Spider.SubmitInventory:input_type -> api.core.v1.spider.SubmitInventoryReq
-	12, // 10: api.core.v1.spider.Spider.PurgeSubmitsAndRecrawl:input_type -> api.core.v1.spider.PurgeSubmitsAndRecrawlReq
-	14, // 11: api.core.v1.spider.Spider.EnqueueUserSpider:input_type -> api.core.v1.spider.EnqueueUserSpiderReq
-	16, // 12: api.core.v1.spider.Spider.GetSpiderMonitor:input_type -> api.core.v1.spider.SpiderMonitorReq
-	19, // 13: api.core.v1.spider.Spider.TogglePlatform:input_type -> api.core.v1.spider.TogglePlatformReq
-	21, // 14: api.core.v1.spider.Spider.UpdatePlatform:input_type -> api.core.v1.spider.UpdatePlatformReq
-	23, // 15: api.core.v1.spider.Spider.RepairContestCells:input_type -> api.core.v1.spider.RepairContestCellsReq
-	25, // 16: api.core.v1.spider.Spider.GetPlatformUsers:input_type -> api.core.v1.spider.GetPlatformUsersReq
-	28, // 17: api.core.v1.spider.Spider.RefreshSpider:input_type -> api.core.v1.spider.RefreshSpiderReq
-	30, // 18: api.core.v1.spider.Spider.RefreshSpiderStatus:input_type -> api.core.v1.spider.RefreshSpiderStatusReq
-	1,  // 19: api.core.v1.spider.Spider.SetSpider:output_type -> api.core.v1.spider.SetSpiderRep
-	3,  // 20: api.core.v1.spider.Spider.GetSpider:output_type -> api.core.v1.spider.GetSpiderRep
-	5,  // 21: api.core.v1.spider.Spider.Update:output_type -> api.core.v1.spider.UpdateRes
-	7,  // 22: api.core.v1.spider.Spider.UpdateAll:output_type -> api.core.v1.spider.UpdateAllRes
-	9,  // 23: api.core.v1.spider.Spider.PurgeUserData:output_type -> api.core.v1.spider.PurgeUserDataRes
-	11, // 24: api.core.v1.spider.Spider.SubmitInventory:output_type -> api.core.v1.spider.SubmitInventoryRes
-	13, // 25: api.core.v1.spider.Spider.PurgeSubmitsAndRecrawl:output_type -> api.core.v1.spider.PurgeSubmitsAndRecrawlRes
-	15, // 26: api.core.v1.spider.Spider.EnqueueUserSpider:output_type -> api.core.v1.spider.EnqueueUserSpiderRes
-	17, // 27: api.core.v1.spider.Spider.GetSpiderMonitor:output_type -> api.core.v1.spider.SpiderMonitorRes
-	20, // 28: api.core.v1.spider.Spider.TogglePlatform:output_type -> api.core.v1.spider.TogglePlatformRes
-	22, // 29: api.core.v1.spider.Spider.UpdatePlatform:output_type -> api.core.v1.spider.UpdatePlatformRes
-	24, // 30: api.core.v1.spider.Spider.RepairContestCells:output_type -> api.core.v1.spider.RepairContestCellsRes
-	27, // 31: api.core.v1.spider.Spider.GetPlatformUsers:output_type -> api.core.v1.spider.GetPlatformUsersRes
-	29, // 32: api.core.v1.spider.Spider.RefreshSpider:output_type -> api.core.v1.spider.RefreshSpiderRes
-	31, // 33: api.core.v1.spider.Spider.RefreshSpiderStatus:output_type -> api.core.v1.spider.RefreshSpiderStatusRes
-	19, // [19:34] is the sub-list for method output_type
-	4,  // [4:19] is the sub-list for method input_type
-	4,  // [4:4] is the sub-list for extension type_name
-	4,  // [4:4] is the sub-list for extension extendee
-	0,  // [0:4] is the sub-list for field type_name
+	36, // 4: api.core.v1.spider.LuoguSyncRecord.problem:type_name -> api.core.v1.spider.LuoguSyncProblem
+	37, // 5: api.core.v1.spider.UploadLuoguSyncPageReq.records:type_name -> api.core.v1.spider.LuoguSyncRecord
+	0,  // 6: api.core.v1.spider.Spider.SetSpider:input_type -> api.core.v1.spider.SetSpiderReq
+	2,  // 7: api.core.v1.spider.Spider.GetSpider:input_type -> api.core.v1.spider.GetSpiderReq
+	4,  // 8: api.core.v1.spider.Spider.Update:input_type -> api.core.v1.spider.UpdateReq
+	6,  // 9: api.core.v1.spider.Spider.UpdateAll:input_type -> api.core.v1.spider.UpdateAllReq
+	8,  // 10: api.core.v1.spider.Spider.PurgeUserData:input_type -> api.core.v1.spider.PurgeUserDataReq
+	10, // 11: api.core.v1.spider.Spider.SubmitInventory:input_type -> api.core.v1.spider.SubmitInventoryReq
+	12, // 12: api.core.v1.spider.Spider.PurgeSubmitsAndRecrawl:input_type -> api.core.v1.spider.PurgeSubmitsAndRecrawlReq
+	14, // 13: api.core.v1.spider.Spider.EnqueueUserSpider:input_type -> api.core.v1.spider.EnqueueUserSpiderReq
+	16, // 14: api.core.v1.spider.Spider.GetSpiderMonitor:input_type -> api.core.v1.spider.SpiderMonitorReq
+	19, // 15: api.core.v1.spider.Spider.TogglePlatform:input_type -> api.core.v1.spider.TogglePlatformReq
+	21, // 16: api.core.v1.spider.Spider.UpdatePlatform:input_type -> api.core.v1.spider.UpdatePlatformReq
+	23, // 17: api.core.v1.spider.Spider.RepairContestCells:input_type -> api.core.v1.spider.RepairContestCellsReq
+	25, // 18: api.core.v1.spider.Spider.GetPlatformUsers:input_type -> api.core.v1.spider.GetPlatformUsersReq
+	28, // 19: api.core.v1.spider.Spider.RefreshSpider:input_type -> api.core.v1.spider.RefreshSpiderReq
+	30, // 20: api.core.v1.spider.Spider.RefreshSpiderStatus:input_type -> api.core.v1.spider.RefreshSpiderStatusReq
+	32, // 21: api.core.v1.spider.Spider.StartLuoguSync:input_type -> api.core.v1.spider.StartLuoguSyncReq
+	34, // 22: api.core.v1.spider.Spider.LuoguSyncStatus:input_type -> api.core.v1.spider.LuoguSyncStatusReq
+	38, // 23: api.core.v1.spider.Spider.UploadLuoguSyncPage:input_type -> api.core.v1.spider.UploadLuoguSyncPageReq
+	1,  // 24: api.core.v1.spider.Spider.SetSpider:output_type -> api.core.v1.spider.SetSpiderRep
+	3,  // 25: api.core.v1.spider.Spider.GetSpider:output_type -> api.core.v1.spider.GetSpiderRep
+	5,  // 26: api.core.v1.spider.Spider.Update:output_type -> api.core.v1.spider.UpdateRes
+	7,  // 27: api.core.v1.spider.Spider.UpdateAll:output_type -> api.core.v1.spider.UpdateAllRes
+	9,  // 28: api.core.v1.spider.Spider.PurgeUserData:output_type -> api.core.v1.spider.PurgeUserDataRes
+	11, // 29: api.core.v1.spider.Spider.SubmitInventory:output_type -> api.core.v1.spider.SubmitInventoryRes
+	13, // 30: api.core.v1.spider.Spider.PurgeSubmitsAndRecrawl:output_type -> api.core.v1.spider.PurgeSubmitsAndRecrawlRes
+	15, // 31: api.core.v1.spider.Spider.EnqueueUserSpider:output_type -> api.core.v1.spider.EnqueueUserSpiderRes
+	17, // 32: api.core.v1.spider.Spider.GetSpiderMonitor:output_type -> api.core.v1.spider.SpiderMonitorRes
+	20, // 33: api.core.v1.spider.Spider.TogglePlatform:output_type -> api.core.v1.spider.TogglePlatformRes
+	22, // 34: api.core.v1.spider.Spider.UpdatePlatform:output_type -> api.core.v1.spider.UpdatePlatformRes
+	24, // 35: api.core.v1.spider.Spider.RepairContestCells:output_type -> api.core.v1.spider.RepairContestCellsRes
+	27, // 36: api.core.v1.spider.Spider.GetPlatformUsers:output_type -> api.core.v1.spider.GetPlatformUsersRes
+	29, // 37: api.core.v1.spider.Spider.RefreshSpider:output_type -> api.core.v1.spider.RefreshSpiderRes
+	31, // 38: api.core.v1.spider.Spider.RefreshSpiderStatus:output_type -> api.core.v1.spider.RefreshSpiderStatusRes
+	33, // 39: api.core.v1.spider.Spider.StartLuoguSync:output_type -> api.core.v1.spider.StartLuoguSyncRes
+	35, // 40: api.core.v1.spider.Spider.LuoguSyncStatus:output_type -> api.core.v1.spider.LuoguSyncStatusRes
+	39, // 41: api.core.v1.spider.Spider.UploadLuoguSyncPage:output_type -> api.core.v1.spider.UploadLuoguSyncPageRes
+	24, // [24:42] is the sub-list for method output_type
+	6,  // [6:24] is the sub-list for method input_type
+	6,  // [6:6] is the sub-list for extension type_name
+	6,  // [6:6] is the sub-list for extension extendee
+	0,  // [0:6] is the sub-list for field type_name
 }
 
 func init() { file_core_v1_spider_spider_proto_init() }
@@ -2409,7 +3126,7 @@ func file_core_v1_spider_spider_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_core_v1_spider_spider_proto_rawDesc), len(file_core_v1_spider_spider_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   34,
+			NumMessages:   42,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

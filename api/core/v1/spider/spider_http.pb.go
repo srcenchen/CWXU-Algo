@@ -21,22 +21,27 @@ const _ = http.SupportPackageIsVersion1
 
 const OperationSpiderGetPlatformUsers = "/api.core.v1.spider.Spider/GetPlatformUsers"
 const OperationSpiderGetSpiderMonitor = "/api.core.v1.spider.Spider/GetSpiderMonitor"
+const OperationSpiderLuoguSyncStatus = "/api.core.v1.spider.Spider/LuoguSyncStatus"
 const OperationSpiderPurgeSubmitsAndRecrawl = "/api.core.v1.spider.Spider/PurgeSubmitsAndRecrawl"
 const OperationSpiderRefreshSpider = "/api.core.v1.spider.Spider/RefreshSpider"
 const OperationSpiderRefreshSpiderStatus = "/api.core.v1.spider.Spider/RefreshSpiderStatus"
 const OperationSpiderRepairContestCells = "/api.core.v1.spider.Spider/RepairContestCells"
 const OperationSpiderSetSpider = "/api.core.v1.spider.Spider/SetSpider"
+const OperationSpiderStartLuoguSync = "/api.core.v1.spider.Spider/StartLuoguSync"
 const OperationSpiderSubmitInventory = "/api.core.v1.spider.Spider/SubmitInventory"
 const OperationSpiderTogglePlatform = "/api.core.v1.spider.Spider/TogglePlatform"
 const OperationSpiderUpdate = "/api.core.v1.spider.Spider/Update"
 const OperationSpiderUpdateAll = "/api.core.v1.spider.Spider/UpdateAll"
 const OperationSpiderUpdatePlatform = "/api.core.v1.spider.Spider/UpdatePlatform"
+const OperationSpiderUploadLuoguSyncPage = "/api.core.v1.spider.Spider/UploadLuoguSyncPage"
 
 type SpiderHTTPServer interface {
 	// GetPlatformUsers 站管：某 OJ 的绑定用户列表（仅站管）
 	GetPlatformUsers(context.Context, *GetPlatformUsersReq) (*GetPlatformUsersRes, error)
 	// GetSpiderMonitor 运维：各 OJ 爬虫模块监控（仅站管）
 	GetSpiderMonitor(context.Context, *SpiderMonitorReq) (*SpiderMonitorRes, error)
+	// LuoguSyncStatus Restore an active session using X-GoAlgo-Sync-Session.
+	LuoguSyncStatus(context.Context, *LuoguSyncStatusReq) (*LuoguSyncStatusRes, error)
 	// PurgeSubmitsAndRecrawl 运维：清空全部提交相关数据并全量重爬（仅站管；confirm=PURGE_SUBMITS）
 	PurgeSubmitsAndRecrawl(context.Context, *PurgeSubmitsAndRecrawlReq) (*PurgeSubmitsAndRecrawlRes, error)
 	// RefreshSpider 用户：手动增量刷新自己的 OJ 做题记录（每日限 2 次；返回剩余次数）
@@ -47,6 +52,8 @@ type SpiderHTTPServer interface {
 	// RepairContestCells 站管：幂等修复 AtCoder 赛时提交明细相关脏数据（external_id / 赛后练习格 / relative_sec）
 	RepairContestCells(context.Context, *RepairContestCellsReq) (*RepairContestCellsRes, error)
 	SetSpider(context.Context, *SetSpiderReq) (*SetSpiderRep, error)
+	// StartLuoguSync Browser-local Luogu sync: requires X-GoAlgo-Plugin-Token at the service.
+	StartLuoguSync(context.Context, *StartLuoguSyncReq) (*StartLuoguSyncRes, error)
 	// SubmitInventory 运维：提交库存（明细 / 账本真实行数，仅站管）
 	SubmitInventory(context.Context, *SubmitInventoryReq) (*SubmitInventoryRes, error)
 	// TogglePlatform 站管：暂停 / 恢复某 OJ 的爬虫同步（body: { platform, enabled }）
@@ -57,6 +64,8 @@ type SpiderHTTPServer interface {
 	// UpdatePlatform 站管：按平台全量回填（body: { platform }；如力扣比赛记录）。
 	// 仅入队该平台已绑定用户的 needAll 任务，并强制清去重。
 	UpdatePlatform(context.Context, *UpdatePlatformReq) (*UpdatePlatformRes, error)
+	// UploadLuoguSyncPage Upload one normalized Luogu record page using X-GoAlgo-Sync-Session.
+	UploadLuoguSyncPage(context.Context, *UploadLuoguSyncPageReq) (*UploadLuoguSyncPageRes, error)
 }
 
 func RegisterSpiderHTTPServer(s *http.Server, srv SpiderHTTPServer) {
@@ -73,6 +82,9 @@ func RegisterSpiderHTTPServer(s *http.Server, srv SpiderHTTPServer) {
 	r.GET("/v1/core/spider/platform-users", _Spider_GetPlatformUsers0_HTTP_Handler(srv))
 	r.POST("/v1/core/spider/refresh", _Spider_RefreshSpider0_HTTP_Handler(srv))
 	r.GET("/v1/core/spider/refresh-status", _Spider_RefreshSpiderStatus0_HTTP_Handler(srv))
+	r.POST("/v1/core/spider/luogu-sync/start", _Spider_StartLuoguSync0_HTTP_Handler(srv))
+	r.GET("/v1/core/spider/luogu-sync/status", _Spider_LuoguSyncStatus0_HTTP_Handler(srv))
+	r.POST("/v1/core/spider/luogu-sync/page", _Spider_UploadLuoguSyncPage0_HTTP_Handler(srv))
 }
 
 func _Spider_SetSpider0_HTTP_Handler(srv SpiderHTTPServer) func(ctx http.Context) error {
@@ -327,11 +339,76 @@ func _Spider_RefreshSpiderStatus0_HTTP_Handler(srv SpiderHTTPServer) func(ctx ht
 	}
 }
 
+func _Spider_StartLuoguSync0_HTTP_Handler(srv SpiderHTTPServer) func(ctx http.Context) error {
+	return func(ctx http.Context) error {
+		var in StartLuoguSyncReq
+		if err := ctx.Bind(&in); err != nil {
+			return err
+		}
+		if err := ctx.BindQuery(&in); err != nil {
+			return err
+		}
+		http.SetOperation(ctx, OperationSpiderStartLuoguSync)
+		h := ctx.Middleware(func(ctx context.Context, req interface{}) (interface{}, error) {
+			return srv.StartLuoguSync(ctx, req.(*StartLuoguSyncReq))
+		})
+		out, err := h(ctx, &in)
+		if err != nil {
+			return err
+		}
+		reply := out.(*StartLuoguSyncRes)
+		return ctx.Result(200, reply)
+	}
+}
+
+func _Spider_LuoguSyncStatus0_HTTP_Handler(srv SpiderHTTPServer) func(ctx http.Context) error {
+	return func(ctx http.Context) error {
+		var in LuoguSyncStatusReq
+		if err := ctx.BindQuery(&in); err != nil {
+			return err
+		}
+		http.SetOperation(ctx, OperationSpiderLuoguSyncStatus)
+		h := ctx.Middleware(func(ctx context.Context, req interface{}) (interface{}, error) {
+			return srv.LuoguSyncStatus(ctx, req.(*LuoguSyncStatusReq))
+		})
+		out, err := h(ctx, &in)
+		if err != nil {
+			return err
+		}
+		reply := out.(*LuoguSyncStatusRes)
+		return ctx.Result(200, reply)
+	}
+}
+
+func _Spider_UploadLuoguSyncPage0_HTTP_Handler(srv SpiderHTTPServer) func(ctx http.Context) error {
+	return func(ctx http.Context) error {
+		var in UploadLuoguSyncPageReq
+		if err := ctx.Bind(&in); err != nil {
+			return err
+		}
+		if err := ctx.BindQuery(&in); err != nil {
+			return err
+		}
+		http.SetOperation(ctx, OperationSpiderUploadLuoguSyncPage)
+		h := ctx.Middleware(func(ctx context.Context, req interface{}) (interface{}, error) {
+			return srv.UploadLuoguSyncPage(ctx, req.(*UploadLuoguSyncPageReq))
+		})
+		out, err := h(ctx, &in)
+		if err != nil {
+			return err
+		}
+		reply := out.(*UploadLuoguSyncPageRes)
+		return ctx.Result(200, reply)
+	}
+}
+
 type SpiderHTTPClient interface {
 	// GetPlatformUsers 站管：某 OJ 的绑定用户列表（仅站管）
 	GetPlatformUsers(ctx context.Context, req *GetPlatformUsersReq, opts ...http.CallOption) (rsp *GetPlatformUsersRes, err error)
 	// GetSpiderMonitor 运维：各 OJ 爬虫模块监控（仅站管）
 	GetSpiderMonitor(ctx context.Context, req *SpiderMonitorReq, opts ...http.CallOption) (rsp *SpiderMonitorRes, err error)
+	// LuoguSyncStatus Restore an active session using X-GoAlgo-Sync-Session.
+	LuoguSyncStatus(ctx context.Context, req *LuoguSyncStatusReq, opts ...http.CallOption) (rsp *LuoguSyncStatusRes, err error)
 	// PurgeSubmitsAndRecrawl 运维：清空全部提交相关数据并全量重爬（仅站管；confirm=PURGE_SUBMITS）
 	PurgeSubmitsAndRecrawl(ctx context.Context, req *PurgeSubmitsAndRecrawlReq, opts ...http.CallOption) (rsp *PurgeSubmitsAndRecrawlRes, err error)
 	// RefreshSpider 用户：手动增量刷新自己的 OJ 做题记录（每日限 2 次；返回剩余次数）
@@ -342,6 +419,8 @@ type SpiderHTTPClient interface {
 	// RepairContestCells 站管：幂等修复 AtCoder 赛时提交明细相关脏数据（external_id / 赛后练习格 / relative_sec）
 	RepairContestCells(ctx context.Context, req *RepairContestCellsReq, opts ...http.CallOption) (rsp *RepairContestCellsRes, err error)
 	SetSpider(ctx context.Context, req *SetSpiderReq, opts ...http.CallOption) (rsp *SetSpiderRep, err error)
+	// StartLuoguSync Browser-local Luogu sync: requires X-GoAlgo-Plugin-Token at the service.
+	StartLuoguSync(ctx context.Context, req *StartLuoguSyncReq, opts ...http.CallOption) (rsp *StartLuoguSyncRes, err error)
 	// SubmitInventory 运维：提交库存（明细 / 账本真实行数，仅站管）
 	SubmitInventory(ctx context.Context, req *SubmitInventoryReq, opts ...http.CallOption) (rsp *SubmitInventoryRes, err error)
 	// TogglePlatform 站管：暂停 / 恢复某 OJ 的爬虫同步（body: { platform, enabled }）
@@ -352,6 +431,8 @@ type SpiderHTTPClient interface {
 	// UpdatePlatform 站管：按平台全量回填（body: { platform }；如力扣比赛记录）。
 	// 仅入队该平台已绑定用户的 needAll 任务，并强制清去重。
 	UpdatePlatform(ctx context.Context, req *UpdatePlatformReq, opts ...http.CallOption) (rsp *UpdatePlatformRes, err error)
+	// UploadLuoguSyncPage Upload one normalized Luogu record page using X-GoAlgo-Sync-Session.
+	UploadLuoguSyncPage(ctx context.Context, req *UploadLuoguSyncPageReq, opts ...http.CallOption) (rsp *UploadLuoguSyncPageRes, err error)
 }
 
 type SpiderHTTPClientImpl struct {
@@ -382,6 +463,20 @@ func (c *SpiderHTTPClientImpl) GetSpiderMonitor(ctx context.Context, in *SpiderM
 	pattern := "/v1/core/spider/monitor"
 	path := binding.EncodeURL(pattern, in, true)
 	opts = append(opts, http.Operation(OperationSpiderGetSpiderMonitor))
+	opts = append(opts, http.PathTemplate(pattern))
+	err := c.cc.Invoke(ctx, "GET", path, nil, &out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// LuoguSyncStatus Restore an active session using X-GoAlgo-Sync-Session.
+func (c *SpiderHTTPClientImpl) LuoguSyncStatus(ctx context.Context, in *LuoguSyncStatusReq, opts ...http.CallOption) (*LuoguSyncStatusRes, error) {
+	var out LuoguSyncStatusRes
+	pattern := "/v1/core/spider/luogu-sync/status"
+	path := binding.EncodeURL(pattern, in, true)
+	opts = append(opts, http.Operation(OperationSpiderLuoguSyncStatus))
 	opts = append(opts, http.PathTemplate(pattern))
 	err := c.cc.Invoke(ctx, "GET", path, nil, &out, opts...)
 	if err != nil {
@@ -460,6 +555,20 @@ func (c *SpiderHTTPClientImpl) SetSpider(ctx context.Context, in *SetSpiderReq, 
 	return &out, nil
 }
 
+// StartLuoguSync Browser-local Luogu sync: requires X-GoAlgo-Plugin-Token at the service.
+func (c *SpiderHTTPClientImpl) StartLuoguSync(ctx context.Context, in *StartLuoguSyncReq, opts ...http.CallOption) (*StartLuoguSyncRes, error) {
+	var out StartLuoguSyncRes
+	pattern := "/v1/core/spider/luogu-sync/start"
+	path := binding.EncodeURL(pattern, in, false)
+	opts = append(opts, http.Operation(OperationSpiderStartLuoguSync))
+	opts = append(opts, http.PathTemplate(pattern))
+	err := c.cc.Invoke(ctx, "POST", path, in, &out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
 // SubmitInventory 运维：提交库存（明细 / 账本真实行数，仅站管）
 func (c *SpiderHTTPClientImpl) SubmitInventory(ctx context.Context, in *SubmitInventoryReq, opts ...http.CallOption) (*SubmitInventoryRes, error) {
 	var out SubmitInventoryRes
@@ -522,6 +631,20 @@ func (c *SpiderHTTPClientImpl) UpdatePlatform(ctx context.Context, in *UpdatePla
 	pattern := "/v1/core/spider/update-platform"
 	path := binding.EncodeURL(pattern, in, false)
 	opts = append(opts, http.Operation(OperationSpiderUpdatePlatform))
+	opts = append(opts, http.PathTemplate(pattern))
+	err := c.cc.Invoke(ctx, "POST", path, in, &out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// UploadLuoguSyncPage Upload one normalized Luogu record page using X-GoAlgo-Sync-Session.
+func (c *SpiderHTTPClientImpl) UploadLuoguSyncPage(ctx context.Context, in *UploadLuoguSyncPageReq, opts ...http.CallOption) (*UploadLuoguSyncPageRes, error) {
+	var out UploadLuoguSyncPageRes
+	pattern := "/v1/core/spider/luogu-sync/page"
+	path := binding.EncodeURL(pattern, in, false)
+	opts = append(opts, http.Operation(OperationSpiderUploadLuoguSyncPage))
 	opts = append(opts, http.PathTemplate(pattern))
 	err := c.cc.Invoke(ctx, "POST", path, in, &out, opts...)
 	if err != nil {

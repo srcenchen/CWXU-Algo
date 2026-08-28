@@ -1764,6 +1764,57 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/api.core.v1.problemset.UpdateRes'
+    /v1/core/spider/luogu-sync/page:
+        post:
+            tags:
+                - Spider
+            description: Upload one normalized Luogu record page using X-GoAlgo-Sync-Session.
+            operationId: Spider_UploadLuoguSyncPage
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/api.core.v1.spider.UploadLuoguSyncPageReq'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.core.v1.spider.UploadLuoguSyncPageRes'
+    /v1/core/spider/luogu-sync/start:
+        post:
+            tags:
+                - Spider
+            description: 'Browser-local Luogu sync: requires X-GoAlgo-Plugin-Token at the service.'
+            operationId: Spider_StartLuoguSync
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/api.core.v1.spider.StartLuoguSyncReq'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.core.v1.spider.StartLuoguSyncRes'
+    /v1/core/spider/luogu-sync/status:
+        get:
+            tags:
+                - Spider
+            description: Restore an active session using X-GoAlgo-Sync-Session.
+            operationId: Spider_LuoguSyncStatus
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.core.v1.spider.LuoguSyncStatusRes'
     /v1/core/spider/monitor:
         get:
             tags:
@@ -4337,6 +4388,82 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/api.user.v1.org.SetSiteAdminRes'
+    /v1/user/plugin/luogu/authorizations:
+        get:
+            tags:
+                - LuoguPlugin
+            description: Requires the normal GoAlgo JWT.
+            operationId: LuoguPlugin_ListAuthorizations
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.user.v1.plugin.ListAuthorizationsRes'
+    /v1/user/plugin/luogu/authorize-code:
+        post:
+            tags:
+                - LuoguPlugin
+            description: |-
+                Requires the normal GoAlgo JWT. The returned code is single-use and
+                 expires after two minutes.
+            operationId: LuoguPlugin_AuthorizeCode
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/api.user.v1.plugin.AuthorizeCodeReq'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.user.v1.plugin.AuthorizeCodeRes'
+    /v1/user/plugin/luogu/revoke:
+        post:
+            tags:
+                - LuoguPlugin
+            description: |-
+                Requires the normal GoAlgo JWT. Set all=true to revoke every Luogu sync
+                 device belonging to the current user.
+            operationId: LuoguPlugin_Revoke
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/api.user.v1.plugin.RevokeReq'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.user.v1.plugin.RevokeRes'
+    /v1/user/plugin/luogu/token:
+        post:
+            tags:
+                - LuoguPlugin
+            description: |-
+                Public at the JWT middleware only: the service still requires the
+                 one-time authorization code, matching state, and PKCE S256 verifier.
+            operationId: LuoguPlugin_Token
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/api.user.v1.plugin.TokenReq'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.user.v1.plugin.TokenRes'
     /v1/user/privacy/get:
         get:
             tags:
@@ -8366,6 +8493,57 @@ components:
                     type: array
                     items:
                         $ref: '#/components/schemas/api.core.v1.spider.PlatformUserItem'
+        api.core.v1.spider.LuoguSyncProblem:
+            type: object
+            properties:
+                pid:
+                    type: string
+                title:
+                    type: string
+                difficulty:
+                    type: integer
+                    format: int32
+        api.core.v1.spider.LuoguSyncRecord:
+            type: object
+            properties:
+                submitId:
+                    type: string
+                submitTime:
+                    type: string
+                status:
+                    type: integer
+                    format: int32
+                language:
+                    type: integer
+                    format: int32
+                problem:
+                    $ref: '#/components/schemas/api.core.v1.spider.LuoguSyncProblem'
+        api.core.v1.spider.LuoguSyncStatusRes:
+            type: object
+            properties:
+                sessionId:
+                    type: string
+                nextPage:
+                    type: integer
+                    format: int32
+                inserted:
+                    type: string
+                processedPages:
+                    type: integer
+                    format: int32
+                totalPages:
+                    type: integer
+                    format: int32
+                expiresAt:
+                    type: string
+                nextAvailableAt:
+                    type: string
+                connected:
+                    type: boolean
+                done:
+                    type: boolean
+                completionReason:
+                    type: string
         api.core.v1.spider.PlatformUserItem:
             type: object
             properties:
@@ -8562,6 +8740,37 @@ components:
                     type: boolean
                     description: 题面抓取是否暂停
             description: 单个 OJ 的爬虫各模块监控
+        api.core.v1.spider.StartLuoguSyncReq:
+            type: object
+            properties:
+                clientKind:
+                    type: string
+                clientVersion:
+                    type: string
+                requestId:
+                    type: string
+                    description: |-
+                        Stable random id persisted by the browser before the first request. The
+                         same id always replays the same session issuance without rotating tokens.
+        api.core.v1.spider.StartLuoguSyncRes:
+            type: object
+            properties:
+                sessionId:
+                    type: string
+                sessionToken:
+                    type: string
+                resumed:
+                    type: boolean
+                nextPage:
+                    type: integer
+                    format: int32
+                pageDelayMs:
+                    type: integer
+                    format: int32
+                expiresAt:
+                    type: string
+                nextAvailableAt:
+                    type: string
         api.core.v1.spider.SubmitInventoryRes:
             type: object
             properties:
@@ -8650,6 +8859,50 @@ components:
                 code:
                     type: string
                 message:
+                    type: string
+        api.core.v1.spider.UploadLuoguSyncPageReq:
+            type: object
+            properties:
+                luoguUid:
+                    type: string
+                page:
+                    type: integer
+                    format: int32
+                remoteCount:
+                    type: integer
+                    format: int32
+                perPage:
+                    type: integer
+                    format: int32
+                records:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/api.core.v1.spider.LuoguSyncRecord'
+        api.core.v1.spider.UploadLuoguSyncPageRes:
+            type: object
+            properties:
+                connected:
+                    type: boolean
+                done:
+                    type: boolean
+                completionReason:
+                    type: string
+                nextPage:
+                    type: integer
+                    format: int32
+                restart:
+                    type: boolean
+                pageInserted:
+                    type: string
+                inserted:
+                    type: string
+                processedPages:
+                    type: integer
+                    format: int32
+                totalPages:
+                    type: integer
+                    format: int32
+                nextAvailableAt:
                     type: string
         api.core.v1.statistic.AcCount:
             type: object
@@ -12163,6 +12416,107 @@ components:
                 content:
                     type: string
                     description: 仅 create/get/admin-list 返回正文；mine 不含
+        api.user.v1.plugin.AuthorizeCodeReq:
+            type: object
+            properties:
+                luoguUid:
+                    type: string
+                clientKind:
+                    type: string
+                clientVersion:
+                    type: string
+                codeChallenge:
+                    type: string
+                codeChallengeMethod:
+                    type: string
+                state:
+                    type: string
+                riskAccepted:
+                    type: boolean
+                riskVersion:
+                    type: string
+                scope:
+                    type: string
+        api.user.v1.plugin.AuthorizeCodeRes:
+            type: object
+            properties:
+                code:
+                    type: string
+                state:
+                    type: string
+                expiresAt:
+                    type: string
+                scope:
+                    type: string
+        api.user.v1.plugin.ListAuthorizationsRes:
+            type: object
+            properties:
+                authorizations:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/api.user.v1.plugin.PluginAuthorizationInfo'
+        api.user.v1.plugin.PluginAuthorizationInfo:
+            type: object
+            properties:
+                id:
+                    type: string
+                provider:
+                    type: string
+                clientKind:
+                    type: string
+                clientVersion:
+                    type: string
+                luoguUid:
+                    type: string
+                riskVersion:
+                    type: string
+                acceptedAt:
+                    type: string
+                expiresAt:
+                    type: string
+                lastUsedAt:
+                    type: string
+                revokedAt:
+                    type: string
+                createdAt:
+                    type: string
+                scope:
+                    type: string
+        api.user.v1.plugin.RevokeReq:
+            type: object
+            properties:
+                authorizationId:
+                    type: string
+                all:
+                    type: boolean
+        api.user.v1.plugin.RevokeRes:
+            type: object
+            properties:
+                revokedCount:
+                    type: integer
+                    format: uint32
+        api.user.v1.plugin.TokenReq:
+            type: object
+            properties:
+                code:
+                    type: string
+                verifier:
+                    type: string
+                state:
+                    type: string
+                scope:
+                    type: string
+        api.user.v1.plugin.TokenRes:
+            type: object
+            properties:
+                deviceToken:
+                    type: string
+                authorizationId:
+                    type: string
+                expiresAt:
+                    type: string
+                scope:
+                    type: string
         api.user.v1.rbac.MyPermissionsRes:
             type: object
             properties:
@@ -13574,6 +13928,8 @@ tags:
     - name: Group
     - name: Health
       description: 站点健康与容量监控（站点管理员）
+    - name: LuoguPlugin
+      description: LuoguPlugin manages browser-local Luogu sync device authorization.
     - name: Notification
       description: |-
         站内信服务（迁移自手写 RegisterNotificationRoutes）

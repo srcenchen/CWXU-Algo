@@ -183,7 +183,14 @@ func TestConfigUnmarshaler(t *testing.T) {
 	if gateway.Endpoints[4].Path != "/v1/user/*" {
 		t.Errorf("upload endpoint must precede the generic user route")
 	}
-	if len(gateway.Middlewares) != 1 || gateway.Middlewares[0].Name != "jwt" {
-		t.Errorf("global jwt middleware must be enabled")
+	if len(gateway.Middlewares) != 2 || gateway.Middlewares[0].Name != "jwt" || gateway.Middlewares[1].Name != "cors" {
+		t.Fatalf("global jwt and cors middleware must be enabled: %+v", gateway.Middlewares)
+	}
+	corsOptions := &corsv1.Cors{}
+	if err := anypb.UnmarshalTo(gateway.Middlewares[1].Options, corsOptions, proto.UnmarshalOptions{}); err != nil {
+		t.Fatalf("decode gateway CORS config: %v", err)
+	}
+	if got, want := corsOptions.AllowOrigins, []string{"chrome-extension://phbnnpidffgnnajfdmgglbphjkbindkd"}; !proto.Equal(corsOptions, &corsv1.Cors{AllowOrigins: want, AllowHeaders: []string{"Content-Type", "X-GoAlgo-Plugin-Token", "X-GoAlgo-Sync-Session"}}) {
+		t.Fatalf("gateway CORS = %#v, want origins %v and Luogu sync headers", corsOptions, got)
 	}
 }

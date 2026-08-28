@@ -427,18 +427,23 @@ func (t *SpiderTask) ResetDedup(userId int64, platform string) {
 }
 
 // BumpGeneration 递增 user+platform 爬取代数。重绑后旧任务写入前应校验代数，避免把已删数据写回。
-func (t *SpiderTask) BumpGeneration(userId int64, platform string) int64 {
-	if t.rdb == nil || platform == "" {
-		return 0
+func (t *SpiderTask) BumpGeneration(userId int64, platform string) (int64, error) {
+	platform = strings.TrimSpace(platform)
+	if t == nil || t.rdb == nil {
+		return 0, fmt.Errorf("bump generation: redis unavailable")
+	}
+	if userId <= 0 || platform == "" {
+		return 0, fmt.Errorf("bump generation: invalid user or platform")
 	}
 	n, err := t.rdb.Incr(context.Background(), GenerationKey(userId, platform)).Result()
 	if err != nil {
-		log.Warnf("SpiderTask: bump generation user=%d platform=%s: %v", userId, platform, err)
-		return 0
+		return 0, fmt.Errorf("bump generation user=%d platform=%s: %w", userId, platform, err)
 	}
 	// 避免 key 永不过期膨胀；绑定活跃用户会持续刷新
-	_ = t.rdb.Expire(context.Background(), GenerationKey(userId, platform), 7*24*time.Hour).Err()
-	return n
+	if err := t.rdb.Expire(context.Background(), GenerationKey(userId, platform), 7*24*time.Hour).Err(); err != nil {
+		log.Warnf("SpiderTask: expire generation user=%d platform=%s: %v", userId, platform, err)
+	}
+	return n, nil
 }
 
 // GenerationKey 爬取代数 Redis key
@@ -446,16 +451,23 @@ func GenerationKey(userId int64, platform string) string {
 	return fmt.Sprintf("spider:gen:%d:%s", userId, platform)
 }
 
-// CurrentGeneration 读取当前代数（无 key 视为 0）
-func CurrentGeneration(rdb *redis.Client, userId int64, platform string) int64 {
+// CurrentGeneration 读取当前代数（无 key 视为 0）。Redis 故障必须由调用方
+// 显式处理，不能与合法的 generation 0 混为一谈。
+func CurrentGeneration(ctx context.Context, rdb *redis.Client, userId int64, platform string) (int64, error) {
 	if rdb == nil || platform == "" {
-		return 0
+		return 0, nil
 	}
-	v, err := rdb.Get(context.Background(), GenerationKey(userId, platform)).Int64()
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	v, err := rdb.Get(ctx, GenerationKey(userId, platform)).Int64()
+	if err == redis.Nil {
+		return 0, nil
+	}
 	if err != nil {
-		return 0
+		return 0, err
 	}
-	return v
+	return v, nil
 }
 
 // DoBatchPlatform 仅入队指定平台（如 LeetCode 回填）；force 时清 pending/inflight 去重以免刚 update-all 被跳过。

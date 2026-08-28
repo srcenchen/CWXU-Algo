@@ -78,17 +78,18 @@ const (
 
 // BindSubmitsAfterSpider 爬虫写入提交后绑定/创建题库（增量，最高优先级入队）
 // 绑完后入队画像重建（含 user_tag_ac 全量重算），保证「绑平台更新一次」雷达最终有数。
-func (uc *ProblemUseCase) BindSubmitsAfterSpider(userId int64) {
+func (uc *ProblemUseCase) BindSubmitsAfterSpider(userId int64) error {
 	var logs []model.SubmitLog
 	// 仅处理未绑定的
 	if err := uc.data.DB.Where("user_id = ? AND (problem_id IS NULL OR problem_id = 0)", userId).
 		Order("id desc").Limit(500).Find(&logs).Error; err != nil {
 		log.Errorf("BindSubmitsAfterSpider query: %v", err)
-		return
+		return err
 	}
 	// 批量预查已存在题，resolveOne 命中缓存不再逐条 SELECT（500 条省 500 次查询）
 	cache := uc.prefetchProblemsForLogs(logs)
 	boundAC := make([]model.SubmitLog, 0, 32)
+	var errs []error
 	for i := range logs {
 		// 系统过载时放缓逐条绑定，避免整点风暴雪上加霜
 		if i%25 == 0 && loadgate.Global().Overloaded() {
@@ -96,6 +97,7 @@ func (uc *ProblemUseCase) BindSubmitsAfterSpider(userId int64) {
 		}
 		if _, _, err := uc.resolveOneWithCache(&logs[i], true, cache); err != nil {
 			log.Debugf("resolve submit %d: %v", logs[i].ID, err)
+			errs = append(errs, err)
 			continue
 		}
 		if logs[i].IsAC && logs[i].ProblemID != nil && *logs[i].ProblemID > 0 {
@@ -105,15 +107,18 @@ func (uc *ProblemUseCase) BindSubmitsAfterSpider(userId int64) {
 	// 已绑定但预聚合仍停在 e:/n: 的存量键一并升级（画像 JOIN 也兼容 e:）
 	if err := dal.PromoteUserACFromBoundSubmits(context.Background(), uc.data.DB, userId); err != nil {
 		log.Warnf("PromoteUserACFromBoundSubmits user=%d: %v", userId, err)
+		errs = append(errs, err)
 	}
 	// 绑题后补 user_problem_status / 首次 AC 增量（与全量 Rebuild 互补）
 	if len(boundAC) > 0 {
 		if err := dal.ApplyUserProblemStatusFromSubmits(context.Background(), uc.data.DB, boundAC); err != nil {
 			log.Warnf("BindSubmits ApplyUserProblemStatus user=%d: %v", userId, err)
+			errs = append(errs, err)
 		}
 	}
 	// 入队雷达+画像重建（队列内 RebuildUserTagAC；不挡爬虫 worker）
 	uc.EnqueueUserProfileRebuild(userId)
+	return errors.Join(errs...)
 }
 
 // RebuildAllUserProfiles 全站「仅重建画像」：对有 AC 的用户强制入队画像重建

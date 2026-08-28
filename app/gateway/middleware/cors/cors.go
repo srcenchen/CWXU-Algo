@@ -47,13 +47,24 @@ func init() {
 }
 
 func isOriginAllowed(origin string, allowOriginHosts []string) bool {
+	origin = strings.TrimSpace(origin)
 	originURL, err := url.Parse(origin)
 	if err != nil {
 		return false
 	}
+	originScheme, originHost, hasExactOrigin := exactOrigin(origin)
 	hostname := strings.ToLower(originURL.Hostname())
 	for _, host := range allowOriginHosts {
-		host = strings.ToLower(host)
+		host = strings.ToLower(strings.TrimSpace(host))
+		if configuredScheme, configuredHost, configuredAsOrigin := exactOrigin(host); configuredAsOrigin {
+			if hasExactOrigin && originScheme == configuredScheme && originHost == configuredHost {
+				return true
+			}
+			continue
+		}
+		if host == "" {
+			continue
+		}
 		if host[0] != '*' {
 			if hostname == host {
 				return true
@@ -65,6 +76,18 @@ func isOriginAllowed(origin string, allowOriginHosts []string) bool {
 		}
 	}
 	return false
+}
+
+// exactOrigin returns the normalized scheme and authority for a serialized
+// browser Origin. Legacy hostname and wildcard configuration intentionally
+// bypasses this helper and keeps its existing matching behavior.
+func exactOrigin(raw string) (scheme string, host string, ok bool) {
+	origin, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || origin.Scheme == "" || origin.Host == "" || origin.User != nil ||
+		origin.Path != "" || origin.RawQuery != "" || origin.ForceQuery || origin.Fragment != "" {
+		return "", "", false
+	}
+	return strings.ToLower(origin.Scheme), strings.ToLower(origin.Host), true
 }
 
 func newResponse(statusCode int, header http.Header) (*http.Response, error) {
@@ -85,8 +108,18 @@ func Middleware(c *config.Middleware) (middleware.Middleware, error) {
 		MaxAge:              durationpb.New(time.Minute * 10),
 	}
 	if c.Options != nil {
+		configured := &v1.Cors{}
+		if err := anypb.UnmarshalTo(c.Options, configured, proto.UnmarshalOptions{}); err != nil {
+			return nil, err
+		}
 		if err := anypb.UnmarshalTo(c.Options, options, proto.UnmarshalOptions{Merge: true}); err != nil {
 			return nil, err
+		}
+		// Repeated protobuf fields append when unmarshaled with Merge. A configured
+		// allowHeaders list is an authorization boundary, so it must replace the
+		// legacy defaults instead of silently widening the preflight response.
+		if configured.AllowHeaders != nil {
+			options.AllowHeaders = configured.AllowHeaders
 		}
 	}
 	preflightHeaders := generatePreflightHeaders(options)

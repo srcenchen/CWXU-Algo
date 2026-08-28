@@ -2,7 +2,10 @@ package service
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"reflect"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -16,10 +19,42 @@ import (
 	"gorm.io/gorm"
 )
 
+type failGenerationBumpHook struct{}
+
+func (failGenerationBumpHook) DialHook(next redis.DialHook) redis.DialHook { return next }
+func (failGenerationBumpHook) ProcessHook(next redis.ProcessHook) redis.ProcessHook {
+	return func(ctx context.Context, cmd redis.Cmder) error {
+		if cmd.Name() == "incr" && len(cmd.Args()) > 1 && strings.HasPrefix(fmt.Sprint(cmd.Args()[1]), "spider:gen:") {
+			return errors.New("generation mutation unavailable")
+		}
+		return next(ctx, cmd)
+	}
+}
+func (failGenerationBumpHook) ProcessPipelineHook(next redis.ProcessPipelineHook) redis.ProcessPipelineHook {
+	return next
+}
+
+func TestBumpGenerationReportsRedisMutationFailure(t *testing.T) {
+	mr := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	rdb.AddHook(failGenerationBumpHook{})
+	spiderTask := task.NewSpiderTask(nil, rdb, nil)
+	type failClosedBumper interface {
+		BumpGeneration(int64, string) (int64, error)
+	}
+	bumper, ok := any(spiderTask).(failClosedBumper)
+	if !ok {
+		t.Fatal("BumpGeneration does not expose Redis mutation failure")
+	}
+	if _, err := bumper.BumpGeneration(7, "LuoGu"); err == nil {
+		t.Fatal("generation mutation failure was swallowed")
+	}
+}
+
 func TestWithPurgeUserPlatformGuardsBumpsGenerationBeforeLocksAndDelete(t *testing.T) {
 	var events []string
 	err := withPurgeUserPlatformGuards(context.Background(), []string{"AtCoder", "LuoGu"},
-		func(platform string) { events = append(events, "bump:"+platform) },
+		func(platform string) error { events = append(events, "bump:"+platform); return nil },
 		func(_ context.Context, platform string) (func(), bool) {
 			events = append(events, "lock:"+platform)
 			return func() { events = append(events, "unlock:"+platform) }, true
@@ -35,22 +70,47 @@ func TestWithPurgeUserPlatformGuardsBumpsGenerationBeforeLocksAndDelete(t *testi
 	}
 }
 
+func TestWithPurgeUserPlatformGuardsBumpFailureSkipsLocksAndDelete(t *testing.T) {
+	locked := false
+	deleted := false
+	err := withPurgeUserPlatformGuards(context.Background(), []string{"AtCoder", "LuoGu"},
+		func(platform string) error {
+			if platform == "LuoGu" {
+				return errors.New("generation unavailable")
+			}
+			return nil
+		},
+		func(context.Context, string) (func(), bool) { locked = true; return func() {}, true },
+		func() error { deleted = true; return nil },
+	)
+	if err == nil || locked || deleted {
+		t.Fatalf("err=%v locked=%v deleted=%v", err, locked, deleted)
+	}
+}
+
 func TestWithPurgeUserPlatformGuardsInvalidatesOldTaskGeneration(t *testing.T) {
 	mr := miniredis.RunT(t)
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
 	spiderTask := task.NewSpiderTask(nil, rdb, nil)
 	const userID = int64(17)
-	oldGeneration := task.CurrentGeneration(rdb, userID, "QOJ")
+	oldGeneration, err := task.CurrentGeneration(context.Background(), rdb, userID, "QOJ")
+	if err != nil {
+		t.Fatal(err)
+	}
 
-	err := withPurgeUserPlatformGuards(context.Background(), []string{"QOJ"},
-		func(platform string) { spiderTask.BumpGeneration(userID, platform) },
+	err = withPurgeUserPlatformGuards(context.Background(), []string{"QOJ"},
+		func(platform string) error { _, err := spiderTask.BumpGeneration(userID, platform); return err },
 		func(context.Context, string) (func(), bool) { return func() {}, true },
 		func() error { return nil },
 	)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if current := task.CurrentGeneration(rdb, userID, "QOJ"); current == oldGeneration {
+	current, err := task.CurrentGeneration(context.Background(), rdb, userID, "QOJ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if current == oldGeneration {
 		t.Fatalf("old task generation remained valid: old=%d current=%d", oldGeneration, current)
 	}
 }
@@ -62,7 +122,7 @@ func TestWithPurgeUserPlatformGuardsWaitsForHeldLockBeforeDelete(t *testing.T) {
 	var once sync.Once
 	done := make(chan error, 1)
 	go func() {
-		done <- withPurgeUserPlatformGuards(context.Background(), []string{"QOJ"}, func(string) {},
+		done <- withPurgeUserPlatformGuards(context.Background(), []string{"QOJ"}, func(string) error { return nil },
 			func(ctx context.Context, _ string) (func(), bool) {
 				select {
 				case <-held:
@@ -98,7 +158,7 @@ func TestWithPurgeUserPlatformGuardsLockFailureSkipsDeleteAndReleasesLocks(t *te
 	deleted := false
 	unlocked := false
 	locks := 0
-	err := withPurgeUserPlatformGuards(context.Background(), []string{"AtCoder", "QOJ"}, func(string) {},
+	err := withPurgeUserPlatformGuards(context.Background(), []string{"AtCoder", "QOJ"}, func(string) error { return nil },
 		func(context.Context, string) (func(), bool) {
 			locks++
 			if locks == 2 {
@@ -108,6 +168,37 @@ func TestWithPurgeUserPlatformGuardsLockFailureSkipsDeleteAndReleasesLocks(t *te
 		}, func() error { deleted = true; return nil })
 	if err == nil || deleted || !unlocked {
 		t.Fatalf("err=%v deleted=%v unlocked=%v", err, deleted, unlocked)
+	}
+}
+
+func TestReplaceSpiderBindingAfterGenerationBumpFailureKeepsOldBinding(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AutoMigrate(&model.Platform{}); err != nil {
+		t.Fatal(err)
+	}
+	old := model.Platform{UserID: 7, Platform: "LuoGu", Username: "old-user"}
+	if err := db.Create(&old).Error; err != nil {
+		t.Fatal(err)
+	}
+	mr := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	rdb.AddHook(failGenerationBumpHook{})
+	spiderTask := task.NewSpiderTask(nil, rdb, db)
+	err = replaceSpiderBindingAfterGenerationBump(context.Background(), spiderTask, db, model.Platform{
+		UserID: 7, Platform: "LuoGu", Username: "new-user",
+	})
+	if err == nil {
+		t.Fatal("generation failure did not abort binding replacement")
+	}
+	var persisted model.Platform
+	if err := db.First(&persisted, "user_id = ? AND platform = ?", 7, "LuoGu").Error; err != nil {
+		t.Fatal(err)
+	}
+	if persisted.Username != "old-user" {
+		t.Fatalf("binding username=%q want old-user", persisted.Username)
 	}
 }
 

@@ -11,6 +11,7 @@ import (
 	notificationpb "cwxu-algo/api/user/v1/notification"
 	orgpb "cwxu-algo/api/user/v1/org"
 	pastepb "cwxu-algo/api/user/v1/paste"
+	pluginpb "cwxu-algo/api/user/v1/plugin"
 	"cwxu-algo/api/user/v1/profile"
 	rbacpb "cwxu-algo/api/user/v1/rbac"
 	"cwxu-algo/api/user/v1/role"
@@ -66,6 +67,8 @@ func NewWhiteListMatcher() selector.MatchFunc {
 		"/v1/payment/notify": "",
 		// 客户中心 webhook 回调（原生路由；HMAC 验签在服务内完成，无 JWT）
 		"/v1/support/events": "",
+		// 洛谷浏览器同步用一次性授权码 + PKCE 换设备令牌；服务层仍强制校验。
+		pluginpb.OperationLuoguPluginToken: "",
 		// 组织广场公开（仅名/logo/人数）；邀请链接预览公开
 		"/api.user.v1.org.Org/Discover":      "",
 		"/api.user.v1.org.Org/InvitePreview": "",
@@ -118,6 +121,7 @@ func NewHTTPServer(
 	seoService *service.SEOService,
 	subscriptionService *service.SubscriptionService,
 	ticketService *service.TicketService,
+	luoguPluginService *service.LuoguPluginService,
 	logger log.Logger,
 
 ) *http.Server {
@@ -163,6 +167,7 @@ func NewHTTPServer(
 	subscriptionpb.RegisterSubscriptionHTTPServer(srv, subscriptionService)
 	// 工单（对接外部客户中心，全部需登录）
 	ticketpb.RegisterTicketServiceHTTPServer(srv, ticketService)
+	pluginpb.RegisterLuoguPluginHTTPServer(srv, luoguPluginService)
 	// 支付FM异步回调：GET query / POST form 原生 handler（不走 proto JSON）
 	srv.Handle("/v1/payment/notify", nethttp.HandlerFunc(subscriptionService.NotifyHTTP))
 	// 客户中心 webhook 回调：POST JSON 原生 handler（HMAC 验签 + 幂等 + 站内信）

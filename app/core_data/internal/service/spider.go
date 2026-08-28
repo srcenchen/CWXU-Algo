@@ -47,10 +47,13 @@ var (
 
 type SpiderService struct {
 	spider.UnimplementedSpiderServer
-	db     *gorm.DB
-	rdb    *redis.Client
-	spider *task.SpiderTask
-	reg    *discovery.Register
+	db                  *gorm.DB
+	rdb                 *redis.Client
+	spider              *task.SpiderTask
+	reg                 *discovery.Register
+	luoguTokenValidator luoguTokenValidator
+	luoguImporter       luoguSubmitImporter
+	luoguClock          luoguSyncClock
 }
 
 func (s SpiderService) allow(ctx context.Context, key string, interval time.Duration) bool {
@@ -234,7 +237,7 @@ func (s SpiderService) SetSpider(ctx context.Context, req *spider.SetSpiderReq) 
 		return nil, errors.Conflict("绑定冲突", "该 OJ 正在同步，请稍后重试")
 	}
 	defer unlock()
-	if err := replaceSpiderBinding(ctx, s.db, platform); err != nil {
+	if err := replaceSpiderBindingAfterGenerationBump(ctx, s.spider, s.db, platform); err != nil {
 		log.Errorf("SetSpider transaction failed: %v", err)
 		return nil, InternalError
 	}
@@ -250,8 +253,6 @@ func (s SpiderService) SetSpider(ctx context.Context, req *spider.SetSpiderReq) 
 	_ = s.rdb.Incr(ctx, fmt.Sprintf("core:contest_log:user:%d:ver", req.UserId)).Err()
 	_ = s.rdb.Incr(ctx, fmt.Sprintf("statistic:user:%d:ver", req.UserId)).Err()
 	_ = s.rdb.Incr(ctx, "statistic:period:global:ver").Err()
-	// 递增代数：正在跑的旧全量任务写入前会发现代数过期并丢弃，避免把已删数据写回叠统计
-	s.spider.BumpGeneration(req.UserId, platformName)
 	// 强制允许本次入队（旧全量任务可能仍占 pending/inflight）
 	s.spider.ResetDedup(req.UserId, platformName)
 	// 只全量抓取刚绑定的这一平台，避免重绑 CF 时把其它 OJ 再扫一遍
@@ -298,6 +299,16 @@ func trySpiderPlatformWriteLock(ctx context.Context, rdb *redis.Client, userID i
 	}
 }
 
+func replaceSpiderBindingAfterGenerationBump(ctx context.Context, spiderTask *task.SpiderTask, db *gorm.DB, platform model.Platform) error {
+	if spiderTask == nil {
+		return fmt.Errorf("replace spider binding: spider task unavailable")
+	}
+	if _, err := spiderTask.BumpGeneration(platform.UserID, platform.Platform); err != nil {
+		return err
+	}
+	return replaceSpiderBinding(ctx, db, platform)
+}
+
 func replaceSpiderBinding(ctx context.Context, db *gorm.DB, platform model.Platform) error {
 	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Where("user_id = ? AND platform = ?", platform.UserID, platform.Platform).Delete(&model.Platform{}).Error; err != nil {
@@ -340,12 +351,14 @@ var purgeUserPlatforms = []string{
 func withPurgeUserPlatformGuards(
 	ctx context.Context,
 	platforms []string,
-	bump func(string),
+	bump func(string) error,
 	lock func(context.Context, string) (func(), bool),
 	remove func() error,
 ) error {
 	for _, platform := range platforms {
-		bump(platform)
+		if err := bump(platform); err != nil {
+			return fmt.Errorf("bump purge generation for %s: %w", platform, err)
+		}
 	}
 	unlocks := make([]func(), 0, len(platforms))
 	defer func() {
@@ -654,7 +667,10 @@ func (s SpiderService) PurgeUserData(ctx context.Context, req *spider.PurgeUserD
 	}
 	uid := req.UserId
 	err := withPurgeUserPlatformGuards(ctx, purgeUserPlatforms,
-		func(platform string) { s.spider.BumpGeneration(uid, platform) },
+		func(platform string) error {
+			_, err := s.spider.BumpGeneration(uid, platform)
+			return err
+		},
 		func(lockCtx context.Context, platform string) (func(), bool) {
 			return trySpiderPlatformWriteLock(lockCtx, s.rdb, uid, platform)
 		},
@@ -715,16 +731,18 @@ func purgeSpiderRepairStates(ctx context.Context, db *gorm.DB, userID int64) err
 	return db.WithContext(ctx).Where("user_id = ?", userID).Delete(&model.SpiderRepairState{}).Error
 }
 
-func NewSpiderService(data *data.Data, spider *task.SpiderTask, reg *discovery.Register) *SpiderService {
+func NewSpiderService(data *data.Data, spider *task.SpiderTask, reg *discovery.Register, importer *bizservice.SpiderUseCase) *SpiderService {
 	// 进程启动清除残留 purge 锁（上次崩溃 / 未 defer 的旧版本）
 	if data != nil {
 		ClearPurgeLock(data.RDB)
 	}
 	return &SpiderService{
-		db:     data.DB,
-		rdb:    data.RDB,
-		spider: spider,
-		reg:    reg,
+		db:            data.DB,
+		rdb:           data.RDB,
+		spider:        spider,
+		reg:           reg,
+		luoguImporter: importer,
+		luoguClock:    realLuoguSyncClock{},
 	}
 }
 
