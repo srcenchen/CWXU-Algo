@@ -764,6 +764,22 @@ func TestUserProfileLightReadRadarFailureStillReturnsExistingStatistics(t *testi
 	}
 }
 
+func TestUserProfileIgnoresMalformedNumericProblemKeys(t *testing.T) {
+	db := profileTestDB(t)
+	const userID = int64(319)
+	seedProfileBuild(t, db, userID)
+	if err := db.Create(&model.UserACProblem{
+		UserID: userID, ProblemKey: "p:not-a-number", Platform: "Codeforces", FirstACAt: time.Now(),
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	_, rdb := profileTestRedis(t)
+	uc := &ProblemUseCase{data: &coredata.Data{DB: db, RDB: rdb}}
+	if _, _, _, _, err := uc.UserProfile(userID); err != nil {
+		t.Fatalf("malformed historical problem key must not break profile: %v", err)
+	}
+}
+
 func TestUserProfileColdReadNeverPublishesExactEvenWhenAggregateProofMatches(t *testing.T) {
 	db := profileTestDB(t)
 	const userID = int64(306)
