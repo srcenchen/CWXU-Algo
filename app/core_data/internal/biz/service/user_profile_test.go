@@ -743,6 +743,12 @@ func TestUserProfileLightReadRadarFailureStillReturnsExistingStatistics(t *testi
 	db := profileTestDB(t)
 	const userID = int64(318)
 	seedProfileBuild(t, db, userID)
+	if err := db.Create(&model.UserTagAC{
+		UserID: userID, Tag: "graph", Count: 3, Weight: 2.4,
+		ScoreVersion: dal.CurrentUserTagAbilityScoreVersion, ModelVersion: 1,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
 	if err := db.Migrator().DropTable(&model.UserTagACSnapshot{}); err != nil {
 		t.Fatal(err)
 	}
@@ -753,7 +759,7 @@ func TestUserProfileLightReadRadarFailureStillReturnsExistingStatistics(t *testi
 	if err != nil {
 		t.Fatalf("radar-only failure must not fail the whole profile: %v", err)
 	}
-	if len(radar) != 0 || len(platforms) == 0 || total <= 0 {
+	if len(radar) != 1 || radar[0].Tag != "graph" || len(platforms) == 0 || total <= 0 {
 		t.Fatalf("partial profile radar=%+v platforms=%+v total=%d", radar, platforms, total)
 	}
 }

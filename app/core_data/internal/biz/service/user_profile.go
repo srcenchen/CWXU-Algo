@@ -1022,6 +1022,12 @@ func (uc *ProblemUseCase) computeUserProfileFromPreaggregates(userID int64, iden
 	radarSnapshot, radarErr := dal.ListUserTagAbilitySnapshot(
 		context.Background(), uc.data.DB, userID, identity, allowStaleRadar, int(^uint(0)>>1),
 	)
+	if allowStaleRadar && radarErr != nil {
+		if recovered, recoverErr := dal.ListLatestUserTagACRows(context.Background(), uc.data.DB, userID, int(^uint(0)>>1)); recoverErr == nil && recovered.Ready {
+			log.Warnf("radar snapshot unavailable, serving latest score rows user=%d model=%d: %v", userID, recovered.ModelVersion, radarErr)
+			radarSnapshot, radarErr = recovered, nil
+		}
+	}
 	if radarErr != nil {
 		err := radarErr
 		log.Errorf("radar preagg user=%d: %v", userID, err)

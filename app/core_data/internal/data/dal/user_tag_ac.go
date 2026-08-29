@@ -166,6 +166,45 @@ func ListStaleUserTagAC(ctx context.Context, db *gorm.DB, userID int64, limit in
 	return ListUserTagAbilitySnapshot(ctx, db, userID, identity, true, limit)
 }
 
+// ListLatestUserTagACRows recovers the newest complete score rows when the
+// snapshot header is temporarily unavailable. It never writes or relabels the
+// rows; the caller must still enqueue a normal snapshot rebuild.
+func ListLatestUserTagACRows(ctx context.Context, db *gorm.DB, userID int64, limit int) (UserTagAbilitySnapshot, error) {
+	if db == nil || userID <= 0 {
+		return UserTagAbilitySnapshot{}, nil
+	}
+	if limit <= 0 {
+		limit = 20
+	}
+	var version uint64
+	if err := db.WithContext(ctx).Model(&model.UserTagAC{}).
+		Where("user_id = ? AND count > 0", userID).
+		Select("COALESCE(MAX(model_version), 0)").Scan(&version).Error; err != nil {
+		return UserTagAbilitySnapshot{}, err
+	}
+	var scoreVersion uint
+	if err := db.WithContext(ctx).Model(&model.UserTagAC{}).
+		Where("user_id = ? AND model_version = ? AND count > 0", userID, version).
+		Select("COALESCE(MAX(score_version), 0)").Scan(&scoreVersion).Error; err != nil {
+		return UserTagAbilitySnapshot{}, err
+	}
+	var rows []UserTagAbility
+	if err := db.WithContext(ctx).Model(&model.UserTagAC{}).
+		Select("tag, count, weight").
+		Where("user_id = ? AND score_version = ? AND model_version = ? AND count > 0", userID, scoreVersion, version).
+		Find(&rows).Error; err != nil {
+		return UserTagAbilitySnapshot{}, err
+	}
+	if len(rows) == 0 {
+		return UserTagAbilitySnapshot{}, nil
+	}
+	sortUserTagAbilities(rows)
+	if len(rows) > limit {
+		rows = rows[:limit]
+	}
+	return UserTagAbilitySnapshot{Ready: true, ModelVersion: version, Rows: rows}, nil
+}
+
 // ListUserTagAbilitySnapshot reads the publication header and all matching tag
 // rows in one MVCC statement. This prevents a header from one rebuild being
 // paired with rows from another, and represents a published zero-row radar as
