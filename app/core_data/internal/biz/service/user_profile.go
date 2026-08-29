@@ -1085,10 +1085,7 @@ func (uc *ProblemUseCase) computeUserProfileFromPreaggregates(userID int64, iden
 		FROM (
 			SELECT p.id AS pid, p.difficulty AS name
 			FROM user_ac_problems u
-			JOIN problems p ON p.id = CASE
-				WHEN u.problem_key ~ '^p:[0-9]+$' THEN substring(u.problem_key, 3)::bigint
-				ELSE NULL
-			END
+			JOIN problems p ON p.id::text = substring(u.problem_key, 3)
 			WHERE u.user_id = ?
 			  AND u.problem_key LIKE 'p:%'
 			  AND u.problem_key ~ '^p:[0-9]+$'
