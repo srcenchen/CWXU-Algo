@@ -2,6 +2,7 @@ package dal
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"sort"
@@ -17,12 +18,27 @@ import (
 
 const CurrentUserTagAbilityScoreVersion uint = 1
 
+// abilityLookupBatchSize keeps normalized tuple predicates below common SQL
+// parameter limits while still avoiding one query per candidate.
+const abilityLookupBatchSize = 200
+
 var ErrUserTagAbilityModelChanged = errors.New("user tag ability model changed; retry rebuild")
+var ErrUserTagAbilityEvidenceChanged = errors.New("user tag ability evidence changed; retry rebuild")
+var ErrUserTagAbilitySnapshotCorrupt = errors.New("user tag ability snapshot is inconsistent")
 
 type UserTagAbility struct {
 	Tag    string
 	Count  int64
 	Weight float64
+}
+
+// UserTagAbilitySnapshot makes the source model explicit so callers cannot
+// treat an older snapshot as rows produced by the active model.
+type UserTagAbilitySnapshot struct {
+	Ready        bool
+	ModelVersion uint64
+	Evidence     ProfileEvidenceIdentity
+	Rows         []UserTagAbility
 }
 
 // DifficultyWeight is retained only for legacy version-zero backfill data.
@@ -72,13 +88,6 @@ func listUsersACProblem(ctx context.Context, db *gorm.DB, problemID uint) ([]int
 			}
 		}
 	}
-	var statusIDs []int64
-	if err := db.WithContext(ctx).Model(&model.UserProblemStatus{}).
-		Where("problem_id = ? AND status = ?", problemID, model.UserProblemStatusAC).
-		Pluck("user_id", &statusIDs).Error; err != nil {
-		return nil, err
-	}
-	add(statusIDs)
 	var problem model.Problem
 	if err := db.WithContext(ctx).First(&problem, problemID).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -86,11 +95,16 @@ func listUsersACProblem(ctx context.Context, db *gorm.DB, problemID uint) ([]int
 		}
 		return nil, err
 	}
+	external := abilityExternalKey{platform: normalizeAbilityPlatform(problem.Platform), external: strings.TrimSpace(problem.ExternalID)}
 	var acRows []model.UserACProblem
-	if err := db.WithContext(ctx).Where("problem_key = ? OR problem_key LIKE ?", fmt.Sprintf("p:%d", problemID), "e:%").Find(&acRows).Error; err != nil {
+	query := db.WithContext(ctx).Where("problem_key = ?", fmt.Sprintf("p:%d", problemID))
+	if external.platform != "" && external.external != "" {
+		query = db.WithContext(ctx).
+			Where("problem_key = ? OR ("+abilityExternalKeySQL(db)+")", fmt.Sprintf("p:%d", problemID), external.platform, external.platform, external.external)
+	}
+	if err := query.Find(&acRows).Error; err != nil {
 		return nil, err
 	}
-	external := abilityExternalKey{platform: normalizeAbilityPlatform(problem.Platform), external: strings.TrimSpace(problem.ExternalID)}
 	for _, row := range acRows {
 		if id, ok := strictProblemKeyID(row.ProblemKey); ok && id == problemID {
 			add([]int64{row.UserID})
@@ -101,6 +115,12 @@ func listUsersACProblem(ctx context.Context, db *gorm.DB, problemID uint) ([]int
 		}
 	}
 	return out, nil
+}
+
+// ListUsersACProblem returns only users backed by canonical lifetime AC facts.
+// Derived status rows are deliberately excluded so stale TRIED/AC status cannot widen fact edits.
+func ListUsersACProblem(ctx context.Context, db *gorm.DB, problemID uint) ([]int64, error) {
+	return listUsersACProblem(ctx, db, problemID)
 }
 
 func IncUserTagACForFirstProblemAC(context.Context, *gorm.DB, int64, uint) error { return nil }
@@ -120,20 +140,100 @@ func ListUserTagAC(ctx context.Context, db *gorm.DB, userID int64, limit int) ([
 	if db == nil || userID <= 0 {
 		return nil, nil
 	}
+	identity, err := ReadProfileCacheIdentity(ctx, db, userID)
+	if err != nil {
+		return nil, err
+	}
+	snapshot, err := ListUserTagAbilitySnapshot(ctx, db, userID, identity, false, limit)
+	return snapshot.Rows, err
+}
+
+// ListStaleUserTagAC reads the newest usable current-score snapshot at or
+// below the active model. It never relabels rows as active: ModelVersion is
+// returned with the rows so the caller can keep stale data out of active
+// cache keys while a rebuild runs in the background.
+func ListStaleUserTagAC(ctx context.Context, db *gorm.DB, userID int64, limit int) (UserTagAbilitySnapshot, error) {
+	if db == nil || userID <= 0 {
+		return UserTagAbilitySnapshot{}, nil
+	}
+	identity, err := ReadProfileCacheIdentity(ctx, db, userID)
+	if err != nil {
+		return UserTagAbilitySnapshot{}, err
+	}
+	return ListUserTagAbilitySnapshot(ctx, db, userID, identity, true, limit)
+}
+
+// ListUserTagAbilitySnapshot reads the publication header and all matching tag
+// rows in one MVCC statement. This prevents a header from one rebuild being
+// paired with rows from another, and represents a published zero-row radar as
+// Ready=true.
+func ListUserTagAbilitySnapshot(ctx context.Context, db *gorm.DB, userID int64, expected ProfileCacheIdentity, allowStaleModel bool, limit int) (UserTagAbilitySnapshot, error) {
+	if db == nil || userID <= 0 || expected.ModelVersion == 0 {
+		return UserTagAbilitySnapshot{}, nil
+	}
 	if limit <= 0 {
 		limit = 20
 	}
-	version, ready, err := activeUserTagAbilityModelVersion(ctx, db)
-	if err != nil || !ready {
-		return nil, err
+	type snapshotRow struct {
+		ModelVersion uint64          `gorm:"column:model_version"`
+		RowCount     int64           `gorm:"column:row_count"`
+		Tag          sql.NullString  `gorm:"column:tag"`
+		Count        sql.NullInt64   `gorm:"column:count"`
+		Weight       sql.NullFloat64 `gorm:"column:weight"`
 	}
-	var rows []UserTagAbility
-	if err := db.WithContext(ctx).Model(&model.UserTagAC{}).
-		Select("tag, count, weight").
-		Where("user_id = ? AND count > 0 AND score_version = ? AND model_version = ?", userID, CurrentUserTagAbilityScoreVersion, version).
-		Find(&rows).Error; err != nil {
-		return nil, err
+	modelPredicate := "s.model_version = ?"
+	if allowStaleModel {
+		modelPredicate = "s.model_version > 0 AND s.model_version <= ?"
 	}
+	var records []snapshotRow
+	err := db.WithContext(ctx).Raw(`SELECT s.model_version, s.row_count, t.tag, t.count, t.weight
+		FROM user_tag_ac_snapshots s
+		LEFT JOIN user_tag_ac t
+		  ON t.user_id = s.user_id
+		 AND t.score_version = s.score_version
+		 AND t.model_version = s.model_version
+		 AND t.count > 0
+		WHERE s.user_id = ?
+		  AND s.score_version = ?
+		  AND s.evidence_dataset_revision = ?
+		  AND s.evidence_user_revision = ?
+		  AND `+modelPredicate,
+		userID, CurrentUserTagAbilityScoreVersion,
+		expected.Evidence.DatasetRevision, expected.Evidence.UserRevision,
+		expected.ModelVersion,
+	).Scan(&records).Error
+	if err != nil {
+		return UserTagAbilitySnapshot{}, err
+	}
+	if len(records) == 0 {
+		return UserTagAbilitySnapshot{}, nil
+	}
+	snapshot := UserTagAbilitySnapshot{
+		Ready: true, ModelVersion: records[0].ModelVersion, Evidence: expected.Evidence,
+	}
+	for _, record := range records {
+		if record.ModelVersion != snapshot.ModelVersion || record.RowCount != records[0].RowCount {
+			return UserTagAbilitySnapshot{}, ErrUserTagAbilitySnapshotCorrupt
+		}
+		if !record.Tag.Valid {
+			continue
+		}
+		if !record.Count.Valid || !record.Weight.Valid {
+			return UserTagAbilitySnapshot{}, ErrUserTagAbilitySnapshotCorrupt
+		}
+		snapshot.Rows = append(snapshot.Rows, UserTagAbility{Tag: record.Tag.String, Count: record.Count.Int64, Weight: record.Weight.Float64})
+	}
+	if int64(len(snapshot.Rows)) != records[0].RowCount {
+		return UserTagAbilitySnapshot{}, ErrUserTagAbilitySnapshotCorrupt
+	}
+	sortUserTagAbilities(snapshot.Rows)
+	if len(snapshot.Rows) > limit {
+		snapshot.Rows = snapshot.Rows[:limit]
+	}
+	return snapshot, nil
+}
+
+func sortUserTagAbilities(rows []UserTagAbility) {
 	sort.Slice(rows, func(i, j int) bool {
 		si := TagAbilityScore(rows[i].Weight, int(rows[i].Count))
 		sj := TagAbilityScore(rows[j].Weight, int(rows[j].Count))
@@ -145,25 +245,18 @@ func ListUserTagAC(ctx context.Context, db *gorm.DB, userID int64, limit int) ([
 		}
 		return rows[i].Tag < rows[j].Tag
 	})
-	if len(rows) > limit {
-		rows = rows[:limit]
-	}
-	return rows, nil
 }
 
 func CountUserTagAC(ctx context.Context, db *gorm.DB, userID int64) (int64, error) {
 	if db == nil || userID <= 0 {
 		return 0, nil
 	}
-	version, ready, err := activeUserTagAbilityModelVersion(ctx, db)
-	if err != nil || !ready {
+	identity, err := ReadProfileCacheIdentity(ctx, db, userID)
+	if err != nil {
 		return 0, err
 	}
-	var n int64
-	err = db.WithContext(ctx).Model(&model.UserTagAC{}).
-		Where("user_id = ? AND count > 0 AND score_version = ? AND model_version = ?", userID, CurrentUserTagAbilityScoreVersion, version).
-		Count(&n).Error
-	return n, err
+	snapshot, err := ListUserTagAbilitySnapshot(ctx, db, userID, identity, false, int(^uint(0)>>1))
+	return int64(len(snapshot.Rows)), err
 }
 
 // UserHasTaggedAC is source-data based; versioned cache rows never suppress a
@@ -204,22 +297,39 @@ func ListUserIDsWithACButEmptyTagAC(ctx context.Context, db *gorm.DB, limit int)
 	if limit <= 0 {
 		limit = 500
 	}
-	version, ready, err := activeUserTagAbilityModelVersion(ctx, db)
-	if err != nil || !ready {
-		return nil, err
+	type globalIdentity struct {
+		ModelVersion    uint64 `gorm:"column:model_version"`
+		DatasetRevision uint64 `gorm:"column:dataset_revision"`
+		SchemaVersion   uint   `gorm:"column:schema_version"`
+		Ready           bool   `gorm:"column:ready"`
+	}
+	var global globalIdentity
+	result := db.WithContext(ctx).Raw(`SELECT a.active_version AS model_version,
+		d.revision AS dataset_revision, d.schema_version, d.ready
+		FROM ability_model_state a
+		JOIN profile_evidence_dataset_state d ON d.id = ?
+		WHERE a.id = ?`, 1, 1).Scan(&global)
+	if result.Error != nil {
+		return nil, result.Error
+	}
+	if result.RowsAffected != 1 || global.ModelVersion == 0 || !global.Ready || global.SchemaVersion != CurrentProfileEvidenceSchemaVersion {
+		return nil, errors.New("user tag ability heal identity is not ready")
 	}
 	var ids []int64
-	err = db.WithContext(ctx).Raw(`
+	err := db.WithContext(ctx).Raw(`
 		SELECT DISTINCT u.user_id
 		FROM user_ac_problems u
+		LEFT JOIN user_profile_evidence_versions e ON e.user_id = u.user_id
 		WHERE NOT EXISTS (
-			SELECT 1 FROM user_tag_ac t
-			WHERE t.user_id = u.user_id AND t.count > 0
-				AND t.score_version = ? AND t.model_version = ?
+			SELECT 1 FROM user_tag_ac_snapshots s
+			WHERE s.user_id = u.user_id
+				AND s.score_version = ? AND s.model_version = ?
+				AND s.evidence_dataset_revision = ?
+				AND s.evidence_user_revision = COALESCE(e.revision, 0)
 		)
 		ORDER BY u.user_id
 		LIMIT ?
-	`, CurrentUserTagAbilityScoreVersion, version, limit).Scan(&ids).Error
+	`, CurrentUserTagAbilityScoreVersion, global.ModelVersion, global.DatasetRevision, limit).Scan(&ids).Error
 	return ids, err
 }
 
@@ -320,13 +430,21 @@ func RebuildUserTagACForUser(ctx context.Context, db *gorm.DB, userID int64) err
 	if !db.Migrator().HasTable(&model.UserTagAC{}) || !db.Migrator().HasTable(&model.ProblemTag{}) {
 		return nil
 	}
-	modelVersion, ready, err := activeUserTagAbilityModelVersion(ctx, db)
+	identity, err := EnsureProfileCacheIdentityForBuild(ctx, db, userID)
 	if err != nil {
 		return err
 	}
-	if !ready {
-		return errors.New("user tag ability: active model version is not published")
+	return RebuildUserTagACForUserAtIdentity(ctx, db, userID, identity)
+}
+
+// RebuildUserTagACForUserAtIdentity computes outside the publication
+// transaction, then atomically replaces rows only if the complete model and
+// evidence identity is still current.
+func RebuildUserTagACForUserAtIdentity(ctx context.Context, db *gorm.DB, userID int64, identity ProfileCacheIdentity) error {
+	if db == nil || userID <= 0 || identity.ModelVersion == 0 {
+		return errors.New("user tag ability: invalid rebuild identity")
 	}
+	modelVersion := identity.ModelVersion
 
 	var acRows []model.UserACProblem
 	if err := db.WithContext(ctx).Where("user_id = ?", userID).Find(&acRows).Error; err != nil {
@@ -354,7 +472,7 @@ func RebuildUserTagACForUser(ctx context.Context, db *gorm.DB, userID int64) err
 	}
 	candidates, externalMatches := resolveAbilityCandidates(acRows, problemByID, extKeys)
 	if len(candidates) == 0 {
-		return replaceUserTagAbilityRows(ctx, db, userID, modelVersion, nil)
+		return replaceUserTagAbilityRows(ctx, db, userID, identity, nil)
 	}
 
 	ids := make([]uint, 0, len(candidates))
@@ -400,7 +518,7 @@ func RebuildUserTagACForUser(ctx context.Context, db *gorm.DB, userID int64) err
 		rows = append(rows, *row)
 	}
 	sort.Slice(rows, func(i, j int) bool { return rows[i].Tag < rows[j].Tag })
-	return replaceUserTagAbilityRows(ctx, db, userID, modelVersion, rows)
+	return replaceUserTagAbilityRows(ctx, db, userID, identity, rows)
 }
 
 func collectAbilityCandidateKeys(rows []model.UserACProblem) ([]uint, []abilityExternalKey) {
@@ -426,28 +544,84 @@ func collectAbilityCandidateKeys(rows []model.UserACProblem) ([]uint, []abilityE
 	return pIDs, keys
 }
 
+// abilityExternalKeySQL returns a dialect-compatible predicate that parses an
+// e:<platform>:<external-id> key with the same case/whitespace semantics as
+// parseAbilityExternalKey. Its literal prefix/delimiter conditions exactly
+// imply the partial external-identity index. The caller supplies the normalized
+// row platform, embedded platform, then external ID.
+func abilityExternalKeySQL(db *gorm.DB) string {
+	if db != nil && db.Dialector != nil && db.Dialector.Name() == "postgres" {
+		return "LOWER(BTRIM(platform)) = ? AND LEFT(problem_key, 2) = 'e:' AND " +
+			"POSITION(':' IN SUBSTRING(problem_key FROM 3)) > 0 AND " +
+			postgresAbilityExternalEmbeddedPlatformSQL + " <> '' AND " + postgresAbilityExternalIDSQL + " <> '' AND " +
+			"NOT (LOWER(" + postgresAbilityExternalEmbeddedPlatformSQL + ") = 'leetcode' AND LEFT(LOWER(" + postgresAbilityExternalIDSQL + "), 3) = 'ac-') AND " +
+			"LOWER(" + postgresAbilityExternalEmbeddedPlatformSQL + ") = ? AND " + postgresAbilityExternalIDSQL + " = ?"
+	}
+	return "LOWER(TRIM(platform)) = ? AND SUBSTR(problem_key, 1, 2) = 'e:' AND " +
+		"INSTR(SUBSTR(problem_key, 3), ':') > 0 AND " +
+		portableAbilityExternalEmbeddedPlatformSQL + " <> '' AND " + portableAbilityExternalIDSQL + " <> '' AND " +
+		"NOT (LOWER(" + portableAbilityExternalEmbeddedPlatformSQL + ") = 'leetcode' AND SUBSTR(LOWER(" + portableAbilityExternalIDSQL + "), 1, 3) = 'ac-') AND " +
+		"LOWER(" + portableAbilityExternalEmbeddedPlatformSQL + ") = ? AND " + portableAbilityExternalIDSQL + " = ?"
+}
+
+const (
+	postgresAbilityExternalEmbeddedPlatformSQL = "BTRIM(SUBSTRING(problem_key FROM 3 FOR GREATEST(POSITION(':' IN SUBSTRING(problem_key FROM 3)) - 1, 0)))"
+	postgresAbilityExternalIDSQL               = "BTRIM(SUBSTRING(problem_key FROM 3 + POSITION(':' IN SUBSTRING(problem_key FROM 3))))"
+	portableAbilityExternalEmbeddedPlatformSQL = "TRIM(SUBSTR(problem_key, 3, INSTR(SUBSTR(problem_key, 3), ':') - 1))"
+	portableAbilityExternalIDSQL               = "TRIM(SUBSTR(problem_key, 3 + INSTR(SUBSTR(problem_key, 3), ':')))"
+)
+
+func uniqueAbilityExternalKeys(keys []abilityExternalKey) []abilityExternalKey {
+	seen := make(map[abilityExternalKey]struct{}, len(keys))
+	out := make([]abilityExternalKey, 0, len(keys))
+	for _, key := range keys {
+		if key.platform == "" || key.external == "" {
+			continue
+		}
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, key)
+	}
+	return out
+}
+
+func abilityExternalPairsWhere(keys []abilityExternalKey) (string, []interface{}) {
+	parts := make([]string, 0, len(keys))
+	args := make([]interface{}, 0, len(keys)*2)
+	for _, key := range keys {
+		parts = append(parts, "(LOWER(TRIM(platform)) = ? AND TRIM(external_id) = ?)")
+		args = append(args, key.platform, key.external)
+	}
+	return "(" + strings.Join(parts, " OR ") + ")", args
+}
+
 func loadAbilityProblems(ctx context.Context, db *gorm.DB, pIDs []uint, extKeys []abilityExternalKey) (map[uint]model.Problem, error) {
 	out := map[uint]model.Problem{}
 	if len(pIDs) > 0 {
-		var rows []model.Problem
-		if err := db.WithContext(ctx).Where("id IN ?", pIDs).Find(&rows).Error; err != nil {
-			return nil, err
-		}
-		for _, p := range rows {
-			out[p.ID] = p
-		}
-	}
-	if len(extKeys) > 0 {
-		seen := map[string]struct{}{}
-		var externalIDs []string
-		for _, key := range extKeys {
-			if _, ok := seen[key.external]; !ok {
-				seen[key.external] = struct{}{}
-				externalIDs = append(externalIDs, key.external)
+		for start := 0; start < len(pIDs); start += abilityLookupBatchSize {
+			end := start + abilityLookupBatchSize
+			if end > len(pIDs) {
+				end = len(pIDs)
+			}
+			var rows []model.Problem
+			if err := db.WithContext(ctx).Where("id IN ?", pIDs[start:end]).Find(&rows).Error; err != nil {
+				return nil, err
+			}
+			for _, p := range rows {
+				out[p.ID] = p
 			}
 		}
+	}
+	for start, keys := 0, uniqueAbilityExternalKeys(extKeys); start < len(keys); start += abilityLookupBatchSize {
+		end := start + abilityLookupBatchSize
+		if end > len(keys) {
+			end = len(keys)
+		}
+		where, args := abilityExternalPairsWhere(keys[start:end])
 		var rows []model.Problem
-		if err := db.WithContext(ctx).Where("TRIM(external_id) IN ?", externalIDs).Find(&rows).Error; err != nil {
+		if err := db.WithContext(ctx).Where(where, args...).Find(&rows).Error; err != nil {
 			return nil, err
 		}
 		for _, p := range rows {
@@ -488,31 +662,123 @@ func resolveAbilityCandidates(acRows []model.UserACProblem, problems map[uint]mo
 }
 
 func loadAbilityFacts(ctx context.Context, db *gorm.DB, ids []uint, modelVersion uint64) (map[uint][]string, map[uint]float64, error) {
-	var tags []model.ProblemTag
-	if err := db.WithContext(ctx).Where("problem_id IN ?", ids).Find(&tags).Error; err != nil {
-		return nil, nil, err
-	}
 	tagsByProblem := map[uint][]string{}
-	for _, row := range tags {
-		if tag := strings.TrimSpace(row.Tag); tag != "" {
-			tagsByProblem[row.ProblemID] = append(tagsByProblem[row.ProblemID], tag)
+	for start := 0; start < len(ids); start += abilityLookupBatchSize {
+		end := start + abilityLookupBatchSize
+		if end > len(ids) {
+			end = len(ids)
+		}
+		var tags []model.ProblemTag
+		if err := db.WithContext(ctx).Where("problem_id IN ?", ids[start:end]).Find(&tags).Error; err != nil {
+			return nil, nil, err
+		}
+		for _, row := range tags {
+			if tag := strings.TrimSpace(row.Tag); tag != "" {
+				tagsByProblem[row.ProblemID] = append(tagsByProblem[row.ProblemID], tag)
+			}
 		}
 	}
-	var stats []model.ProblemAbilityStat
-	if err := db.WithContext(ctx).Where("model_version = ? AND problem_id IN ?", modelVersion, ids).Find(&stats).Error; err != nil {
-		return nil, nil, err
-	}
 	hardness := map[uint]float64{}
-	for _, stat := range stats {
-		hardness[stat.ProblemID] = stat.Hardness
+	for start := 0; start < len(ids); start += abilityLookupBatchSize {
+		end := start + abilityLookupBatchSize
+		if end > len(ids) {
+			end = len(ids)
+		}
+		var stats []model.ProblemAbilityStat
+		if err := db.WithContext(ctx).Where("model_version = ? AND problem_id IN ?", modelVersion, ids[start:end]).Find(&stats).Error; err != nil {
+			return nil, nil, err
+		}
+		for _, stat := range stats {
+			hardness[stat.ProblemID] = stat.Hardness
+		}
 	}
 	return tagsByProblem, hardness, nil
 }
 
 func loadAbilityEvidence(ctx context.Context, db *gorm.DB, userID int64, candidates map[uint]abilityCandidate, externalMatches map[abilityExternalKey][]model.Problem) (map[uint][]abilitySubmit, map[string]bool, map[string]bool, error) {
-	var logs []model.SubmitLog
-	if err := db.WithContext(ctx).Where("user_id = ?", userID).Find(&logs).Error; err != nil {
-		return nil, nil, nil, err
+	logs := make([]model.SubmitLog, 0)
+	backlog := map[string]bool{}
+	ids := make([]uint, 0, len(candidates))
+	for id := range candidates {
+		ids = append(ids, id)
+	}
+	for start := 0; start < len(ids); start += abilityLookupBatchSize {
+		end := start + abilityLookupBatchSize
+		if end > len(ids) {
+			end = len(ids)
+		}
+		var rows []model.SubmitLog
+		if err := db.WithContext(ctx).Where("user_id = ? AND problem_id IN ?", userID, ids[start:end]).Find(&rows).Error; err != nil {
+			return nil, nil, nil, err
+		}
+		logs = append(logs, rows...)
+	}
+
+	uniqueExternal := make([]abilityExternalKey, 0, len(externalMatches))
+	hasLuoguCandidate := false
+	for _, candidate := range candidates {
+		if candidate.platform == "luogu" {
+			hasLuoguCandidate = true
+			break
+		}
+	}
+	for key, matches := range externalMatches {
+		if len(matches) == 1 {
+			uniqueExternal = append(uniqueExternal, key)
+		}
+	}
+	for start, keys := 0, uniqueAbilityExternalKeys(uniqueExternal); start < len(keys); start += abilityLookupBatchSize {
+		end := start + abilityLookupBatchSize
+		if end > len(keys) {
+			end = len(keys)
+		}
+		where, args := abilityExternalPairsWhere(keys[start:end])
+		args = append([]interface{}{userID}, args...)
+		var rows []model.SubmitLog
+		if err := db.WithContext(ctx).
+			Where("user_id = ? AND (problem_id IS NULL OR problem_id = 0) AND "+where, args...).
+			Find(&rows).Error; err != nil {
+			return nil, nil, nil, err
+		}
+		logs = append(logs, rows...)
+	}
+	if hasLuoguCandidate {
+		var luoguBacklog int
+		if err := db.WithContext(ctx).Raw(`
+			SELECT 1
+			FROM submit_logs s
+			LEFT JOIN problems p ON p.id = s.problem_id
+			WHERE s.user_id = ?
+				AND LOWER(TRIM(s.platform)) = 'luogu'
+				AND TRIM(COALESCE(s.submit_id, '')) <> ''
+				AND TRIM(COALESCE(s.status, '')) <> ''
+				AND TRIM(s.status) NOT IN ('正在评测', '评测中', '等待评测', '排队中')
+				AND UPPER(TRIM(s.status)) NOT IN ('TESTING', 'PENDING', 'JUDGING', 'IN_QUEUE', 'IN QUEUE', 'WAITING', 'WJ', 'QUEUE')
+				AND (s.problem_id IS NULL OR s.problem_id = 0 OR p.id IS NULL
+					OR LOWER(TRIM(p.platform)) <> LOWER(TRIM(s.platform)))
+				AND NOT EXISTS (
+					SELECT 1
+					FROM submit_logs canonical
+					JOIN problems canonical_problem ON canonical_problem.id = canonical.problem_id
+					WHERE canonical.user_id = s.user_id
+						AND LOWER(TRIM(canonical.platform)) = LOWER(TRIM(s.platform))
+						AND TRIM(canonical.submit_id) = TRIM(s.submit_id)
+						AND canonical.problem_id IS NOT NULL AND canonical.problem_id <> 0
+						AND LOWER(TRIM(canonical_problem.platform)) = LOWER(TRIM(canonical.platform))
+						AND TRIM(COALESCE(canonical.submit_id, '')) <> ''
+						AND TRIM(COALESCE(canonical.status, '')) <> ''
+						AND TRIM(canonical.status) NOT IN ('正在评测', '评测中', '等待评测', '排队中')
+						AND UPPER(TRIM(canonical.status)) NOT IN ('TESTING', 'PENDING', 'JUDGING', 'IN_QUEUE', 'IN QUEUE', 'WAITING', 'WJ', 'QUEUE')
+				)
+			LIMIT 1
+		`, userID).Scan(&luoguBacklog).Error; err != nil {
+			return nil, nil, nil, err
+		}
+		if luoguBacklog == 1 {
+			// Keep the existing one-sided incomplete-history penalty without
+			// materializing every unrelated unbound Luogu submission.
+			backlog["luogu"] = true
+		}
 	}
 	var platforms []model.Platform
 	if err := db.WithContext(ctx).Where("user_id = ?", userID).Find(&platforms).Error; err != nil {
@@ -534,7 +800,6 @@ func loadAbilityEvidence(ctx context.Context, db *gorm.DB, userID int64, candida
 			dedup[key] = log
 		}
 	}
-	backlog := map[string]bool{}
 	byProblem := map[uint][]abilitySubmit{}
 	for _, log := range dedup {
 		platform := normalizeAbilityPlatform(log.Platform)
@@ -551,7 +816,7 @@ func loadAbilityEvidence(ctx context.Context, db *gorm.DB, userID int64, candida
 		if !ok || candidate.platform != platform {
 			continue
 		}
-		byProblem[id] = append(byProblem[id], abilitySubmit{id: log.ID, isAC: log.IsAC || model.IsAcceptedStatus(log.Status), time: log.Time})
+		byProblem[id] = append(byProblem[id], abilitySubmit{id: log.ID, isAC: model.IsAcceptedStatus(log.Status), time: log.Time})
 	}
 	return byProblem, completed, backlog, nil
 }
@@ -613,32 +878,61 @@ func personalAbilityEffort(submits []abilitySubmit, platform string, completeAnc
 	return SolveEffort(attempts, minutes, false)
 }
 
-func replaceUserTagAbilityRows(ctx context.Context, db *gorm.DB, userID int64, modelVersion uint64, rows []model.UserTagAC) error {
+func replaceUserTagAbilityRows(ctx context.Context, db *gorm.DB, userID int64, expected ProfileCacheIdentity, rows []model.UserTagAC) error {
 	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		current, ready, err := lockActiveUserTagAbilityModelVersion(ctx, tx)
+		current, err := lockProfileCacheIdentity(ctx, tx, userID)
 		if err != nil {
 			return err
 		}
-		if !ready || current != modelVersion {
-			return ErrUserTagAbilityModelChanged
+		if err := compareUserTagAbilityIdentity(current, expected); err != nil {
+			return err
 		}
 		if err := tx.Where("user_id = ?", userID).Delete(&model.UserTagAC{}).Error; err != nil {
 			return err
 		}
 		if len(rows) > 0 {
+			for i := range rows {
+				rows[i].UserID = userID
+				rows[i].ScoreVersion = CurrentUserTagAbilityScoreVersion
+				rows[i].ModelVersion = expected.ModelVersion
+			}
 			if err := tx.CreateInBatches(&rows, 200).Error; err != nil {
 				return err
 			}
 		}
-		current, ready, err = lockActiveUserTagAbilityModelVersion(ctx, tx)
+		header := model.UserTagACSnapshot{
+			UserID: userID, ScoreVersion: CurrentUserTagAbilityScoreVersion, ModelVersion: expected.ModelVersion,
+			EvidenceDatasetRevision: expected.Evidence.DatasetRevision,
+			EvidenceUserRevision:    expected.Evidence.UserRevision,
+			RowCount:                int64(len(rows)),
+			PublishedAt:             time.Now(),
+		}
+		if err := tx.Clauses(clause.OnConflict{
+			Columns: []clause.Column{{Name: "user_id"}},
+			DoUpdates: clause.AssignmentColumns([]string{
+				"score_version", "model_version", "evidence_dataset_revision",
+				"evidence_user_revision", "row_count", "published_at",
+			}),
+		}).Create(&header).Error; err != nil {
+			return err
+		}
+		current, err = lockProfileCacheIdentity(ctx, tx, userID)
 		if err != nil {
 			return err
 		}
-		if !ready || current != modelVersion {
-			return ErrUserTagAbilityModelChanged
-		}
-		return nil
+		return compareUserTagAbilityIdentity(current, expected)
 	})
+}
+
+func compareUserTagAbilityIdentity(current, expected ProfileCacheIdentity) error {
+	var errs []error
+	if current.ModelVersion != expected.ModelVersion {
+		errs = append(errs, ErrUserTagAbilityModelChanged)
+	}
+	if current.Evidence != expected.Evidence {
+		errs = append(errs, ErrUserTagAbilityEvidenceChanged)
+	}
+	return errors.Join(errs...)
 }
 
 // lockActiveUserTagAbilityModelVersion locks the singleton state row used by

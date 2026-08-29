@@ -2,7 +2,10 @@ package dal
 
 import (
 	"context"
+	"crypto/sha256"
+	"database/sql"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -158,14 +161,24 @@ func ListUserPlatformAC(db *gorm.DB, userID int64) ([]PlatformACCount, error) {
 
 	// 1) 非力扣：含 NowCoder，整包计为 platform 名
 	var others []nc
-	if err := db.Raw(`
+	othersSQL := `
 		SELECT COALESCE(NULLIF(btrim(platform), ''), 'unknown') AS name, COUNT(*)::bigint AS cnt
 		FROM user_ac_problems
 		WHERE user_id = ?
 		  AND platform IS DISTINCT FROM 'LeetCode'
 		GROUP BY 1
 		HAVING COUNT(*) > 0
-	`, userID).Scan(&others).Error; err != nil {
+	`
+	if db.Dialector.Name() == "sqlite" {
+		othersSQL = `
+			SELECT COALESCE(NULLIF(trim(platform), ''), 'unknown') AS name, COUNT(*) AS cnt
+			FROM user_ac_problems
+			WHERE user_id = ? AND platform IS NOT 'LeetCode'
+			GROUP BY 1
+			HAVING COUNT(*) > 0
+		`
+	}
+	if err := db.Raw(othersSQL, userID).Scan(&others).Error; err != nil {
 		firstErr = err
 	} else {
 		for _, r := range others {
@@ -175,7 +188,7 @@ func ListUserPlatformAC(db *gorm.DB, userID int64) ([]PlatformACCount, error) {
 
 	// 2) 力扣：有官方合成键 e:LeetCode:ac-* 时只计这些
 	var lc []nc
-	if err := db.Raw(`
+	lcSQL := `
 		SELECT 'LeetCode' AS name,
 			CASE
 				WHEN COUNT(*) FILTER (WHERE problem_key LIKE 'e:LeetCode:ac-%') > 0
@@ -184,7 +197,20 @@ func ListUserPlatformAC(db *gorm.DB, userID int64) ([]PlatformACCount, error) {
 			END::bigint AS cnt
 		FROM user_ac_problems
 		WHERE user_id = ? AND platform = 'LeetCode'
-	`, userID).Scan(&lc).Error; err != nil {
+	`
+	if db.Dialector.Name() == "sqlite" {
+		lcSQL = `
+			SELECT 'LeetCode' AS name,
+				CAST(CASE
+					WHEN COUNT(*) FILTER (WHERE problem_key LIKE 'e:LeetCode:ac-%') > 0
+					THEN COUNT(*) FILTER (WHERE problem_key LIKE 'e:LeetCode:ac-%')
+					ELSE COUNT(*)
+				END AS INTEGER) AS cnt
+			FROM user_ac_problems
+			WHERE user_id = ? AND platform = 'LeetCode'
+		`
+	}
+	if err := db.Raw(lcSQL, userID).Scan(&lc).Error; err != nil {
 		if firstErr == nil {
 			firstErr = err
 		}
@@ -433,25 +459,106 @@ func RebuildUserPreaggFromSubmits(ctx context.Context, db *gorm.DB, userId int64
 	return nil
 }
 
-// UserACFingerprint 用户 AC 预聚合指纹（count + 最新 first_ac_at）。
-// 画像重建用它判断「数据是否变化」：未变化则跳过重建，削 3h 整点风暴。
+// UserACFingerprint 用户画像过程证据版本（e2）。
+// 真实终态提交与规范 AC 键在同一可重复读快照内采集，避免把构建期间的新证据
+// 误认成旧画像已经覆盖。pending、空 submit_id 及合成提交不属于真实过程证据。
 func UserACFingerprint(ctx context.Context, db *gorm.DB, userID int64) (string, error) {
 	if db == nil || userID <= 0 {
 		return "", nil
 	}
-	var row struct {
-		Count int64
-		Max   *time.Time
+	type terminalEvidence struct {
+		Count       int64  `gorm:"column:terminal_count"`
+		MaxID       int64  `gorm:"column:max_id"`
+		Bound       int64  `gorm:"column:bound_count"`
+		ContentHash string `gorm:"column:content_hash"`
 	}
-	if err := db.WithContext(ctx).Model(&model.UserACProblem{}).
-		Select("count(*) AS count, max(first_ac_at) AS max").
-		Where("user_id = ?", userID).Scan(&row).Error; err != nil {
+	type terminalRow struct {
+		ID         uint
+		Platform   string
+		SubmitID   string
+		Status     string
+		IsAC       bool
+		Time       time.Time
+		ProblemID  *uint
+		ExternalID string
+	}
+	var evidence terminalEvidence
+	var keys []string
+	err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		terminalWhere := `
+			user_id = ?
+			AND TRIM(COALESCE(submit_id, '')) <> ''
+			AND TRIM(COALESCE(status, '')) <> ''
+			AND UPPER(TRIM(status)) NOT IN ('TESTING','PENDING','JUDGING','IN_QUEUE','IN QUEUE','WAITING','WJ','QUEUE')
+			AND TRIM(status) NOT IN ('正在评测','评测中','等待评测','排队中')
+			AND NOT (
+				(LOWER(TRIM(platform)) = 'leetcode' AND (LOWER(submit_id) LIKE 'lc-ac-%' OR LOWER(submit_id) LIKE 'lc-prob-%'))
+				OR (LOWER(TRIM(platform)) = 'uoj' AND LOWER(submit_id) LIKE 'uoj-ac-%')
+			)
+		`
+		if tx.Dialector.Name() == "postgres" {
+			if err := tx.Raw(`
+				SELECT
+					COUNT(*) AS terminal_count,
+					COALESCE(MAX(id), 0) AS max_id,
+					COALESCE(SUM(CASE WHEN problem_id IS NOT NULL AND problem_id <> 0 THEN 1 ELSE 0 END), 0) AS bound_count,
+					MD5(COALESCE(STRING_AGG(CONCAT_WS(CHR(31),
+						id::text,
+						LENGTH(COALESCE(platform, ''))::text || ':' || COALESCE(platform, ''),
+						LENGTH(COALESCE(submit_id, ''))::text || ':' || COALESCE(submit_id, ''),
+						LENGTH(COALESCE(status, ''))::text || ':' || COALESCE(status, ''),
+						CASE WHEN is_ac THEN '1' ELSE '0' END,
+						TO_CHAR(time AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US'),
+						COALESCE(problem_id, 0)::text,
+						LENGTH(COALESCE(external_id, ''))::text || ':' || COALESCE(external_id, '')
+					), CHR(30) ORDER BY id), '')) AS content_hash
+				FROM submit_logs
+				WHERE `+terminalWhere, userID).Scan(&evidence).Error; err != nil {
+				return err
+			}
+		} else {
+			var rows []terminalRow
+			if err := tx.Raw(`SELECT id, platform, submit_id, status, is_ac, time, problem_id, external_id
+				FROM submit_logs WHERE `+terminalWhere+` ORDER BY id`, userID).Scan(&rows).Error; err != nil {
+				return err
+			}
+			contentHash := sha256.New()
+			for _, row := range rows {
+				problemID := uint(0)
+				if row.ProblemID != nil && *row.ProblemID != 0 {
+					problemID = *row.ProblemID
+					evidence.Bound++
+				}
+				evidence.Count++
+				if int64(row.ID) > evidence.MaxID {
+					evidence.MaxID = int64(row.ID)
+				}
+				_, _ = fmt.Fprintf(contentHash, "%d\x1f%d:%s\x1f%d:%s\x1f%d:%s\x1f%t\x1f%s\x1f%d\x1f%d:%s\x1e",
+					row.ID,
+					len(row.Platform), row.Platform,
+					len(row.SubmitID), row.SubmitID,
+					len(row.Status), row.Status,
+					row.IsAC,
+					row.Time.UTC().Format(time.RFC3339Nano),
+					problemID,
+					len(row.ExternalID), row.ExternalID,
+				)
+			}
+			evidence.ContentHash = fmt.Sprintf("%x", contentHash.Sum(nil))
+		}
+		return tx.Model(&model.UserACProblem{}).
+			Where("user_id = ?", userID).
+			Pluck("problem_key", &keys).Error
+	}, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
+	if err != nil {
 		return "", err
 	}
-	if row.Max == nil {
-		return fmt.Sprintf("c%d", row.Count), nil
+	sort.Strings(keys)
+	keyHash := sha256.New()
+	for _, key := range keys {
+		_, _ = fmt.Fprintf(keyHash, "%d:%s\n", len(key), key)
 	}
-	return fmt.Sprintf("c%d_%d", row.Count, row.Max.Unix()), nil
+	return fmt.Sprintf("e2_t%d_m%d_b%d_s%s_a%x", evidence.Count, evidence.MaxID, evidence.Bound, evidence.ContentHash, keyHash.Sum(nil)), nil
 }
 
 // PromoteUserACFromBoundSubmits 根据已绑定 problem_id 的 AC 明细，把 e:/n: 预聚合键升为 p:{id}。
@@ -625,6 +732,18 @@ func DeletePlatformUserAC(ctx context.Context, db *gorm.DB, userID int64, platfo
 			return err
 		}
 	}
+	// user_tag_ac 是跨平台聚合。换绑任一平台后整用户清空，待新数据绑定完成再全量重建，
+	// 避免把旧账号的标签贡献与仍绑定的平台混合展示。
+	if db.Migrator().HasTable(&model.UserTagACSnapshot{}) {
+		if err := db.WithContext(ctx).Where("user_id = ?", userID).Delete(&model.UserTagACSnapshot{}).Error; err != nil {
+			return err
+		}
+	}
+	if db.Migrator().HasTable(&model.UserTagAC{}) {
+		if err := db.WithContext(ctx).Where("user_id = ?", userID).Delete(&model.UserTagAC{}).Error; err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -645,6 +764,21 @@ func DeleteUserPreagg(ctx context.Context, db *gorm.DB, userId int64) error {
 	}
 	if db.Migrator().HasTable(&model.UserACProblemDay{}) {
 		if err := db.WithContext(ctx).Where("user_id = ?", userId).Delete(&model.UserACProblemDay{}).Error; err != nil {
+			return err
+		}
+	}
+	if db.Migrator().HasTable(&model.UserProblemStatus{}) {
+		if err := db.WithContext(ctx).Where("user_id = ?", userId).Delete(&model.UserProblemStatus{}).Error; err != nil {
+			return err
+		}
+	}
+	if db.Migrator().HasTable(&model.UserTagACSnapshot{}) {
+		if err := db.WithContext(ctx).Where("user_id = ?", userId).Delete(&model.UserTagACSnapshot{}).Error; err != nil {
+			return err
+		}
+	}
+	if db.Migrator().HasTable(&model.UserTagAC{}) {
+		if err := db.WithContext(ctx).Where("user_id = ?", userId).Delete(&model.UserTagAC{}).Error; err != nil {
 			return err
 		}
 	}

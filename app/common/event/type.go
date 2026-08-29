@@ -49,4 +49,6 @@ type UserProfileEvent struct {
 	UserId int64 `json:"user_id"`
 	// Force 强制重建（每日全量 / 空雷达补刷）；false 时按指纹跳过未变化用户
 	Force bool `json:"force,omitempty"`
+	// IntentID 是能力维护 outbox 的持久意图标识。空值保留普通画像消息语义。
+	IntentID string `json:"intent_id,omitempty"`
 }

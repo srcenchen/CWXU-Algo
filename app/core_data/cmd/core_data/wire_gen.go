@@ -45,7 +45,8 @@ func wireApp(confServer *conf.Server, confData *conf.Data, logger log.Logger) (*
 	register := discovery.NewConsulRegister(confServer)
 	problemTagger := service.NewProblemTagger(client)
 	userProfileTask := task.NewUserProfileTask(rabbitMQ, client)
-	problemUseCase := service.NewProblemUseCase(dataData, rabbitMQ, problemTagger, register, userProfileTask)
+	problemAbilityStatsRefresher := task.NewProblemAbilityStatsRefresher(dataData)
+	problemUseCase := service.NewProblemUseCase(dataData, rabbitMQ, problemTagger, register, userProfileTask, problemAbilityStatsRefresher)
 	spiderUseCase := service.NewSpiderUseCase(dataData, problemUseCase, spiderTask)
 	spiderService := service2.NewSpiderService(dataData, spiderTask, register, spiderUseCase)
 	spiderDal := dal.NewSpiderDal(dataData)
@@ -74,7 +75,7 @@ func wireApp(confServer *conf.Server, confData *conf.Data, logger log.Logger) (*
 	userProfileConsumer := service.NewUserProfileConsumer(rabbitMQ, problemUseCase, userProfileTask)
 	mailConsumer := service.NewMailConsumer(rabbitMQ, dataData)
 	summaryTask := task.NewSummaryTask(rabbitMQ, client)
-	cronTask := task.NewCronTask(spiderTask, dataData, summaryTask, userProfileTask, register, coordinator)
+	cronTask := task.NewCronTask(spiderTask, dataData, summaryTask, userProfileTask, register, coordinator, problemAbilityStatsRefresher)
 	app := newApp(logger, grpcServer, httpServer, register, consumer, problemFetchConsumer, problemAnalyzeConsumer, userProfileConsumer, mailConsumer, spiderUseCase, cronTask, coordinator)
 	return app, func() {
 		cleanup2()

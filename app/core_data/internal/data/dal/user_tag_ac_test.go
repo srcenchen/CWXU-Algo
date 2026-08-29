@@ -27,12 +27,62 @@ func userTagAbilityTestDB(t *testing.T) *gorm.DB {
 		t.Fatalf("sqlite: %v", err)
 	}
 	if err := db.AutoMigrate(
-		&model.UserTagAC{}, &model.UserACProblem{}, &model.Problem{}, &model.ProblemTag{},
+		&model.UserTagAC{}, &model.UserTagACSnapshot{}, &model.UserACProblem{}, &model.Problem{}, &model.ProblemTag{},
 		&model.SubmitLog{}, &model.Platform{}, &model.AbilityModelState{}, &model.ProblemAbilityStat{},
+		&model.UserProfileEvidenceVersion{}, &model.ProfileEvidenceDatasetState{},
 	); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
+	if err := InstallProfileEvidenceRevisionTriggers(db); err != nil {
+		t.Fatalf("install profile evidence revision triggers: %v", err)
+	}
 	return db
+}
+
+func ensureUserTagSnapshotTable(t *testing.T, db *gorm.DB) {
+	t.Helper()
+	if db.Migrator().HasTable("user_tag_ac_snapshots") {
+		return
+	}
+	if err := db.Exec(`CREATE TABLE user_tag_ac_snapshots (
+		user_id INTEGER PRIMARY KEY,
+		score_version INTEGER NOT NULL,
+		model_version INTEGER NOT NULL,
+		evidence_dataset_revision INTEGER NOT NULL,
+		evidence_user_revision INTEGER NOT NULL,
+		row_count INTEGER NOT NULL,
+		published_at DATETIME NOT NULL
+	)`).Error; err != nil {
+		t.Fatalf("create user_tag_ac_snapshots: %v", err)
+	}
+}
+
+func stampUserTagSnapshot(t *testing.T, db *gorm.DB, userID int64, modelVersion uint64) ProfileEvidenceIdentity {
+	t.Helper()
+	ensureUserTagSnapshotTable(t, db)
+	identity, err := ReadProfileEvidenceIdentity(context.Background(), db, userID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rowCount int64
+	if err := db.Model(&model.UserTagAC{}).Where("user_id = ? AND score_version = ? AND model_version = ?", userID, CurrentUserTagAbilityScoreVersion, modelVersion).Count(&rowCount).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Exec(`INSERT INTO user_tag_ac_snapshots
+		(user_id, score_version, model_version, evidence_dataset_revision, evidence_user_revision, row_count, published_at)
+		VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+		ON CONFLICT(user_id) DO UPDATE SET
+			score_version = excluded.score_version,
+			model_version = excluded.model_version,
+			evidence_dataset_revision = excluded.evidence_dataset_revision,
+			evidence_user_revision = excluded.evidence_user_revision,
+			row_count = excluded.row_count,
+			published_at = excluded.published_at`,
+		userID, CurrentUserTagAbilityScoreVersion, modelVersion,
+		identity.DatasetRevision, identity.UserRevision, rowCount).Error; err != nil {
+		t.Fatal(err)
+	}
+	return identity
 }
 
 func addUserTagProblem(t *testing.T, db *gorm.DB, platform, externalID, difficulty string, tags ...string) model.Problem {
@@ -222,6 +272,7 @@ func TestListUserTagAbilityUsesOnlyActiveVersionAndScoresBeforeLimit(t *testing.
 			t.Fatal(err)
 		}
 	}
+	stampUserTagSnapshot(t, db, 4, 9)
 	rows, err := ListUserTagAC(ctx, db, 4, 1)
 	if err != nil {
 		t.Fatal(err)
@@ -241,6 +292,88 @@ func TestListUserTagAbilityUsesOnlyActiveVersionAndScoresBeforeLimit(t *testing.
 		if id == 4 {
 			t.Fatalf("active radar rows must prevent empty-radar heal: %v", ids)
 		}
+	}
+}
+
+func TestListUserTagAbilityRejectsRowsFromOldEvidence(t *testing.T) {
+	db := userTagAbilityTestDB(t)
+	ctx := context.Background()
+	setActiveAbilityVersion(t, db, 9)
+	ensureUserTagSnapshotTable(t, db)
+	identity, err := ReadProfileEvidenceIdentity(ctx, db, 40)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Exec(`INSERT INTO user_tag_ac (user_id, tag, count, weight, score_version, model_version)
+		VALUES (?, 'current', 1, 0.8, ?, 9),
+		       (?, 'old-dataset', 9, 8, ?, 9),
+		       (?, 'old-user', 9, 8, ?, 9)`,
+		40, CurrentUserTagAbilityScoreVersion,
+		401, CurrentUserTagAbilityScoreVersion,
+		402, CurrentUserTagAbilityScoreVersion,
+	).Error; err != nil {
+		t.Fatal(err)
+	}
+	stampUserTagSnapshot(t, db, 40, 9)
+	if err := db.Exec(`INSERT INTO user_tag_ac_snapshots
+		(user_id, score_version, model_version, evidence_dataset_revision, evidence_user_revision, row_count, published_at)
+		VALUES (?, ?, 9, ?, ?, 1, CURRENT_TIMESTAMP), (?, ?, 9, ?, ?, 1, CURRENT_TIMESTAMP)`,
+		401, CurrentUserTagAbilityScoreVersion, identity.DatasetRevision+1, identity.UserRevision,
+		402, CurrentUserTagAbilityScoreVersion, identity.DatasetRevision, identity.UserRevision+1,
+	).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	current, err := ListUserTagAC(ctx, db, 40, 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(current) != 1 || current[0].Tag != "current" {
+		t.Fatalf("current evidence rows=%+v", current)
+	}
+	for _, userID := range []int64{401, 402} {
+		rows, err := ListStaleUserTagAC(ctx, db, userID, 20)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if rows.ModelVersion != 0 || len(rows.Rows) != 0 {
+			t.Fatalf("old evidence user=%d remained readable: %+v", userID, rows)
+		}
+	}
+}
+
+func TestListStaleUserTagACSelectsLatestReadableVersionAndSortsBeforeLimit(t *testing.T) {
+	db := userTagAbilityTestDB(t)
+	ctx := context.Background()
+	setActiveAbilityVersion(t, db, 9)
+	if err := db.Exec(`INSERT INTO user_tag_ac (user_id, tag, count, weight, score_version, model_version)
+		VALUES
+			(41, 'legacy', 99, 99, 0, 8),
+			(41, 'future', 99, 99, 1, 10),
+			(41, 'older', 99, 99, 1, 7),
+			(41, 'stale-best', 1, 0.98, 1, 8),
+			(41, 'stale-bulk', 2, 0.30, 1, 8)`).Error; err != nil {
+		t.Fatal(err)
+	}
+	stampUserTagSnapshot(t, db, 41, 8)
+
+	snapshot, err := ListStaleUserTagAC(ctx, db, 41, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.ModelVersion != 8 {
+		t.Fatalf("model version=%d, want latest readable stale version 8", snapshot.ModelVersion)
+	}
+	if len(snapshot.Rows) != 1 || snapshot.Rows[0].Tag != "stale-best" {
+		t.Fatalf("rows=%+v, want score-sorted row from selected version only", snapshot.Rows)
+	}
+
+	empty, err := ListStaleUserTagAC(ctx, db, 42, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if empty.ModelVersion != 0 || empty.Rows != nil {
+		t.Fatalf("empty snapshot=%+v, want explicit no-version nil rows", empty)
 	}
 }
 
@@ -347,6 +480,452 @@ func TestRebuildUserTagAbilityUniqueEpochFirstACIsZero(t *testing.T) {
 	}
 }
 
+func TestListUsersACProblemFiltersExternalKeysInSQL(t *testing.T) {
+	db := userTagAbilityTestDB(t)
+	ctx := context.Background()
+	now := time.Date(2026, 8, 29, 12, 0, 0, 0, time.UTC)
+	p := addUserTagProblem(t, db, " LuOgU ", " P1000 ", "medium", "greedy")
+	addUserTagACKey(t, db, 11, fmt.Sprintf("p:%d", p.ID), "Luogu", now)
+	addUserTagACKey(t, db, 12, "e:LuOgU:P1000", "LuOgU", now)
+	for i := 0; i < 256; i++ {
+		addUserTagACKey(t, db, int64(1000+i), fmt.Sprintf("e:LuOgU:noise-%d", i), "LuOgU", now)
+		addUserTagACKey(t, db, int64(2000+i), fmt.Sprintf("e:AtCoder:noise-%d", i), "AtCoder", now)
+	}
+
+	loaded, querySQL := 0, ""
+	if err := db.Callback().Query().After("gorm:query").Register("capture_list_users_ac_problem_rows", func(tx *gorm.DB) {
+		if rows, ok := tx.Statement.Dest.(*[]model.UserACProblem); ok {
+			loaded += len(*rows)
+			querySQL = tx.Statement.SQL.String()
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	ids, err := ListUsersACProblem(ctx, db, p.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ids) != 2 || !containsUserID(ids, 11) || !containsUserID(ids, 12) {
+		t.Fatalf("canonical p:/e: users=%v", ids)
+	}
+	if loaded != 2 {
+		t.Fatalf("unrelated e: rows entered the query result: loaded=%d", loaded)
+	}
+	if !strings.Contains(querySQL, "LOWER(TRIM(platform))") || !strings.Contains(querySQL, "SUBSTR(problem_key, 1, 2) = 'e:'") {
+		t.Fatalf("external-key lookup must exactly imply the SQLite partial identity index: %s", querySQL)
+	}
+	if strings.Contains(querySQL, "problem_key LIKE ?") {
+		t.Fatalf("external-key prefix must be a SQL literal so a partial index is usable: %s", querySQL)
+	}
+}
+
+func TestAbilityExternalKeyPostgresPredicateHasSafeMalformedKeyLength(t *testing.T) {
+	sqlDB, _, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sqlDB.Close()
+	db, err := gorm.Open(postgres.New(postgres.Config{Conn: sqlDB}), &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Silent),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	predicate := abilityExternalKeySQL(db)
+	embeddedPlatform := "BTRIM(SUBSTRING(problem_key FROM 3 FOR GREATEST(POSITION(':' IN SUBSTRING(problem_key FROM 3)) - 1, 0)))"
+	externalID := "BTRIM(SUBSTRING(problem_key FROM 3 + POSITION(':' IN SUBSTRING(problem_key FROM 3))))"
+	want := "LOWER(BTRIM(platform)) = ? AND LEFT(problem_key, 2) = 'e:' AND " +
+		"POSITION(':' IN SUBSTRING(problem_key FROM 3)) > 0 AND " +
+		embeddedPlatform + " <> '' AND " + externalID + " <> '' AND " +
+		"NOT (LOWER(" + embeddedPlatform + ") = 'leetcode' AND LEFT(LOWER(" + externalID + "), 3) = 'ac-') AND " +
+		"LOWER(" + embeddedPlatform + ") = ? AND " + externalID + " = ?"
+	if predicate != want {
+		t.Fatalf("PostgreSQL external identity predicate=%q want=%q", predicate, want)
+	}
+	if strings.Contains(predicate, "FOR POSITION(':' IN SUBSTRING(problem_key FROM 3)) - 1") {
+		t.Fatalf("malformed e:bad can reach a negative PostgreSQL substring length: %s", predicate)
+	}
+	if !strings.Contains(predicate, "FOR GREATEST(POSITION(':' IN SUBSTRING(problem_key FROM 3)) - 1, 0)") {
+		t.Fatalf("PostgreSQL parser length must be safe independently of AND evaluation order: %s", predicate)
+	}
+}
+
+func TestListUsersACProblemSQLiteFiltersSyntheticLeetCodeIdentityInSQL(t *testing.T) {
+	db := userTagAbilityTestDB(t)
+	ctx := context.Background()
+	now := time.Date(2026, 8, 29, 12, 0, 0, 0, time.UTC)
+	p := addUserTagProblem(t, db, "LeetCode", "ac-1", "medium", "synthetic")
+	addUserTagACKey(t, db, 98, "e:LeetCode:ac-1", "LeetCode", now)
+
+	loaded, querySQL := 0, ""
+	if err := db.Callback().Query().After("gorm:query").Register("capture_synthetic_external_identity_rows", func(tx *gorm.DB) {
+		if rows, ok := tx.Statement.Dest.(*[]model.UserACProblem); ok {
+			loaded += len(*rows)
+			querySQL = tx.Statement.SQL.String()
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	ids, err := ListUsersACProblem(ctx, db, p.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ids) != 0 || loaded != 0 {
+		t.Fatalf("synthetic LeetCode identity must be rejected in SQL: ids=%v loaded=%d", ids, loaded)
+	}
+	if !strings.Contains(querySQL, "SUBSTR(LOWER(") || !strings.Contains(querySQL, "= 'ac-'") {
+		t.Fatalf("SQLite query must literally imply the synthetic-key partial predicate: %s", querySQL)
+	}
+}
+
+func TestListUsersACProblemSQLiteRejectsMissingDelimiterAndPreservesExtraColons(t *testing.T) {
+	db := userTagAbilityTestDB(t)
+	ctx := context.Background()
+	now := time.Date(2026, 8, 29, 12, 0, 0, 0, time.UTC)
+	p := addUserTagProblem(t, db, "Luogu", "contest:P1000:hard", "medium", "parser")
+	addUserTagACKey(t, db, 91, fmt.Sprintf("p:%d", p.ID), "Luogu", now)
+	addUserTagACKey(t, db, 92, "e:LUOGU:contest:P1000:hard", "Luogu", now)
+	addUserTagACKey(t, db, 93, "e:bad", "Luogu", now)
+	addUserTagACKey(t, db, 94, "e:Luogu:contest:P1000", "Luogu", now)
+
+	ids, err := ListUsersACProblem(ctx, db, p.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ids) != 2 || !containsUserID(ids, 91) || !containsUserID(ids, 92) {
+		t.Fatalf("SQLite external-key parser users=%v, want canonical p: and full extra-colon e: keys", ids)
+	}
+}
+
+func TestListUsersACProblemSkipsEmptyExternalIdentity(t *testing.T) {
+	db := userTagAbilityTestDB(t)
+	ctx := context.Background()
+	now := time.Date(2026, 8, 29, 12, 0, 0, 0, time.UTC)
+	p := addUserTagProblem(t, db, "", "", "medium", "untitled")
+	addUserTagACKey(t, db, 21, fmt.Sprintf("p:%d", p.ID), "", now)
+	addUserTagACKey(t, db, 22, "e::", "", now)
+
+	loaded := 0
+	if err := db.Callback().Query().After("gorm:query").Register("capture_empty_external_lookup_rows", func(tx *gorm.DB) {
+		if rows, ok := tx.Statement.Dest.(*[]model.UserACProblem); ok {
+			loaded += len(*rows)
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	ids, err := ListUsersACProblem(ctx, db, p.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ids) != 1 || ids[0] != 21 || loaded != 1 {
+		t.Fatalf("empty external identity must only use p: key: ids=%v loaded=%d", ids, loaded)
+	}
+}
+
+func TestLoadAbilityProblemsFiltersByCanonicalPlatformAndExternalID(t *testing.T) {
+	db := userTagAbilityTestDB(t)
+	ctx := context.Background()
+	want := addUserTagProblem(t, db, " CodeForces ", " 1900A ", "medium", "target")
+	for i := 0; i < 256; i++ {
+		addUserTagProblem(t, db, fmt.Sprintf("OtherPlatform%d", i), "1900A", "medium", "noise")
+	}
+
+	loaded := 0
+	if err := db.Callback().Query().After("gorm:query").Register("capture_ability_problem_lookup_rows", func(tx *gorm.DB) {
+		if rows, ok := tx.Statement.Dest.(*[]model.Problem); ok {
+			loaded += len(*rows)
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	problems, err := loadAbilityProblems(ctx, db, nil, []abilityExternalKey{{platform: "codeforces", external: "1900A"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(problems) != 1 || problems[want.ID].ID != want.ID {
+		t.Fatalf("canonical external lookup=%+v want=%d", problems, want.ID)
+	}
+	if loaded != 1 {
+		t.Fatalf("cross-platform external-id rows entered the query result: loaded=%d", loaded)
+	}
+}
+
+func TestLoadAbilityProblemsBatchesMoreThanTwoHundredKeysAndIDs(t *testing.T) {
+	db := userTagAbilityTestDB(t)
+	ctx := context.Background()
+	n := abilityLookupBatchSize + 3
+	ids := make([]uint, 0, n)
+	keys := make([]abilityExternalKey, 0, n)
+	for i := 0; i < n; i++ {
+		external := fmt.Sprintf("batch:%03d", i)
+		p := addUserTagProblem(t, db, "Codeforces", external, "medium")
+		ids = append(ids, p.ID)
+		keys = append(keys, abilityExternalKey{platform: "codeforces", external: external})
+	}
+	queries := 0
+	if err := db.Callback().Query().Before("gorm:query").Register("capture_batched_ability_problem_queries", func(tx *gorm.DB) {
+		if _, ok := tx.Statement.Dest.(*[]model.Problem); ok {
+			queries++
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	byExternal, err := loadAbilityProblems(ctx, db, nil, keys)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(byExternal) != n || queries != 2 {
+		t.Fatalf("external batches: rows=%d queries=%d want=%d/2", len(byExternal), queries, n)
+	}
+	queries = 0
+	byID, err := loadAbilityProblems(ctx, db, ids, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(byID) != n || queries != 2 {
+		t.Fatalf("ID batches: rows=%d queries=%d want=%d/2", len(byID), queries, n)
+	}
+}
+
+func TestLoadAbilityFactsBatchesTagsAndStatsBeyondTwoHundredCandidates(t *testing.T) {
+	db := userTagAbilityTestDB(t)
+	ctx := context.Background()
+	n := abilityLookupBatchSize + 3
+	ids := make([]uint, 0, n)
+	for i := 0; i < n; i++ {
+		p := addUserTagProblem(t, db, "AtCoder", fmt.Sprintf("ABC%03d_A", i), "easy", fmt.Sprintf("tag-%03d", i))
+		ids = append(ids, p.ID)
+		if err := db.Create(&model.ProblemAbilityStat{
+			ModelVersion: 9, ProblemID: p.ID, Platform: "atcoder", Difficulty: "easy", Hardness: float64(i+1) / 100,
+		}).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	tagQueries, statQueries := 0, 0
+	if err := db.Callback().Query().Before("gorm:query").Register("capture_batched_ability_fact_queries", func(tx *gorm.DB) {
+		switch tx.Statement.Dest.(type) {
+		case *[]model.ProblemTag:
+			tagQueries++
+		case *[]model.ProblemAbilityStat:
+			statQueries++
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	tags, hardness, err := loadAbilityFacts(ctx, db, ids, 9)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tags) != n || len(hardness) != n {
+		t.Fatalf("fact aggregation incomplete: tags=%d hardness=%d want=%d", len(tags), len(hardness), n)
+	}
+	if tagQueries != 2 || statQueries != 2 {
+		t.Fatalf("fact queries must be bounded batches: tags=%d stats=%d want=2/2", tagQueries, statQueries)
+	}
+}
+
+func TestLoadAbilityEvidenceFiltersUnrelatedLogsButKeepsLuoguBacklog(t *testing.T) {
+	db := userTagAbilityTestDB(t)
+	ctx := context.Background()
+	now := time.Date(2026, 8, 29, 12, 0, 0, 0, time.UTC)
+	p := addUserTagProblem(t, db, "Luogu", "P1000", "medium", "target")
+	if err := db.Create(&model.Platform{UserID: 88, Platform: " LUOGU ", Username: "u88", ClientSyncCompletedAt: &now}).Error; err != nil {
+		t.Fatal(err)
+	}
+	for _, log := range []model.SubmitLog{
+		{UserID: 88, Platform: "Luogu", SubmitID: "target-wa", Status: "WA", ProblemID: &p.ID, ExternalID: "P1000", Time: now},
+		{UserID: 88, Platform: "Luogu", SubmitID: "target-ac", Status: "AC", ProblemID: &p.ID, ExternalID: "P1000", Time: now.Add(time.Minute)},
+		{UserID: 88, Platform: "Luogu", SubmitID: "target-unbound", Status: "WA", ExternalID: "P1000", Time: now.Add(2 * time.Minute)},
+		{UserID: 88, Platform: "Luogu", SubmitID: "luogu-backlog", Status: "WA", ExternalID: "P9999", Time: now.Add(3 * time.Minute)},
+	} {
+		log.FillIsAC()
+		if err := db.Create(&log).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	for i := 0; i < 256; i++ {
+		log := model.SubmitLog{UserID: 88, Platform: "Codeforces", SubmitID: fmt.Sprintf("noise-%d", i), Status: "WA", ExternalID: fmt.Sprintf("%dA", i), Time: now.Add(time.Duration(i+4) * time.Minute)}
+		log.FillIsAC()
+		if err := db.Create(&log).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	loaded := 0
+	if err := db.Callback().Query().After("gorm:query").Register("capture_ability_evidence_rows", func(tx *gorm.DB) {
+		if rows, ok := tx.Statement.Dest.(*[]model.SubmitLog); ok {
+			loaded += len(*rows)
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	key := abilityExternalKey{platform: "luogu", external: "P1000"}
+	byProblem, completed, backlog, err := loadAbilityEvidence(ctx, db, 88,
+		map[uint]abilityCandidate{p.ID: {problem: p, platform: "luogu"}},
+		map[abilityExternalKey][]model.Problem{key: {p}},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !completed["luogu"] || !backlog["luogu"] {
+		t.Fatalf("Luogu completion/backlog=%v/%v", completed, backlog)
+	}
+	if got := len(byProblem[p.ID]); got != 3 {
+		t.Fatalf("target evidence count=%d want=3", got)
+	}
+	if loaded > 5 {
+		t.Fatalf("unrelated submissions entered evidence queries: loaded=%d", loaded)
+	}
+}
+
+func TestLoadAbilityEvidenceIgnoresNonterminalLuoguBacklog(t *testing.T) {
+	db := userTagAbilityTestDB(t)
+	ctx := context.Background()
+	now := time.Date(2026, 8, 29, 12, 0, 0, 0, time.UTC)
+	p := addUserTagProblem(t, db, "Luogu", "P1001", "medium", "target")
+	if err := db.Create(&model.Platform{UserID: 89, Platform: "luogu", Username: "u89", ClientSyncCompletedAt: &now}).Error; err != nil {
+		t.Fatal(err)
+	}
+	for _, log := range []model.SubmitLog{
+		{UserID: 89, Platform: "Luogu", SubmitID: "target", Status: "AC", ProblemID: &p.ID, ExternalID: "P1001", Time: now},
+		{UserID: 89, Platform: "Luogu", SubmitID: "pending", Status: "TESTING", ExternalID: "P9998", Time: now},
+		{UserID: 89, Platform: "Luogu", SubmitID: " ", Status: "WA", ExternalID: "P9999", Time: now},
+	} {
+		log.FillIsAC()
+		if err := db.Create(&log).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	key := abilityExternalKey{platform: "luogu", external: "P1001"}
+	_, completed, backlog, err := loadAbilityEvidence(ctx, db, 89,
+		map[uint]abilityCandidate{p.ID: {problem: p, platform: "luogu"}},
+		map[abilityExternalKey][]model.Problem{key: {p}},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !completed["luogu"] || backlog["luogu"] {
+		t.Fatalf("nonterminal/empty Luogu evidence must not revoke completion: completed=%v backlog=%v", completed, backlog)
+	}
+}
+
+func TestLoadAbilityEvidenceInvalidLuoguBindingRevokesCompletion(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		problemID func(model.Problem) uint
+	}{
+		{name: "cross-platform", problemID: func(foreign model.Problem) uint { return foreign.ID }},
+		{name: "missing-problem", problemID: func(foreign model.Problem) uint { return foreign.ID + 100000 }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db := userTagAbilityTestDB(t)
+			ctx := context.Background()
+			now := time.Date(2026, 8, 29, 12, 0, 0, 0, time.UTC)
+			target := addUserTagProblem(t, db, "Luogu", "P2000", "medium", "target")
+			foreign := addUserTagProblem(t, db, "Codeforces", "2000A", "medium", "foreign")
+			if err := db.Create(&model.Platform{UserID: 95, Platform: "Luogu", Username: "u95", ClientSyncCompletedAt: &now}).Error; err != nil {
+				t.Fatal(err)
+			}
+			addUserTagSubmit(t, db, 95, "Luogu", "target-ac", "AC", &target.ID, "P2000", now)
+			invalidID := tc.problemID(foreign)
+			addUserTagSubmit(t, db, 95, "LUOGU", "invalid-binding", "WA", &invalidID, "P9999", now.Add(time.Minute))
+			key := abilityExternalKey{platform: "luogu", external: "P2000"}
+			_, completed, backlog, err := loadAbilityEvidence(ctx, db, 95,
+				map[uint]abilityCandidate{target.ID: {problem: target, platform: "luogu"}},
+				map[abilityExternalKey][]model.Problem{key: {target}},
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !completed["luogu"] || !backlog["luogu"] {
+				t.Fatalf("invalid binding must revoke completion: completed=%v backlog=%v", completed, backlog)
+			}
+		})
+	}
+}
+
+func TestLoadAbilityEvidenceCanonicalBoundDuplicateDoesNotCreateBacklog(t *testing.T) {
+	db := userTagAbilityTestDB(t)
+	ctx := context.Background()
+	now := time.Date(2026, 8, 29, 12, 0, 0, 0, time.UTC)
+	target := addUserTagProblem(t, db, "Luogu", "P2001", "medium", "target")
+	foreign := addUserTagProblem(t, db, "Codeforces", "2001A", "medium", "foreign")
+	if err := db.Create(&model.Platform{UserID: 96, Platform: "Luogu", Username: "u96", ClientSyncCompletedAt: &now}).Error; err != nil {
+		t.Fatal(err)
+	}
+	addUserTagSubmit(t, db, 96, "Luogu", "duplicate", "AC", &target.ID, "P2001", now)
+	if err := db.Exec("DROP INDEX idx_submit_plat_sid").Error; err != nil {
+		t.Fatal(err)
+	}
+	addUserTagSubmit(t, db, 96, " LUOGU ", "duplicate", "WA", &foreign.ID, "P9999", now.Add(time.Minute))
+	key := abilityExternalKey{platform: "luogu", external: "P2001"}
+	byProblem, completed, backlog, err := loadAbilityEvidence(ctx, db, 96,
+		map[uint]abilityCandidate{target.ID: {problem: target, platform: "luogu"}},
+		map[abilityExternalKey][]model.Problem{key: {target}},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !completed["luogu"] || backlog["luogu"] || len(byProblem[target.ID]) != 1 {
+		t.Fatalf("canonical bound duplicate must win: evidence=%v completed=%v backlog=%v", byProblem, completed, backlog)
+	}
+}
+
+func TestLoadAbilityEvidenceUsesTerminalStatusAsACTruth(t *testing.T) {
+	db := userTagAbilityTestDB(t)
+	ctx := context.Background()
+	now := time.Date(2026, 8, 29, 12, 0, 0, 0, time.UTC)
+	p := addUserTagProblem(t, db, "Luogu", "P2002", "medium", "target")
+	stale := model.SubmitLog{
+		UserID: 97, Platform: "Luogu", SubmitID: "corrected", Status: "WA",
+		IsAC: true, ProblemID: &p.ID, ExternalID: "P2002", Time: now,
+	}
+	if err := db.Create(&stale).Error; err != nil {
+		t.Fatal(err)
+	}
+	key := abilityExternalKey{platform: "luogu", external: "P2002"}
+	byProblem, _, _, err := loadAbilityEvidence(ctx, db, 97,
+		map[uint]abilityCandidate{p.ID: {problem: p, platform: "luogu"}},
+		map[abilityExternalKey][]model.Problem{key: {p}},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(byProblem[p.ID]) != 1 || byProblem[p.ID][0].isAC {
+		t.Fatalf("corrected terminal status must override stale is_ac: %+v", byProblem[p.ID])
+	}
+}
+
+func TestAbilityLookupIndexesAreNotOwnedByAutoMigrate(t *testing.T) {
+	db := userTagAbilityTestDB(t)
+	for _, index := range []struct {
+		model any
+		name  string
+	}{
+		{&model.UserACProblem{}, "idx_uac_problem_key"},
+		{&model.UserACProblem{}, "idx_uac_ability_platform_key"},
+		{&model.Problem{}, "idx_problem_ability_external_lookup"},
+		{&model.SubmitLog{}, "idx_submit_user_problem"},
+		{&model.SubmitLog{}, "idx_submit_user_ability_external"},
+	} {
+		if db.Migrator().HasIndex(index.model, index.name) {
+			t.Fatalf("optional ability lookup index %s must not be created by blocking AutoMigrate", index.name)
+		}
+	}
+}
+
+func containsUserID(ids []int64, want int64) bool {
+	for _, id := range ids {
+		if id == want {
+			return true
+		}
+	}
+	return false
+}
+
 func TestListUserIDsWithACButEmptyTagACIncludesLegacyRow(t *testing.T) {
 	db := userTagAbilityTestDB(t)
 	ctx := context.Background()
@@ -365,6 +944,37 @@ func TestListUserIDsWithACButEmptyTagACIncludesLegacyRow(t *testing.T) {
 		}
 	}
 	t.Fatalf("legacy user_tag_ac row must not suppress empty-radar heal: %v", ids)
+}
+
+func TestListUserIDsWithACButEmptyTagACDistinguishesPublishedEmptyFromStale(t *testing.T) {
+	db := userTagAbilityTestDB(t)
+	ctx := context.Background()
+	setActiveAbilityVersion(t, db, 1)
+	now := time.Date(2026, 8, 29, 14, 0, 0, 0, time.UTC)
+	p := addUserTagProblem(t, db, "Codeforces", "empty-radar", "medium")
+	for _, userID := range []int64{35, 350} {
+		addUserTagACKey(t, db, userID, fmt.Sprintf("p:%d", p.ID), "Codeforces", now)
+		if err := RebuildUserTagACForUser(ctx, db, userID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Only user 350's published-empty snapshot is invalidated afterwards.
+	if err := db.Create(&model.SubmitLog{
+		UserID: 350, Platform: "Codeforces", SubmitID: "late", Status: "WA", Time: now,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	ids, err := ListUserIDsWithACButEmptyTagAC(ctx, db, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if containsUserID(ids, 35) {
+		t.Fatalf("current published-empty snapshot was repeatedly selected for heal: %v", ids)
+	}
+	if !containsUserID(ids, 350) {
+		t.Fatalf("stale published-empty snapshot was not selected for heal: %v", ids)
+	}
 }
 
 func TestRebuildUserTagAbilityNonLuoguACOnlyIsStrictlyNeutral(t *testing.T) {
@@ -400,7 +1010,11 @@ func TestReplaceUserTagAbilityRowsRollsBackOnLockedVersionFlip(t *testing.T) {
 		BEGIN UPDATE ability_model_state SET active_version = 2 WHERE id = 1; END`).Error; err != nil {
 		t.Fatal(err)
 	}
-	err := replaceUserTagAbilityRows(ctx, db, 37, 1, []model.UserTagAC{{UserID: 37, Tag: "new", Count: 1, Weight: 0.8, ScoreVersion: CurrentUserTagAbilityScoreVersion, ModelVersion: 1}})
+	identity, err := EnsureProfileCacheIdentityForBuild(ctx, db, 37)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = replaceUserTagAbilityRows(ctx, db, 37, identity, []model.UserTagAC{{UserID: 37, Tag: "new", Count: 1, Weight: 0.8, ScoreVersion: CurrentUserTagAbilityScoreVersion, ModelVersion: 1}})
 	if !errors.Is(err, ErrUserTagAbilityModelChanged) {
 		t.Fatalf("version flip must force retry/rollback, err=%v", err)
 	}
@@ -411,6 +1025,46 @@ func TestReplaceUserTagAbilityRowsRollsBackOnLockedVersionFlip(t *testing.T) {
 	rows := tagAbilityRows(t, db, 37)
 	if len(rows) != 1 || rows["old"].Count != 1 || rows["new"].Count != 0 {
 		t.Fatalf("version flip must rollback replacement rows: %+v", rows)
+	}
+}
+
+func TestRebuildUserTagAbilityRollsBackWhenEvidenceChangesBeforePublish(t *testing.T) {
+	db := userTagAbilityTestDB(t)
+	ctx := context.Background()
+	now := time.Date(2026, 8, 29, 13, 0, 0, 0, time.UTC)
+	p := addUserTagProblem(t, db, "Codeforces", "2000A", "medium", "new")
+	setActiveAbilityVersion(t, db, 1)
+	addUserTagACKey(t, db, 38, fmt.Sprintf("p:%d", p.ID), "Codeforces", now)
+	ensureUserTagSnapshotTable(t, db)
+	if err := db.Create(&model.UserTagAC{
+		UserID: 38, Tag: "old", Count: 1, Weight: 0.7,
+		ScoreVersion: CurrentUserTagAbilityScoreVersion, ModelVersion: 1,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	stampUserTagSnapshot(t, db, 38, 1)
+	var changed bool
+	if err := db.Callback().Query().After("gorm:query").Register("test:bump_evidence_before_tag_publish", func(tx *gorm.DB) {
+		if changed || tx.Statement.Table != "problem_tags" {
+			return
+		}
+		changed = true
+		if err := tx.Session(&gorm.Session{NewDB: true, SkipHooks: true}).
+			Model(&model.UserProfileEvidenceVersion{}).Where("user_id = ?", 38).
+			Update("revision", gorm.Expr("revision + 1")).Error; err != nil {
+			tx.AddError(err)
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	err := RebuildUserTagACForUser(ctx, db, 38)
+	if err == nil {
+		t.Fatal("evidence change must reject the rebuilt tag snapshot")
+	}
+	rows := tagAbilityRows(t, db, 38)
+	if len(rows) != 1 || rows["old"].Count != 1 {
+		t.Fatalf("rejected evidence snapshot changed published rows: %+v", rows)
 	}
 }
 

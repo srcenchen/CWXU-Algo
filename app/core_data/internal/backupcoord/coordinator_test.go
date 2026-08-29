@@ -328,17 +328,17 @@ func TestScheduledFailureReleasesDayForRetryButSuccessKeepsDone(t *testing.T) {
 	failed := &resultRunner{err: errors.New("async failure"), done: make(chan struct{})}
 	c := NewForTestSchedule(func(context.Context) Schedule { return Schedule{Enabled: true, Time: "03:15"} }, failed, store)
 	loc, _ := time.LoadLocation("Asia/Shanghai")
-	now := time.Date(2026, 8, 16, 3, 16, 0, 0, loc)
+	now := time.Date(2026, 8, 16, 3, 15, 0, 0, loc)
 	c.RunScheduled(now)
 	<-failed.done
 	waitState(t, c, StateFailed)
 
 	succeeded := &resultRunner{done: make(chan struct{})}
 	c.runner = succeeded
-	c.RunScheduled(now.Add(time.Minute))
+	c.RunScheduled(now.Add(30 * time.Second))
 	<-succeeded.done
 	waitState(t, c, StateSucceeded)
-	c.RunScheduled(now.Add(2 * time.Minute))
+	c.RunScheduled(now.Add(45 * time.Second))
 	if succeeded.runs != 1 {
 		t.Fatalf("successful day repeated %d times", succeeded.runs)
 	}

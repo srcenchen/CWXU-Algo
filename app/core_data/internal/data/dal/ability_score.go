@@ -137,8 +137,16 @@ func TagAbilityScore(qualitySum float64, acCount int) float64 {
 		return 0
 	}
 	c := float64(acCount)
-	if !finiteAbilityFloat(qualitySum) || qualitySum < abilityMinQuality*c || qualitySum > abilityMaxQuality*c {
+	minQualitySum := abilityMinQuality * c
+	maxQualitySum := abilityMaxQuality * c
+	// Repeatedly adding a clamped boundary value can drift a few ULPs beyond
+	// the mathematical bound. Treat that representation noise as valid, while
+	// still rejecting materially impossible/corrupt aggregates.
+	boundTolerance := 1e-9 * math.Max(1, c)
+	if !finiteAbilityFloat(qualitySum) || qualitySum < minQualitySum-boundTolerance || qualitySum > maxQualitySum+boundTolerance {
 		qualitySum = 0.55 * c
+	} else {
+		qualitySum = clampAbility(qualitySum, minQualitySum, maxQualitySum)
 	}
 	q := (4*0.55 + qualitySum) / (4 + c)
 	score := 100 * q * math.Sqrt(c/(c+10))

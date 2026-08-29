@@ -182,6 +182,21 @@ func TestTagAbilityScoreInvalidQualitySumUsesNeutralQuality(t *testing.T) {
 	}
 }
 
+func TestTagAbilityScoreAcceptsAccumulatedBoundaryRounding(t *testing.T) {
+	const count = 100
+	qualitySum := 0.0
+	for i := 0; i < count; i++ {
+		qualitySum += abilityMaxQuality
+	}
+	if qualitySum <= abilityMaxQuality*count {
+		t.Fatalf("test fixture must expose positive accumulation drift: sum=%0.17g bound=%0.17g", qualitySum, abilityMaxQuality*count)
+	}
+	want := TagAbilityScore(abilityMaxQuality*count, count)
+	if got := TagAbilityScore(qualitySum, count); got != want {
+		t.Fatalf("boundary accumulation drift must clamp to the valid maximum: got=%v want=%v", got, want)
+	}
+}
+
 func TestTagAbilityScoreUsesQualityAndBreadthMonotonically(t *testing.T) {
 	if got := TagAbilityScore(0.8*500, 500); math.Abs(got-79.015) > 1e-3 {
 		t.Fatalf("500 medium-quality problems score = %.3f, want about 79.015", got)

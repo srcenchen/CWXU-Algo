@@ -2,8 +2,10 @@ package dal
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
+	"strings"
 	"testing"
 	"time"
 
@@ -24,11 +26,73 @@ func problemAbilityTestDB(t *testing.T) *gorm.DB {
 	}
 	if err := db.AutoMigrate(
 		&model.SubmitLog{}, &model.Problem{}, &model.Platform{},
-		&model.AbilityModelState{}, &model.ProblemAbilityStat{},
+		&model.AbilityModelState{}, &model.ProblemAbilityStat{}, &model.AbilityMaintenancePending{},
 	); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	return db
+}
+
+func TestRefreshProblemAbilityStatsScansBeforeTakingPublicationLock(t *testing.T) {
+	db := problemAbilityTestDB(t)
+	var events []string
+	if err := db.Callback().Query().Before("gorm:query").Register("test:ability_publication_lock_order", func(tx *gorm.DB) {
+		if tx.Statement.Table == "ability_model_state" {
+			if _, locked := tx.Statement.Clauses["FOR"]; locked {
+				events = append(events, "lock")
+			}
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Callback().Row().Before("gorm:row").Register("test:ability_evidence_scan_order", func(tx *gorm.DB) {
+		if strings.Contains(strings.ToLower(tx.Statement.SQL.String()), "with terminal as") {
+			events = append(events, "evidence")
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := RefreshProblemAbilityStats(context.Background(), db); err != nil {
+		t.Fatal(err)
+	}
+	if len(events) < 2 || events[0] != "evidence" || events[1] != "lock" {
+		t.Fatalf("heavy evidence scan must precede the publication row lock: %v", events)
+	}
+}
+
+func TestRefreshProblemAbilityStatsForMaintenanceRollsBackActiveSwitchWithTransition(t *testing.T) {
+	db := problemAbilityTestDB(t)
+	ctx := context.Background()
+	now := time.Now()
+	if err := db.Create(&model.AbilityModelState{ID: 1, ActiveVersion: 4, BuiltAt: now, UpdatedAt: now}).Error; err != nil {
+		t.Fatal(err)
+	}
+	pending := model.AbilityMaintenancePending{
+		Scope: "problem:atomic", OperationID: "atomic-intent", Revision: 3, Phase: "facts",
+		LeaseOwner: "owner", Operation: "problem", CreatedAt: now, UpdatedAt: now,
+	}
+	if err := db.Create(&pending).Error; err != nil {
+		t.Fatal(err)
+	}
+	injected := errors.New("injected transition failure")
+	_, err := RefreshProblemAbilityStatsForMaintenance(ctx, db, func(_ context.Context, _ *gorm.DB, _ uint64) error {
+		return injected
+	})
+	if !errors.Is(err, injected) {
+		t.Fatalf("refresh err=%v want transition failure", err)
+	}
+	var state model.AbilityModelState
+	if err := db.First(&state, 1).Error; err != nil {
+		t.Fatal(err)
+	}
+	var stored model.AbilityMaintenancePending
+	if err := db.First(&stored, "scope = ?", pending.Scope).Error; err != nil {
+		t.Fatal(err)
+	}
+	if state.ActiveVersion != 4 || stored.Phase != "facts" || stored.Revision != 3 {
+		t.Fatalf("atomic rollback state=%+v pending=%+v", state, stored)
+	}
 }
 
 func createProblemAbilityTestProblem(t *testing.T, db *gorm.DB, platform, externalID, difficulty string) model.Problem {
@@ -158,6 +222,64 @@ func TestRefreshProblemAbilityStatsPublishesCompleteNewSnapshot(t *testing.T) {
 	}
 }
 
+func TestRefreshProblemAbilityStatsForPeriodCoalescesCronButNotAdminForce(t *testing.T) {
+	db := problemAbilityTestDB(t)
+	ctx := context.Background()
+
+	version, refreshed, err := RefreshProblemAbilityStatsForPeriod(ctx, db, "2026-08-29")
+	if err != nil || !refreshed || version != 1 {
+		t.Fatalf("first scheduled refresh version=%d refreshed=%v err=%v", version, refreshed, err)
+	}
+	version, refreshed, err = RefreshProblemAbilityStatsForPeriod(ctx, db, "2026-08-29")
+	if err != nil || refreshed || version != 1 {
+		t.Fatalf("same-period scheduled refresh version=%d refreshed=%v err=%v", version, refreshed, err)
+	}
+	if err := RefreshProblemAbilityStats(ctx, db); err != nil {
+		t.Fatalf("admin force refresh: %v", err)
+	}
+	version, refreshed, err = RefreshProblemAbilityStatsForPeriod(ctx, db, "2026-08-29")
+	if err != nil || refreshed || version != 2 {
+		t.Fatalf("admin force must stay independent without reopening the cron period: version=%d refreshed=%v err=%v", version, refreshed, err)
+	}
+	version, refreshed, err = RefreshProblemAbilityStatsForPeriod(ctx, db, "2026-08-30")
+	if err != nil || !refreshed || version != 3 {
+		t.Fatalf("next-period scheduled refresh version=%d refreshed=%v err=%v", version, refreshed, err)
+	}
+}
+
+func TestRefreshProblemAbilityStatsForPeriodConcurrentCallersBuildOnce(t *testing.T) {
+	db := problemAbilityTestDB(t)
+	ctx := context.Background()
+	start := make(chan struct{})
+	type result struct {
+		version   uint64
+		refreshed bool
+		err       error
+	}
+	results := make(chan result, 2)
+	for i := 0; i < 2; i++ {
+		go func() {
+			<-start
+			version, refreshed, err := RefreshProblemAbilityStatsForPeriod(ctx, db, "2026-08-29")
+			results <- result{version: version, refreshed: refreshed, err: err}
+		}()
+	}
+	close(start)
+	builds := 0
+	for i := 0; i < 2; i++ {
+		got := <-results
+		if got.err != nil || got.version != 1 {
+			t.Fatalf("result=%+v", got)
+		}
+		if got.refreshed {
+			builds++
+		}
+	}
+	if builds != 1 {
+		t.Fatalf("same-period concurrent scheduled builds=%d want=1", builds)
+	}
+}
+
 func TestProblemAbilityEvidenceNormalizesPlatformAndBacklogRevokesCoverage(t *testing.T) {
 	db := problemAbilityTestDB(t)
 	ctx := context.Background()
@@ -187,6 +309,54 @@ func TestProblemAbilityEvidenceNormalizesPlatformAndBacklogRevokesCoverage(t *te
 	}
 	if len(stats) != 0 {
 		t.Fatalf("unbound terminal backlog must revoke AC-only coverage, got %+v", stats)
+	}
+
+	if err := db.Where("platform = ? AND submit_id = ?", "LUOGU", "unbound").Delete(&model.SubmitLog{}).Error; err != nil {
+		t.Fatal(err)
+	}
+	zeroProblemID := uint(0)
+	addProblemAbilityLog(t, db, 31, "LUOGU", "unbound-zero", "WA", &zeroProblemID, now.Add(2*time.Minute))
+	if err := RefreshProblemAbilityStats(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+	stats, err = ActiveProblemAbilityStats(ctx, db, []uint{p.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stats) != 0 {
+		t.Fatalf("problem_id=0 backlog must remain unbound and revoke AC-only coverage, got %+v", stats)
+	}
+
+	if err := db.Where("platform = ? AND submit_id = ?", "LUOGU", "unbound-zero").Delete(&model.SubmitLog{}).Error; err != nil {
+		t.Fatal(err)
+	}
+	foreign := createProblemAbilityTestProblem(t, db, "Codeforces", "1900A", "hard")
+	addProblemAbilityLog(t, db, 31, "LUOGU", "cross-platform-binding", "WA", &foreign.ID, now.Add(3*time.Minute))
+	if err := RefreshProblemAbilityStats(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+	stats, err = ActiveProblemAbilityStats(ctx, db, []uint{p.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stats) != 0 {
+		t.Fatalf("cross-platform dirty binding must revoke the complete-history anchor, got %+v", stats)
+	}
+
+	if err := db.Where("platform = ? AND submit_id = ?", "LUOGU", "cross-platform-binding").Delete(&model.SubmitLog{}).Error; err != nil {
+		t.Fatal(err)
+	}
+	missingProblemID := foreign.ID + 100000
+	addProblemAbilityLog(t, db, 31, "LUOGU", "missing-problem-binding", "WA", &missingProblemID, now.Add(4*time.Minute))
+	if err := RefreshProblemAbilityStats(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+	stats, err = ActiveProblemAbilityStats(ctx, db, []uint{p.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stats) != 0 {
+		t.Fatalf("missing nonzero problem binding must revoke the complete-history anchor, got %+v", stats)
 	}
 }
 
@@ -279,6 +449,33 @@ func TestRefreshProblemAbilityStatsRollbackAndEmptySnapshot(t *testing.T) {
 	}
 }
 
+func TestRefreshProblemAbilityStatsRejectsVersionOverflow(t *testing.T) {
+	const maxPostgresBigint = uint64(math.MaxInt64)
+	if _, err := nextAbilityModelVersion(maxPostgresBigint); err == nil {
+		t.Fatal("version overflow was reported as a successful refresh")
+	}
+	if got, err := nextAbilityModelVersion(maxPostgresBigint - 1); err != nil || got != maxPostgresBigint {
+		t.Fatalf("last PostgreSQL bigint version got=%d err=%v", got, err)
+	}
+}
+
+func TestRefreshProblemAbilityStatsRequiresOneActiveStateUpdate(t *testing.T) {
+	db := problemAbilityTestDB(t)
+	if err := db.Create(&model.AbilityModelState{ID: 1, ActiveVersion: 3}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Exec(`CREATE TRIGGER ignore_ability_state_update BEFORE UPDATE OF active_version ON ability_model_state BEGIN SELECT RAISE(IGNORE); END`).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := RefreshProblemAbilityStats(context.Background(), db); err == nil {
+		t.Fatal("zero-row active state update was reported as refreshed")
+	}
+	var state model.AbilityModelState
+	if err := db.First(&state, 1).Error; err != nil || state.ActiveVersion != 3 {
+		t.Fatalf("failed state publication was not rolled back: state=%+v err=%v", state, err)
+	}
+}
+
 func TestProblemAbilityEvidenceDuplicateUnboundDoesNotRevokeBoundCoverage(t *testing.T) {
 	db := problemAbilityTestDB(t)
 	ctx := context.Background()
@@ -288,12 +485,14 @@ func TestProblemAbilityEvidenceDuplicateUnboundDoesNotRevokeBoundCoverage(t *tes
 		t.Fatal(err)
 	}
 	addProblemAbilityLog(t, db, 61, "LuoGu", "duplicate", "AC", &p.ID, now)
+	foreign := createProblemAbilityTestProblem(t, db, "Codeforces", "1900B", "medium")
 	if err := db.Exec("DROP INDEX idx_submit_plat_sid").Error; err != nil {
 		t.Fatal(err)
 	}
 	// Historical dirty data can carry an unbound duplicate of the same real
 	// submit. The bound row is canonical evidence and must win that conflict.
 	addProblemAbilityLog(t, db, 61, "luogu", "duplicate", "WA", nil, now.Add(time.Minute))
+	addProblemAbilityLog(t, db, 61, " LUOGU ", "duplicate", "WA", &foreign.ID, now.Add(2*time.Minute))
 	if err := RefreshProblemAbilityStats(ctx, db); err != nil {
 		t.Fatal(err)
 	}

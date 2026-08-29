@@ -28,6 +28,7 @@ import (
 
 	"github.com/go-kratos/kratos/v2/log"
 	"github.com/go-kratos/kratos/v2/registry"
+	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 	"github.com/streadway/amqp"
 	"gorm.io/gorm"
@@ -37,6 +38,7 @@ import (
 var (
 	errProblemFetchPaused    = errors.New("fetch paused")
 	errProblemPlatformPaused = errors.New("problem platform paused")
+	errSkipProblemBank       = errors.New("submit does not belong in problem bank")
 )
 
 type ProblemUseCase struct {
@@ -46,7 +48,8 @@ type ProblemUseCase struct {
 	reg    *registry.Registrar
 
 	// profileTask 画像 MQ 入队（可选；nil 时只同步算小用户）
-	profileTask *task.UserProfileTask
+	profileTask  *task.UserProfileTask
+	abilityStats task.AbilityStatsRefresher
 
 	orgUsersMu         sync.Mutex
 	orgUsersCache      map[int64]struct{} // 兼容旧缓存（= fetch 集合）
@@ -59,12 +62,16 @@ type ProblemUseCase struct {
 	adminOpName string
 }
 
-func NewProblemUseCase(data *data.Data, mq *event.RabbitMQ, tagger *ProblemTagger, reg *discovery.Register, profileTask *task.UserProfileTask) *ProblemUseCase {
+func NewProblemUseCase(data *data.Data, mq *event.RabbitMQ, tagger *ProblemTagger, reg *discovery.Register, profileTask *task.UserProfileTask, abilityStats task.AbilityStatsRefresher) *ProblemUseCase {
 	var r *registry.Registrar
 	if reg != nil {
 		r = &reg.Reg
 	}
-	return &ProblemUseCase{data: data, mq: mq, tagger: tagger, reg: r, profileTask: profileTask}
+	uc := &ProblemUseCase{data: data, mq: mq, tagger: tagger, reg: r, profileTask: profileTask, abilityStats: abilityStats}
+	if data != nil && data.DB != nil && data.DB.Dialector.Name() == "postgres" {
+		go uc.runAbilityMaintenanceRecovery()
+	}
+	return uc
 }
 
 // MQ 优先级：队列需 x-max-priority
@@ -79,63 +86,184 @@ const (
 // BindSubmitsAfterSpider 爬虫写入提交后绑定/创建题库（增量，最高优先级入队）
 // 绑完后入队画像重建（含 user_tag_ac 全量重算），保证「绑平台更新一次」雷达最终有数。
 func (uc *ProblemUseCase) BindSubmitsAfterSpider(userId int64) error {
-	var logs []model.SubmitLog
-	// 仅处理未绑定的
-	if err := uc.data.DB.Where("user_id = ? AND (problem_id IS NULL OR problem_id = 0)", userId).
-		Order("id desc").Limit(500).Find(&logs).Error; err != nil {
-		log.Errorf("BindSubmitsAfterSpider query: %v", err)
+	ctx := context.Background()
+	var highWatermark uint
+	if err := uc.data.DB.WithContext(ctx).Model(&model.SubmitLog{}).
+		Where("user_id = ?", userId).
+		Select("COALESCE(MAX(id), 0)").Scan(&highWatermark).Error; err != nil {
+		log.Errorf("BindSubmitsAfterSpider watermark: %v", err)
 		return err
 	}
-	// 批量预查已存在题，resolveOne 命中缓存不再逐条 SELECT（500 条省 500 次查询）
-	cache := uc.prefetchProblemsForLogs(logs)
+	const batchSize = 500
+	var cursor uint
 	boundAC := make([]model.SubmitLog, 0, 32)
 	var errs []error
-	for i := range logs {
-		// 系统过载时放缓逐条绑定，避免整点风暴雪上加霜
-		if i%25 == 0 && loadgate.Global().Overloaded() {
-			time.Sleep(200 * time.Millisecond)
+	for cursor < highWatermark {
+		var logs []model.SubmitLog
+		if err := uc.data.DB.WithContext(ctx).
+			Where("user_id = ? AND id > ? AND id <= ? AND (problem_id IS NULL OR problem_id = 0)", userId, cursor, highWatermark).
+			Order("id ASC").Limit(batchSize).Find(&logs).Error; err != nil {
+			log.Errorf("BindSubmitsAfterSpider query: %v", err)
+			return errors.Join(append(errs, err)...)
 		}
-		if _, _, err := uc.resolveOneWithCache(&logs[i], true, cache); err != nil {
-			log.Debugf("resolve submit %d: %v", logs[i].ID, err)
-			errs = append(errs, err)
-			continue
+		if len(logs) == 0 {
+			break
 		}
-		if logs[i].IsAC && logs[i].ProblemID != nil && *logs[i].ProblemID > 0 {
-			boundAC = append(boundAC, logs[i])
+		cursor = logs[len(logs)-1].ID
+		// 每批预查已存在题；单批最多 500 条，避免无界内存。
+		cache := uc.prefetchProblemsForLogs(logs)
+		for i := range logs {
+			// 系统过载时放缓逐条绑定，避免整点风暴雪上加霜
+			if i%25 == 0 && loadgate.Global().Overloaded() {
+				time.Sleep(200 * time.Millisecond)
+			}
+			if _, _, err := uc.resolveOneWithCache(&logs[i], true, cache); err != nil {
+				if errors.Is(err, errSkipProblemBank) {
+					continue
+				}
+				log.Debugf("resolve submit %d: %v", logs[i].ID, err)
+				errs = append(errs, err)
+				continue
+			}
+			if logs[i].IsAC && logs[i].ProblemID != nil && *logs[i].ProblemID > 0 {
+				boundAC = append(boundAC, logs[i])
+			}
 		}
 	}
 	// 已绑定但预聚合仍停在 e:/n: 的存量键一并升级（画像 JOIN 也兼容 e:）
-	if err := dal.PromoteUserACFromBoundSubmits(context.Background(), uc.data.DB, userId); err != nil {
+	if err := dal.PromoteUserACFromBoundSubmits(ctx, uc.data.DB, userId); err != nil {
 		log.Warnf("PromoteUserACFromBoundSubmits user=%d: %v", userId, err)
 		errs = append(errs, err)
 	}
 	// 绑题后补 user_problem_status / 首次 AC 增量（与全量 Rebuild 互补）
 	if len(boundAC) > 0 {
-		if err := dal.ApplyUserProblemStatusFromSubmits(context.Background(), uc.data.DB, boundAC); err != nil {
+		if err := dal.ApplyUserProblemStatusFromSubmits(ctx, uc.data.DB, boundAC); err != nil {
 			log.Warnf("BindSubmits ApplyUserProblemStatus user=%d: %v", userId, err)
 			errs = append(errs, err)
 		}
 	}
 	// 入队雷达+画像重建（队列内 RebuildUserTagAC；不挡爬虫 worker）
+	if err := errors.Join(errs...); err != nil {
+		return err
+	}
 	uc.EnqueueUserProfileRebuild(userId)
-	return errors.Join(errs...)
+	return nil
 }
 
 // RebuildAllUserProfiles 全站「仅重建画像」：对有 AC 的用户强制入队画像重建
-// （队列内 RebuildUserTagAC 重算难度加权 weight，不重新爬取 OJ 提交）。
+// （队列内 RebuildUserTagAC 重算后验、个人过程与标签置信度，不重新爬取 OJ 提交）。
 // 用于能力雷达评分模型升级后的一次性回填，或站管手动触发。
-func (uc *ProblemUseCase) RebuildAllUserProfiles() (candidates, published int) {
-	if uc.data == nil || uc.data.DB == nil || uc.profileTask == nil {
-		return 0, 0
+func (uc *ProblemUseCase) RebuildAllUserProfiles(ctx context.Context) (candidates, published int, err error) {
+	if uc.data == nil || uc.data.DB == nil || uc.profileTask == nil || uc.abilityStats == nil {
+		return 0, 0, errors.New("RebuildAllUserProfiles: dependencies unavailable")
 	}
-	var userIDs []int64
-	if err := uc.data.DB.Model(&model.UserACProblem{}).Distinct("user_id").Pluck("user_id", &userIDs).Error; err != nil {
-		log.Errorf("RebuildAllUserProfiles: pluck users: %v", err)
-		return 0, 0
+	pending, _, err := ensureAbilityMaintenancePending(ctx, uc.data.DB, model.AbilityMaintenancePending{
+		Scope: "global:rebuild", Operation: "rebuild", TagsChanged: true, DifficultyChanged: true,
+	})
+	if err != nil {
+		return 0, 0, err
 	}
-	pub, dedup, fail := uc.profileTask.DoBatch(userIDs, true)
-	log.Infof("RebuildAllUserProfiles candidates=%d published=%d dedup=%d failed=%d", len(userIDs), pub, dedup, fail)
-	return len(userIDs), pub
+	if pending.Phase == "fence_finalized" {
+		var count int64
+		if err := uc.data.DB.WithContext(ctx).Model(&model.AbilityMaintenanceTarget{}).Where("intent_id = ?", pending.OperationID).Count(&count).Error; err != nil {
+			return 0, 0, err
+		}
+		if _, err := uc.relayAbilityMaintenanceTargets(ctx, pending); err != nil {
+			return int(count), 0, err
+		}
+		return int(count), int(count), nil
+	}
+	profileToken, err := beginGlobalProfileInvalidationForIntent(ctx, uc.data.RDB, pending.OperationID)
+	if err != nil {
+		return 0, 0, err
+	}
+	owner := profileToken.Owner
+	if err := claimAbilityMaintenancePending(ctx, uc.data.DB, pending, owner); err != nil {
+		return 0, 0, errors.Join(err, AbandonGlobalProfileInvalidation(context.Background(), uc.data.RDB, profileToken))
+	}
+	workCtx := profileToken.Context()
+	if err := validateProfileInvalidation(workCtx, uc.data.RDB, profileGlobalGenerationKey, profileToken); err != nil {
+		return 0, 0, errors.Join(err, AbandonGlobalProfileInvalidation(context.Background(), uc.data.RDB, profileToken))
+	}
+	abandon := func(cause error) error {
+		return errors.Join(cause, AbandonGlobalProfileInvalidation(context.Background(), uc.data.RDB, profileToken))
+	}
+	validate := func() error {
+		return validateProfileInvalidation(workCtx, uc.data.RDB, profileGlobalGenerationKey, profileToken)
+	}
+	if pending.Phase == "derived_ready" {
+		var count int64
+		if err := uc.data.DB.WithContext(workCtx).Model(&model.AbilityMaintenanceTarget{}).Where("intent_id = ?", pending.OperationID).Count(&count).Error; err != nil {
+			return 0, 0, abandon(err)
+		}
+		if err := FinishGlobalProfileInvalidation(workCtx, uc.data.RDB, profileToken); err != nil {
+			return int(count), 0, abandon(err)
+		}
+		if err := advanceAbilityMaintenancePhase(ctx, uc.data.DB, pending, "fence_finalized"); err != nil {
+			return int(count), 0, err
+		}
+		if _, err := uc.relayAbilityMaintenanceTargets(ctx, pending); err != nil {
+			return int(count), 0, err
+		}
+		return int(count), int(count), nil
+	}
+	if pending.Phase == "intent" {
+		if err := markAbilityMaintenanceFacts(workCtx, uc.data.DB, pending, true, true); err != nil {
+			return 0, 0, abandon(err)
+		}
+	}
+	modelVersion := pending.TargetModelVersion
+	if pending.Phase == "facts" {
+		modelVersion, err = uc.refreshAbilityStatsForMaintenance(workCtx, pending)
+		if err != nil {
+			return 0, 0, abandon(err)
+		}
+		if err := validate(); err != nil {
+			return 0, 0, abandon(err)
+		}
+	}
+	if err := validate(); err != nil {
+		return 0, 0, abandon(err)
+	}
+	if pending.Phase == "model_ready" {
+		var userIDs []int64
+		if err := uc.data.DB.WithContext(workCtx).Model(&model.UserACProblem{}).Distinct("user_id").Order("user_id ASC").Pluck("user_id", &userIDs).Error; err != nil {
+			log.Errorf("RebuildAllUserProfiles: pluck users: %v", err)
+			return 0, 0, abandon(err)
+		}
+		if err := prepareAbilityMaintenanceRebuildTargets(workCtx, uc.data.DB, pending, userIDs); err != nil {
+			return len(userIDs), 0, abandon(err)
+		}
+	}
+	var targetCount int64
+	if err := uc.data.DB.WithContext(workCtx).Model(&model.AbilityMaintenanceTarget{}).Where("intent_id = ?", pending.OperationID).Count(&targetCount).Error; err != nil {
+		return 0, 0, abandon(err)
+	}
+	if pending.Phase == "targets_ready" {
+		if err := rebuildPendingAbilityMaintenanceTargets(workCtx, uc.data.DB, pending, validate, func(userID int64) error {
+			return dal.RebuildUserTagACForUser(workCtx, uc.data.DB, userID)
+		}); err != nil {
+			return int(targetCount), 0, abandon(err)
+		}
+		if err := validate(); err != nil {
+			return int(targetCount), 0, abandon(err)
+		}
+		if err := stageRebuiltAbilityMaintenanceTargets(workCtx, uc.data.DB, pending); err != nil {
+			return int(targetCount), 0, abandon(err)
+		}
+	}
+	if err := FinishGlobalProfileInvalidation(workCtx, uc.data.RDB, profileToken); err != nil {
+		return int(targetCount), published, abandon(err)
+	}
+	if err := advanceAbilityMaintenancePhase(ctx, uc.data.DB, pending, "fence_finalized"); err != nil {
+		return int(targetCount), published, err
+	}
+	if _, err := uc.relayAbilityMaintenanceTargets(ctx, pending); err != nil {
+		return int(targetCount), published, err
+	}
+	published = int(targetCount)
+	log.Infof("RebuildAllUserProfiles model_version=%d candidates=%d published=%d", modelVersion, targetCount, published)
+	return int(targetCount), published, nil
 }
 
 // resolveOne 解析并绑定单条提交；返回 (problem, isNew, err)
@@ -188,7 +316,7 @@ func (uc *ProblemUseCase) resolveOneWithCache(sl *model.SubmitLog, highPriority 
 	}
 	// SkipBank：明确不进题库的平台/记录
 	if parsed.SkipBank {
-		return nil, false, fmt.Errorf("skip bank: %s", parsed.Platform)
+		return nil, false, fmt.Errorf("%w: %s", errSkipProblemBank, parsed.Platform)
 	}
 
 	cacheKey := parsed.Platform + "\x00" + parsed.ExternalID
@@ -247,26 +375,39 @@ func (uc *ProblemUseCase) resolveOneWithCache(sl *model.SubmitLog, highPriority 
 		}
 	}
 
-	// 绑定 submit
+	// 绑定 submit；条件更新防止并发 binder 覆盖已变化的归属。
 	pid := existing.ID
-	_ = uc.data.DB.Model(sl).Updates(map[string]interface{}{
-		"problem_id":  pid,
-		"external_id": parsed.ExternalID,
-	}).Error
+	oldExternalID := sl.ExternalID
+	if err := uc.data.DB.WithContext(context.Background()).Transaction(func(tx *gorm.DB) error {
+		res := tx.Model(&model.SubmitLog{}).
+			Where("id = ? AND user_id = ? AND (problem_id IS NULL OR problem_id = 0)", sl.ID, sl.UserID).
+			Updates(map[string]interface{}{
+				"problem_id":  pid,
+				"external_id": parsed.ExternalID,
+			})
+		if res.Error != nil {
+			return fmt.Errorf("bind submit %d: %w", sl.ID, res.Error)
+		}
+		if res.RowsAffected != 1 {
+			return fmt.Errorf("bind submit %d: expected one row, updated %d", sl.ID, res.RowsAffected)
+		}
+		// 画像预聚合：绑题后把 e:/n: 键升级为 p:{id}（写路径在绑题前多写 e:/n:）。
+		if sl.IsAC {
+			oldKeys := []string{
+				model.ACProblemKey(sl.Platform, parsed.ExternalID, sl.Problem, nil),
+				model.ACProblemKey(sl.Platform, oldExternalID, sl.Problem, nil),
+				model.ACProblemKey(parsed.Platform, parsed.ExternalID, sl.Problem, nil),
+			}
+			if err := dal.PromoteUserACKeysToProblemID(context.Background(), tx, sl.UserID, oldKeys, pid); err != nil {
+				return fmt.Errorf("promote user AC keys user=%d pid=%d: %w", sl.UserID, pid, err)
+			}
+		}
+		return nil
+	}); err != nil {
+		return nil, false, err
+	}
 	sl.ProblemID = &pid
 	sl.ExternalID = parsed.ExternalID
-
-	// 画像预聚合：绑题后把 e:/n: 键升级为 p:{id}（写路径在绑题前多写 e:/n:）
-	if sl.IsAC {
-		oldKeys := []string{
-			model.ACProblemKey(sl.Platform, parsed.ExternalID, sl.Problem, nil),
-			model.ACProblemKey(sl.Platform, sl.ExternalID, sl.Problem, nil),
-			model.ACProblemKey(parsed.Platform, parsed.ExternalID, sl.Problem, nil),
-		}
-		if err := dal.PromoteUserACKeysToProblemID(context.Background(), uc.data.DB, sl.UserID, oldKeys, pid); err != nil {
-			log.Warnf("PromoteUserACKeys user=%d pid=%d: %v", sl.UserID, pid, err)
-		}
-	}
 
 	prio := mqPriorityBulk
 	if highPriority {
@@ -1068,7 +1209,13 @@ func (uc *ProblemUseCase) CreateManualProblem(actorUID uint, title, contentMD, s
 		Tags:       model.StringArray(tags),
 		Status:     status,
 	}
-	if err := uc.data.DB.Create(&p).Error; err != nil {
+	if err := uc.data.DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(&p).Error; err != nil {
+			return err
+		}
+		_, _, err := dal.SyncProblemTags(context.Background(), tx, p.ID, tags)
+		return err
+	}); err != nil {
 		return nil, err
 	}
 	if hasContent && !hasTags && actorUID > 0 {
@@ -1195,6 +1342,27 @@ func (uc *ProblemUseCase) ProcessAnalyze(ctx context.Context, ev event.ProblemAn
 	if err := uc.data.DB.First(&p, ev.ProblemID).Error; err != nil {
 		return err
 	}
+	dirtyTags, dirtyDifficulty := problemFactsDirtyFlags(p.ErrorMsg)
+	pending, pendingErr := loadAbilityMaintenancePending(ctx, uc.data.DB, problemMaintenanceScope(p.ID))
+	if pendingErr != nil {
+		return pendingErr
+	}
+	if pending != nil {
+		if err := uc.recoverProblemMaintenance(ctx, pending); err != nil {
+			return err
+		}
+		uc.BumpProblemDetailVer(p.ID)
+		return nil
+	}
+	if dirtyTags || dirtyDifficulty {
+		updates := map[string]interface{}{"status": model.ProblemStatusCompleted, "error_msg": ""}
+		if err := uc.applyProblemFactUpdates(ctx, &p, updates, []string(p.Tags), dirtyTags, dirtyDifficulty); err != nil {
+			return err
+		}
+		uc.BumpProblemDetailVer(p.ID)
+		uc.progressMoveStatus(p.Status, model.ProblemStatusCompleted)
+		return nil
+	}
 	pipelineControl.TrackStart("analyze", p.ID, p.Platform, p.ExternalID, p.Title)
 	defer pipelineControl.TrackEnd("analyze", p.ID)
 	// 已识别完成：跳过
@@ -1303,18 +1471,10 @@ func (uc *ProblemUseCase) ProcessAnalyze(ctx context.Context, ev event.ProblemAn
 			updates["title"] = "#" + p.ExternalID
 		}
 	}
-	if err := uc.data.DB.Model(&p).Updates(updates).Error; err != nil {
+	tagsChanged := !sameNormalizedTags([]string(p.Tags), result.AlgorithmTags)
+	difficultyChanged := strings.TrimSpace(p.Difficulty) != strings.TrimSpace(result.Difficulty)
+	if err := uc.applyProblemFactUpdates(ctx, &p, updates, result.AlgorithmTags, tagsChanged, difficultyChanged); err != nil {
 		return err
-	}
-	oldTags, newTags, e := dal.SyncProblemTags(ctx, uc.data.DB, p.ID, result.AlgorithmTags)
-	if e != nil {
-		log.Warnf("SyncProblemTags analyze id=%d: %v", p.ID, e)
-	} else {
-		uc.BumpProblemTagsVer()
-		uc.BumpProblemListVer()
-		if e2 := dal.AdjustUserTagACForProblemTagsChange(ctx, uc.data.DB, p.ID, oldTags, newTags); e2 != nil {
-			log.Warnf("AdjustUserTagAC analyze id=%d: %v", p.ID, e2)
-		}
 	}
 	uc.BumpProblemDetailVer(p.ID)
 	uc.progressMoveStatus(oldStatus, model.ProblemStatusCompleted)
@@ -2726,55 +2886,260 @@ func (uc *ProblemUseCase) ProgressPausedFetch() bool {
 // ResetAll 仅重置 AI 分析结果（保留 content_md 题面），清空 AI 队列并可选重新入队分析
 // 顺序必须是：暂停 → 清空队列 → 改 DB → 恢复暂停 → 再入队
 // 若在暂停期间入队，消费者会把消息 Ack 丢掉（只剩碰巧在恢复后取出的少数任务）。
+type resetMaintenancePayload struct {
+	Requeue bool `json:"requeue"`
+}
+
+func resetMaintenanceRequeue(pending *model.AbilityMaintenancePending, created, requested bool) (bool, error) {
+	if created || pending == nil || strings.TrimSpace(pending.Payload) == "" {
+		return requested, nil
+	}
+	var payload resetMaintenancePayload
+	if err := json.Unmarshal([]byte(pending.Payload), &payload); err != nil {
+		return false, err
+	}
+	return payload.Requeue, nil
+}
+
 func (uc *ProblemUseCase) ResetAll(requeue bool) (reset, enqueued, purgedFetch, purgedAnalyze int, err error) {
-	pipelineControl.SetAnalyzePaused(true)
-	purgedAnalyze, err = uc.purgeAnalyzeQueue()
+	ctx := context.Background()
+	requestedPayload, marshalErr := json.Marshal(resetMaintenancePayload{Requeue: requeue})
+	if marshalErr != nil {
+		err = marshalErr
+		return
+	}
+	pending, created, pendingErr := ensureAbilityMaintenancePending(ctx, uc.data.DB, model.AbilityMaintenancePending{
+		Scope: "global:reset", Operation: "reset", Payload: string(requestedPayload), TagsChanged: true, DifficultyChanged: true,
+	})
+	if pendingErr != nil {
+		err = pendingErr
+		return
+	}
+	requeue, err = resetMaintenanceRequeue(pending, created, requeue)
 	if err != nil {
+		return
+	}
+	pipelineControl.SetAnalyzePaused(true)
+	if pending.Phase == "intent" {
+		purgedAnalyze, err = uc.purgeAnalyzeQueue()
+		if err != nil {
+			pipelineControl.SetAnalyzePaused(false)
+			return
+		}
+		if err = advanceAbilityMaintenancePhase(ctx, uc.data.DB, pending, "queue_purged"); err != nil {
+			pipelineControl.SetAnalyzePaused(false)
+			return
+		}
+	}
+	if pending.Phase == "fence_finalized" {
+		claimed, claimErr := claimAbilityMaintenanceRelay(ctx, uc.data.DB, pending)
+		if claimErr != nil {
+			err = claimErr
+			pipelineControl.SetAnalyzePaused(false)
+			return
+		}
+		if !claimed {
+			pipelineControl.SetAnalyzePaused(false)
+			return
+		}
+		defer func() {
+			if releaseErr := releaseAbilityMaintenanceRelay(context.Background(), uc.data.DB, pending); releaseErr != nil {
+				log.Warnf("reset relay release scope=%s intent=%s: %v", pending.Scope, pending.OperationID, releaseErr)
+			}
+		}()
+		if err = uc.publishAbilityMaintenanceTargets(ctx, pending); err != nil {
+			pipelineControl.SetAnalyzePaused(false)
+			return
+		}
+		var consumed bool
+		consumed, err = uc.abilityMaintenanceTargetsConsumed(ctx, pending)
+		if err != nil || !consumed {
+			pipelineControl.SetAnalyzePaused(false)
+			return
+		}
 		pipelineControl.SetAnalyzePaused(false)
+		enqueued, err = uc.completeResetMaintenanceTail(ctx, pending, requeue, uc.enqueueAnalyze)
+		return
+	}
+	profileToken, fenceErr := beginGlobalProfileInvalidationForIntent(ctx, uc.data.RDB, pending.OperationID)
+	if fenceErr != nil {
+		err = fenceErr
+		pipelineControl.SetAnalyzePaused(false)
+		return
+	}
+	if claimErr := claimAbilityMaintenancePending(ctx, uc.data.DB, pending, profileToken.Owner); claimErr != nil {
+		err = errors.Join(claimErr, AbandonGlobalProfileInvalidation(context.Background(), uc.data.RDB, profileToken))
+		pipelineControl.SetAnalyzePaused(false)
+		return
+	}
+	workCtx := profileToken.Context()
+	validate := func() error {
+		return validateProfileInvalidation(workCtx, uc.data.RDB, profileGlobalGenerationKey, profileToken)
+	}
+	if validateErr := validate(); validateErr != nil {
+		err = errors.Join(validateErr, AbandonGlobalProfileInvalidation(context.Background(), uc.data.RDB, profileToken))
+		pipelineControl.SetAnalyzePaused(false)
+		return
+	}
+	abandon := func(cause error) error {
+		return errors.Join(cause, AbandonGlobalProfileInvalidation(context.Background(), uc.data.RDB, profileToken))
+	}
+	if pending.Phase == "derived_ready" {
+		if finishErr := FinishGlobalProfileInvalidation(workCtx, uc.data.RDB, profileToken); finishErr != nil {
+			err = abandon(finishErr)
+			pipelineControl.SetAnalyzePaused(false)
+			return
+		}
+		if err = advanceAbilityMaintenancePhase(ctx, uc.data.DB, pending, "fence_finalized"); err != nil {
+			pipelineControl.SetAnalyzePaused(false)
+			return
+		}
+		claimed, claimErr := claimAbilityMaintenanceRelay(ctx, uc.data.DB, pending)
+		if claimErr != nil {
+			err = claimErr
+			pipelineControl.SetAnalyzePaused(false)
+			return
+		}
+		if !claimed {
+			pipelineControl.SetAnalyzePaused(false)
+			return
+		}
+		defer func() {
+			if releaseErr := releaseAbilityMaintenanceRelay(context.Background(), uc.data.DB, pending); releaseErr != nil {
+				log.Warnf("reset relay release scope=%s intent=%s: %v", pending.Scope, pending.OperationID, releaseErr)
+			}
+		}()
+		if err = uc.publishAbilityMaintenanceTargets(ctx, pending); err != nil {
+			pipelineControl.SetAnalyzePaused(false)
+			return
+		}
+		var consumed bool
+		consumed, err = uc.abilityMaintenanceTargetsConsumed(ctx, pending)
+		if err != nil || !consumed {
+			pipelineControl.SetAnalyzePaused(false)
+			return
+		}
+		pipelineControl.SetAnalyzePaused(false)
+		enqueued, err = uc.completeResetMaintenanceTail(ctx, pending, requeue, uc.enqueueAnalyze)
 		return
 	}
 	// 清除分析字段，保留题面 content_md；有题面的回到 TAGGING，无题面保持 PENDING
-	// 1) 有题面：清标签/难度/解法，状态 TAGGING
-	res := uc.data.DB.Model(&model.Problem{}).
-		Where("status IN ?", []string{
-			model.ProblemStatusCompleted,
-			model.ProblemStatusTagging,
-			model.ProblemStatusFailed,
-		}).
-		Where("content_md IS NOT NULL AND content_md != ''").
-		Updates(map[string]interface{}{
-			"status":         model.ProblemStatusTagging,
-			"problem_type":   "",
-			"difficulty":     "",
-			"tags":           model.StringArray{},
-			"solutions_meta": model.SolutionsMeta{},
-			"error_msg":      "",
-		})
-	if res.Error != nil {
-		err = res.Error
+	if pending.Phase == "queue_purged" {
+		reset, err = resetProblemFactsWithPending(workCtx, uc.data.DB, pending)
+		if err != nil {
+			err = abandon(err)
+			pipelineControl.SetAnalyzePaused(false)
+			return
+		}
+	}
+	if pending.Phase == "facts" {
+		if uc.abilityStats == nil {
+			err = abandon(fmt.Errorf("ResetAll: ability refresher unavailable"))
+			pipelineControl.SetAnalyzePaused(false)
+			return
+		}
+		modelVersion, refreshErr := uc.refreshAbilityStatsForMaintenance(workCtx, pending)
+		if refreshErr != nil {
+			err = abandon(refreshErr)
+			pipelineControl.SetAnalyzePaused(false)
+			return
+		}
+		if validateErr := validate(); validateErr != nil {
+			err = abandon(validateErr)
+			pipelineControl.SetAnalyzePaused(false)
+			return
+		}
+		_ = modelVersion
+	}
+	if validateErr := validate(); validateErr != nil {
+		err = abandon(validateErr)
 		pipelineControl.SetAnalyzePaused(false)
 		return
 	}
-	reset = int(res.RowsAffected)
-
-	// 2) 无题面的失败/卡住：只清错误，不回删题面（本来就没有）
-	res2 := uc.data.DB.Model(&model.Problem{}).
-		Where("status IN ?", []string{model.ProblemStatusFailed, model.ProblemStatusFetching}).
-		Where("(content_md IS NULL OR content_md = '')").
-		Updates(map[string]interface{}{
-			"status":    model.ProblemStatusPending,
-			"error_msg": "",
-		})
-	if res2.Error == nil {
-		reset += int(res2.RowsAffected)
+	if pending.Phase == "model_ready" {
+		userIDs, listErr := uc.allCanonicalACUsers(workCtx)
+		if listErr != nil {
+			err = abandon(listErr)
+			pipelineControl.SetAnalyzePaused(false)
+			return
+		}
+		if stageErr := prepareAbilityMaintenanceRebuildTargets(workCtx, uc.data.DB, pending, userIDs); stageErr != nil {
+			err = abandon(stageErr)
+			pipelineControl.SetAnalyzePaused(false)
+			return
+		}
+	}
+	if pending.Phase == "targets_ready" {
+		if rebuildErr := rebuildPendingAbilityMaintenanceTargets(workCtx, uc.data.DB, pending, validate, func(userID int64) error {
+			return dal.RebuildUserTagACForUser(workCtx, uc.data.DB, userID)
+		}); rebuildErr != nil {
+			err = abandon(rebuildErr)
+			pipelineControl.SetAnalyzePaused(false)
+			return
+		}
+		if validateErr := validate(); validateErr != nil {
+			err = abandon(validateErr)
+			pipelineControl.SetAnalyzePaused(false)
+			return
+		}
+		if stageErr := stageRebuiltAbilityMaintenanceTargets(workCtx, uc.data.DB, pending); stageErr != nil {
+			err = abandon(stageErr)
+			pipelineControl.SetAnalyzePaused(false)
+			return
+		}
+	}
+	if finishErr := FinishGlobalProfileInvalidation(workCtx, uc.data.RDB, profileToken); finishErr != nil {
+		err = abandon(finishErr)
+		pipelineControl.SetAnalyzePaused(false)
+		return
+	}
+	if phaseErr := advanceAbilityMaintenancePhase(ctx, uc.data.DB, pending, "fence_finalized"); phaseErr != nil {
+		err = phaseErr
+		pipelineControl.SetAnalyzePaused(false)
+		return
+	}
+	claimed, claimErr := claimAbilityMaintenanceRelay(ctx, uc.data.DB, pending)
+	if claimErr != nil {
+		err = claimErr
+		pipelineControl.SetAnalyzePaused(false)
+		return
+	}
+	if !claimed {
+		pipelineControl.SetAnalyzePaused(false)
+		return
+	}
+	defer func() {
+		if releaseErr := releaseAbilityMaintenanceRelay(context.Background(), uc.data.DB, pending); releaseErr != nil {
+			log.Warnf("reset relay release scope=%s intent=%s: %v", pending.Scope, pending.OperationID, releaseErr)
+		}
+	}()
+	if relayErr := uc.publishAbilityMaintenanceTargets(ctx, pending); relayErr != nil {
+		err = relayErr
+		pipelineControl.SetAnalyzePaused(false)
+		return
+	}
+	consumed, consumedErr := uc.abilityMaintenanceTargetsConsumed(ctx, pending)
+	if consumedErr != nil {
+		err = consumedErr
+		pipelineControl.SetAnalyzePaused(false)
+		return
+	}
+	if !consumed {
+		pipelineControl.SetAnalyzePaused(false)
+		return
 	}
 
 	// 先恢复再入队，避免 paused 期间消息被 Ack 丢弃
 	pipelineControl.SetAnalyzePaused(false)
+	enqueued, err = uc.completeResetMaintenanceTail(ctx, pending, requeue, uc.enqueueAnalyze)
+	return
+}
 
+func (uc *ProblemUseCase) completeResetMaintenanceTail(ctx context.Context, pending *model.AbilityMaintenancePending, requeue bool, enqueue func(uint) error) (int, error) {
+	enqueued := 0
 	if requeue {
 		// 批量回写 last_submitted_at ← submit_logs.MAX(time)
-		_ = uc.data.DB.Exec(`
+		updateLastSubmittedSQL := `
 			UPDATE problems p
 			SET last_submitted_at = s.mx
 			FROM (
@@ -2785,7 +3150,19 @@ func (uc *ProblemUseCase) ResetAll(requeue bool) (reset, enqueued, purgedFetch, 
 			) s
 			WHERE p.id = s.problem_id
 			  AND (p.last_submitted_at IS NULL OR p.last_submitted_at < s.mx)
-		`).Error
+		`
+		if uc.data.DB.Dialector.Name() != "postgres" {
+			updateLastSubmittedSQL = `
+				UPDATE problems
+				SET last_submitted_at = (
+					SELECT MAX(submit_logs.time) FROM submit_logs WHERE submit_logs.problem_id = problems.id
+				)
+				WHERE EXISTS (SELECT 1 FROM submit_logs WHERE submit_logs.problem_id = problems.id)
+			`
+		}
+		if err := uc.data.DB.WithContext(ctx).Exec(updateLastSubmittedSQL).Error; err != nil {
+			return enqueued, err
+		}
 
 		// 仅：有题面 + TAGGING + submit_logs 近 6 月有提交（禁止 NULL 虚入队）
 		cutoff := time.Now().Add(-backfillWindow)
@@ -2795,15 +3172,86 @@ func (uc *ProblemUseCase) ResetAll(requeue bool) (reset, enqueued, purgedFetch, 
 			Where("content_md IS NOT NULL AND content_md != ''").
 			Where(recentClause, recentArgs...).
 			Order("last_submitted_at DESC NULLS LAST, id DESC")
-		_ = q.Find(&list).Error
-		for _, p := range list {
-			if e := uc.enqueueAnalyze(p.ID); e == nil {
-				enqueued++
-			}
+		if err := q.WithContext(ctx).Find(&list).Error; err != nil {
+			return enqueued, err
 		}
-		log.Infof("ResetAll: reset=%d analyze_enqueued=%d (enqueue after unpause)", reset, enqueued)
+		for _, p := range list {
+			if enqueue == nil {
+				return enqueued, fmt.Errorf("ResetAll: analyze publisher unavailable")
+			}
+			if err := enqueue(p.ID); err != nil {
+				return enqueued, err
+			}
+			enqueued++
+		}
+		log.Infof("ResetAll: analyze_enqueued=%d (enqueue after unpause)", enqueued)
 	}
-	return
+	if err := uc.completeAbilityMaintenanceTargets(ctx, pending); err != nil {
+		return enqueued, err
+	}
+	return enqueued, nil
+}
+
+func resetProblemFacts(ctx context.Context, db *gorm.DB) (reset int, err error) {
+	pending, _, err := ensureAbilityMaintenancePending(ctx, db, model.AbilityMaintenancePending{
+		Scope: "global:reset", Operation: "reset", TagsChanged: true, DifficultyChanged: true,
+	})
+	if err != nil {
+		return 0, err
+	}
+	if err := claimAbilityMaintenancePending(ctx, db, pending, uuid.NewString()); err != nil {
+		return 0, err
+	}
+	return resetProblemFactsWithPending(ctx, db, pending)
+}
+
+func resetProblemFactsWithPending(ctx context.Context, db *gorm.DB, pending *model.AbilityMaintenancePending) (reset int, err error) {
+	expected := *pending
+	txPending := expected
+	err = problemFactsTransaction(db.WithContext(ctx), func(tx *gorm.DB) error {
+		res := tx.Model(&model.Problem{}).
+			Where("status IN ?", []string{model.ProblemStatusCompleted, model.ProblemStatusTagging, model.ProblemStatusFailed}).
+			Where("content_md IS NOT NULL AND content_md != ''").
+			Updates(map[string]interface{}{
+				"status": model.ProblemStatusTagging, "problem_type": "", "difficulty": "",
+				"tags": model.StringArray{}, "solutions_meta": model.SolutionsMeta{}, "error_msg": "",
+			})
+		if res.Error != nil {
+			return res.Error
+		}
+		reset = int(res.RowsAffected)
+		res2 := tx.Model(&model.Problem{}).
+			Where("status IN ?", []string{model.ProblemStatusFailed, model.ProblemStatusFetching}).
+			Where("(content_md IS NULL OR content_md = '')").
+			Updates(map[string]interface{}{"status": model.ProblemStatusPending, "error_msg": ""})
+		if res2.Error != nil {
+			return res2.Error
+		}
+		reset += int(res2.RowsAffected)
+		if err := tx.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&model.ProblemTag{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&model.UserTagACSnapshot{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&model.UserTagAC{}).Error; err != nil {
+			return err
+		}
+		return markAbilityMaintenanceFacts(ctx, tx, &txPending, true, true)
+	})
+	if err == nil {
+		*pending = txPending
+		return reset, nil
+	}
+	stored, loadErr := loadAbilityMaintenancePending(context.Background(), db, expected.Scope)
+	if loadErr != nil {
+		return reset, errors.Join(err, loadErr)
+	}
+	if stored != nil && stored.OperationID == expected.OperationID && stored.Phase == "facts" && stored.Revision == expected.Revision+1 {
+		*pending = *stored
+		return reset, nil
+	}
+	return reset, err
 }
 
 func truncateErr(s string) string {

@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -30,6 +31,7 @@ import (
 	"github.com/go-kratos/kratos/v2/log"
 	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 var spiderPlatformWriteUnlockScript = redis.NewScript(`
@@ -44,6 +46,13 @@ var (
 	UpdateForbidden = errors.Forbidden("权限错误", "仅站点管理员可手动同步 OJ 数据")
 	RateLimitError  = errors.New(429, "TOO_MANY_REQUESTS", "请求过于频繁，请稍后再试")
 )
+
+func settleUnfinishedProfileInvalidation(mutationCommitted bool, finish, abandon func() error) error {
+	if mutationCommitted {
+		return abandon()
+	}
+	return finish()
+}
 
 type SpiderService struct {
 	spider.UnimplementedSpiderServer
@@ -227,37 +236,17 @@ func (s SpiderService) SetSpider(ctx context.Context, req *spider.SetSpiderReq) 
 	if !s.allow(ctx, ratelimit.SpiderSetKey(platformName, username), 30*time.Second) {
 		return nil, RateLimitError
 	}
-	platform := model.Platform{
-		UserID:   req.UserId,
-		Platform: platformName,
-		Username: username,
-	}
-	unlock, locked := trySpiderPlatformWriteLock(ctx, s.rdb, req.UserId, platformName)
-	if !locked {
-		return nil, errors.Conflict("绑定冲突", "该 OJ 正在同步，请稍后重试")
-	}
-	defer unlock()
-	if err := replaceSpiderBindingAfterGenerationBump(ctx, s.spider, s.db, platform); err != nil {
-		log.Errorf("SetSpider transaction failed: %v", err)
+	pending, err := s.prepareSpiderMaintenance(ctx, spiderSetMaintenanceScope(req.UserId, platformName), spiderMaintenanceSetBinding, spiderSetMaintenancePayload{
+		UserID: req.UserId, Platform: platformName, Username: username,
+	})
+	if err != nil {
+		log.Errorf("SetSpider prepare durable maintenance failed: %v", err)
 		return nil, InternalError
 	}
-	// 缓存与统计版本：立即让首页题量/热力读到重建后的数
-	if err := s.rdb.Del(ctx,
-		fmt.Sprintf("core:submit_log:user:%d", req.UserId),
-		fmt.Sprintf("user:%d:lastSubmitTime", req.UserId),
-		"core:platforms:bound_users:v1",
-		fmt.Sprintf("core:platforms:user:%d:v1", req.UserId),
-	).Err(); err != nil {
-		log.Errorf("SetSpider: redis del failed: %v", err)
+	if err := s.executeSetSpiderMaintenance(ctx, pending); err != nil {
+		log.Errorf("SetSpider durable maintenance failed: %v", err)
+		return nil, InternalError
 	}
-	_ = s.rdb.Incr(ctx, fmt.Sprintf("core:contest_log:user:%d:ver", req.UserId)).Err()
-	_ = s.rdb.Incr(ctx, fmt.Sprintf("statistic:user:%d:ver", req.UserId)).Err()
-	_ = s.rdb.Incr(ctx, "statistic:period:global:ver").Err()
-	// 强制允许本次入队（旧全量任务可能仍占 pending/inflight）
-	s.spider.ResetDedup(req.UserId, platformName)
-	// 只全量抓取刚绑定的这一平台，避免重绑 CF 时把其它 OJ 再扫一遍
-	// 后台入队：MQ confirm 可达秒级，绑定 HTTP 路径不阻塞
-	go s.spider.DoPlatform(req.UserId, platformName, true)
 	// 站管已暂停该 OJ：绑定照常保存，但提示用户同步暂时停用（DoPlatform 内部不会入队）
 	if task.IsPlatformPaused(s.rdb, platformName) {
 		return &spider.SetSpiderRep{
@@ -338,6 +327,29 @@ func deleteSpiderPlatformData(ctx context.Context, db *gorm.DB, userID int64, pl
 
 const purgeSubmitsConfirm = "PURGE_SUBMITS"
 
+var purgeSubmitTables = []string{
+	"submit_logs",
+	"daily_user_stats",
+	"user_ac_problems",
+	"user_ac_problem_days",
+	"contest_logs",
+	"contest_calendar_notify_logs",
+	"user_problem_status",
+	"user_tag_ac_snapshots",
+	"user_tag_ac",
+	"problem_ability_stats",
+	"ability_model_state",
+	"ability_profile_schedule_runs",
+}
+
+var purgeSubmitTableSet = func() map[string]struct{} {
+	out := make(map[string]struct{}, len(purgeSubmitTables))
+	for _, table := range purgeSubmitTables {
+		out[table] = struct{}{}
+	}
+	return out
+}()
+
 var purgeUserPlatforms = []string{
 	spiderregistry.AtCoder,
 	spiderregistry.CodeForces,
@@ -353,11 +365,21 @@ var purgeUserPlatforms = []string{
 func withPurgeUserPlatformGuards(
 	ctx context.Context,
 	platforms []string,
+	validate func(context.Context) error,
 	bump func(string) error,
 	lock func(context.Context, string) (func(), bool),
 	remove func() error,
 ) error {
+	validateStage := func() error {
+		if validate == nil {
+			return nil
+		}
+		return validate(ctx)
+	}
 	for _, platform := range platforms {
+		if err := validateStage(); err != nil {
+			return fmt.Errorf("validate profile fence before generation bump for %s: %w", platform, err)
+		}
 		if err := bump(platform); err != nil {
 			return fmt.Errorf("bump purge generation for %s: %w", platform, err)
 		}
@@ -369,6 +391,9 @@ func withPurgeUserPlatformGuards(
 		}
 	}()
 	for _, platform := range platforms {
+		if err := validateStage(); err != nil {
+			return fmt.Errorf("validate profile fence before write lock for %s: %w", platform, err)
+		}
 		unlock, ok := lock(ctx, platform)
 		if !ok {
 			if err := ctx.Err(); err != nil {
@@ -377,6 +402,9 @@ func withPurgeUserPlatformGuards(
 			return fmt.Errorf("acquire purge write lock for %s", platform)
 		}
 		unlocks = append(unlocks, unlock)
+	}
+	if err := validateStage(); err != nil {
+		return fmt.Errorf("validate profile fence before user purge: %w", err)
 	}
 	return remove()
 }
@@ -483,49 +511,47 @@ func (s SpiderService) PurgeSubmitsAndRecrawl(ctx context.Context, req *spider.P
 			defer func() { _ = s.rdb.Del(context.Background(), purgeLockKey).Err() }()
 		}
 	}
-
 	// 先统计行数再 TRUNCATE（硬删，最快且不留脏页）
-	countTable := func(name string) int64 {
+	countTable := func(name string) (int64, error) {
 		if !s.db.Migrator().HasTable(name) {
-			return 0
+			return 0, nil
 		}
 		var n int64
-		_ = s.db.WithContext(ctx).Table(name).Count(&n).Error
-		return n
+		if err := s.db.WithContext(ctx).Table(name).Count(&n).Error; err != nil {
+			return 0, err
+		}
+		return n, nil
 	}
-	deletedLogs := countTable("submit_logs")
-	deletedDaily := countTable("daily_user_stats")
-	deletedAc := countTable("user_ac_problems") + countTable("user_ac_problem_days")
-	deletedContests := countTable("contest_logs")
+	deletedLogs, err := countTable("submit_logs")
+	if err != nil {
+		return nil, InternalError
+	}
+	deletedDaily, err := countTable("daily_user_stats")
+	if err != nil {
+		return nil, InternalError
+	}
+	deletedAcProblems, err := countTable("user_ac_problems")
+	if err != nil {
+		return nil, InternalError
+	}
+	deletedAcDays, err := countTable("user_ac_problem_days")
+	if err != nil {
+		return nil, InternalError
+	}
+	deletedAc := deletedAcProblems + deletedAcDays
+	deletedContests, err := countTable("contest_logs")
+	if err != nil {
+		return nil, InternalError
+	}
+	pending, err := s.prepareSpiderMaintenance(ctx, spiderPurgeGlobalMaintenanceScope, spiderMaintenancePurgeGlobal, struct{}{})
+	if err != nil {
+		log.Errorf("purge prepare durable maintenance: %v", err)
+		return nil, InternalError
+	}
 
-	// 仅允许白名单表名，防注入
-	toTruncate := []string{
-		"submit_logs",
-		"daily_user_stats",
-		"user_ac_problems",
-		"user_ac_problem_days",
-		"contest_logs",
-		"contest_calendar_notify_logs",
-	}
-	var existing []string
-	for _, t := range toTruncate {
-		if s.db.Migrator().HasTable(t) {
-			existing = append(existing, t)
-		}
-	}
-	if len(existing) > 0 {
-		// TRUNCATE 硬删 + 重置序列
-		sql := "TRUNCATE TABLE " + strings.Join(existing, ", ") + " RESTART IDENTITY"
-		if err := s.db.WithContext(ctx).Exec(sql).Error; err != nil {
-			log.Errorf("purge TRUNCATE failed: %v", err)
-			// 回退分批 DELETE
-			for _, t := range existing {
-				if _, err := deleteAllInBatches(ctx, s.db, t, 5000); err != nil {
-					log.Errorf("purge delete %s: %v", t, err)
-					return nil, InternalError
-				}
-			}
-		}
+	if err := s.executePurgeGlobalMaintenance(ctx, pending); err != nil {
+		log.Errorf("purge durable maintenance: %v", err)
+		return nil, InternalError
 	}
 	var userIds []int64
 	if err := s.db.Model(&model.Platform{}).
@@ -534,12 +560,6 @@ func (s SpiderService) PurgeSubmitsAndRecrawl(ctx context.Context, req *spider.P
 		log.Errorf("purge recrawl list users: %v", err)
 		return nil, InternalError
 	}
-
-	// Redis：全局 ver + 每用户训练相关缓存/爬虫锁
-	s.purgeTrainingCaches(ctx, userIds)
-
-	// 全部入队全量重爬（写路径会重新灌 submit_logs + daily/user_ac）
-	go s.spider.DoBatch(context.Background(), userIds, true, 30, 200*time.Millisecond)
 
 	log.Warnf("ops purge-submits admin=%d logs=%d daily=%d ac=%d contests=%d enqueued=%d",
 		adminID, deletedLogs, deletedDaily, deletedAc, deletedContests, len(userIds))
@@ -560,14 +580,20 @@ func (s SpiderService) PurgeSubmitsAndRecrawl(ctx context.Context, req *spider.P
 }
 
 // purgeTrainingCaches 清训练相关 Redis，避免 purge 后脏缓存
-func (s SpiderService) purgeTrainingCaches(ctx context.Context, userIds []int64) {
+func (s SpiderService) purgeTrainingCaches(ctx context.Context, userIds []int64) error {
 	if s.rdb == nil {
-		return
+		return nil
 	}
-	_ = s.rdb.Incr(ctx, "statistic:heatmap:global:ver").Err()
-	_ = s.rdb.Incr(ctx, "statistic:period:global:ver").Err()
+	if err := s.rdb.Incr(ctx, "statistic:heatmap:global:ver").Err(); err != nil {
+		return err
+	}
+	if err := s.rdb.Incr(ctx, "statistic:period:global:ver").Err(); err != nil {
+		return err
+	}
 	// 提交库存缓存失效，避免 purge 后运维页仍显示旧规模
-	_ = s.rdb.Del(ctx, "ops:submit_inventory").Err()
+	if err := s.rdb.Del(ctx, "ops:submit_inventory").Err(); err != nil {
+		return err
+	}
 
 	plats := []string{"AtCoder", "Codeforces", "LuoGu", "NowCoder", "QOJ", "LeetCode", "CodeForces", "LOJ", "UOJ", "POJ"}
 	const chunk = 200
@@ -598,10 +624,11 @@ func (s SpiderService) purgeTrainingCaches(ctx context.Context, userIds []int64)
 		}
 		if len(keys) > 0 {
 			if err := s.rdb.Del(ctx, keys...).Err(); err != nil {
-				log.Warnf("purge redis del chunk: %v", err)
+				return err
 			}
 		}
 	}
+	return nil
 }
 
 // ClearPurgeLock 启动时清除运维 purge 锁（进程挂掉时可能残留）
@@ -616,28 +643,36 @@ func ClearPurgeLock(rdb *redis.Client) {
 
 // deleteAllInBatches 分批清空表（TRUNCATE 失败时回退）
 func deleteAllInBatches(ctx context.Context, db *gorm.DB, table string, batch int) (int64, error) {
+	return deleteAllInBatchesValidated(ctx, db, table, batch, nil)
+}
+
+func deleteAllInBatchesValidated(ctx context.Context, db *gorm.DB, table string, batch int, validate func(context.Context) error) (int64, error) {
 	if db == nil || table == "" {
 		return 0, nil
 	}
-	// 白名单
-	switch table {
-	case "submit_logs", "daily_user_stats",
-		"user_ac_problems", "user_ac_problem_days", "contest_logs",
-		"contest_calendar_notify_logs":
-	default:
+	if _, ok := purgeSubmitTableSet[table]; !ok {
 		return 0, fmt.Errorf("refuse delete table %s", table)
 	}
 	if batch <= 0 {
 		batch = 5000
 	}
 	var total int64
+	idColumn := "ctid"
+	if db.Dialector.Name() != "postgres" {
+		idColumn = "rowid"
+	}
 	for {
+		if validate != nil {
+			if err := validate(ctx); err != nil {
+				return total, err
+			}
+		}
 		res := db.WithContext(ctx).Exec(fmt.Sprintf(`
 			DELETE FROM %s
-			WHERE ctid IN (
-				SELECT ctid FROM %s LIMIT %d
+			WHERE %s IN (
+				SELECT %s FROM %s LIMIT %d
 			)
-		`, table, table, batch))
+		`, table, idColumn, idColumn, table, batch))
 		if res.Error != nil {
 			return total, res.Error
 		}
@@ -647,6 +682,104 @@ func deleteAllInBatches(ctx context.Context, db *gorm.DB, table string, batch in
 		}
 	}
 	return total, nil
+}
+
+func purgeSubmitData(ctx context.Context, db *gorm.DB, tables []string, validate func(context.Context) error, pending *model.AbilityMaintenancePending) (spiderMaintenanceTxOutcome, error) {
+	if db == nil {
+		return spiderMaintenanceUnknown, fmt.Errorf("purge training tables: nil database")
+	}
+	for _, table := range tables {
+		if _, ok := purgeSubmitTableSet[table]; !ok {
+			return spiderMaintenanceRolledBack, fmt.Errorf("refuse purge table %s", table)
+		}
+	}
+	run := func(truncate bool) (spiderMaintenanceTxOutcome, error) {
+		if validate != nil {
+			if err := validate(ctx); err != nil {
+				return spiderMaintenanceRolledBack, err
+			}
+		}
+		mutation := func(tx *gorm.DB) error {
+			var previous model.AbilityModelState
+			query := tx.Where("id = ?", 1)
+			if tx.Dialector.Name() == "postgres" {
+				query = query.Clauses(clause.Locking{Strength: "UPDATE"})
+			}
+			err := query.First(&previous).Error
+			if err != nil && err != gorm.ErrRecordNotFound {
+				return err
+			}
+			if truncate {
+				if err := tx.Exec("TRUNCATE TABLE " + strings.Join(tables, ", ") + " RESTART IDENTITY").Error; err != nil {
+					return err
+				}
+			} else {
+				for _, table := range tables {
+					if _, err := deleteAllInBatchesValidated(ctx, tx, table, 5000, validate); err != nil {
+						return err
+					}
+				}
+			}
+			if containsProfileEvidenceSourceTable(tables) {
+				if err := dal.BumpProfileEvidenceDataset(ctx, tx); err != nil {
+					return err
+				}
+			}
+			if containsString(tables, "ability_model_state") {
+				nextVersion, err := nextAbilityModelVersion(previous.ActiveVersion)
+				if err != nil {
+					return err
+				}
+				now := time.Now()
+				state := model.AbilityModelState{ID: 1, ActiveVersion: nextVersion, BuiltAt: now, UpdatedAt: now}
+				if err := tx.Create(&state).Error; err != nil {
+					return err
+				}
+			}
+			if pending != nil {
+				return markSpiderMaintenanceFacts(ctx, tx, pending)
+			}
+			return nil
+		}
+		if pending == nil {
+			if err := db.WithContext(ctx).Transaction(mutation); err != nil {
+				return spiderMaintenanceRolledBack, err
+			}
+			return spiderMaintenanceCommitted, nil
+		}
+		return runSpiderMaintenanceFactsTransaction(ctx, db, pending, mutation)
+	}
+	outcome, err := run(true)
+	if outcome == spiderMaintenanceCommitted {
+		return outcome, nil
+	}
+	if outcome == spiderMaintenanceUnknown {
+		return outcome, err
+	}
+	if err != nil {
+		log.Warnf("purge TRUNCATE failed, falling back to transactional DELETE: %v", err)
+	}
+	return run(false)
+}
+
+func nextAbilityModelVersion(active uint64) (uint64, error) {
+	if active >= uint64(math.MaxInt64) {
+		return 0, fmt.Errorf("ability model version exhausted")
+	}
+	return active + 1, nil
+}
+
+func containsProfileEvidenceSourceTable(tables []string) bool {
+	return containsString(tables, "submit_logs") || containsString(tables, "user_ac_problems") || containsString(tables, "platforms")
+}
+
+func containsString(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
 }
 
 // EnqueueUserSpider 服务间入队（休眠唤醒等）；无站管鉴权
@@ -668,41 +801,62 @@ func (s SpiderService) PurgeUserData(ctx context.Context, req *spider.PurgeUserD
 		return &spider.PurgeUserDataRes{Code: 1, Message: "用户ID无效"}, nil
 	}
 	uid := req.UserId
-	err := withPurgeUserPlatformGuards(ctx, purgeUserPlatforms,
-		func(platform string) error {
-			_, err := s.spider.BumpGeneration(uid, platform)
-			return err
-		},
-		func(lockCtx context.Context, platform string) (func(), bool) {
-			return trySpiderPlatformWriteLock(lockCtx, s.rdb, uid, platform)
-		},
-		func() error { return s.purgeUserDataLocked(ctx, uid) },
-	)
+	pending, err := s.prepareSpiderMaintenance(ctx, spiderPurgeUserMaintenanceScope(uid), spiderMaintenancePurgeUser, spiderPurgeUserMaintenancePayload{UserID: uid})
 	if err != nil {
-		log.Errorf("PurgeUserData: guard/delete user=%d: %v", uid, err)
-		if ctx.Err() != nil {
-			return nil, errors.Conflict("删除冲突", "该用户的 OJ 数据正在同步，请稍后重试")
-		}
+		log.Errorf("PurgeUserData: prepare durable maintenance user=%d: %v", uid, err)
+		return nil, InternalError
+	}
+	if err := s.executePurgeUserMaintenance(ctx, pending); err != nil {
+		log.Errorf("PurgeUserData: durable maintenance user=%d: %v", uid, err)
 		return nil, InternalError
 	}
 	return &spider.PurgeUserDataRes{Code: 0, Message: "已清空该用户的训练与绑定数据"}, nil
 }
 
-func (s SpiderService) purgeUserDataLocked(ctx context.Context, uid int64) error {
-	if err := s.db.WithContext(ctx).Where("user_id = ?", uid).Delete(&model.Platform{}).Error; err != nil {
-		return fmt.Errorf("platform: %w", err)
+func (s SpiderService) purgeUserDataLocked(ctx context.Context, uid int64, validate func(context.Context) error) (bool, error) {
+	validateStage := func() error {
+		if validate == nil {
+			return nil
+		}
+		return validate(ctx)
 	}
-	if err := s.db.WithContext(ctx).Where("user_id = ?", uid).Delete(&model.SubmitLog{}).Error; err != nil {
-		return fmt.Errorf("submit_log: %w", err)
+	if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := validateStage(); err != nil {
+			return err
+		}
+		if err := tx.Where("user_id = ?", uid).Delete(&model.Platform{}).Error; err != nil {
+			return fmt.Errorf("platform: %w", err)
+		}
+		if err := validateStage(); err != nil {
+			return err
+		}
+		if err := tx.Where("user_id = ?", uid).Delete(&model.SubmitLog{}).Error; err != nil {
+			return fmt.Errorf("submit_log: %w", err)
+		}
+		if err := validateStage(); err != nil {
+			return err
+		}
+		if err := tx.Where("user_id = ?", uid).Delete(&model.ContestLog{}).Error; err != nil {
+			return fmt.Errorf("contest_log: %w", err)
+		}
+		if err := validateStage(); err != nil {
+			return err
+		}
+		if err := dal.DeleteUserPreagg(ctx, tx, uid); err != nil {
+			return fmt.Errorf("preagg: %w", err)
+		}
+		if err := validateStage(); err != nil {
+			return err
+		}
+		if err := purgeSpiderRepairStates(ctx, tx, uid); err != nil {
+			return fmt.Errorf("spider repair state: %w", err)
+		}
+		return validateStage()
+	}); err != nil {
+		return false, err
 	}
-	if err := s.db.WithContext(ctx).Where("user_id = ?", uid).Delete(&model.ContestLog{}).Error; err != nil {
-		return fmt.Errorf("contest_log: %w", err)
-	}
-	if err := dal.DeleteUserPreagg(ctx, s.db, uid); err != nil {
-		return fmt.Errorf("preagg: %w", err)
-	}
-	if err := purgeSpiderRepairStates(ctx, s.db, uid); err != nil {
-		return fmt.Errorf("spider repair state: %w", err)
+	if err := validateStage(); err != nil {
+		return true, err
 	}
 	// 缓存 / 爬虫 inflight / 上次同步
 	keys := []string{
@@ -710,7 +864,6 @@ func (s SpiderService) purgeUserDataLocked(ctx context.Context, uid int64) error
 		fmt.Sprintf("spider:pending:%d", uid),
 		fmt.Sprintf("spider:inflight:%d", uid),
 		fmt.Sprintf("spider:last_ok:%d", uid),
-		fmt.Sprintf("user:%d:profile", uid),
 		fmt.Sprintf("statistic:user:%d:ver", uid),
 		"core:platforms:bound_users:v1",
 		fmt.Sprintf("core:platforms:user:%d:v1", uid),
@@ -718,15 +871,21 @@ func (s SpiderService) purgeUserDataLocked(ctx context.Context, uid int64) error
 	if err := s.rdb.Del(ctx, keys...).Err(); err != nil {
 		log.Warnf("PurgeUserData: redis del user=%d: %v", uid, err)
 	}
+	if err := validateStage(); err != nil {
+		return true, err
+	}
 	_ = s.rdb.Incr(ctx, "statistic:period:global:ver").Err()
 	// 按平台清除任务去重状态；写锁由 owner-safe unlock 释放，代数必须保留以拦截旧任务。
 	for _, p := range purgeUserPlatforms {
+		if err := validateStage(); err != nil {
+			return true, err
+		}
 		_ = s.rdb.Del(ctx,
 			fmt.Sprintf("spider:pending:%d:%s", uid, p),
 			fmt.Sprintf("spider:inflight:%d:%s", uid, p),
 		).Err()
 	}
-	return nil
+	return true, nil
 }
 
 func purgeSpiderRepairStates(ctx context.Context, db *gorm.DB, userID int64) error {
@@ -738,7 +897,7 @@ func NewSpiderService(data *data.Data, spider *task.SpiderTask, reg *discovery.R
 	if data != nil {
 		ClearPurgeLock(data.RDB)
 	}
-	return &SpiderService{
+	service := &SpiderService{
 		db:            data.DB,
 		rdb:           data.RDB,
 		spider:        spider,
@@ -746,6 +905,9 @@ func NewSpiderService(data *data.Data, spider *task.SpiderTask, reg *discovery.R
 		luoguImporter: importer,
 		luoguClock:    realLuoguSyncClock{},
 	}
+	go service.runLuoguCleanupRecovery()
+	go service.runSpiderMaintenanceRecovery()
+	return service
 }
 
 // ojCap 单个 OJ 的爬虫能力（提交/题库/比赛日历/全局账号）

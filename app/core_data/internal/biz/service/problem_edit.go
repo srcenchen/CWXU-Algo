@@ -2,17 +2,25 @@ package service
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
+	"time"
 
+	"cwxu-algo/app/common/event"
 	"cwxu-algo/app/common/mail"
 	"cwxu-algo/app/common/mailqueue"
 	"cwxu-algo/app/common/notify"
 	"cwxu-algo/app/core_data/internal/data/dal"
 	"cwxu-algo/app/core_data/internal/data/model"
+	"cwxu-algo/app/core_data/task"
 
 	"github.com/go-kratos/kratos/v2/log"
+	"github.com/google/uuid"
+	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // normalizeEditTags 去空白、去重、限长
@@ -43,6 +51,1023 @@ func nonEmptyTags(tags model.StringArray) []string {
 	return normalizeEditTags([]string(tags))
 }
 
+type userProfileInvalidationToken struct {
+	userID int64
+	token  ProfileInvalidationToken
+}
+
+const problemFactsDirtyPrefix = "ability_facts_dirty:"
+
+var problemFactsTransaction = func(db *gorm.DB, fn func(*gorm.DB) error) error {
+	return db.Transaction(fn)
+}
+
+func problemFactsDirtyFlags(message string) (tags, difficulty bool) {
+	message = strings.TrimSpace(message)
+	if !strings.HasPrefix(message, problemFactsDirtyPrefix) {
+		return false, false
+	}
+	kind := strings.TrimPrefix(message, problemFactsDirtyPrefix)
+	return strings.Contains(kind, "tags"), strings.Contains(kind, "difficulty")
+}
+
+func (uc *ProblemUseCase) markProblemFactsDirty(ctx context.Context, pending *model.AbilityMaintenancePending, problemID uint, tagsChanged, difficultyChanged bool) error {
+	if pending == nil {
+		return fmt.Errorf("problem facts dirty: missing maintenance owner")
+	}
+	parts := make([]string, 0, 2)
+	if tagsChanged {
+		parts = append(parts, "tags")
+	}
+	if difficultyChanged {
+		parts = append(parts, "difficulty")
+	}
+	if len(parts) == 0 {
+		parts = append(parts, "profile")
+	}
+	expected := *pending
+	return uc.data.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := lockAbilityMaintenanceParent(ctx, tx, &expected); err != nil {
+			return err
+		}
+		res := tx.Model(&model.Problem{}).Where("id = ?", problemID).Updates(map[string]interface{}{
+			"status": model.ProblemStatusTagging, "error_msg": problemFactsDirtyPrefix + strings.Join(parts, "+"),
+		})
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected != 1 {
+			return fmt.Errorf("problem facts dirty: expected one problem row, updated %d", res.RowsAffected)
+		}
+		return nil
+	})
+}
+
+func problemMaintenanceScope(problemID uint) string {
+	return fmt.Sprintf("problem:%d", problemID)
+}
+
+type problemMaintenancePayload struct {
+	Updates           map[string]interface{} `json:"updates"`
+	Tags              []string               `json:"tags"`
+	TagsChanged       bool                   `json:"tagsChanged"`
+	DifficultyChanged bool                   `json:"difficultyChanged"`
+}
+
+func decodeProblemMaintenancePayload(raw string) (problemMaintenancePayload, error) {
+	var payload problemMaintenancePayload
+	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+		return payload, err
+	}
+	if payload.Updates == nil {
+		payload.Updates = map[string]interface{}{}
+	}
+	if _, ok := payload.Updates["tags"]; ok {
+		payload.Updates["tags"] = model.StringArray(payload.Tags)
+	}
+	return payload, nil
+}
+
+func ensureAbilityMaintenancePending(ctx context.Context, tx *gorm.DB, pending model.AbilityMaintenancePending) (*model.AbilityMaintenancePending, bool, error) {
+	if tx == nil || strings.TrimSpace(pending.Scope) == "" {
+		return nil, false, fmt.Errorf("invalid ability maintenance pending")
+	}
+	if pending.OperationID == "" {
+		pending.OperationID = uuid.NewString()
+	}
+	if pending.Phase == "" {
+		pending.Phase = "intent"
+	}
+	if pending.Revision == 0 {
+		pending.Revision = 1
+	}
+	res := tx.WithContext(ctx).Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "scope"}}, DoNothing: true}).Create(&pending)
+	if res.Error != nil {
+		return nil, false, res.Error
+	}
+	if res.RowsAffected == 1 {
+		return &pending, true, nil
+	}
+	existing, err := loadAbilityMaintenancePending(ctx, tx, pending.Scope)
+	return existing, false, err
+}
+
+func claimAbilityMaintenancePending(ctx context.Context, db *gorm.DB, pending *model.AbilityMaintenancePending, owner string) error {
+	if pending == nil || owner == "" {
+		return fmt.Errorf("invalid ability maintenance owner claim")
+	}
+	res := db.WithContext(ctx).Model(&model.AbilityMaintenancePending{}).
+		Where("scope = ? AND operation_id = ? AND revision = ?", pending.Scope, pending.OperationID, pending.Revision).
+		Updates(map[string]interface{}{"lease_owner": owner, "revision": gorm.Expr("revision + 1"), "updated_at": time.Now()})
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected != 1 {
+		return fmt.Errorf("ability maintenance owner changed")
+	}
+	pending.LeaseOwner = owner
+	pending.Revision++
+	return nil
+}
+
+func markAbilityMaintenanceFacts(ctx context.Context, tx *gorm.DB, pending *model.AbilityMaintenancePending, tagsChanged, difficultyChanged bool) error {
+	res := tx.WithContext(ctx).Model(&model.AbilityMaintenancePending{}).
+		Where("scope = ? AND operation_id = ? AND lease_owner = ? AND revision = ?", pending.Scope, pending.OperationID, pending.LeaseOwner, pending.Revision).
+		Updates(map[string]interface{}{
+			"phase": "facts", "tags_changed": tagsChanged, "difficulty_changed": difficultyChanged,
+			"revision": gorm.Expr("revision + 1"), "updated_at": time.Now(),
+		})
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected != 1 {
+		return fmt.Errorf("ability maintenance fact owner changed")
+	}
+	pending.Phase = "facts"
+	pending.TagsChanged = tagsChanged
+	pending.DifficultyChanged = difficultyChanged
+	pending.Revision++
+	return nil
+}
+
+func writeAbilityMaintenanceModelReady(ctx context.Context, db *gorm.DB, pending model.AbilityMaintenancePending, modelVersion uint64) error {
+	if db == nil || modelVersion == 0 {
+		return fmt.Errorf("invalid ability maintenance model ready transition")
+	}
+	res := db.WithContext(ctx).Model(&model.AbilityMaintenancePending{}).
+		Where("scope = ? AND operation_id = ? AND lease_owner = ? AND revision = ? AND phase = ?", pending.Scope, pending.OperationID, pending.LeaseOwner, pending.Revision, "facts").
+		Updates(map[string]interface{}{
+			"phase": "model_ready", "target_model_version": modelVersion,
+			"revision": gorm.Expr("revision + 1"), "updated_at": time.Now(),
+		})
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected != 1 {
+		return fmt.Errorf("ability maintenance model phase owner changed")
+	}
+	return nil
+}
+
+func (uc *ProblemUseCase) refreshAbilityStatsForMaintenance(ctx context.Context, pending *model.AbilityMaintenancePending) (uint64, error) {
+	if uc == nil || uc.abilityStats == nil || pending == nil {
+		return 0, fmt.Errorf("ability maintenance: refresher unavailable")
+	}
+	refresher, ok := uc.abilityStats.(task.AbilityStatsMaintenanceRefresher)
+	if !ok {
+		return 0, fmt.Errorf("ability maintenance: atomic refresher unavailable")
+	}
+	expected := *pending
+	version, refreshErr := refresher.RefreshForMaintenance(ctx, func(callbackCtx context.Context, tx *gorm.DB, modelVersion uint64) error {
+		if tx == nil {
+			tx = uc.data.DB
+		}
+		return writeAbilityMaintenanceModelReady(callbackCtx, tx, expected, modelVersion)
+	})
+	stored, loadErr := loadAbilityMaintenancePending(context.Background(), uc.data.DB, expected.Scope)
+	if loadErr != nil {
+		return 0, errors.Join(refreshErr, loadErr)
+	}
+	if stored != nil && stored.OperationID == expected.OperationID && stored.Phase == "model_ready" && stored.Revision == expected.Revision+1 && stored.TargetModelVersion > 0 {
+		*pending = *stored
+		return stored.TargetModelVersion, nil
+	}
+	if refreshErr != nil {
+		return 0, refreshErr
+	}
+	return version, fmt.Errorf("ability maintenance: model switch committed without durable MODEL_READY")
+}
+
+func loadAbilityMaintenancePending(ctx context.Context, db *gorm.DB, scope string) (*model.AbilityMaintenancePending, error) {
+	if db == nil {
+		return nil, fmt.Errorf("ability maintenance: nil database")
+	}
+	if !db.Migrator().HasTable(&model.AbilityMaintenancePending{}) {
+		return nil, nil
+	}
+	var pending model.AbilityMaintenancePending
+	err := db.WithContext(ctx).Where("scope = ?", scope).First(&pending).Error
+	if err == gorm.ErrRecordNotFound {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &pending, nil
+}
+
+func clearAbilityMaintenancePending(ctx context.Context, db *gorm.DB, pending *model.AbilityMaintenancePending) error {
+	if pending == nil {
+		return fmt.Errorf("invalid ability maintenance clear")
+	}
+	res := db.WithContext(ctx).Where("scope = ? AND operation_id = ? AND lease_owner = ? AND revision = ?", pending.Scope, pending.OperationID, pending.LeaseOwner, pending.Revision).
+		Delete(&model.AbilityMaintenancePending{})
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected != 1 {
+		return fmt.Errorf("ability maintenance clear owner changed")
+	}
+	return nil
+}
+
+func advanceAbilityMaintenancePhase(ctx context.Context, db *gorm.DB, pending *model.AbilityMaintenancePending, phase string) error {
+	res := db.WithContext(ctx).Model(&model.AbilityMaintenancePending{}).
+		Where("scope = ? AND operation_id = ? AND revision = ? AND lease_owner = ?", pending.Scope, pending.OperationID, pending.Revision, pending.LeaseOwner).
+		Updates(map[string]interface{}{"phase": phase, "revision": gorm.Expr("revision + 1"), "updated_at": time.Now()})
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected != 1 {
+		return fmt.Errorf("ability maintenance phase owner changed")
+	}
+	pending.Phase = phase
+	pending.Revision++
+	return nil
+}
+
+func lockAbilityMaintenanceParent(ctx context.Context, tx *gorm.DB, expected *model.AbilityMaintenancePending) error {
+	if tx == nil || expected == nil {
+		return fmt.Errorf("ability maintenance: invalid parent owner")
+	}
+	var current model.AbilityMaintenancePending
+	err := tx.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("scope = ? AND operation_id = ? AND lease_owner = ? AND revision = ? AND phase = ?", expected.Scope, expected.OperationID, expected.LeaseOwner, expected.Revision, expected.Phase).
+		First(&current).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return fmt.Errorf("ability maintenance parent owner changed")
+	}
+	return err
+}
+
+// AdvanceAbilityMaintenanceTarget binds a target transition to the exact
+// current parent attempt. A takeover increments parent revision, so an old
+// owner can never commit progress after the new owner has claimed the intent.
+func AdvanceAbilityMaintenanceTarget(ctx context.Context, db *gorm.DB, pending *model.AbilityMaintenancePending, target *model.AbilityMaintenanceTarget, nextTargetState, nextParentPhase, messagePayload string) error {
+	if db == nil || pending == nil || target == nil || nextTargetState == "" {
+		return fmt.Errorf("ability maintenance: invalid target transition")
+	}
+	expectedParent := *pending
+	expectedTarget := *target
+	err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := lockAbilityMaintenanceParent(ctx, tx, &expectedParent); err != nil {
+			return err
+		}
+		updates := map[string]interface{}{
+			"state": nextTargetState, "revision": gorm.Expr("revision + 1"), "updated_at": time.Now(),
+		}
+		if messagePayload != "" {
+			updates["message_payload"] = messagePayload
+		}
+		res := tx.Model(&model.AbilityMaintenanceTarget{}).
+			Where("intent_id = ? AND user_id = ? AND revision = ? AND state = ?", expectedTarget.IntentID, expectedTarget.UserID, expectedTarget.Revision, expectedTarget.State).
+			Updates(updates)
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected != 1 {
+			return fmt.Errorf("ability maintenance target owner changed")
+		}
+		if nextParentPhase != "" {
+			res = tx.Model(&model.AbilityMaintenancePending{}).
+				Where("scope = ? AND operation_id = ? AND lease_owner = ? AND revision = ? AND phase = ?", expectedParent.Scope, expectedParent.OperationID, expectedParent.LeaseOwner, expectedParent.Revision, expectedParent.Phase).
+				Updates(map[string]interface{}{"phase": nextParentPhase, "revision": gorm.Expr("revision + 1"), "updated_at": time.Now()})
+			if res.Error != nil {
+				return res.Error
+			}
+			if res.RowsAffected != 1 {
+				return fmt.Errorf("ability maintenance phase owner changed")
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	target.State = nextTargetState
+	target.Revision++
+	if messagePayload != "" {
+		target.MessagePayload = messagePayload
+	}
+	if nextParentPhase != "" {
+		pending.Phase = nextParentPhase
+		pending.Revision++
+	}
+	return nil
+}
+
+func prepareAbilityMaintenanceRebuildTargets(ctx context.Context, db *gorm.DB, pending *model.AbilityMaintenancePending, userIDs []int64) error {
+	expected := *pending
+	next := expected
+	err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := lockAbilityMaintenanceParent(ctx, tx, &expected); err != nil {
+			return err
+		}
+		for _, userID := range userIDs {
+			target := model.AbilityMaintenanceTarget{IntentID: pending.OperationID, UserID: userID, Revision: 1, State: "pending"}
+			if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&target).Error; err != nil {
+				return err
+			}
+		}
+		return advanceAbilityMaintenancePhase(ctx, tx, &next, "targets_ready")
+	})
+	if err == nil {
+		*pending = next
+	}
+	return err
+}
+
+func rebuildPendingAbilityMaintenanceTargets(ctx context.Context, db *gorm.DB, pending *model.AbilityMaintenancePending, validate func() error, rebuild func(int64) error) error {
+	if pending == nil || rebuild == nil {
+		return fmt.Errorf("ability maintenance: invalid target rebuild")
+	}
+	var targets []model.AbilityMaintenanceTarget
+	if err := db.WithContext(ctx).Where("intent_id = ? AND state = ?", pending.OperationID, "pending").Order("user_id ASC").Find(&targets).Error; err != nil {
+		return err
+	}
+	for i := range targets {
+		if validate != nil {
+			if err := validate(); err != nil {
+				return err
+			}
+		}
+		if err := rebuild(targets[i].UserID); err != nil {
+			return err
+		}
+		if validate != nil {
+			if err := validate(); err != nil {
+				return err
+			}
+		}
+		if err := AdvanceAbilityMaintenanceTarget(ctx, db, pending, &targets[i], "rebuilt", "", ""); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func stageRebuiltAbilityMaintenanceTargets(ctx context.Context, db *gorm.DB, pending *model.AbilityMaintenancePending) error {
+	expected := *pending
+	next := expected
+	err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := lockAbilityMaintenanceParent(ctx, tx, &expected); err != nil {
+			return err
+		}
+		var remaining int64
+		if err := tx.Model(&model.AbilityMaintenanceTarget{}).Where("intent_id = ? AND state <> ?", pending.OperationID, "rebuilt").Count(&remaining).Error; err != nil {
+			return err
+		}
+		if remaining != 0 {
+			return fmt.Errorf("ability maintenance targets remain unrebuilt")
+		}
+		var targets []model.AbilityMaintenanceTarget
+		if err := tx.Where("intent_id = ? AND state = ?", pending.OperationID, "rebuilt").Order("user_id ASC").Find(&targets).Error; err != nil {
+			return err
+		}
+		for i := range targets {
+			payload, err := json.Marshal(event.UserProfileEvent{UserId: targets[i].UserID, Force: true, IntentID: pending.OperationID})
+			if err != nil {
+				return err
+			}
+			res := tx.Model(&model.AbilityMaintenanceTarget{}).
+				Where("intent_id = ? AND user_id = ? AND revision = ? AND state = ?", targets[i].IntentID, targets[i].UserID, targets[i].Revision, "rebuilt").
+				Updates(map[string]interface{}{
+					"state": "outbox_ready", "message_payload": string(payload),
+					"revision": gorm.Expr("revision + 1"), "updated_at": time.Now(),
+				})
+			if res.Error != nil {
+				return res.Error
+			}
+			if res.RowsAffected != 1 {
+				return fmt.Errorf("ability maintenance target stage owner changed")
+			}
+		}
+		return advanceAbilityMaintenancePhase(ctx, tx, &next, "derived_ready")
+	})
+	if err == nil {
+		*pending = next
+	}
+	return err
+}
+
+const abilityMaintenanceDeliveryLease = 24 * time.Hour
+
+const abilityMaintenanceRelayLease = 5 * time.Minute
+
+// claimAbilityMaintenanceRelay serializes the MQ publication pass for one
+// durable parent. The revision fence prevents a stale scanner from publishing
+// the same ready target after another scanner has acquired the relay lease.
+func claimAbilityMaintenanceRelay(ctx context.Context, db *gorm.DB, pending *model.AbilityMaintenancePending) (bool, error) {
+	if db == nil || pending == nil {
+		return false, fmt.Errorf("invalid ability maintenance relay lease")
+	}
+	now := time.Now()
+	owner := uuid.NewString()
+	res := db.WithContext(ctx).Model(&model.AbilityMaintenancePending{}).
+		Where("scope = ? AND operation_id = ? AND revision = ?", pending.Scope, pending.OperationID, pending.Revision).
+		Where("relay_lease_until IS NULL OR relay_lease_until <= ?", now).
+		Updates(map[string]interface{}{
+			"relay_lease_owner": owner, "relay_lease_until": now.Add(abilityMaintenanceRelayLease),
+			"revision": gorm.Expr("revision + 1"), "updated_at": now,
+		})
+	if res.Error != nil {
+		return false, res.Error
+	}
+	if res.RowsAffected == 0 {
+		return false, nil
+	}
+	pending.RelayLeaseOwner = owner
+	pending.RelayLeaseUntil = now.Add(abilityMaintenanceRelayLease)
+	pending.Revision++
+	return true, nil
+}
+
+func releaseAbilityMaintenanceRelay(ctx context.Context, db *gorm.DB, pending *model.AbilityMaintenancePending) error {
+	if db == nil || pending == nil || pending.RelayLeaseOwner == "" {
+		return nil
+	}
+	res := db.WithContext(ctx).Model(&model.AbilityMaintenancePending{}).
+		Where("scope = ? AND operation_id = ? AND revision = ? AND relay_lease_owner = ?", pending.Scope, pending.OperationID, pending.Revision, pending.RelayLeaseOwner).
+		Updates(map[string]interface{}{"relay_lease_owner": "", "relay_lease_until": time.Time{}, "updated_at": time.Now()})
+	if res.Error != nil {
+		return res.Error
+	}
+	pending.RelayLeaseOwner = ""
+	pending.RelayLeaseUntil = time.Time{}
+	return nil
+}
+
+// renewAbilityMaintenanceRelay is called before every target publish. It
+// proves the scanner still owns the exact parent revision and extends only its
+// own short lease; a takeover stops the old scanner before the next message.
+func renewAbilityMaintenanceRelay(ctx context.Context, db *gorm.DB, pending *model.AbilityMaintenancePending) error {
+	if db == nil || pending == nil || pending.RelayLeaseOwner == "" {
+		return fmt.Errorf("invalid ability maintenance relay owner")
+	}
+	now := time.Now()
+	res := db.WithContext(ctx).Model(&model.AbilityMaintenancePending{}).
+		Where("scope = ? AND operation_id = ? AND revision = ? AND relay_lease_owner = ? AND relay_lease_until > ?", pending.Scope, pending.OperationID, pending.Revision, pending.RelayLeaseOwner, now).
+		Updates(map[string]interface{}{"relay_lease_until": now.Add(abilityMaintenanceRelayLease), "updated_at": now})
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected != 1 {
+		return fmt.Errorf("ability maintenance relay owner changed")
+	}
+	pending.RelayLeaseUntil = now.Add(abilityMaintenanceRelayLease)
+	return nil
+}
+
+func (uc *ProblemUseCase) publishAbilityMaintenanceTargets(ctx context.Context, pending *model.AbilityMaintenancePending) error {
+	var targets []model.AbilityMaintenanceTarget
+	now := time.Now()
+	if err := uc.data.DB.WithContext(ctx).
+		Where("intent_id = ? AND (state = ? OR (state = ? AND next_retry_at <= ?))", pending.OperationID, "outbox_ready", "delivered", now).
+		Order("user_id ASC").Find(&targets).Error; err != nil {
+		return err
+	}
+	if len(targets) > 0 && uc.profileTask == nil {
+		return fmt.Errorf("ability maintenance: profile publisher unavailable")
+	}
+	for i := range targets {
+		if pending.RelayLeaseOwner != "" {
+			if err := renewAbilityMaintenanceRelay(ctx, uc.data.DB, pending); err != nil {
+				return err
+			}
+		}
+		result := uc.profileTask.DoMaintenanceForce(targets[i].UserID, targets[i].IntentID)
+		if result.Failed {
+			res := uc.data.DB.WithContext(ctx).Model(&model.AbilityMaintenanceTarget{}).
+				Where("intent_id = ? AND user_id = ? AND revision = ? AND state = ?", targets[i].IntentID, targets[i].UserID, targets[i].Revision, targets[i].State).
+				Updates(map[string]interface{}{
+					"publish_attempts": gorm.Expr("publish_attempts + 1"), "last_error": "profile publish failed",
+					"next_retry_at": now.Add(time.Minute), "revision": gorm.Expr("revision + 1"),
+				})
+			if res.Error != nil {
+				return res.Error
+			}
+			if res.RowsAffected != 1 {
+				var current model.AbilityMaintenanceTarget
+				if err := uc.data.DB.WithContext(ctx).First(&current, "intent_id = ? AND user_id = ?", targets[i].IntentID, targets[i].UserID).Error; err != nil {
+					return err
+				}
+				if current.State != "consumed" {
+					return fmt.Errorf("ability maintenance target retry owner changed")
+				}
+			}
+			if res.RowsAffected == 1 {
+				return fmt.Errorf("ability maintenance: profile publish failed for user %d", targets[i].UserID)
+			}
+			continue
+		}
+		res := uc.data.DB.WithContext(ctx).Model(&model.AbilityMaintenanceTarget{}).
+			Where("intent_id = ? AND user_id = ? AND revision = ? AND state = ?", targets[i].IntentID, targets[i].UserID, targets[i].Revision, targets[i].State).
+			Updates(map[string]interface{}{
+				"state": "delivered", "publish_attempts": gorm.Expr("publish_attempts + 1"), "last_error": "",
+				"next_retry_at": now.Add(abilityMaintenanceDeliveryLease), "revision": gorm.Expr("revision + 1"), "updated_at": now,
+			})
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected != 1 {
+			var current model.AbilityMaintenanceTarget
+			if err := uc.data.DB.WithContext(ctx).First(&current, "intent_id = ? AND user_id = ?", targets[i].IntentID, targets[i].UserID).Error; err != nil {
+				return err
+			}
+			if current.State != "consumed" {
+				return fmt.Errorf("ability maintenance target owner changed")
+			}
+		}
+	}
+	return nil
+}
+
+func (uc *ProblemUseCase) completeAbilityMaintenanceTargets(ctx context.Context, pending *model.AbilityMaintenancePending) error {
+	return uc.data.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var remaining int64
+		if err := tx.Model(&model.AbilityMaintenanceTarget{}).Where("intent_id = ? AND state <> ?", pending.OperationID, "consumed").Count(&remaining).Error; err != nil {
+			return err
+		}
+		if remaining != 0 {
+			return fmt.Errorf("ability maintenance targets remain unconsumed")
+		}
+		if err := tx.Where("intent_id = ?", pending.OperationID).Delete(&model.AbilityMaintenanceTarget{}).Error; err != nil {
+			return err
+		}
+		return clearAbilityMaintenancePending(ctx, tx, pending)
+	})
+}
+
+func (uc *ProblemUseCase) abilityMaintenanceTargetsConsumed(ctx context.Context, pending *model.AbilityMaintenancePending) (bool, error) {
+	var remaining int64
+	if err := uc.data.DB.WithContext(ctx).Model(&model.AbilityMaintenanceTarget{}).
+		Where("intent_id = ? AND state <> ?", pending.OperationID, "consumed").Count(&remaining).Error; err != nil {
+		return false, err
+	}
+	return remaining == 0, nil
+}
+
+// ConfirmAbilityMaintenanceTarget records the consumer's successful build. It
+// accepts an ack that races the producer's delivered transition and accepts
+// duplicates after the parent has already been cleaned up.
+func (uc *ProblemUseCase) ConfirmAbilityMaintenanceTarget(ctx context.Context, intentID string, userID int64) error {
+	if uc == nil || uc.data == nil || uc.data.DB == nil || intentID == "" || userID <= 0 {
+		return fmt.Errorf("invalid ability maintenance confirmation")
+	}
+	res := uc.data.DB.WithContext(ctx).Model(&model.AbilityMaintenanceTarget{}).
+		Where("intent_id = ? AND user_id = ? AND state IN ?", intentID, userID, []string{"outbox_ready", "delivered"}).
+		Updates(map[string]interface{}{"state": "consumed", "last_error": "", "next_retry_at": time.Time{}, "revision": gorm.Expr("revision + 1"), "updated_at": time.Now()})
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected != 0 {
+		return nil
+	}
+	var target model.AbilityMaintenanceTarget
+	err := uc.data.DB.WithContext(ctx).First(&target, "intent_id = ? AND user_id = ?", intentID, userID).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) || (err == nil && target.State == "consumed") {
+		return nil
+	}
+	return err
+}
+
+// MarkAbilityMaintenanceTargetDue is invoked immediately before MQ discards a
+// failed maintenance message. Its durable deadline lets the DB scanner replay
+// that exact intent, while normal queued messages retain their long lease.
+func (uc *ProblemUseCase) MarkAbilityMaintenanceTargetDue(ctx context.Context, intentID string, userID int64) error {
+	if uc == nil || uc.data == nil || uc.data.DB == nil || intentID == "" || userID <= 0 {
+		return fmt.Errorf("invalid ability maintenance retry")
+	}
+	res := uc.data.DB.WithContext(ctx).Model(&model.AbilityMaintenanceTarget{}).
+		Where("intent_id = ? AND user_id = ? AND state IN ?", intentID, userID, []string{"outbox_ready", "delivered"}).
+		Updates(map[string]interface{}{"next_retry_at": time.Now(), "last_error": "profile consumer retries exhausted", "revision": gorm.Expr("revision + 1"), "updated_at": time.Now()})
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected != 0 {
+		return nil
+	}
+	var target model.AbilityMaintenanceTarget
+	err := uc.data.DB.WithContext(ctx).First(&target, "intent_id = ? AND user_id = ?", intentID, userID).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) || (err == nil && target.State == "consumed") {
+		return nil
+	}
+	return err
+}
+
+func (uc *ProblemUseCase) relayAbilityMaintenanceTargets(ctx context.Context, pending *model.AbilityMaintenancePending) (bool, error) {
+	claimed, err := claimAbilityMaintenanceRelay(ctx, uc.data.DB, pending)
+	if err != nil || !claimed {
+		return false, err
+	}
+	defer func() {
+		if err := releaseAbilityMaintenanceRelay(context.Background(), uc.data.DB, pending); err != nil {
+			log.Warnf("ability maintenance relay release scope=%s intent=%s: %v", pending.Scope, pending.OperationID, err)
+		}
+	}()
+	if err := uc.publishAbilityMaintenanceTargets(ctx, pending); err != nil {
+		return false, err
+	}
+	completed, err := uc.abilityMaintenanceTargetsConsumed(ctx, pending)
+	if err != nil || !completed {
+		return completed, err
+	}
+	return true, uc.completeAbilityMaintenanceTargets(ctx, pending)
+}
+
+// RelayAbilityMaintenanceTargets exposes the durable outbox relay to narrow
+// maintenance callers. It owns the relay lease, delivery deadline, consumer
+// acknowledgement race, and parent completion protocol.
+func (uc *ProblemUseCase) RelayAbilityMaintenanceTargets(ctx context.Context, pending *model.AbilityMaintenancePending) error {
+	if uc == nil || uc.data == nil || uc.data.DB == nil || pending == nil {
+		return fmt.Errorf("ability maintenance relay unavailable")
+	}
+	var current model.AbilityMaintenancePending
+	err := uc.data.DB.WithContext(ctx).
+		Where("scope = ? AND operation_id = ? AND revision = ? AND operation = ? AND phase = ?", pending.Scope, pending.OperationID, pending.Revision, "luogu_cleanup", "tail_finalized").
+		First(&current).Error
+	if err != nil {
+		return fmt.Errorf("ability maintenance relay parent changed: %w", err)
+	}
+	var targetCount, intentTargetCount int64
+	if err := uc.data.DB.WithContext(ctx).Model(&model.AbilityMaintenanceTarget{}).
+		Where("intent_id = ? AND user_id = ?", current.OperationID, current.UserID).Count(&targetCount).Error; err != nil {
+		return err
+	}
+	if err := uc.data.DB.WithContext(ctx).Model(&model.AbilityMaintenanceTarget{}).
+		Where("intent_id = ?", current.OperationID).Count(&intentTargetCount).Error; err != nil {
+		return err
+	}
+	if targetCount != 1 || intentTargetCount != 1 {
+		return fmt.Errorf("ability maintenance relay target changed")
+	}
+	_, err = uc.relayAbilityMaintenanceTargets(ctx, &current)
+	return err
+}
+
+func (uc *ProblemUseCase) completeProblemMaintenanceTail(ctx context.Context, pending *model.AbilityMaintenancePending) error {
+	if pending == nil || pending.Operation != "problem" {
+		return fmt.Errorf("invalid problem maintenance tail")
+	}
+	if pending.Phase == "fence_finalized" {
+		expected := *pending
+		next := expected
+		if err := uc.data.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			if err := lockAbilityMaintenanceParent(ctx, tx, &expected); err != nil {
+				return err
+			}
+			if err := tx.Model(&model.Problem{}).Where("id = ?", pending.ProblemID).
+				Where("error_msg LIKE ?", problemFactsDirtyPrefix+"%").Update("error_msg", "").Error; err != nil {
+				return err
+			}
+			return advanceAbilityMaintenancePhase(ctx, tx, &next, "dirty_cleared")
+		}); err != nil {
+			return err
+		}
+		*pending = next
+	}
+	if pending.Phase == "dirty_cleared" {
+		if pending.TagsChanged && uc.data != nil && uc.data.RDB != nil {
+			if _, err := uc.data.RDB.Pipelined(ctx, func(pipe redis.Pipeliner) error {
+				pipe.Incr(ctx, problemTagsVerKey)
+				pipe.Incr(ctx, problemListVerKey)
+				return nil
+			}); err != nil {
+				return err
+			}
+		}
+		if err := advanceAbilityMaintenancePhase(ctx, uc.data.DB, pending, "cache_tail_done"); err != nil {
+			return err
+		}
+	}
+	if pending.Phase == "cache_tail_done" {
+		_, err := uc.relayAbilityMaintenanceTargets(ctx, pending)
+		return err
+	}
+	return fmt.Errorf("problem maintenance tail: unexpected phase %q", pending.Phase)
+}
+
+func sameNormalizedTags(a, b []string) bool {
+	aa, bb := dal.NormalizeTags(a), dal.NormalizeTags(b)
+	if len(aa) != len(bb) {
+		return false
+	}
+	seen := make(map[string]struct{}, len(aa))
+	for _, tag := range aa {
+		seen[tag] = struct{}{}
+	}
+	for _, tag := range bb {
+		if _, ok := seen[tag]; !ok {
+			return false
+		}
+	}
+	return true
+}
+
+func (uc *ProblemUseCase) beginUserProfileInvalidations(ctx context.Context, userIDs []int64, intentID string) ([]userProfileInvalidationToken, error) {
+	tokens := make([]userProfileInvalidationToken, 0, len(userIDs))
+	ownerID := uuid.NewString()
+	for _, userID := range userIDs {
+		token, err := beginProfileInvalidationForAttemptWithTTL(ctx, uc.data.RDB, profileUserGenerationKey(userID), intentID, ownerID, profileInvalidationLeaseTTL)
+		if err != nil {
+			_ = uc.finishUserProfileInvalidations(context.Background(), tokens)
+			return nil, err
+		}
+		tokens = append(tokens, userProfileInvalidationToken{userID: userID, token: token})
+	}
+	return tokens, nil
+}
+
+func (uc *ProblemUseCase) finishUserProfileInvalidations(ctx context.Context, tokens []userProfileInvalidationToken) error {
+	var errs []error
+	for _, item := range tokens {
+		if err := FinishUserProfileInvalidation(ctx, uc.data.RDB, item.userID, item.token); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
+}
+
+func (uc *ProblemUseCase) abandonUserProfileInvalidations(ctx context.Context, tokens []userProfileInvalidationToken) error {
+	var errs []error
+	for _, item := range tokens {
+		if err := AbandonUserProfileInvalidation(ctx, uc.data.RDB, item.userID, item.token); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
+}
+
+func (uc *ProblemUseCase) allCanonicalACUsers(ctx context.Context) ([]int64, error) {
+	var userIDs []int64
+	err := uc.data.DB.WithContext(ctx).Model(&model.UserACProblem{}).Distinct("user_id").Order("user_id ASC").Pluck("user_id", &userIDs).Error
+	return userIDs, err
+}
+
+func (uc *ProblemUseCase) applyProblemFactUpdates(ctx context.Context, p *model.Problem, updates map[string]interface{}, tags []string, tagsChanged, difficultyChanged bool) error {
+	return uc.applyProblemFactUpdatesWithPending(ctx, p, updates, tags, tagsChanged, difficultyChanged, nil)
+}
+
+func (uc *ProblemUseCase) applyProblemFactUpdatesWithPending(ctx context.Context, p *model.Problem, updates map[string]interface{}, tags []string, tagsChanged, difficultyChanged bool, prepared *model.AbilityMaintenancePending) error {
+	if p == nil || p.ID == 0 {
+		return fmt.Errorf("invalid problem facts")
+	}
+	if !tagsChanged && !difficultyChanged {
+		res := uc.data.DB.WithContext(ctx).Model(&model.Problem{}).Where("id = ?", p.ID).Updates(updates)
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected != 1 {
+			return fmt.Errorf("problem facts: expected one problem row, updated %d", res.RowsAffected)
+		}
+		return nil
+	}
+	pending := prepared
+	var err error
+	if pending == nil {
+		payloadBytes, err := json.Marshal(problemMaintenancePayload{Updates: updates, Tags: tags, TagsChanged: tagsChanged, DifficultyChanged: difficultyChanged})
+		if err != nil {
+			return err
+		}
+		var created bool
+		pending, created, err = ensureAbilityMaintenancePending(ctx, uc.data.DB, model.AbilityMaintenancePending{
+			Scope: problemMaintenanceScope(p.ID), ProblemID: p.ID, Operation: "problem", Payload: string(payloadBytes),
+			TagsChanged: tagsChanged, DifficultyChanged: difficultyChanged,
+		})
+		if err != nil {
+			return err
+		}
+		if !created {
+			return fmt.Errorf("problem maintenance already pending")
+		}
+	}
+	tagsChanged = tagsChanged || pending.TagsChanged
+	difficultyChanged = difficultyChanged || pending.DifficultyChanged
+	var userIDs []int64
+	globalToken, err := beginGlobalProfileInvalidationForIntent(ctx, uc.data.RDB, pending.OperationID)
+	if err != nil {
+		return err
+	}
+	abandonCommitted := func() error {
+		return AbandonGlobalProfileInvalidation(context.Background(), uc.data.RDB, globalToken)
+	}
+	finishWithoutCommit := func() error {
+		return FinishGlobalProfileInvalidation(context.Background(), uc.data.RDB, globalToken)
+	}
+	owner := globalToken.Owner
+	if owner == "" {
+		owner = uuid.NewString()
+	}
+	if err := claimAbilityMaintenancePending(ctx, uc.data.DB, pending, owner); err != nil {
+		return errors.Join(err, abandonCommitted())
+	}
+	workCtx, cancelWork := context.WithCancel(ctx)
+	defer cancelWork()
+	if globalToken.lease != nil {
+		go func() {
+			select {
+			case <-globalToken.Context().Done():
+				cancelWork()
+			case <-workCtx.Done():
+			}
+		}()
+	}
+	validateOwner := func(checkCtx context.Context) error {
+		return validateProfileInvalidation(checkCtx, uc.data.RDB, profileGlobalGenerationKey, globalToken)
+	}
+	if err := validateOwner(workCtx); err != nil {
+		return errors.Join(err, abandonCommitted())
+	}
+	failCommitted := func(cause error) error {
+		markerErr := uc.markProblemFactsDirty(context.Background(), pending, p.ID, tagsChanged, difficultyChanged)
+		return errors.Join(cause, markerErr, abandonCommitted())
+	}
+	if pending.Phase == "intent" {
+		expected := *pending
+		txPending := expected
+		txErr := problemFactsTransaction(uc.data.DB.WithContext(workCtx), func(tx *gorm.DB) error {
+			res := tx.Model(&model.Problem{}).Where("id = ?", p.ID).Updates(updates)
+			if res.Error != nil {
+				return res.Error
+			}
+			if res.RowsAffected != 1 {
+				return fmt.Errorf("problem facts: expected one problem row, updated %d", res.RowsAffected)
+			}
+			if tagsChanged {
+				if _, _, err := dal.SyncProblemTags(workCtx, tx, p.ID, tags); err != nil {
+					return err
+				}
+			}
+			return markAbilityMaintenanceFacts(workCtx, tx, &txPending, tagsChanged, difficultyChanged)
+		})
+		if txErr != nil {
+			stored, loadErr := loadAbilityMaintenancePending(context.Background(), uc.data.DB, pending.Scope)
+			if loadErr != nil {
+				return errors.Join(txErr, loadErr, abandonCommitted())
+			}
+			if stored != nil && stored.OperationID == expected.OperationID && stored.LeaseOwner == expected.LeaseOwner && stored.Phase == "facts" && stored.Revision == expected.Revision+1 {
+				*pending = *stored
+			} else if stored != nil && stored.OperationID == expected.OperationID && stored.LeaseOwner == expected.LeaseOwner && stored.Phase == "intent" && stored.Revision == expected.Revision {
+				if ownerErr := validateOwner(context.Background()); ownerErr != nil {
+					return errors.Join(txErr, ownerErr, abandonCommitted())
+				}
+				finishErr := finishWithoutCommit()
+				if finishErr != nil {
+					return errors.Join(txErr, finishErr)
+				}
+				clearErr := clearAbilityMaintenancePending(context.Background(), uc.data.DB, &expected)
+				return errors.Join(txErr, clearErr)
+			} else {
+				return errors.Join(txErr, abandonCommitted())
+			}
+		} else {
+			*pending = txPending
+		}
+	}
+	if err := validateOwner(workCtx); err != nil {
+		return failCommitted(err)
+	}
+	if difficultyChanged && pending.Phase == "facts" {
+		if uc.abilityStats == nil {
+			return failCommitted(fmt.Errorf("problem facts: ability refresher unavailable"))
+		}
+		modelVersion, err := uc.refreshAbilityStatsForMaintenance(workCtx, pending)
+		if err != nil {
+			return failCommitted(err)
+		}
+		if err := validateOwner(workCtx); err != nil {
+			return failCommitted(err)
+		}
+		_ = modelVersion
+	}
+	if pending.Phase == "facts" || pending.Phase == "model_ready" {
+		if difficultyChanged {
+			userIDs, err = uc.allCanonicalACUsers(workCtx)
+		} else {
+			userIDs, err = dal.ListUsersACProblem(workCtx, uc.data.DB, p.ID)
+		}
+		if err != nil {
+			return failCommitted(err)
+		}
+		if err := prepareAbilityMaintenanceRebuildTargets(workCtx, uc.data.DB, pending, userIDs); err != nil {
+			return failCommitted(err)
+		}
+	}
+	if pending.Phase == "targets_ready" {
+		if err := rebuildPendingAbilityMaintenanceTargets(workCtx, uc.data.DB, pending, func() error {
+			return validateOwner(workCtx)
+		}, func(userID int64) error {
+			return dal.RebuildUserTagACForUser(workCtx, uc.data.DB, userID)
+		}); err != nil {
+			return failCommitted(err)
+		}
+		if err := validateOwner(workCtx); err != nil {
+			return failCommitted(err)
+		}
+		if err := stageRebuiltAbilityMaintenanceTargets(workCtx, uc.data.DB, pending); err != nil {
+			return failCommitted(err)
+		}
+	}
+	if err := validateOwner(workCtx); err != nil {
+		return failCommitted(err)
+	}
+	err = FinishGlobalProfileInvalidation(workCtx, uc.data.RDB, globalToken)
+	if err != nil {
+		return failCommitted(err)
+	}
+	if err := advanceAbilityMaintenancePhase(ctx, uc.data.DB, pending, "fence_finalized"); err != nil {
+		return err
+	}
+	return uc.completeProblemMaintenanceTail(ctx, pending)
+}
+
+func (uc *ProblemUseCase) recoverProblemMaintenance(ctx context.Context, pending *model.AbilityMaintenancePending) error {
+	if pending == nil || pending.Operation != "problem" {
+		return fmt.Errorf("invalid problem maintenance recovery")
+	}
+	if pending.Phase == "fence_finalized" || pending.Phase == "dirty_cleared" || pending.Phase == "cache_tail_done" {
+		return uc.completeProblemMaintenanceTail(ctx, pending)
+	}
+	if pending.Phase == "derived_ready" {
+		token, err := beginGlobalProfileInvalidationForIntent(ctx, uc.data.RDB, pending.OperationID)
+		if err != nil {
+			return err
+		}
+		if err := claimAbilityMaintenancePending(ctx, uc.data.DB, pending, token.Owner); err != nil {
+			return errors.Join(err, AbandonGlobalProfileInvalidation(context.Background(), uc.data.RDB, token))
+		}
+		if err := FinishGlobalProfileInvalidation(token.Context(), uc.data.RDB, token); err != nil {
+			return errors.Join(err, AbandonGlobalProfileInvalidation(context.Background(), uc.data.RDB, token))
+		}
+		if err := advanceAbilityMaintenancePhase(ctx, uc.data.DB, pending, "fence_finalized"); err != nil {
+			return err
+		}
+		return uc.completeProblemMaintenanceTail(ctx, pending)
+	}
+	payload, err := decodeProblemMaintenancePayload(pending.Payload)
+	if err != nil {
+		return err
+	}
+	var p model.Problem
+	if err := uc.data.DB.WithContext(ctx).First(&p, pending.ProblemID).Error; err != nil {
+		return err
+	}
+	return uc.applyProblemFactUpdatesWithPending(ctx, &p, payload.Updates, payload.Tags, payload.TagsChanged, payload.DifficultyChanged, pending)
+}
+
+func (uc *ProblemUseCase) recoverAbilityMaintenancePending(ctx context.Context) {
+	if uc == nil || uc.data == nil || uc.data.DB == nil || !uc.data.DB.Migrator().HasTable(&model.AbilityMaintenancePending{}) {
+		return
+	}
+	generalOperations := []string{"problem", "rebuild", "reset"}
+	knownOperations := []string{"problem", "rebuild", "reset", "luogu_cleanup", "spider_set", "spider_purge_user", "spider_purge_global"}
+	if unknown, err := dal.ListUnknownAbilityMaintenanceOperations(ctx, uc.data.DB, knownOperations, 10); err != nil {
+		log.Warnf("ability maintenance unknown-operation scan: %v", err)
+	} else {
+		for _, item := range unknown {
+			log.Warnf("ability maintenance unknown operation=%q pending=%d (isolated)", item.Operation, item.Count)
+		}
+	}
+	pending, err := dal.LoadAbilityMaintenanceRecoveryBatch(ctx, uc.data.DB, generalOperations, 50)
+	if err != nil {
+		log.Warnf("ability maintenance recovery scan: %v", err)
+		return
+	}
+	for i := range pending {
+		claimed, touchErr := dal.TouchAbilityMaintenanceRecoveryAttempt(ctx, uc.data.DB, &pending[i], time.Now())
+		if touchErr != nil {
+			log.Warnf("ability maintenance recovery touch scope=%s intent=%s: %v", pending[i].Scope, pending[i].OperationID, touchErr)
+			continue
+		}
+		if !claimed {
+			continue
+		}
+		var recoverErr error
+		switch pending[i].Operation {
+		case "problem":
+			recoverErr = uc.recoverProblemMaintenance(ctx, &pending[i])
+		case "rebuild":
+			_, _, recoverErr = uc.RebuildAllUserProfiles(ctx)
+		case "reset":
+			_, _, _, _, recoverErr = uc.ResetAll(false)
+		default:
+			recoverErr = fmt.Errorf("unknown ability maintenance operation %q", pending[i].Operation)
+		}
+		if recoverErr != nil {
+			log.Warnf("ability maintenance recovery scope=%s intent=%s: %v", pending[i].Scope, pending[i].OperationID, recoverErr)
+		}
+	}
+}
+
+func (uc *ProblemUseCase) runAbilityMaintenanceRecovery() {
+	uc.recoverAbilityMaintenancePending(context.Background())
+	ticker := time.NewTicker(time.Minute)
+	defer ticker.Stop()
+	for range ticker.C {
+		uc.recoverAbilityMaintenancePending(context.Background())
+	}
+}
+
 // normalizeEditDifficulty 校验难度：简单|中等|困难；空串表示清空。
 func normalizeEditDifficulty(d string) (string, error) {
 	d = strings.TrimSpace(d)
@@ -70,8 +1095,11 @@ func (uc *ProblemUseCase) ApplyProblemFields(problemID uint, updateTags bool, ta
 	}
 
 	updates := map[string]interface{}{}
+	tagsChanged := false
 	if updateTags {
-		updates["tags"] = model.StringArray(normalizeEditTags(tags))
+		tags = normalizeEditTags(tags)
+		tagsChanged = !sameNormalizedTags([]string(p.Tags), tags)
+		updates["tags"] = model.StringArray(tags)
 	}
 	if updateContent {
 		updates["content_md"] = strings.TrimSpace(contentMD)
@@ -90,25 +1118,34 @@ func (uc *ProblemUseCase) ApplyProblemFields(problemID uint, updateTags bool, ta
 		return &p, nil
 	}
 	oldStatus := p.Status
-	if err := uc.data.DB.Model(&p).Updates(updates).Error; err != nil {
+	dirtyTags, dirtyDifficulty := problemFactsDirtyFlags(p.ErrorMsg)
+	pending, err := loadAbilityMaintenancePending(context.Background(), uc.data.DB, problemMaintenanceScope(p.ID))
+	if err != nil {
+		return nil, err
+	}
+	if pending != nil {
+		if err := uc.recoverProblemMaintenance(context.Background(), pending); err != nil {
+			return nil, err
+		}
+		if err := uc.data.DB.First(&p, problemID).Error; err != nil {
+			return nil, err
+		}
+		dirtyTags, dirtyDifficulty = problemFactsDirtyFlags(p.ErrorMsg)
+		if updateTags {
+			tagsChanged = !sameNormalizedTags([]string(p.Tags), tags)
+		}
+	}
+	tagsChanged = tagsChanged || dirtyTags
+	difficultyChanged := (updateDifficulty && strings.TrimSpace(p.Difficulty) != strings.TrimSpace(fmt.Sprint(updates["difficulty"]))) || dirtyDifficulty
+	if tagsChanged && !updateTags {
+		tags = []string(p.Tags)
+	}
+	if err := uc.applyProblemFactUpdates(context.Background(), &p, updates, tags, tagsChanged, difficultyChanged); err != nil {
 		return nil, err
 	}
 	// 重新加载
 	if err := uc.data.DB.First(&p, problemID).Error; err != nil {
 		return nil, err
-	}
-
-	if updateTags {
-		oldTags, newTags, e := dal.SyncProblemTags(context.Background(), uc.data.DB, p.ID, []string(p.Tags))
-		if e != nil {
-			log.Warnf("SyncProblemTags edit id=%d: %v", p.ID, e)
-		} else {
-			uc.BumpProblemTagsVer()
-			uc.BumpProblemListVer()
-			if e2 := dal.AdjustUserTagACForProblemTagsChange(context.Background(), uc.data.DB, p.ID, oldTags, newTags); e2 != nil {
-				log.Warnf("AdjustUserTagAC edit id=%d: %v", p.ID, e2)
-			}
-		}
 	}
 
 	hasTags := len(nonEmptyTags(p.Tags)) > 0

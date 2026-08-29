@@ -34,7 +34,7 @@ var (
 	rePOJNum      = regexp.MustCompile(`#?\s*(\d+)`)
 	reDigits      = regexp.MustCompile(`^\d+$`)
 	// CF API：gym 提交的 contestId 为负数
-	reCFNegativeContest = regexp.MustCompile(`^-\d+$`)
+	reCFNegativeContest   = regexp.MustCompile(`^-\d+$`)
 	reNowCoderProblemURL  = regexp.MustCompile(`(?i)(?:https?://[^/\s]+)?/acm/problem/(\d+)`)
 	reNowCoderPracticeURL = regexp.MustCompile(`(?i)(?:https?://[^/\s]+)?/practice/([0-9a-fA-F-]{32,36})`)
 	reNowCoderUUID        = regexp.MustCompile(`(?i)^[0-9a-f]{8}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{12}$|^[0-9a-f]{32}$`)
@@ -460,7 +460,7 @@ func sanitizeExternalID(s string) string {
 func parseLeetCode(problem string) (*ParsedProblem, error) {
 	problem = strings.TrimSpace(problem)
 	if problem == "" || problem == "leetcode-submit" || strings.HasPrefix(problem, "lc-ac-problem-") {
-		return nil, fmt.Errorf("leetcode synthetic skip bank: %q", problem)
+		return nil, fmt.Errorf("%w: leetcode synthetic %q", errSkipProblemBank, problem)
 	}
 	// URL 中的 slug
 	if i := strings.Index(problem, "leetcode.cn/problems/"); i >= 0 {

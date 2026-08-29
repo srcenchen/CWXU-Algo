@@ -498,12 +498,12 @@ func (s *ProblemService) UserProfile(ctx context.Context, req *problem.UserProfi
 
 // RebuildAllProfiles 全站画像重建（站管触发，仅重建画像不重爬 OJ）。
 // 返回 candidates/published；unauthorized=true 表示非站点管理员被拒绝。
-func (s *ProblemService) RebuildAllProfiles(ctx context.Context) (candidates, published int, unauthorized bool) {
+func (s *ProblemService) RebuildAllProfiles(ctx context.Context) (candidates, published int, unauthorized bool, err error) {
 	if !auth.VerifySiteAdmin(ctx) {
-		return 0, 0, true
+		return 0, 0, true, nil
 	}
-	candidates, published = s.uc.RebuildAllUserProfiles()
-	return candidates, published, false
+	candidates, published, err = s.uc.RebuildAllUserProfiles(ctx)
+	return candidates, published, false, err
 }
 
 func toFailedProto(list []model.Problem) []*problem.FailedProblem {

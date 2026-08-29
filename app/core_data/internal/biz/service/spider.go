@@ -110,6 +110,31 @@ func NewSpiderUseCase(data *data.Data, problem *ProblemUseCase, spiderTask *task
 	}
 }
 
+// ForcePublishUserProfile exposes only the profile action required by direct
+// platform-binding maintenance paths.
+func (uc *SpiderUseCase) ForcePublishUserProfile(userID int64) error {
+	if uc == nil || uc.problem == nil {
+		return fmt.Errorf("user profile publisher unavailable")
+	}
+	return uc.problem.ForcePublishUserProfile(userID)
+}
+
+func (uc *SpiderUseCase) ForcePublishMaintenanceUserProfile(userID int64, intentID string) error {
+	if uc == nil || uc.problem == nil {
+		return fmt.Errorf("user profile publisher unavailable")
+	}
+	return uc.problem.ForcePublishMaintenanceUserProfile(userID, intentID)
+}
+
+// RelayAbilityMaintenanceTargets keeps platform cleanup on the same durable
+// profile outbox path as problem maintenance.
+func (uc *SpiderUseCase) RelayAbilityMaintenanceTargets(ctx context.Context, pending *model.AbilityMaintenancePending) error {
+	if uc == nil || uc.problem == nil {
+		return fmt.Errorf("user profile publisher unavailable")
+	}
+	return uc.problem.RelayAbilityMaintenanceTargets(ctx, pending)
+}
+
 // loadDataTimeout 单用户整次爬取上限，防止某平台挂死占满 worker 导致 spider 队列堆积
 const loadDataTimeout = 8 * time.Minute
 

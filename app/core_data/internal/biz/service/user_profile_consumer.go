@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"sync"
@@ -17,13 +18,19 @@ import (
 // 画像重 JOIN 限并发，避免拖垮 DB
 const userProfileConcurrency = 1
 
+type userProfileBuilder interface {
+	BuildAndCacheUserProfile(int64, bool) error
+	ConfirmAbilityMaintenanceTarget(context.Context, string, int64) error
+	MarkAbilityMaintenanceTargetDue(context.Context, string, int64) error
+}
+
 // UserProfileConsumer 消费 user_profile 队列，预计算写入 Redis
 type UserProfileConsumer struct {
-	mq           *event.RabbitMQ
-	problem      *ProblemUseCase
-	profileTask  *task.UserProfileTask
-	stopCh       chan struct{}
-	stopOnce     sync.Once
+	mq          *event.RabbitMQ
+	problem     userProfileBuilder
+	profileTask *task.UserProfileTask
+	stopCh      chan struct{}
+	stopOnce    sync.Once
 }
 
 func NewUserProfileConsumer(mq *event.RabbitMQ, problem *ProblemUseCase, profileTask *task.UserProfileTask) *UserProfileConsumer {
@@ -52,26 +59,45 @@ func (c *UserProfileConsumer) Consume() {
 		MaxRetry:         3,
 		DeclareOnMissing: true,
 		Stop:             c.stopCh,
-		Handler: func(body []byte, _ amqp.Table) error {
-			msg := event.UserProfileEvent{}
-			if err := json.Unmarshal(body, &msg); err != nil {
-				return fmt.Errorf("bad json: %w", err)
-			}
-		if msg.UserId <= 0 {
-			return nil
-		}
-		start := time.Now()
-		err := c.problem.BuildAndCacheUserProfile(msg.UserId, msg.Force)
-			if err != nil {
-				log.Errorf("user_profile build user=%d: %v", msg.UserId, err)
-				// 失败不释放 pending，避免重试期间重复入队；TTL 到期后可再预热
-				return err
-			}
-			if c.profileTask != nil {
-				c.profileTask.ClearPending(msg.UserId)
-			}
-			log.Infof("user_profile built user=%d cost=%s", msg.UserId, time.Since(start).Round(time.Millisecond))
-			return nil
-		},
+		Handler:          func(body []byte, _ amqp.Table) error { return c.handle(body) },
+		OnExhausted:      func(body []byte, _ amqp.Table) error { return c.handleExhausted(body) },
 	})
+}
+
+func (c *UserProfileConsumer) handleExhausted(body []byte) error {
+	msg := event.UserProfileEvent{}
+	if err := json.Unmarshal(body, &msg); err != nil {
+		// Poison messages have no reliable intent to recover. Let the consumer
+		// drop them after its bounded retries instead of creating a hot loop.
+		log.Errorf("user_profile exhausted poison message: %v", err)
+		return nil
+	}
+	if msg.IntentID == "" || msg.UserId <= 0 {
+		return nil
+	}
+	return c.problem.MarkAbilityMaintenanceTargetDue(context.Background(), msg.IntentID, msg.UserId)
+}
+
+func (c *UserProfileConsumer) handle(body []byte) error {
+	msg := event.UserProfileEvent{}
+	if err := json.Unmarshal(body, &msg); err != nil {
+		return fmt.Errorf("bad json: %w", err)
+	}
+	if msg.UserId <= 0 {
+		return nil
+	}
+	start := time.Now()
+	if err := c.problem.BuildAndCacheUserProfile(msg.UserId, msg.Force); err != nil {
+		log.Errorf("user_profile build user=%d: %v", msg.UserId, err)
+		return err
+	}
+	if msg.IntentID != "" {
+		if err := c.problem.ConfirmAbilityMaintenanceTarget(context.Background(), msg.IntentID, msg.UserId); err != nil {
+			return fmt.Errorf("user_profile confirm intent=%s user=%d: %w", msg.IntentID, msg.UserId, err)
+		}
+	} else if c.profileTask != nil {
+		c.profileTask.ClearPending(msg.UserId)
+	}
+	log.Infof("user_profile built user=%d cost=%s", msg.UserId, time.Since(start).Round(time.Millisecond))
+	return nil
 }

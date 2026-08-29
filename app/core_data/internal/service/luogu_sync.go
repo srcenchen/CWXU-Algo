@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"regexp"
@@ -17,6 +18,7 @@ import (
 	spiderpb "cwxu-algo/api/core/v1/spider"
 	pluginpb "cwxu-algo/api/user/v1/plugin"
 	bizservice "cwxu-algo/app/core_data/internal/biz/service"
+	"cwxu-algo/app/core_data/internal/data/dal"
 	"cwxu-algo/app/core_data/internal/data/model"
 	spiderregistry "cwxu-algo/app/core_data/internal/spider"
 	"cwxu-algo/app/core_data/internal/spider/platform"
@@ -26,8 +28,10 @@ import (
 	kratoserrors "github.com/go-kratos/kratos/v2/errors"
 	"github.com/go-kratos/kratos/v2/log"
 	"github.com/go-kratos/kratos/v2/transport"
+	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 const (
@@ -71,6 +75,10 @@ type luoguClientPageImporter interface {
 
 type luoguSessionFinalizer interface {
 	MarkClientSyncSessionTerminated(context.Context, string, time.Time) error
+}
+
+type luoguProfilePublisher interface {
+	RelayAbilityMaintenanceTargets(context.Context, *model.AbilityMaintenancePending) error
 }
 
 type luoguSyncClock interface {
@@ -505,6 +513,18 @@ func validateLuoguStartRequest(req *spiderpb.StartLuoguSyncReq, identity luoguPl
 
 func (s *SpiderService) validateLuoguBinding(ctx context.Context, userID int64, uid string) (model.Platform, int64, error) {
 	var binding model.Platform
+	if pending, pendingErr := loadLuoguCleanupPending(ctx, s.db, userID); pendingErr != nil {
+		return binding, 0, kratoserrors.ServiceUnavailable("SYNC_UNAVAILABLE", "绑定异常，自动清理失败，请稍后重试")
+	} else if pending != nil {
+		removed, recoverErr := s.removeInvalidLuoguBinding(ctx, userID, uid)
+		if recoverErr != nil {
+			log.Errorf("recover invalid Luogu binding user=%d: %v", userID, recoverErr)
+			return binding, 0, kratoserrors.ServiceUnavailable("SYNC_UNAVAILABLE", "绑定异常，自动清理失败，请稍后重试")
+		}
+		if removed {
+			return binding, 0, kratoserrors.Conflict("LUOGU_BINDING_INVALID_REMOVED", "原洛谷绑定无效，相关同步数据已清理，请重新绑定")
+		}
+	}
 	err := s.db.WithContext(ctx).Where("user_id = ? AND platform = ?", userID, spiderregistry.LuoGu).First(&binding).Error
 	if err != nil {
 		return binding, 0, kratoserrors.Conflict("LUOGU_UID_MISMATCH", "当前洛谷账号与 GoAlgo 绑定不一致")
@@ -564,65 +584,481 @@ func (s *SpiderService) inferLuoguCheckpoint(ctx context.Context, userID int64) 
 	return best, rows.Err()
 }
 
-func (s *SpiderService) removeInvalidLuoguBinding(ctx context.Context, userID int64, authorizedUID string) (bool, error) {
-	unlock, locked := trySpiderPlatformWriteLock(ctx, s.rdb, userID, spiderregistry.LuoGu)
-	if !locked {
-		return false, fmt.Errorf("acquire LuoGu write lock")
+func luoguCleanupScope(userID int64) string {
+	return fmt.Sprintf("luogu-cleanup:%d:%s", userID, spiderregistry.LuoGu)
+}
+
+type luoguCleanupPayload struct {
+	BindingID     int64  `json:"bindingId"`
+	Username      string `json:"username"`
+	AuthorizedUID string `json:"authorizedUid"`
+}
+
+func loadLuoguCleanupPending(ctx context.Context, db *gorm.DB, userID int64) (*model.AbilityMaintenancePending, error) {
+	if db == nil || !db.Migrator().HasTable(&model.AbilityMaintenancePending{}) {
+		return nil, nil
 	}
-	defer unlock()
-	var lockedBinding model.Platform
-	if err := s.db.WithContext(ctx).Where("user_id = ? AND platform = ?", userID, spiderregistry.LuoGu).First(&lockedBinding).Error; err != nil {
-		if err == gorm.ErrRecordNotFound {
-			return false, nil
+	var pending model.AbilityMaintenancePending
+	err := db.WithContext(ctx).Where("scope = ?", luoguCleanupScope(userID)).First(&pending).Error
+	if err == gorm.ErrRecordNotFound {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &pending, nil
+}
+
+func prepareLuoguCleanupPending(ctx context.Context, db *gorm.DB, binding model.Platform, authorizedUID string) (*model.AbilityMaintenancePending, error) {
+	payload, err := json.Marshal(luoguCleanupPayload{BindingID: binding.Id, Username: binding.Username, AuthorizedUID: authorizedUID})
+	if err != nil {
+		return nil, err
+	}
+	pending := model.AbilityMaintenancePending{
+		Scope: luoguCleanupScope(binding.UserID), OperationID: uuid.NewString(), Revision: 1,
+		Phase: "intent", Operation: "luogu_cleanup", UserID: binding.UserID, Platform: spiderregistry.LuoGu, Payload: string(payload),
+	}
+	err = db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		res := tx.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "scope"}}, DoNothing: true}).Create(&pending)
+		if res.Error != nil {
+			return res.Error
 		}
-		return false, err
-	}
-	if luoguUIDPattern.MatchString(strings.TrimSpace(lockedBinding.Username)) {
-		return false, nil
-	}
-	if _, err := s.rdb.Incr(ctx, task.GenerationKey(userID, spiderregistry.LuoGu)).Result(); err != nil {
-		return false, err
-	}
-	_ = s.rdb.Expire(ctx, task.GenerationKey(userID, spiderregistry.LuoGu), 7*24*time.Hour).Err()
-	removed := false
-	if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var current model.Platform
-		if err := tx.Where("user_id = ? AND platform = ?", userID, spiderregistry.LuoGu).First(&current).Error; err != nil {
-			if err == gorm.ErrRecordNotFound {
-				return nil
-			}
-			return err
-		}
-		if luoguUIDPattern.MatchString(strings.TrimSpace(current.Username)) {
+		if res.RowsAffected == 0 {
 			return nil
 		}
-		removed = true
-		return deleteSpiderPlatformData(ctx, tx, userID, spiderregistry.LuoGu)
-	}); err != nil {
-		return false, err
+		target := model.AbilityMaintenanceTarget{IntentID: pending.OperationID, UserID: binding.UserID, Revision: 1, State: "pending"}
+		return tx.Create(&target).Error
+	})
+	if err != nil {
+		return nil, err
 	}
-	if !removed {
-		return false, nil
+	return loadLuoguCleanupPending(ctx, db, binding.UserID)
+}
+
+func claimLuoguCleanupPending(ctx context.Context, db *gorm.DB, pending *model.AbilityMaintenancePending, owner string) error {
+	res := db.WithContext(ctx).Model(&model.AbilityMaintenancePending{}).
+		Where("scope = ? AND operation_id = ? AND revision = ?", pending.Scope, pending.OperationID, pending.Revision).
+		Updates(map[string]interface{}{"lease_owner": owner, "revision": gorm.Expr("revision + 1"), "updated_at": time.Now()})
+	if res.Error != nil {
+		return res.Error
 	}
-	if sessionID, err := s.rdb.Get(ctx, luoguSyncActiveKey(userID, authorizedUID)).Result(); err == nil {
-		if state, loadErr := s.loadLuoguSessionByID(ctx, sessionID); loadErr == nil {
-			s.terminateLuoguSession(ctx, state)
+	if res.RowsAffected != 1 {
+		return fmt.Errorf("LuoGu cleanup owner changed")
+	}
+	pending.LeaseOwner = owner
+	pending.Revision++
+	return nil
+}
+
+func advanceLuoguCleanupPhase(ctx context.Context, db *gorm.DB, pending *model.AbilityMaintenancePending, phase string) error {
+	res := db.WithContext(ctx).Model(&model.AbilityMaintenancePending{}).
+		Where("scope = ? AND operation_id = ? AND revision = ? AND lease_owner = ?", pending.Scope, pending.OperationID, pending.Revision, pending.LeaseOwner).
+		Updates(map[string]interface{}{"phase": phase, "revision": gorm.Expr("revision + 1"), "updated_at": time.Now()})
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected != 1 {
+		return fmt.Errorf("LuoGu cleanup phase owner changed")
+	}
+	pending.Phase = phase
+	pending.Revision++
+	return nil
+}
+
+func (s *SpiderService) publishAndClearLuoguCleanup(ctx context.Context, pending *model.AbilityMaintenancePending) error {
+	profilePublisher, ok := s.luoguImporter.(luoguProfilePublisher)
+	if !ok || profilePublisher == nil {
+		return fmt.Errorf("LuoGu binding cleanup: user profile publisher unavailable")
+	}
+	return profilePublisher.RelayAbilityMaintenanceTargets(ctx, pending)
+}
+
+func (s *SpiderService) clearLuoguCleanupIntent(ctx context.Context, pending *model.AbilityMaintenancePending) error {
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var target model.AbilityMaintenanceTarget
+		if err := tx.Where("intent_id = ? AND user_id = ?", pending.OperationID, pending.UserID).First(&target).Error; err != nil {
+			return err
+		}
+		res := tx.Where("intent_id = ? AND user_id = ? AND revision = ? AND state = ?", target.IntentID, target.UserID, target.Revision, target.State).
+			Delete(&model.AbilityMaintenanceTarget{})
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected != 1 {
+			return fmt.Errorf("LuoGu cleanup target owner changed")
+		}
+		res = tx.Where("scope = ? AND operation_id = ? AND revision = ?", pending.Scope, pending.OperationID, pending.Revision).
+			Delete(&model.AbilityMaintenancePending{})
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected != 1 {
+			return fmt.Errorf("LuoGu cleanup complete owner changed")
+		}
+		return nil
+	})
+}
+
+func (s *SpiderService) finalizeLuoguCleanupTail(ctx context.Context, userID int64, authorizedUID string) error {
+	activeKey := luoguSyncActiveKey(userID, authorizedUID)
+	if sessionID, err := s.rdb.Get(ctx, activeKey).Result(); err == nil {
+		state, loadErr := s.loadLuoguSessionByID(ctx, sessionID)
+		if loadErr != nil {
+			if kratoserrors.Reason(loadErr) != "SESSION_EXPIRED" {
+				return loadErr
+			}
+			if err := s.rdb.Del(ctx, activeKey).Err(); err != nil {
+				return err
+			}
+		} else {
+			if err := s.finalizeLuoguSessionForCleanup(ctx, state); err != nil {
+				return err
+			}
 		}
 	} else if err != redis.Nil {
-		return false, err
+		return err
 	}
-	_ = s.rdb.Del(ctx,
+	if err := s.rdb.Del(ctx,
 		fmt.Sprintf("core:submit_log:user:%d", userID),
 		fmt.Sprintf("user:%d:lastSubmitTime", userID),
 		"core:platforms:bound_users:v1",
 		fmt.Sprintf("core:platforms:user:%d:v1", userID),
 		fmt.Sprintf("spider:pending:%d:%s", userID, spiderregistry.LuoGu),
 		fmt.Sprintf("spider:inflight:%d:%s", userID, spiderregistry.LuoGu),
-	).Err()
-	_ = s.rdb.Incr(ctx, fmt.Sprintf("core:contest_log:user:%d:ver", userID)).Err()
-	_ = s.rdb.Incr(ctx, fmt.Sprintf("statistic:user:%d:ver", userID)).Err()
-	_ = s.rdb.Incr(ctx, "statistic:period:global:ver").Err()
-	return true, nil
+	).Err(); err != nil {
+		return err
+	}
+	if err := s.rdb.Incr(ctx, fmt.Sprintf("core:contest_log:user:%d:ver", userID)).Err(); err != nil {
+		return err
+	}
+	if err := s.rdb.Incr(ctx, fmt.Sprintf("statistic:user:%d:ver", userID)).Err(); err != nil {
+		return err
+	}
+	if err := s.rdb.Incr(ctx, "statistic:period:global:ver").Err(); err != nil {
+		return err
+	}
+	return nil
+}
+
+// finalizeLuoguCleanupTailPersisted runs the destructive cache/session tail
+// under a short platform lock, records its completion, then lets MQ relay run
+// after the lock has been released. Any replacement binding makes the tail a
+// durable no-op so an expired old owner cannot clear a new session.
+func (s *SpiderService) finalizeLuoguCleanupTailPersisted(ctx context.Context, pending *model.AbilityMaintenancePending, payload luoguCleanupPayload) (*model.AbilityMaintenancePending, error) {
+	tailUnlock, tailLocked := trySpiderPlatformWriteLock(ctx, s.rdb, pending.UserID, spiderregistry.LuoGu)
+	if !tailLocked {
+		return nil, fmt.Errorf("acquire LuoGu finalize lock")
+	}
+	defer tailUnlock()
+	current, err := loadLuoguCleanupPending(ctx, s.db, pending.UserID)
+	if err != nil || current == nil {
+		return current, err
+	}
+	if current.OperationID != pending.OperationID {
+		return nil, fmt.Errorf("LuoGu cleanup intent changed")
+	}
+	if current.Phase == "tail_finalized" {
+		return current, nil
+	}
+	if current.Phase != "fence_finalized" {
+		return nil, fmt.Errorf("LuoGu cleanup tail unexpected phase %q", current.Phase)
+	}
+	var binding model.Platform
+	err = s.db.WithContext(ctx).Where("user_id = ? AND platform = ?", current.UserID, spiderregistry.LuoGu).First(&binding).Error
+	if err == nil {
+		// A fresh binding may already have its own active session and crawler
+		// keys. Do not let this old cleanup touch any of them.
+		return current, advanceLuoguCleanupPhase(ctx, s.db, current, "tail_finalized")
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, err
+	}
+	if err := s.finalizeLuoguCleanupTail(ctx, current.UserID, payload.AuthorizedUID); err != nil {
+		return nil, err
+	}
+	if err := advanceLuoguCleanupPhase(ctx, s.db, current, "tail_finalized"); err != nil {
+		return nil, err
+	}
+	return current, nil
+}
+
+func (s *SpiderService) removeInvalidLuoguBinding(ctx context.Context, userID int64, authorizedUID string) (bool, error) {
+	unlock, locked := trySpiderPlatformWriteLock(ctx, s.rdb, userID, spiderregistry.LuoGu)
+	if !locked {
+		return false, fmt.Errorf("acquire LuoGu write lock")
+	}
+	lockHeld := true
+	releaseLock := func() {
+		if lockHeld {
+			unlock()
+			lockHeld = false
+		}
+	}
+	defer releaseLock()
+	pending, err := loadLuoguCleanupPending(ctx, s.db, userID)
+	if err != nil {
+		return false, err
+	}
+	if pending == nil {
+		var binding model.Platform
+		if err := s.db.WithContext(ctx).Where("user_id = ? AND platform = ?", userID, spiderregistry.LuoGu).First(&binding).Error; err != nil {
+			if err == gorm.ErrRecordNotFound {
+				return false, nil
+			}
+			return false, err
+		}
+		if luoguUIDPattern.MatchString(strings.TrimSpace(binding.Username)) {
+			return false, nil
+		}
+		pending, err = prepareLuoguCleanupPending(ctx, s.db, binding, authorizedUID)
+		if err != nil {
+			return false, err
+		}
+	}
+	var cleanupPayload luoguCleanupPayload
+	if err := json.Unmarshal([]byte(pending.Payload), &cleanupPayload); err != nil {
+		return false, err
+	}
+	// The platform lock only protects binding discovery/intent creation. The
+	// durable intent and profile fence own the expensive rebuild/cache/MQ tail;
+	// keeping the Redis write lock through that work risks TTL takeover.
+	releaseLock()
+	if pending.Phase == "fence_finalized" {
+		pending, err = s.finalizeLuoguCleanupTailPersisted(ctx, pending, cleanupPayload)
+		if err != nil {
+			return false, err
+		}
+	}
+	if pending.Phase == "tail_finalized" {
+		return true, s.publishAndClearLuoguCleanup(ctx, pending)
+	}
+	profileToken, err := bizservice.BeginUserProfileInvalidationForIntent(ctx, s.rdb, userID, pending.OperationID)
+	if err != nil {
+		return false, err
+	}
+	if err := claimLuoguCleanupPending(ctx, s.db, pending, profileToken.Owner); err != nil {
+		return false, errors.Join(err, bizservice.AbandonUserProfileInvalidation(context.Background(), s.rdb, userID, profileToken))
+	}
+	workCtx := profileToken.Context()
+	abandon := func(cause error) error {
+		return errors.Join(cause, bizservice.AbandonUserProfileInvalidation(context.Background(), s.rdb, userID, profileToken))
+	}
+	validateOwner := func() error {
+		return bizservice.ValidateUserProfileInvalidation(workCtx, s.rdb, userID, profileToken)
+	}
+	if err := validateOwner(); err != nil {
+		return false, abandon(err)
+	}
+	if pending.Phase == "intent" {
+		if err := s.db.WithContext(workCtx).Transaction(func(tx *gorm.DB) error {
+			var current model.Platform
+			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("user_id = ? AND platform = ?", userID, spiderregistry.LuoGu).First(&current).Error; err != nil {
+				if err == gorm.ErrRecordNotFound {
+					return nil
+				}
+				return err
+			}
+			if (current.Id != cleanupPayload.BindingID || current.Username != cleanupPayload.Username) && luoguUIDPattern.MatchString(strings.TrimSpace(current.Username)) {
+				return advanceLuoguCleanupPhase(workCtx, tx, pending, "cancelled")
+			}
+			return nil
+		}); err != nil {
+			return false, abandon(err)
+		}
+	}
+	generationBumped := false
+	if pending.Phase == "cancelled" {
+		cancelUnlock, cancelLocked := trySpiderPlatformWriteLock(ctx, s.rdb, userID, spiderregistry.LuoGu)
+		if !cancelLocked {
+			return false, abandon(fmt.Errorf("acquire LuoGu cancelled lock"))
+		}
+		cancelLockHeld := true
+		releaseCancelLock := func() {
+			if cancelLockHeld {
+				cancelUnlock()
+				cancelLockHeld = false
+			}
+		}
+		defer releaseCancelLock()
+		current, loadErr := loadLuoguCleanupPending(ctx, s.db, userID)
+		if loadErr != nil {
+			return false, abandon(loadErr)
+		}
+		if current == nil || current.OperationID != pending.OperationID || current.Phase != "cancelled" {
+			return false, abandon(fmt.Errorf("LuoGu cancelled cleanup intent changed"))
+		}
+		pending = current
+		var replacement model.Platform
+		replacementErr := s.db.WithContext(ctx).Where("user_id = ? AND platform = ?", userID, spiderregistry.LuoGu).First(&replacement).Error
+		validReplacement := replacementErr == nil &&
+			(replacement.Id != cleanupPayload.BindingID || replacement.Username != cleanupPayload.Username) &&
+			luoguUIDPattern.MatchString(strings.TrimSpace(replacement.Username))
+		if replacementErr != nil && !errors.Is(replacementErr, gorm.ErrRecordNotFound) {
+			return false, abandon(replacementErr)
+		}
+		if validReplacement {
+			if err := bizservice.FinishUserProfileInvalidation(workCtx, s.rdb, userID, profileToken); err != nil {
+				return false, abandon(err)
+			}
+			if err := s.clearLuoguCleanupIntent(ctx, pending); err != nil {
+				return false, err
+			}
+			return false, nil
+		}
+
+		// The replacement that justified cancellation disappeared or became
+		// invalid. Resume the same durable cleanup instead of leaving a live odd
+		// profile fence behind. Recheck inside the facts transaction so a valid
+		// replacement can never be deleted, even if the DB was changed outside
+		// the normal platform-lock path.
+		if _, err := bizservice.BumpUserProfileOwnedGeneration(workCtx, s.rdb, userID, profileToken, task.GenerationKey(userID, spiderregistry.LuoGu), 7*24*time.Hour); err != nil {
+			return false, abandon(err)
+		}
+		generationBumped = true
+		replacementRestored := false
+		if err := validateOwner(); err != nil {
+			return false, abandon(err)
+		}
+		if err := s.db.WithContext(workCtx).Transaction(func(tx *gorm.DB) error {
+			var latest model.Platform
+			err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("user_id = ? AND platform = ?", userID, spiderregistry.LuoGu).First(&latest).Error
+			if err == nil {
+				if (latest.Id != cleanupPayload.BindingID || latest.Username != cleanupPayload.Username) && luoguUIDPattern.MatchString(strings.TrimSpace(latest.Username)) {
+					replacementRestored = true
+					return nil
+				}
+				if err := deleteSpiderPlatformData(workCtx, tx, userID, spiderregistry.LuoGu); err != nil {
+					return err
+				}
+			} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+				return err
+			}
+			return advanceLuoguCleanupPhase(workCtx, tx, pending, "facts")
+		}); err != nil {
+			return false, abandon(err)
+		}
+		if replacementRestored {
+			if err := bizservice.FinishUserProfileInvalidation(workCtx, s.rdb, userID, profileToken); err != nil {
+				return false, abandon(err)
+			}
+			if err := s.clearLuoguCleanupIntent(ctx, pending); err != nil {
+				return false, err
+			}
+			return false, nil
+		}
+		releaseCancelLock()
+	}
+	if !generationBumped {
+		if _, err := bizservice.BumpUserProfileOwnedGeneration(workCtx, s.rdb, userID, profileToken, task.GenerationKey(userID, spiderregistry.LuoGu), 7*24*time.Hour); err != nil {
+			return false, abandon(err)
+		}
+	}
+	removed := false
+	if pending.Phase == "intent" {
+		if err := validateOwner(); err != nil {
+			return false, abandon(err)
+		}
+		if err := s.db.WithContext(workCtx).Transaction(func(tx *gorm.DB) error {
+			var current model.Platform
+			if err := tx.Where("user_id = ? AND platform = ?", userID, spiderregistry.LuoGu).First(&current).Error; err != nil {
+				if err == gorm.ErrRecordNotFound {
+					return advanceLuoguCleanupPhase(workCtx, tx, pending, "facts")
+				}
+				return err
+			}
+			if current.Id != cleanupPayload.BindingID || current.Username != cleanupPayload.Username {
+				return fmt.Errorf("LuoGu cleanup binding identity changed")
+			}
+			removed = true
+			if err := deleteSpiderPlatformData(workCtx, tx, userID, spiderregistry.LuoGu); err != nil {
+				return err
+			}
+			return advanceLuoguCleanupPhase(workCtx, tx, pending, "facts")
+		}); err != nil {
+			return false, abandon(err)
+		}
+	} else {
+		removed = true
+	}
+	if err := validateOwner(); err != nil {
+		return false, abandon(err)
+	}
+	if err := dal.RebuildUserTagACForUser(workCtx, s.db, userID); err != nil {
+		return false, abandon(err)
+	}
+	if pending.Phase == "facts" {
+		if err := validateOwner(); err != nil {
+			return false, abandon(err)
+		}
+		var target model.AbilityMaintenanceTarget
+		if err := s.db.WithContext(workCtx).Where("intent_id = ? AND user_id = ?", pending.OperationID, userID).First(&target).Error; err != nil {
+			return false, abandon(err)
+		}
+		if err := validateOwner(); err != nil {
+			return false, abandon(err)
+		}
+		if err := bizservice.AdvanceAbilityMaintenanceTarget(workCtx, s.db, pending, &target, "outbox_ready", "derived_ready", ""); err != nil {
+			return false, abandon(err)
+		}
+	}
+	if pending.Phase == "derived_ready" {
+		if err := bizservice.FinishUserProfileInvalidation(workCtx, s.rdb, userID, profileToken); err != nil {
+			return false, abandon(err)
+		}
+		if err := advanceLuoguCleanupPhase(ctx, s.db, pending, "fence_finalized"); err != nil {
+			return false, err
+		}
+	}
+	if pending.Phase == "fence_finalized" {
+		pending, err = s.finalizeLuoguCleanupTailPersisted(ctx, pending, cleanupPayload)
+		if err != nil {
+			return false, err
+		}
+	}
+	if pending.Phase == "tail_finalized" {
+		if err := s.publishAndClearLuoguCleanup(ctx, pending); err != nil {
+			return false, err
+		}
+	}
+	return removed, nil
+}
+
+func (s *SpiderService) recoverPendingLuoguCleanups(ctx context.Context) {
+	if s == nil || s.db == nil || s.rdb == nil || !s.db.Migrator().HasTable(&model.AbilityMaintenancePending{}) {
+		return
+	}
+	pending, err := dal.LoadAbilityMaintenanceRecoveryBatch(ctx, s.db, []string{"luogu_cleanup"}, 50)
+	if err != nil {
+		log.Warnf("LuoGu cleanup recovery scan: %v", err)
+		return
+	}
+	for i := range pending {
+		claimed, touchErr := dal.TouchAbilityMaintenanceRecoveryAttempt(ctx, s.db, &pending[i], time.Now())
+		if touchErr != nil {
+			log.Warnf("LuoGu cleanup recovery touch intent=%s: %v", pending[i].OperationID, touchErr)
+			continue
+		}
+		if !claimed {
+			continue
+		}
+		var payload luoguCleanupPayload
+		if err := json.Unmarshal([]byte(pending[i].Payload), &payload); err != nil {
+			log.Warnf("LuoGu cleanup recovery payload intent=%s: %v", pending[i].OperationID, err)
+			continue
+		}
+		if _, err := s.removeInvalidLuoguBinding(ctx, pending[i].UserID, payload.AuthorizedUID); err != nil {
+			log.Warnf("LuoGu cleanup recovery user=%d intent=%s: %v", pending[i].UserID, pending[i].OperationID, err)
+		}
+	}
+}
+
+func (s *SpiderService) runLuoguCleanupRecovery() {
+	s.recoverPendingLuoguCleanups(context.Background())
+	ticker := time.NewTicker(time.Minute)
+	defer ticker.Stop()
+	for range ticker.C {
+		s.recoverPendingLuoguCleanups(context.Background())
+	}
 }
 
 func validateLuoguPage(req *spiderpb.UploadLuoguSyncPageReq, state *luoguSession, now time.Time) error {
@@ -738,7 +1174,10 @@ func (s *SpiderService) validateLuoguSessionState(ctx context.Context, state *lu
 
 func (s *SpiderService) loadLuoguSessionByID(ctx context.Context, id string) (*luoguSession, error) {
 	values, err := s.rdb.HGetAll(ctx, luoguSyncSessionKey(id)).Result()
-	if err != nil || len(values) == 0 {
+	if err != nil {
+		return nil, kratoserrors.ServiceUnavailable("SYNC_UNAVAILABLE", "同步服务暂不可用")
+	}
+	if len(values) == 0 {
 		return nil, kratoserrors.Unauthorized("SESSION_EXPIRED", "同步会话已失效")
 	}
 	state := &luoguSession{ID: id}
@@ -824,24 +1263,49 @@ func (s *SpiderService) restartLuoguScan(ctx context.Context, state *luoguSessio
 	return response, nil
 }
 
-func (s *SpiderService) terminateLuoguSession(ctx context.Context, state *luoguSession) {
-	if s == nil || s.rdb == nil || state == nil {
-		return
+func (s *SpiderService) markLuoguSessionTerminated(state *luoguSession) error {
+	if s == nil || state == nil {
+		return nil
 	}
 	if finalizer, ok := s.luoguImporter.(luoguSessionFinalizer); ok {
 		markCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		if err := finalizer.MarkClientSyncSessionTerminated(markCtx, state.ID, s.luoguNow()); err != nil {
-			log.Errorf("client-sync mark termination session=%s user=%d: %v", state.ID, state.UserID, err)
-		}
-		cancel()
-	} else if state.Inserted > 0 && !state.Done && s.luoguImporter != nil {
+		defer cancel()
+		return finalizer.MarkClientSyncSessionTerminated(markCtx, state.ID, s.luoguNow())
+	}
+	if state.Inserted > 0 && !state.Done && s.luoguImporter != nil {
 		s.luoguImporter.ScheduleSubmitPostProcess(state.UserID)
 	}
-	_ = luoguTerminateScript.Run(ctx, s.rdb, []string{
+	return nil
+}
+
+func (s *SpiderService) deleteLuoguSessionKeys(ctx context.Context, state *luoguSession) error {
+	if s == nil || s.rdb == nil || state == nil {
+		return nil
+	}
+	return luoguTerminateScript.Run(ctx, s.rdb, []string{
 		luoguSyncSessionKey(state.ID), luoguSyncTokenKey(state.TokenHash),
 		luoguSyncActiveKey(state.UserID, state.LuoguUID), luoguSyncLockKey(state.ID),
 		luoguSyncIssuanceKey(state.AuthorizationID, state.RequestIDHash),
 	}, state.ID).Err()
+}
+
+func (s *SpiderService) finalizeLuoguSessionForCleanup(ctx context.Context, state *luoguSession) error {
+	if err := s.markLuoguSessionTerminated(state); err != nil {
+		return err
+	}
+	return s.deleteLuoguSessionKeys(ctx, state)
+}
+
+func (s *SpiderService) terminateLuoguSession(ctx context.Context, state *luoguSession) {
+	if s == nil || s.rdb == nil || state == nil {
+		return
+	}
+	if err := s.markLuoguSessionTerminated(state); err != nil {
+		log.Errorf("client-sync mark termination session=%s user=%d: %v", state.ID, state.UserID, err)
+	}
+	if err := s.deleteLuoguSessionKeys(ctx, state); err != nil {
+		log.Errorf("client-sync terminate Redis session=%s user=%d: %v", state.ID, state.UserID, err)
+	}
 }
 
 func (s *SpiderService) tryLuoguSessionLock(ctx context.Context, id string) (func(), bool) {

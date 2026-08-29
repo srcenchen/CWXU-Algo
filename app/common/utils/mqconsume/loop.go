@@ -17,6 +17,12 @@ import (
 )
 
 const RetryHeader = "x-retry"
+const exhaustedRetryHeader = "x-exhausted-retry"
+
+type retryBroker interface {
+	QueueDeclare(string, bool, bool, bool, bool, amqp.Table) (amqp.Queue, error)
+	Publish(string, string, bool, bool, amqp.Publishing) error
+}
 
 // Options 受控消费循环配置。
 type Options struct {
@@ -34,6 +40,14 @@ type Options struct {
 	Handler func(body []byte, headers amqp.Table) error
 	// ShouldRequeue 可选：返回 true 表示立即 requeue 不计入重试（如 pipeline pause）。
 	ShouldRequeue func(err error) bool
+	// OnExhausted 在最后一次失败且消息即将丢弃前运行。返回 error 时原消息会
+	// requeue，防止外部持久恢复状态尚未写入就丢失消息。
+	OnExhausted func(body []byte, headers amqp.Table) error
+	// ExhaustedRetryBackoff controls the bounded delay before requeueing an
+	// exhausted message whose durable recovery callback failed.
+	ExhaustedRetryBackoff func(retry int) time.Duration
+	// Sleep makes retry waits testable. Nil uses time.Sleep.
+	Sleep func(time.Duration)
 	// Stop 可选：关闭时退出循环。
 	Stop <-chan struct{}
 }
@@ -210,7 +224,7 @@ func normalizeConcurrency(value, fallback int) int {
 	return value
 }
 
-func handleFail(mq *event.RabbitMQ, opts Options, d amqp.Delivery, err error, fromPanic bool) error {
+func handleFail(mq retryBroker, opts Options, d amqp.Delivery, err error, fromPanic bool) error {
 	retry := headerRetry(d.Headers)
 	if err != nil {
 		log.Errorf("%s fail retry=%d/%d: %v", opts.Name, retry, opts.MaxRetry, err)
@@ -219,6 +233,19 @@ func handleFail(mq *event.RabbitMQ, opts Options, d amqp.Delivery, err error, fr
 	}
 	if retry >= opts.MaxRetry {
 		// 超过上限：丢弃，避免 poison 无限循环
+		if opts.OnExhausted != nil {
+			if exhaustedErr := opts.OnExhausted(d.Body, d.Headers); exhaustedErr != nil {
+				log.Errorf("%s exhausted recovery failed, delaying original: %v", opts.Name, exhaustedErr)
+				exhaustedRetries := headerRetry(amqp.Table{RetryHeader: d.Headers[exhaustedRetryHeader]})
+				delay := exhaustedRetryBackoff(opts, exhaustedRetries)
+				delayErr := settleExhaustedRetry(mq, opts.Queue, d, delay)
+				if delayErr == nil {
+					return d.Ack(false)
+				}
+				log.Errorf("%s exhausted delay publish failed, requeueing original: %v", opts.Name, delayErr)
+				return d.Nack(false, true)
+			}
+		}
 		return d.Nack(false, false)
 	}
 	// 重新入队并递增重试计数，然后 Ack 原消息
@@ -238,6 +265,52 @@ func handleFail(mq *event.RabbitMQ, opts Options, d amqp.Delivery, err error, fr
 		return d.Nack(false, true)
 	}
 	return d.Ack(false)
+}
+
+func settleExhaustedRetry(mq retryBroker, queue string, d amqp.Delivery, delay time.Duration) error {
+	if mq == nil || queue == "" {
+		return fmt.Errorf("exhausted retry broker unavailable")
+	}
+	if delay <= 0 {
+		delay = time.Millisecond
+	}
+	delayQueue := fmt.Sprintf("%s.exhausted.%dms", queue, delay.Milliseconds())
+	args := amqp.Table{
+		"x-message-ttl":             int32(delay / time.Millisecond),
+		"x-dead-letter-exchange":    "",
+		"x-dead-letter-routing-key": queue,
+	}
+	if _, err := mq.QueueDeclare(delayQueue, true, false, false, false, args); err != nil {
+		return err
+	}
+	headers := amqp.Table{}
+	for k, value := range d.Headers {
+		headers[k] = value
+	}
+	headers[exhaustedRetryHeader] = headerRetry(amqp.Table{RetryHeader: headers[exhaustedRetryHeader]}) + 1
+	return mq.Publish("", delayQueue, false, false, amqp.Publishing{
+		ContentType: d.ContentType, ContentEncoding: d.ContentEncoding, DeliveryMode: amqp.Persistent,
+		Priority: d.Priority, CorrelationId: d.CorrelationId, ReplyTo: d.ReplyTo, Expiration: d.Expiration,
+		MessageId: d.MessageId, Timestamp: d.Timestamp, Type: d.Type, UserId: d.UserId, AppId: d.AppId,
+		Headers: headers, Body: append([]byte(nil), d.Body...),
+	})
+}
+
+func exhaustedRetryBackoff(opts Options, retry int) time.Duration {
+	if opts.ExhaustedRetryBackoff != nil {
+		return opts.ExhaustedRetryBackoff(retry)
+	}
+	// The exhausted-retry header is durable across delay-queue round trips and
+	// yields exponential delay (250ms, 500ms, …),
+	// capped at two seconds so an unacked Rabbit delivery is never held long.
+	delay := 250 * time.Millisecond
+	for step := 0; step < retry && delay < 2*time.Second; step++ {
+		delay *= 2
+	}
+	if delay > 2*time.Second {
+		return 2 * time.Second
+	}
+	return delay
 }
 
 func headerRetry(h amqp.Table) int {

@@ -141,8 +141,12 @@ func migrateModels(db *gorm.DB) {
 		&model.ProblemTag{},
 		&model.UserProblemStatus{},
 		&model.UserTagAC{},
+		&model.UserTagACSnapshot{},
 		&model.AbilityModelState{},
 		&model.ProblemAbilityStat{},
+		&model.AbilityProfileScheduleRun{},
+		&model.AbilityMaintenancePending{},
+		&model.AbilityMaintenanceTarget{},
 		&model.ProblemComment{},
 		&model.ProblemUserSolution{},
 		&model.ActivityFeed{},
@@ -157,6 +161,15 @@ func migrateModels(db *gorm.DB) {
 	)
 	if err != nil {
 		panic("数据库：数据库自动合并失败")
+	}
+	if err := model.InstallProfileEvidenceRevisionTriggers(db); err != nil {
+		panic("数据库：画像证据版本触发器安装失败: " + err.Error())
+	}
+	// Optional ability read-path indexes are intentionally built after
+	// AutoMigrate. PostgreSQL uses CONCURRENTLY so large table scans do not hold
+	// a write-blocking index build lock during core-data startup.
+	if err := migrateAbilityLookupIndexes(db); err != nil {
+		log.Warnf("database: ability lookup index migration: %v", err)
 	}
 	migrateContestLogUnique(db)
 	migrateContestLogListIndexes(db)

@@ -15,19 +15,75 @@ import (
 )
 
 const (
-	userProfileQueue       = "user_profile"
-	userProfilePendingTTL  = 30 * time.Minute
-	userProfilePendingPref = "user_profile:pending:"
+	userProfileQueue         = "user_profile"
+	userProfilePendingTTL    = 30 * time.Minute
+	userProfilePendingPref   = "user_profile:pending:"
+	userProfilePendingNormal = "normal"
+	userProfilePendingForce  = "force"
 )
+
+var userProfileClaimScript = redis.NewScript(`
+local current = redis.call('GET', KEYS[1])
+local desired = ARGV[1]
+local tentative = desired .. ':publishing:' .. ARGV[3]
+if not current then
+  redis.call('PSETEX', KEYS[1], ARGV[2], tentative)
+  return 1
+end
+if desired == 'force' then
+  if current == 'force' or current == 'force:published' then
+    return 0
+  end
+  redis.call('PSETEX', KEYS[1], ARGV[2], tentative)
+  return 2
+end
+if desired == 'normal' and string.find(current, 'normal:publishing:', 1, true) == 1 then
+  redis.call('PSETEX', KEYS[1], ARGV[2], tentative)
+  return 2
+end
+if desired == 'normal' and string.find(current, 'force:publishing:', 1, true) == 1 then
+  redis.call('PSETEX', KEYS[1], ARGV[2], 'force:publishing:' .. ARGV[3])
+  return 3
+end
+return 0
+`)
+
+var userProfileReleaseClaimScript = redis.NewScript(`
+if redis.call('GET', KEYS[1]) == ARGV[1] then
+  return redis.call('DEL', KEYS[1])
+end
+return 0
+`)
+
+var userProfilePublishClaimScript = redis.NewScript(`
+if redis.call('GET', KEYS[1]) == ARGV[1] then
+  redis.call('PSETEX', KEYS[1], ARGV[3], ARGV[2])
+  return 1
+end
+return 0
+`)
+
+var userProfileClaimSeq atomic.Uint64
 
 // UserProfileTask 画像预计算入队（去重 + 持久化 MQ）
 type UserProfileTask struct {
-	mq         *event.RabbitMQ
+	mq         userProfilePublisher
 	rdb        *redis.Client
 	queueReady atomic.Bool
 }
 
+type userProfilePublisher interface {
+	QueueDeclare(string, bool, bool, bool, bool, amqp.Table) (amqp.Queue, error)
+	Publish(string, string, bool, bool, amqp.Publishing) error
+}
+
 func NewUserProfileTask(mq *event.RabbitMQ, rdb *redis.Client) *UserProfileTask {
+	return NewUserProfileTaskWithPublisher(mq, rdb)
+}
+
+// NewUserProfileTaskWithPublisher keeps the queue protocol testable and allows
+// alternate publishers without coupling pending-state semantics to RabbitMQ.
+func NewUserProfileTaskWithPublisher(mq userProfilePublisher, rdb *redis.Client) *UserProfileTask {
 	return &UserProfileTask{mq: mq, rdb: rdb}
 }
 
@@ -70,23 +126,60 @@ func (t *UserProfileTask) DoForce(userID int64) UserProfileEnqueueResult {
 	return t.do(userID, true)
 }
 
+// DoMaintenanceForce publishes a durable-maintenance rebuild.  The caller owns
+// deduplication and recovery in SQL, so this deliberately does not claim the
+// normal Redis pending key: a consumer drop must never suppress a DB retry.
+func (t *UserProfileTask) DoMaintenanceForce(userID int64, intentID string) UserProfileEnqueueResult {
+	if userID <= 0 || intentID == "" || t.mq == nil {
+		return UserProfileEnqueueResult{Failed: true}
+	}
+	t.ensureQueue()
+	body, err := json.Marshal(event.UserProfileEvent{UserId: userID, Force: true, IntentID: intentID})
+	if err != nil {
+		return UserProfileEnqueueResult{Failed: true}
+	}
+	if err := t.mq.Publish("", userProfileQueue, false, false, amqp.Publishing{
+		ContentType: "application/json", Body: body, DeliveryMode: amqp.Persistent,
+	}); err != nil {
+		log.Errorf("UserProfileTask: maintenance publish user=%d intent=%s: %v", userID, intentID, err)
+		t.queueReady.Store(false)
+		return UserProfileEnqueueResult{Failed: true}
+	}
+	return UserProfileEnqueueResult{Published: true}
+}
+
 func (t *UserProfileTask) do(userID int64, force bool) UserProfileEnqueueResult {
 	if userID <= 0 || t.mq == nil {
 		return UserProfileEnqueueResult{Failed: true}
 	}
+	pendingState := userProfilePendingNormal
+	if force {
+		pendingState = userProfilePendingForce
+	}
+	publishForce := force
+	claimToken := fmt.Sprintf("%d-%d", time.Now().UnixNano(), userProfileClaimSeq.Add(1))
 	if t.rdb != nil {
-		ok, err := t.rdb.SetNX(context.Background(), userProfilePendingKey(userID), "1", userProfilePendingTTL).Result()
+		claim, err := userProfileClaimScript.Run(
+			context.Background(), t.rdb, []string{userProfilePendingKey(userID)},
+			pendingState, userProfilePendingTTL.Milliseconds(), claimToken,
+		).Int64()
 		if err != nil {
-			log.Warnf("UserProfileTask: pending SetNX user=%d: %v", userID, err)
+			log.Warnf("UserProfileTask: pending claim user=%d: %v", userID, err)
 			// Redis 故障仍尝试入队
-		} else if !ok {
+		} else if claim == 0 {
 			return UserProfileEnqueueResult{Deduped: true}
+		} else if claim == 3 {
+			// A normal request cannot trust a tentative force publish. Take it over
+			// as force so a failing earlier publisher cannot lose both requests.
+			pendingState = userProfilePendingForce
+			publishForce = true
 		}
 	}
+	claimState := pendingState + ":publishing:" + claimToken
 	t.ensureQueue()
-	body, err := json.Marshal(event.UserProfileEvent{UserId: userID, Force: force})
+	body, err := json.Marshal(event.UserProfileEvent{UserId: userID, Force: publishForce})
 	if err != nil {
-		t.clearPending(userID)
+		t.releaseClaim(userID, claimState)
 		return UserProfileEnqueueResult{Failed: true}
 	}
 	if err := t.mq.Publish("", userProfileQueue, false, false, amqp.Publishing{
@@ -96,9 +189,10 @@ func (t *UserProfileTask) do(userID int64, force bool) UserProfileEnqueueResult 
 	}); err != nil {
 		log.Errorf("UserProfileTask: Publish user=%d: %v", userID, err)
 		t.queueReady.Store(false)
-		t.clearPending(userID)
+		t.releaseClaim(userID, claimState)
 		return UserProfileEnqueueResult{Failed: true}
 	}
+	t.publishClaim(userID, claimState, pendingState+":published")
 	return UserProfileEnqueueResult{Published: true}
 }
 
@@ -112,6 +206,25 @@ func (t *UserProfileTask) clearPending(userID int64) {
 		return
 	}
 	_ = t.rdb.Del(context.Background(), userProfilePendingKey(userID)).Err()
+}
+
+func (t *UserProfileTask) releaseClaim(userID int64, state string) {
+	if t.rdb == nil || userID <= 0 || state == "" {
+		return
+	}
+	_ = userProfileReleaseClaimScript.Run(
+		context.Background(), t.rdb, []string{userProfilePendingKey(userID)}, state,
+	).Err()
+}
+
+func (t *UserProfileTask) publishClaim(userID int64, claimState, publishedState string) {
+	if t.rdb == nil || userID <= 0 || claimState == "" || publishedState == "" {
+		return
+	}
+	_ = userProfilePublishClaimScript.Run(
+		context.Background(), t.rdb, []string{userProfilePendingKey(userID)},
+		claimState, publishedState, userProfilePendingTTL.Milliseconds(),
+	).Err()
 }
 
 // DoBatch 批量入队（cron 预热）；force=true 强制重建（跳过指纹）。返回 published 数

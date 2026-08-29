@@ -3,6 +3,7 @@ package dal
 import (
 	"context"
 	"errors"
+	"math"
 	"strings"
 	"sync"
 	"time"
@@ -47,21 +48,22 @@ WITH terminal AS (
 terminal_with_problem AS (
 	SELECT terminal.*, lower(trim(p.platform)) AS problem_platform_key,
 		trim(coalesce(p.difficulty, '')) AS difficulty,
-		CASE WHEN terminal.problem_id IS NOT NULL AND lower(trim(p.platform)) = terminal.platform_key THEN 1 ELSE 0 END AS valid_bound
+		CASE WHEN terminal.problem_id IS NOT NULL AND terminal.problem_id <> 0
+			AND lower(trim(p.platform)) = terminal.platform_key THEN 1 ELSE 0 END AS valid_bound
 	FROM terminal LEFT JOIN problems p ON p.id = terminal.problem_id
 ),
 deduplicated AS (
 	SELECT terminal_with_problem.*,
 		row_number() OVER (
 			PARTITION BY platform_key, submit_id
-			ORDER BY valid_bound DESC, CASE WHEN problem_id IS NULL THEN 1 ELSE 0 END DESC, time ASC, id ASC
+			ORDER BY valid_bound DESC, CASE WHEN problem_id IS NULL OR problem_id = 0 THEN 1 ELSE 0 END DESC, time ASC, id ASC
 		) AS duplicate_rank
 	FROM terminal_with_problem
 ),
 unbound_keys AS (
 	SELECT DISTINCT user_id, platform_key
 	FROM deduplicated
-	WHERE duplicate_rank = 1 AND valid_bound = 0 AND problem_id IS NULL
+	WHERE duplicate_rank = 1 AND valid_bound = 0
 ),
 complete_platform_keys AS (
 	SELECT DISTINCT user_id, lower(trim(platform)) AS platform_key
@@ -103,44 +105,133 @@ GROUP BY problem_id, platform_key, difficulty ORDER BY problem_id ASC`
 // RefreshProblemAbilityStats locks the singleton before its CTE source read;
 // a stale concurrent builder therefore cannot publish after a newer snapshot.
 func RefreshProblemAbilityStats(ctx context.Context, db *gorm.DB) error {
+	_, _, err := refreshProblemAbilityStats(ctx, db, "", nil)
+	return err
+}
+
+// RefreshProblemAbilityStatsForMaintenance publishes a new active snapshot and
+// the caller's durable maintenance transition in the same database commit.
+// A transition failure rolls the active pointer and snapshot rows back too.
+func RefreshProblemAbilityStatsForMaintenance(ctx context.Context, db *gorm.DB, transition func(context.Context, *gorm.DB, uint64) error) (uint64, error) {
+	if transition == nil {
+		return 0, errors.New("problem ability stats: nil maintenance transition")
+	}
+	version, _, err := refreshProblemAbilityStats(ctx, db, "", transition)
+	return version, err
+}
+
+// RefreshProblemAbilityStatsForPeriod atomically coalesces scheduled refreshes
+// for one logical period. Ad-hoc/admin RefreshProblemAbilityStats calls do not
+// modify the period marker and therefore remain independent force refreshes.
+func RefreshProblemAbilityStatsForPeriod(ctx context.Context, db *gorm.DB, period string) (version uint64, refreshed bool, err error) {
+	period = strings.TrimSpace(period)
+	if period == "" {
+		return 0, false, errors.New("problem ability stats: empty refresh period")
+	}
+	return refreshProblemAbilityStats(ctx, db, period, nil)
+}
+
+func refreshProblemAbilityStats(ctx context.Context, db *gorm.DB, scheduledPeriod string, transition func(context.Context, *gorm.DB, uint64) error) (version uint64, refreshed bool, err error) {
 	if db == nil {
-		return errors.New("problem ability stats: nil database")
+		return 0, false, errors.New("problem ability stats: nil database")
 	}
 	// SQLite's write locking needs process serialization; PostgreSQL cross-process
 	// serialization is supplied by the state-row lock inside the transaction.
 	problemAbilityRefreshMu.Lock()
 	defer problemAbilityRefreshMu.Unlock()
-	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		now := time.Now()
-		if err := tx.Exec(`INSERT INTO ability_model_state (id, active_version, built_at, updated_at)
-			VALUES (?, ?, ?, ?) ON CONFLICT (id) DO NOTHING`, 1, 0, now, now).Error; err != nil {
-			return err
+	for {
+		if err := ctx.Err(); err != nil {
+			return 0, false, err
 		}
-		var state model.AbilityModelState
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&state, 1).Error; err != nil {
-			return err
+		now := time.Now()
+		if err := db.WithContext(ctx).Exec(`INSERT INTO ability_model_state (id, active_version, built_at, updated_at)
+			VALUES (?, ?, ?, ?) ON CONFLICT (id) DO NOTHING`, 1, 0, now, now).Error; err != nil {
+			return 0, false, err
+		}
+		var baseline model.AbilityModelState
+		if err := db.WithContext(ctx).First(&baseline, 1).Error; err != nil {
+			return 0, false, err
+		}
+		if scheduledPeriod != "" && baseline.LastScheduledRefreshPeriod == scheduledPeriod {
+			return baseline.ActiveVersion, false, nil
 		}
 		var evidence []problemAbilityAggregate
-		if err := tx.Raw(problemAbilityEvidenceSQL).Scan(&evidence).Error; err != nil {
-			return err
+		if err := db.WithContext(ctx).Raw(problemAbilityEvidenceSQL).Scan(&evidence).Error; err != nil {
+			return 0, false, err
 		}
-		newVersion := state.ActiveVersion + 1
-		rows := reduceProblemAbilityStats(evidence, newVersion, now)
-		if len(rows) > 0 {
-			if err := tx.CreateInBatches(rows, 500).Error; err != nil {
+		// Group/posterior reduction is CPU work and belongs outside the state-row
+		// publication lock together with the full evidence scan.
+		rows := reduceProblemAbilityStats(evidence, 0, now)
+		retry := false
+		err = db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			var state model.AbilityModelState
+			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&state, 1).Error; err != nil {
 				return err
 			}
-		}
-		if state.ActiveVersion > 0 {
-			if err := tx.Where("model_version <> ? AND model_version <> ?", state.ActiveVersion, newVersion).Delete(&model.ProblemAbilityStat{}).Error; err != nil {
+			if scheduledPeriod != "" && state.LastScheduledRefreshPeriod == scheduledPeriod {
+				version = state.ActiveVersion
+				refreshed = false
+				return nil
+			}
+			if state.ActiveVersion != baseline.ActiveVersion {
+				retry = true
+				return nil
+			}
+			newVersion, err := nextAbilityModelVersion(state.ActiveVersion)
+			if err != nil {
 				return err
 			}
+			for i := range rows {
+				rows[i].ModelVersion = newVersion
+			}
+			if len(rows) > 0 {
+				if err := tx.CreateInBatches(rows, 500).Error; err != nil {
+					return err
+				}
+			}
+			if state.ActiveVersion > 0 {
+				if err := tx.Where("model_version <> ? AND model_version <> ?", state.ActiveVersion, newVersion).Delete(&model.ProblemAbilityStat{}).Error; err != nil {
+					return err
+				}
+			}
+			// ActiveVersion is the ready/status marker, updated only after all rows.
+			updates := map[string]interface{}{
+				"active_version": newVersion, "built_at": now, "updated_at": now,
+			}
+			if scheduledPeriod != "" {
+				updates["last_scheduled_refresh_period"] = scheduledPeriod
+			}
+			res := tx.Model(&model.AbilityModelState{}).Where("id = ?", state.ID).Updates(updates)
+			if res.Error != nil {
+				return res.Error
+			}
+			if res.RowsAffected != 1 {
+				return errors.New("problem ability stats: active state publication updated zero rows")
+			}
+			if transition != nil {
+				if err := transition(ctx, tx, newVersion); err != nil {
+					return err
+				}
+			}
+			version = newVersion
+			refreshed = true
+			return nil
+		})
+		if err != nil {
+			return 0, false, err
 		}
-		// ActiveVersion is the ready/status marker, updated only after all rows.
-		return tx.Model(&model.AbilityModelState{}).Where("id = ?", state.ID).Updates(map[string]interface{}{
-			"active_version": newVersion, "built_at": now, "updated_at": now,
-		}).Error
-	})
+		if retry {
+			continue
+		}
+		return version, refreshed, nil
+	}
+}
+
+func nextAbilityModelVersion(active uint64) (uint64, error) {
+	if active >= uint64(math.MaxInt64) {
+		return 0, errors.New("ability model version exhausted")
+	}
+	return active + 1, nil
 }
 
 // reduceProblemAbilityStats is pure and receives only compact per-problem N/A.

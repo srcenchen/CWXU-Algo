@@ -53,7 +53,7 @@ func TestBumpGenerationReportsRedisMutationFailure(t *testing.T) {
 
 func TestWithPurgeUserPlatformGuardsBumpsGenerationBeforeLocksAndDelete(t *testing.T) {
 	var events []string
-	err := withPurgeUserPlatformGuards(context.Background(), []string{"AtCoder", "LuoGu"},
+	err := withPurgeUserPlatformGuards(context.Background(), []string{"AtCoder", "LuoGu"}, nil,
 		func(platform string) error { events = append(events, "bump:"+platform); return nil },
 		func(_ context.Context, platform string) (func(), bool) {
 			events = append(events, "lock:"+platform)
@@ -73,7 +73,7 @@ func TestWithPurgeUserPlatformGuardsBumpsGenerationBeforeLocksAndDelete(t *testi
 func TestWithPurgeUserPlatformGuardsBumpFailureSkipsLocksAndDelete(t *testing.T) {
 	locked := false
 	deleted := false
-	err := withPurgeUserPlatformGuards(context.Background(), []string{"AtCoder", "LuoGu"},
+	err := withPurgeUserPlatformGuards(context.Background(), []string{"AtCoder", "LuoGu"}, nil,
 		func(platform string) error {
 			if platform == "LuoGu" {
 				return errors.New("generation unavailable")
@@ -98,7 +98,7 @@ func TestWithPurgeUserPlatformGuardsInvalidatesOldTaskGeneration(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = withPurgeUserPlatformGuards(context.Background(), []string{"QOJ"},
+	err = withPurgeUserPlatformGuards(context.Background(), []string{"QOJ"}, nil,
 		func(platform string) error { _, err := spiderTask.BumpGeneration(userID, platform); return err },
 		func(context.Context, string) (func(), bool) { return func() {}, true },
 		func() error { return nil },
@@ -122,7 +122,7 @@ func TestWithPurgeUserPlatformGuardsWaitsForHeldLockBeforeDelete(t *testing.T) {
 	var once sync.Once
 	done := make(chan error, 1)
 	go func() {
-		done <- withPurgeUserPlatformGuards(context.Background(), []string{"QOJ"}, func(string) error { return nil },
+		done <- withPurgeUserPlatformGuards(context.Background(), []string{"QOJ"}, nil, func(string) error { return nil },
 			func(ctx context.Context, _ string) (func(), bool) {
 				select {
 				case <-held:
@@ -158,7 +158,7 @@ func TestWithPurgeUserPlatformGuardsLockFailureSkipsDeleteAndReleasesLocks(t *te
 	deleted := false
 	unlocked := false
 	locks := 0
-	err := withPurgeUserPlatformGuards(context.Background(), []string{"AtCoder", "QOJ"}, func(string) error { return nil },
+	err := withPurgeUserPlatformGuards(context.Background(), []string{"AtCoder", "QOJ"}, nil, func(string) error { return nil },
 		func(context.Context, string) (func(), bool) {
 			locks++
 			if locks == 2 {
@@ -168,6 +168,67 @@ func TestWithPurgeUserPlatformGuardsLockFailureSkipsDeleteAndReleasesLocks(t *te
 		}, func() error { deleted = true; return nil })
 	if err == nil || deleted || !unlocked {
 		t.Fatalf("err=%v deleted=%v unlocked=%v", err, deleted, unlocked)
+	}
+}
+
+func TestWithPurgeUserPlatformGuardsValidatesLeaseBeforeEveryStage(t *testing.T) {
+	var events []string
+	validations := 0
+	err := withPurgeUserPlatformGuards(context.Background(), []string{"AtCoder", "LuoGu"},
+		func(context.Context) error {
+			validations++
+			events = append(events, "validate")
+			if validations == 4 {
+				return errors.New("profile lease lost")
+			}
+			return nil
+		},
+		func(platform string) error { events = append(events, "bump:"+platform); return nil },
+		func(_ context.Context, platform string) (func(), bool) {
+			events = append(events, "lock:"+platform)
+			return func() { events = append(events, "unlock:"+platform) }, true
+		},
+		func() error { events = append(events, "delete"); return nil },
+	)
+	if err == nil {
+		t.Fatal("lost profile lease did not abort purge")
+	}
+	want := []string{
+		"validate", "bump:AtCoder", "validate", "bump:LuoGu",
+		"validate", "lock:AtCoder", "validate", "unlock:AtCoder",
+	}
+	if !reflect.DeepEqual(events, want) {
+		t.Fatalf("events=%v want=%v", events, want)
+	}
+}
+
+func TestSettleUnfinishedProfileInvalidationKeepsOddAfterCommittedMutation(t *testing.T) {
+	finishCalls := 0
+	abandonCalls := 0
+	err := settleUnfinishedProfileInvalidation(true,
+		func() error { finishCalls++; return nil },
+		func() error { abandonCalls++; return nil },
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if finishCalls != 0 || abandonCalls != 1 {
+		t.Fatalf("finish=%d abandon=%d want finish=0 abandon=1", finishCalls, abandonCalls)
+	}
+}
+
+func TestSettleUnfinishedProfileInvalidationReopensAfterRollback(t *testing.T) {
+	finishCalls := 0
+	abandonCalls := 0
+	err := settleUnfinishedProfileInvalidation(false,
+		func() error { finishCalls++; return nil },
+		func() error { abandonCalls++; return nil },
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if finishCalls != 1 || abandonCalls != 0 {
+		t.Fatalf("finish=%d abandon=%d want finish=1 abandon=0", finishCalls, abandonCalls)
 	}
 }
 

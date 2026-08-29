@@ -2,6 +2,7 @@ package task
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -11,6 +12,7 @@ import (
 	"cwxu-algo/app/common/utils"
 	"cwxu-algo/app/core_data/internal/backupcoord"
 	"cwxu-algo/app/core_data/internal/data"
+	"cwxu-algo/app/core_data/internal/data/dal"
 	"cwxu-algo/app/core_data/internal/data/model"
 	"cwxu-algo/app/core_data/internal/loadgate"
 	"cwxu-algo/app/core_data/internal/userrpc"
@@ -46,30 +48,35 @@ type CronTask struct {
 	spider  *SpiderTask
 	summary *SummaryTask
 	profile *UserProfileTask
-	db      *gorm.DB
-	rdb     *redis.Client
-	reg     *discovery.Register
-	backup  scheduledBackup
-	cron    *cron.Cron
-	stopCh  chan struct{}
-	mu      sync.Mutex
-	running bool
+	// abilityStats must succeed before profile candidates are enumerated.
+	abilityStats    AbilityStatsRefresher
+	profileFullGate profileFullScheduleGate
+	db              *gorm.DB
+	rdb             *redis.Client
+	reg             *discovery.Register
+	backup          scheduledBackup
+	cron            *cron.Cron
+	stopCh          chan struct{}
+	mu              sync.Mutex
+	running         bool
 }
 
 type scheduledBackup interface {
 	RunScheduled(time.Time)
 }
 
-func NewCronTask(spider *SpiderTask, data *data.Data, summary *SummaryTask, profile *UserProfileTask, reg *discovery.Register, backup *backupcoord.Coordinator) *CronTask {
+func NewCronTask(spider *SpiderTask, data *data.Data, summary *SummaryTask, profile *UserProfileTask, reg *discovery.Register, backup *backupcoord.Coordinator, abilityStats AbilityStatsRefresher) *CronTask {
 	return &CronTask{
-		spider:  spider,
-		db:      data.DB,
-		rdb:     data.RDB,
-		summary: summary,
-		profile: profile,
-		reg:     reg,
-		backup:  backup,
-		stopCh:  make(chan struct{}),
+		spider:          spider,
+		db:              data.DB,
+		rdb:             data.RDB,
+		summary:         summary,
+		profile:         profile,
+		abilityStats:    abilityStats,
+		profileFullGate: newDBProfileFullScheduleGate(data.DB),
+		reg:             reg,
+		backup:          backup,
+		stopCh:          make(chan struct{}),
 	}
 }
 
@@ -263,6 +270,27 @@ func (t *CronTask) tryCronLock(kind string, ttl time.Duration) bool {
 	return true
 }
 
+// tryCronLoadSheddingLock suppresses duplicate heavy reads across replicas but
+// fails open: callers using the DB version protocol must not depend on Redis
+// availability for correctness.
+func (t *CronTask) tryCronLoadSheddingLock(kind string, ttl time.Duration) bool {
+	if t.rdb == nil {
+		return true
+	}
+	if ttl <= 0 {
+		ttl = 4 * time.Minute
+	}
+	ok, err := t.rdb.SetNX(context.Background(), cronLockKey(kind), "1", ttl).Result()
+	if err != nil {
+		log.Warnf("CronTask: load-shedding lock %s failed, continue with DB protocol: %v", kind, err)
+		return true
+	}
+	if !ok {
+		log.Debugf("CronTask: skip duplicate work %s (another instance holds load-shedding lock)", kind)
+	}
+	return ok
+}
+
 // tryClaim 原子占用本用户「当前墙钟周期」：同一 interval 槽位只入队一次（多实例安全）。
 // 周期从整点网格起算，与服务启动时间无关；Redis 故障时跳过，避免 stampede。
 func (t *CronTask) tryClaim(kind string, userId int64, intervalMin int) bool {
@@ -403,81 +431,96 @@ func (t *CronTask) runDailySummaryTick() {
 		len(userIds), len(seen), enqueued, weekly, isMonday)
 }
 
+type profilePrewarmSource uint8
+
+const (
+	profilePrewarmDaily profilePrewarmSource = iota
+	profilePrewarmEmptyHeal
+	profilePrewarmStartup
+)
+
 // runUserProfilePrewarm 将有 AC 的用户入队画像预计算（队列内会 RebuildUserTagAC）。
-// full=true：每日全量；false：仅空雷达补漏（有 AC 但 user_tag_ac 为空）。
-func (t *CronTask) runUserProfilePrewarm(full bool) {
+func (t *CronTask) runUserProfilePrewarm(source profilePrewarmSource) {
 	if loadgateSkipTick("user_profile_prewarm") {
 		return
 	}
-	if t.profile == nil || t.db == nil {
+	if t.profile == nil || t.db == nil || t.abilityStats == nil {
 		return
 	}
-	lockKind := "user_profile"
-	if full {
-		lockKind = "user_profile_full"
-	} else {
-		lockKind = "user_profile_empty_heal"
-	}
-	ttl := 10 * time.Minute
-	if full {
-		ttl = 50 * time.Minute
-	}
-	if !t.tryCronLock(lockKind, ttl) {
+	full := source == profilePrewarmDaily
+	var refreshMode AbilityStatsRefreshMode
+	switch source {
+	case profilePrewarmDaily:
+		refreshMode = AbilityStatsScheduledDaily
+	case profilePrewarmEmptyHeal:
+		refreshMode = AbilityStatsEnsureActive
+	case profilePrewarmStartup:
+		refreshMode = AbilityStatsForceNew
+	default:
+		log.Errorf("CronTask user_profile: unknown prewarm source=%d", source)
 		return
 	}
-	var userIDs []int64
-	if full {
-		q := t.db.Model(&model.UserACProblem{}).Distinct("user_id").Order("user_id")
-		if err := q.Pluck("user_id", &userIDs).Error; err != nil {
-			log.Errorf("CronTask user_profile: pluck users: %v", err)
-			return
-		}
-	} else {
-		// 空雷达补漏：有过题但 user_tag_ac 为空
-		ids, err := listUserIDsWithACButEmptyTagAC(t.db, 800)
-		if err != nil {
-			log.Errorf("CronTask user_profile empty-heal: %v", err)
-			return
-		}
-		userIDs = ids
+	modelVersion, err := t.abilityStats.Refresh(context.Background(), refreshMode)
+	if err != nil {
+		log.Errorf("CronTask user_profile: ability stats refresh full=%v: %v", full, err)
+		return
 	}
-	// 过滤休眠用户：仅 SyncActive 入队画像预热
-	policies := t.fetchPolicies(userIDs)
-	active := make([]int64, 0, len(userIDs))
-	skipped := 0
-	for _, uid := range userIDs {
-		p := policies[uid]
-		if p.SyncActive || p.EnableSpider {
-			active = append(active, uid)
+	run := func(workDB *gorm.DB) error {
+		if workDB == nil {
+			return errors.New("user profile prewarm: nil work database")
+		}
+		var userIDs []int64
+		if full {
+			// The full-batch gate passes its advisory-lock transaction so a
+			// MaxOpenConns=1 deployment never waits on a second DB connection.
+			q := workDB.Model(&model.UserACProblem{}).Distinct("user_id").Order("user_id")
+			if err := q.Pluck("user_id", &userIDs).Error; err != nil {
+				return err
+			}
 		} else {
-			skipped++
+			// 空雷达补漏：旧评分/旧模型标签行仍必须回填当前版本。
+			ids, err := dal.ListUserIDsWithACButEmptyTagAC(context.Background(), t.db, 800)
+			if err != nil {
+				return err
+			}
+			userIDs = ids
 		}
+		// 过滤休眠用户：仅 SyncActive 入队画像预热
+		policies := t.fetchPolicies(userIDs)
+		active := make([]int64, 0, len(userIDs))
+		skipped := 0
+		for _, uid := range userIDs {
+			p := policies[uid]
+			if p.SyncActive || p.EnableSpider {
+				active = append(active, uid)
+			} else {
+				skipped++
+			}
+		}
+		pub, dedup, fail := t.profile.DoBatch(active, true)
+		log.Infof("CronTask user_profile prewarm full=%v model_version=%d candidates=%d active=%d dormant_skip=%d published=%d dedup=%d failed=%d",
+			full, modelVersion, len(userIDs), len(active), skipped, pub, dedup, fail)
+		if fail > 0 {
+			return fmt.Errorf("user profile prewarm: %d publishes failed", fail)
+		}
+		return nil
 	}
-	pub, dedup, fail := t.profile.DoBatch(active, true)
-	log.Infof("CronTask user_profile prewarm full=%v candidates=%d active=%d dormant_skip=%d published=%d dedup=%d failed=%d",
-		full, len(userIDs), len(active), skipped, pub, dedup, fail)
-}
-
-// listUserIDsWithACButEmptyTagAC cron 用（避免 task 包循环依赖 dal）
-func listUserIDsWithACButEmptyTagAC(db *gorm.DB, limit int) ([]int64, error) {
-	if db == nil {
-		return nil, nil
+	if full {
+		gate := t.profileFullGate
+		if gate == nil {
+			gate = newDBProfileFullScheduleGate(t.db)
+		}
+		if _, err := gate.Run(context.Background(), abilityStatsDailyPeriod(time.Now()), modelVersion, run); err != nil {
+			log.Errorf("CronTask user_profile full schedule: %v", err)
+		}
+		return
 	}
-	if limit <= 0 {
-		limit = 500
+	if !t.tryCronLoadSheddingLock("user_profile_empty_heal", 10*time.Minute) {
+		return
 	}
-	var ids []int64
-	err := db.Raw(`
-		SELECT DISTINCT u.user_id
-		FROM user_ac_problems u
-		WHERE NOT EXISTS (
-			SELECT 1 FROM user_tag_ac t
-			WHERE t.user_id = u.user_id AND t.count > 0
-		)
-		ORDER BY u.user_id
-		LIMIT ?
-	`, limit).Scan(&ids).Error
-	return ids, err
+	if err := run(t.db); err != nil {
+		log.Errorf("CronTask user_profile empty-heal: %v", err)
+	}
 }
 
 // Do 启动 cron 并阻塞到 Stop，供 runForever 使用（只应有一个存活实例）。
@@ -534,10 +577,10 @@ func (t *CronTask) Do() {
 	})
 	// 画像/雷达：每天 03:15 全量刷新一次；每 6h 只补「有 AC 但雷达空」的用户
 	_, _ = c.AddFunc("15 3 * * *", func() {
-		t.runUserProfilePrewarm(true)
+		t.runUserProfilePrewarm(profilePrewarmDaily)
 	})
 	_, _ = c.AddFunc("20 */6 * * *", func() {
-		t.runUserProfilePrewarm(false)
+		t.runUserProfilePrewarm(profilePrewarmEmptyHeal)
 	})
 	// 启动后异步跑一次爬取，避免空库等到下一个 12h 点
 	go func() {
@@ -557,7 +600,7 @@ func (t *CronTask) Do() {
 			return
 		default:
 		}
-		t.runUserProfilePrewarm(false)
+		t.runUserProfilePrewarm(profilePrewarmStartup)
 	}()
 	c.Start()
 	t.cron = c

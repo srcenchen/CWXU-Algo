@@ -162,11 +162,19 @@ func NewHTTPServer(c *conf.Server, logger log.Logger, d *data.Data, submitServic
 			stdhttp.Error(w, "method not allowed", stdhttp.StatusMethodNotAllowed)
 			return
 		}
-		candidates, published, unauthorized := problemService.RebuildAllProfiles(r.Context())
+		candidates, published, unauthorized, rebuildErr := problemService.RebuildAllProfiles(r.Context())
 		w.Header().Set("Content-Type", "application/json")
 		if unauthorized {
 			w.WriteHeader(stdhttp.StatusForbidden)
 			_ = json.NewEncoder(w).Encode(map[string]any{"code": 1, "message": "仅站点管理员可操作"})
+			return
+		}
+		if rebuildErr != nil {
+			w.WriteHeader(stdhttp.StatusInternalServerError)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"code": 1, "message": rebuildErr.Error(),
+				"candidates": 0, "published": 0,
+			})
 			return
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{
