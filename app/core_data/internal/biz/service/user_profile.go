@@ -22,13 +22,12 @@ import (
 
 // 画像缓存：model+evidence 精确失效 + latest 兜底。
 const (
-	userProfileCacheSchema   = "8"
+	userProfileCacheSchema   = "9"
 	userProfileLatestTTL     = 30 * 24 * time.Hour
 	userProfileExactTTL      = 7 * 24 * time.Hour
 	userProfileEmptyProofTTL = 6 * time.Hour
 	// userProfileFpKey 用户 AC 指纹缓存：数据未变化时跳过重建，削 3h 整点画像风暴
 	userProfileFpPref           = "user_profile:fp:"
-	profileRadarLimit           = 8
 	profileGlobalGenerationKey  = "problem:user_profile:generation:global"
 	profileUserGenerationPref   = "problem:user_profile:generation:user:"
 	profileInvalidationLeaseTTL = 30 * time.Minute
@@ -1044,9 +1043,6 @@ func (uc *ProblemUseCase) computeUserProfileFromPreaggregates(userID int64, iden
 			}
 			return snap.Radar[i].Tag < snap.Radar[j].Tag
 		})
-		if len(snap.Radar) > profileRadarLimit {
-			snap.Radar = snap.Radar[:profileRadarLimit]
-		}
 	}
 
 	// 平台过题：读 user_ac_problems；力扣优先官方 acTotal 合成键（e:LeetCode:ac-*）

@@ -26,6 +26,16 @@ type ProblemService struct {
 	reg *registry.Registrar
 }
 
+const userProfileRadarLimit = 8
+
+func topUserProfileRadar(tagStats []*problem.TagScore) []*problem.TagScore {
+	limit := len(tagStats)
+	if limit > userProfileRadarLimit {
+		limit = userProfileRadarLimit
+	}
+	return tagStats[:limit:limit]
+}
+
 func NewProblemService(uc *biz.ProblemUseCase, reg *discovery.Register) *ProblemService {
 	return &ProblemService{uc: uc, reg: &reg.Reg}
 }
@@ -474,10 +484,11 @@ func (s *ProblemService) UserProfile(ctx context.Context, req *problem.UserProfi
 	if err != nil {
 		return nil, errors.InternalServer("profile failed", "service unavailable")
 	}
-	r := make([]*problem.TagScore, 0, len(radar))
+	tagStats := make([]*problem.TagScore, 0, len(radar))
 	for _, v := range radar {
-		r = append(r, &problem.TagScore{Tag: v.Tag, Score: v.Score, AcCount: v.ACCount})
+		tagStats = append(tagStats, &problem.TagScore{Tag: v.Tag, Score: v.Score, AcCount: v.ACCount})
 	}
+	r := topUserProfileRadar(tagStats)
 	p := make([]*problem.NamedCount, 0, len(plats))
 	for _, v := range plats {
 		p = append(p, &problem.NamedCount{Name: v.Name, Count: v.Count})
@@ -493,6 +504,7 @@ func (s *ProblemService) UserProfile(ctx context.Context, req *problem.UserProfi
 		Platforms:    p,
 		Difficulties: d,
 		TotalAc:      totalAC,
+		TagStats:     tagStats,
 	}, nil
 }
 

@@ -167,7 +167,7 @@ func publishProfileTestTagSnapshot(t *testing.T, db *gorm.DB, userID int64, mode
 
 func TestUserProfileExactCacheIdentityIncludesSchemaModelAndEvidence(t *testing.T) {
 	key := userProfileExactCacheKey(42, 9, "process-7")
-	for _, want := range []string{"s8", "u42", "m9", "eprocess-7"} {
+	for _, want := range []string{"s9", "u42", "m9", "eprocess-7"} {
 		if !strings.Contains(key, want) {
 			t.Fatalf("exact key %q does not contain %q", key, want)
 		}
@@ -199,7 +199,7 @@ func TestWriteProfileCachePersistsCapturedIdentity(t *testing.T) {
 	if err := utils.GobDecoder(b, &cached); err != nil {
 		t.Fatal(err)
 	}
-	if cached.SchemaVersion != "8" || cached.ModelVersion != 9 || cached.EvidenceVersion != "process-7" {
+	if cached.SchemaVersion != "9" || cached.ModelVersion != 9 || cached.EvidenceVersion != "process-7" {
 		t.Fatalf("cached identity mismatch: %+v", cached)
 	}
 	if rdb.Exists(context.Background(), userProfileExactCacheKey(42, 10, "process-7")).Val() != 0 {
@@ -234,7 +234,7 @@ func TestComputeUserProfileUsesVersionedAbilityScore(t *testing.T) {
 	}
 }
 
-func TestComputeUserProfileLimitsRadarToTopEight(t *testing.T) {
+func TestComputeUserProfileKeepsEverySortedTagForAllTagStatistics(t *testing.T) {
 	db := profileTestDB(t)
 	if err := db.Create(&model.AbilityModelState{ID: 1, ActiveVersion: 10}).Error; err != nil {
 		t.Fatal(err)
@@ -267,8 +267,8 @@ func TestComputeUserProfileLimitsRadarToTopEight(t *testing.T) {
 
 	uc := &ProblemUseCase{data: &coredata.Data{DB: db}}
 	snap, _ := uc.computeUserProfile(2)
-	if len(snap.Radar) != 8 {
-		t.Fatalf("radar size=%d want 8", len(snap.Radar))
+	if len(snap.Radar) != len(want) {
+		t.Fatalf("profile tag size=%d want all %d", len(snap.Radar), len(want))
 	}
 	for i := range snap.Radar {
 		if snap.Radar[i].Tag != want[i].Tag || snap.Radar[i].Score != dal.TagAbilityScore(want[i].Weight, int(want[i].Count)) {

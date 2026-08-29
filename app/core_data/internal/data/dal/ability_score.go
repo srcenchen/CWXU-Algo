@@ -131,7 +131,9 @@ func ProblemMasteryQuality(hardness, effort float64) float64 {
 }
 
 // TagAbilityScore aggregates a tag's quality sum and de-duplicated AC count.
-// Four virtual medium-quality observations provide the low-sample prior.
+// Four virtual medium-quality observations provide the low-sample prior, while
+// sqrt(n/(n+60)) is the evidence confidence. The slower saturation keeps mature
+// tags distinguishable without letting tiny count differences dominate quality.
 func TagAbilityScore(qualitySum float64, acCount int) float64 {
 	if acCount <= 0 {
 		return 0
@@ -149,7 +151,7 @@ func TagAbilityScore(qualitySum float64, acCount int) float64 {
 		qualitySum = clampAbility(qualitySum, minQualitySum, maxQualitySum)
 	}
 	q := (4*0.55 + qualitySum) / (4 + c)
-	score := 100 * q * math.Sqrt(c/(c+10))
+	score := 100 * q * math.Sqrt(c/(c+60))
 	if !finiteAbilityFloat(score) {
 		return 0
 	}

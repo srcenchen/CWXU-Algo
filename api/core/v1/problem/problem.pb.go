@@ -1841,13 +1841,16 @@ func (x *UserProfileReq) GetUserId() int64 {
 }
 
 type UserProfileRes struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Code          int64                  `protobuf:"varint,1,opt,name=code,proto3" json:"code,omitempty"`
-	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
-	Radar         []*TagScore            `protobuf:"bytes,3,rep,name=radar,proto3" json:"radar,omitempty"`
-	Platforms     []*NamedCount          `protobuf:"bytes,4,rep,name=platforms,proto3" json:"platforms,omitempty"`
-	Difficulties  []*NamedCount          `protobuf:"bytes,5,rep,name=difficulties,proto3" json:"difficulties,omitempty"`
-	TotalAc       int64                  `protobuf:"varint,6,opt,name=total_ac,json=totalAc,proto3" json:"total_ac,omitempty"`
+	state   protoimpl.MessageState `protogen:"open.v1"`
+	Code    int64                  `protobuf:"varint,1,opt,name=code,proto3" json:"code,omitempty"`
+	Message string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	// 能力分最高的八个标签，供雷达和摘要使用。
+	Radar        []*TagScore   `protobuf:"bytes,3,rep,name=radar,proto3" json:"radar,omitempty"`
+	Platforms    []*NamedCount `protobuf:"bytes,4,rep,name=platforms,proto3" json:"platforms,omitempty"`
+	Difficulties []*NamedCount `protobuf:"bytes,5,rep,name=difficulties,proto3" json:"difficulties,omitempty"`
+	TotalAc      int64         `protobuf:"varint,6,opt,name=total_ac,json=totalAc,proto3" json:"total_ac,omitempty"`
+	// 用户全部标签统计，供词云和可滚动 AC 排行使用。
+	TagStats      []*TagScore `protobuf:"bytes,7,rep,name=tag_stats,json=tagStats,proto3" json:"tag_stats,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1922,6 +1925,13 @@ func (x *UserProfileRes) GetTotalAc() int64 {
 		return x.TotalAc
 	}
 	return 0
+}
+
+func (x *UserProfileRes) GetTagStats() []*TagScore {
+	if x != nil {
+		return x.TagStats
+	}
+	return nil
 }
 
 type ProgressReq struct {
@@ -4656,14 +4666,15 @@ const file_core_v1_problem_problem_proto_rawDesc = "" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x14\n" +
 	"\x05count\x18\x02 \x01(\x03R\x05count\")\n" +
 	"\x0eUserProfileReq\x12\x17\n" +
-	"\auser_id\x18\x01 \x01(\x03R\x06userId\"\x92\x02\n" +
+	"\auser_id\x18\x01 \x01(\x03R\x06userId\"\xce\x02\n" +
 	"\x0eUserProfileRes\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\x03R\x04code\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x123\n" +
 	"\x05radar\x18\x03 \x03(\v2\x1d.api.core.v1.problem.TagScoreR\x05radar\x12=\n" +
 	"\tplatforms\x18\x04 \x03(\v2\x1f.api.core.v1.problem.NamedCountR\tplatforms\x12C\n" +
 	"\fdifficulties\x18\x05 \x03(\v2\x1f.api.core.v1.problem.NamedCountR\fdifficulties\x12\x19\n" +
-	"\btotal_ac\x18\x06 \x01(\x03R\atotalAc\"\r\n" +
+	"\btotal_ac\x18\x06 \x01(\x03R\atotalAc\x12:\n" +
+	"\ttag_stats\x18\a \x03(\v2\x1d.api.core.v1.problem.TagScoreR\btagStats\"\r\n" +
 	"\vProgressReq\"<\n" +
 	"\fProgressItem\x12\x16\n" +
 	"\x06status\x18\x01 \x01(\tR\x06status\x12\x14\n" +
@@ -5006,70 +5017,71 @@ var file_core_v1_problem_problem_proto_depIdxs = []int32{
 	22, // 10: api.core.v1.problem.UserProfileRes.radar:type_name -> api.core.v1.problem.TagScore
 	23, // 11: api.core.v1.problem.UserProfileRes.platforms:type_name -> api.core.v1.problem.NamedCount
 	23, // 12: api.core.v1.problem.UserProfileRes.difficulties:type_name -> api.core.v1.problem.NamedCount
-	27, // 13: api.core.v1.problem.ProgressRes.items:type_name -> api.core.v1.problem.ProgressItem
-	28, // 14: api.core.v1.problem.ProgressRes.recent_failed:type_name -> api.core.v1.problem.FailedProblem
-	29, // 15: api.core.v1.problem.ProgressRes.active_jobs:type_name -> api.core.v1.problem.ActiveJob
-	30, // 16: api.core.v1.problem.ProgressRes.queues:type_name -> api.core.v1.problem.QueueStatus
-	28, // 17: api.core.v1.problem.ProgressRes.in_progress:type_name -> api.core.v1.problem.FailedProblem
-	28, // 18: api.core.v1.problem.ProgressRes.recent_failed_perm:type_name -> api.core.v1.problem.FailedProblem
-	2,  // 19: api.core.v1.problem.AdminUpdateProblemRes.data:type_name -> api.core.v1.problem.ProblemInfo
-	55, // 20: api.core.v1.problem.ListProblemEditRes.data:type_name -> api.core.v1.problem.ProblemEditInfo
-	55, // 21: api.core.v1.problem.MyPendingEditRes.data:type_name -> api.core.v1.problem.ProblemEditInfo
-	3,  // 22: api.core.v1.problem.Problem.List:input_type -> api.core.v1.problem.ListProblemReq
-	5,  // 23: api.core.v1.problem.Problem.ListTags:input_type -> api.core.v1.problem.ListTagsReq
-	7,  // 24: api.core.v1.problem.Problem.Hot:input_type -> api.core.v1.problem.HotProblemReq
-	11, // 25: api.core.v1.problem.Problem.Get:input_type -> api.core.v1.problem.GetProblemReq
-	14, // 26: api.core.v1.problem.Problem.RelatedContests:input_type -> api.core.v1.problem.RelatedContestsReq
-	17, // 27: api.core.v1.problem.Problem.ListSubmissions:input_type -> api.core.v1.problem.ListSubmissionsReq
-	19, // 28: api.core.v1.problem.Problem.FollowingStatus:input_type -> api.core.v1.problem.FollowingStatusReq
-	24, // 29: api.core.v1.problem.Problem.UserProfile:input_type -> api.core.v1.problem.UserProfileReq
-	26, // 30: api.core.v1.problem.Problem.Progress:input_type -> api.core.v1.problem.ProgressReq
-	32, // 31: api.core.v1.problem.Problem.Backfill:input_type -> api.core.v1.problem.BackfillReq
-	36, // 32: api.core.v1.problem.Problem.EmergencyStop:input_type -> api.core.v1.problem.EmergencyStopReq
-	38, // 33: api.core.v1.problem.Problem.ResetAll:input_type -> api.core.v1.problem.ResetAllReq
-	40, // 34: api.core.v1.problem.Problem.Resume:input_type -> api.core.v1.problem.ResumeReq
-	42, // 35: api.core.v1.problem.Problem.RetryFailed:input_type -> api.core.v1.problem.RetryFailedReq
-	44, // 36: api.core.v1.problem.Problem.ClearRecentFailed:input_type -> api.core.v1.problem.ClearRecentFailedReq
-	46, // 37: api.core.v1.problem.Problem.ClearNowCoderContent:input_type -> api.core.v1.problem.ClearNowCoderContentReq
-	48, // 38: api.core.v1.problem.Problem.ToggleAnalyze:input_type -> api.core.v1.problem.TogglePipelineReq
-	48, // 39: api.core.v1.problem.Problem.ToggleFetch:input_type -> api.core.v1.problem.TogglePipelineReq
-	34, // 40: api.core.v1.problem.Problem.ResetQueues:input_type -> api.core.v1.problem.ResetQueuesReq
-	50, // 41: api.core.v1.problem.Problem.AdminUpdate:input_type -> api.core.v1.problem.AdminUpdateProblemReq
-	52, // 42: api.core.v1.problem.Problem.ProposeEdit:input_type -> api.core.v1.problem.ProposeProblemEditReq
-	54, // 43: api.core.v1.problem.Problem.ListEditRequests:input_type -> api.core.v1.problem.ListProblemEditReq
-	57, // 44: api.core.v1.problem.Problem.ReviewEdit:input_type -> api.core.v1.problem.ReviewProblemEditReq
-	59, // 45: api.core.v1.problem.Problem.MyPendingEdit:input_type -> api.core.v1.problem.MyPendingEditReq
-	61, // 46: api.core.v1.problem.Problem.RepairQOJTitles:input_type -> api.core.v1.problem.RepairQOJTitlesReq
-	4,  // 47: api.core.v1.problem.Problem.List:output_type -> api.core.v1.problem.ListProblemRes
-	10, // 48: api.core.v1.problem.Problem.ListTags:output_type -> api.core.v1.problem.ListTagsRes
-	9,  // 49: api.core.v1.problem.Problem.Hot:output_type -> api.core.v1.problem.HotProblemRes
-	12, // 50: api.core.v1.problem.Problem.Get:output_type -> api.core.v1.problem.GetProblemRes
-	15, // 51: api.core.v1.problem.Problem.RelatedContests:output_type -> api.core.v1.problem.RelatedContestsRes
-	18, // 52: api.core.v1.problem.Problem.ListSubmissions:output_type -> api.core.v1.problem.ListSubmissionsRes
-	21, // 53: api.core.v1.problem.Problem.FollowingStatus:output_type -> api.core.v1.problem.FollowingStatusRes
-	25, // 54: api.core.v1.problem.Problem.UserProfile:output_type -> api.core.v1.problem.UserProfileRes
-	31, // 55: api.core.v1.problem.Problem.Progress:output_type -> api.core.v1.problem.ProgressRes
-	33, // 56: api.core.v1.problem.Problem.Backfill:output_type -> api.core.v1.problem.BackfillRes
-	37, // 57: api.core.v1.problem.Problem.EmergencyStop:output_type -> api.core.v1.problem.EmergencyStopRes
-	39, // 58: api.core.v1.problem.Problem.ResetAll:output_type -> api.core.v1.problem.ResetAllRes
-	41, // 59: api.core.v1.problem.Problem.Resume:output_type -> api.core.v1.problem.ResumeRes
-	43, // 60: api.core.v1.problem.Problem.RetryFailed:output_type -> api.core.v1.problem.RetryFailedRes
-	45, // 61: api.core.v1.problem.Problem.ClearRecentFailed:output_type -> api.core.v1.problem.ClearRecentFailedRes
-	47, // 62: api.core.v1.problem.Problem.ClearNowCoderContent:output_type -> api.core.v1.problem.ClearNowCoderContentRes
-	49, // 63: api.core.v1.problem.Problem.ToggleAnalyze:output_type -> api.core.v1.problem.TogglePipelineRes
-	49, // 64: api.core.v1.problem.Problem.ToggleFetch:output_type -> api.core.v1.problem.TogglePipelineRes
-	35, // 65: api.core.v1.problem.Problem.ResetQueues:output_type -> api.core.v1.problem.ResetQueuesRes
-	51, // 66: api.core.v1.problem.Problem.AdminUpdate:output_type -> api.core.v1.problem.AdminUpdateProblemRes
-	53, // 67: api.core.v1.problem.Problem.ProposeEdit:output_type -> api.core.v1.problem.ProposeProblemEditRes
-	56, // 68: api.core.v1.problem.Problem.ListEditRequests:output_type -> api.core.v1.problem.ListProblemEditRes
-	58, // 69: api.core.v1.problem.Problem.ReviewEdit:output_type -> api.core.v1.problem.ReviewProblemEditRes
-	60, // 70: api.core.v1.problem.Problem.MyPendingEdit:output_type -> api.core.v1.problem.MyPendingEditRes
-	62, // 71: api.core.v1.problem.Problem.RepairQOJTitles:output_type -> api.core.v1.problem.RepairQOJTitlesRes
-	47, // [47:72] is the sub-list for method output_type
-	22, // [22:47] is the sub-list for method input_type
-	22, // [22:22] is the sub-list for extension type_name
-	22, // [22:22] is the sub-list for extension extendee
-	0,  // [0:22] is the sub-list for field type_name
+	22, // 13: api.core.v1.problem.UserProfileRes.tag_stats:type_name -> api.core.v1.problem.TagScore
+	27, // 14: api.core.v1.problem.ProgressRes.items:type_name -> api.core.v1.problem.ProgressItem
+	28, // 15: api.core.v1.problem.ProgressRes.recent_failed:type_name -> api.core.v1.problem.FailedProblem
+	29, // 16: api.core.v1.problem.ProgressRes.active_jobs:type_name -> api.core.v1.problem.ActiveJob
+	30, // 17: api.core.v1.problem.ProgressRes.queues:type_name -> api.core.v1.problem.QueueStatus
+	28, // 18: api.core.v1.problem.ProgressRes.in_progress:type_name -> api.core.v1.problem.FailedProblem
+	28, // 19: api.core.v1.problem.ProgressRes.recent_failed_perm:type_name -> api.core.v1.problem.FailedProblem
+	2,  // 20: api.core.v1.problem.AdminUpdateProblemRes.data:type_name -> api.core.v1.problem.ProblemInfo
+	55, // 21: api.core.v1.problem.ListProblemEditRes.data:type_name -> api.core.v1.problem.ProblemEditInfo
+	55, // 22: api.core.v1.problem.MyPendingEditRes.data:type_name -> api.core.v1.problem.ProblemEditInfo
+	3,  // 23: api.core.v1.problem.Problem.List:input_type -> api.core.v1.problem.ListProblemReq
+	5,  // 24: api.core.v1.problem.Problem.ListTags:input_type -> api.core.v1.problem.ListTagsReq
+	7,  // 25: api.core.v1.problem.Problem.Hot:input_type -> api.core.v1.problem.HotProblemReq
+	11, // 26: api.core.v1.problem.Problem.Get:input_type -> api.core.v1.problem.GetProblemReq
+	14, // 27: api.core.v1.problem.Problem.RelatedContests:input_type -> api.core.v1.problem.RelatedContestsReq
+	17, // 28: api.core.v1.problem.Problem.ListSubmissions:input_type -> api.core.v1.problem.ListSubmissionsReq
+	19, // 29: api.core.v1.problem.Problem.FollowingStatus:input_type -> api.core.v1.problem.FollowingStatusReq
+	24, // 30: api.core.v1.problem.Problem.UserProfile:input_type -> api.core.v1.problem.UserProfileReq
+	26, // 31: api.core.v1.problem.Problem.Progress:input_type -> api.core.v1.problem.ProgressReq
+	32, // 32: api.core.v1.problem.Problem.Backfill:input_type -> api.core.v1.problem.BackfillReq
+	36, // 33: api.core.v1.problem.Problem.EmergencyStop:input_type -> api.core.v1.problem.EmergencyStopReq
+	38, // 34: api.core.v1.problem.Problem.ResetAll:input_type -> api.core.v1.problem.ResetAllReq
+	40, // 35: api.core.v1.problem.Problem.Resume:input_type -> api.core.v1.problem.ResumeReq
+	42, // 36: api.core.v1.problem.Problem.RetryFailed:input_type -> api.core.v1.problem.RetryFailedReq
+	44, // 37: api.core.v1.problem.Problem.ClearRecentFailed:input_type -> api.core.v1.problem.ClearRecentFailedReq
+	46, // 38: api.core.v1.problem.Problem.ClearNowCoderContent:input_type -> api.core.v1.problem.ClearNowCoderContentReq
+	48, // 39: api.core.v1.problem.Problem.ToggleAnalyze:input_type -> api.core.v1.problem.TogglePipelineReq
+	48, // 40: api.core.v1.problem.Problem.ToggleFetch:input_type -> api.core.v1.problem.TogglePipelineReq
+	34, // 41: api.core.v1.problem.Problem.ResetQueues:input_type -> api.core.v1.problem.ResetQueuesReq
+	50, // 42: api.core.v1.problem.Problem.AdminUpdate:input_type -> api.core.v1.problem.AdminUpdateProblemReq
+	52, // 43: api.core.v1.problem.Problem.ProposeEdit:input_type -> api.core.v1.problem.ProposeProblemEditReq
+	54, // 44: api.core.v1.problem.Problem.ListEditRequests:input_type -> api.core.v1.problem.ListProblemEditReq
+	57, // 45: api.core.v1.problem.Problem.ReviewEdit:input_type -> api.core.v1.problem.ReviewProblemEditReq
+	59, // 46: api.core.v1.problem.Problem.MyPendingEdit:input_type -> api.core.v1.problem.MyPendingEditReq
+	61, // 47: api.core.v1.problem.Problem.RepairQOJTitles:input_type -> api.core.v1.problem.RepairQOJTitlesReq
+	4,  // 48: api.core.v1.problem.Problem.List:output_type -> api.core.v1.problem.ListProblemRes
+	10, // 49: api.core.v1.problem.Problem.ListTags:output_type -> api.core.v1.problem.ListTagsRes
+	9,  // 50: api.core.v1.problem.Problem.Hot:output_type -> api.core.v1.problem.HotProblemRes
+	12, // 51: api.core.v1.problem.Problem.Get:output_type -> api.core.v1.problem.GetProblemRes
+	15, // 52: api.core.v1.problem.Problem.RelatedContests:output_type -> api.core.v1.problem.RelatedContestsRes
+	18, // 53: api.core.v1.problem.Problem.ListSubmissions:output_type -> api.core.v1.problem.ListSubmissionsRes
+	21, // 54: api.core.v1.problem.Problem.FollowingStatus:output_type -> api.core.v1.problem.FollowingStatusRes
+	25, // 55: api.core.v1.problem.Problem.UserProfile:output_type -> api.core.v1.problem.UserProfileRes
+	31, // 56: api.core.v1.problem.Problem.Progress:output_type -> api.core.v1.problem.ProgressRes
+	33, // 57: api.core.v1.problem.Problem.Backfill:output_type -> api.core.v1.problem.BackfillRes
+	37, // 58: api.core.v1.problem.Problem.EmergencyStop:output_type -> api.core.v1.problem.EmergencyStopRes
+	39, // 59: api.core.v1.problem.Problem.ResetAll:output_type -> api.core.v1.problem.ResetAllRes
+	41, // 60: api.core.v1.problem.Problem.Resume:output_type -> api.core.v1.problem.ResumeRes
+	43, // 61: api.core.v1.problem.Problem.RetryFailed:output_type -> api.core.v1.problem.RetryFailedRes
+	45, // 62: api.core.v1.problem.Problem.ClearRecentFailed:output_type -> api.core.v1.problem.ClearRecentFailedRes
+	47, // 63: api.core.v1.problem.Problem.ClearNowCoderContent:output_type -> api.core.v1.problem.ClearNowCoderContentRes
+	49, // 64: api.core.v1.problem.Problem.ToggleAnalyze:output_type -> api.core.v1.problem.TogglePipelineRes
+	49, // 65: api.core.v1.problem.Problem.ToggleFetch:output_type -> api.core.v1.problem.TogglePipelineRes
+	35, // 66: api.core.v1.problem.Problem.ResetQueues:output_type -> api.core.v1.problem.ResetQueuesRes
+	51, // 67: api.core.v1.problem.Problem.AdminUpdate:output_type -> api.core.v1.problem.AdminUpdateProblemRes
+	53, // 68: api.core.v1.problem.Problem.ProposeEdit:output_type -> api.core.v1.problem.ProposeProblemEditRes
+	56, // 69: api.core.v1.problem.Problem.ListEditRequests:output_type -> api.core.v1.problem.ListProblemEditRes
+	58, // 70: api.core.v1.problem.Problem.ReviewEdit:output_type -> api.core.v1.problem.ReviewProblemEditRes
+	60, // 71: api.core.v1.problem.Problem.MyPendingEdit:output_type -> api.core.v1.problem.MyPendingEditRes
+	62, // 72: api.core.v1.problem.Problem.RepairQOJTitles:output_type -> api.core.v1.problem.RepairQOJTitlesRes
+	48, // [48:73] is the sub-list for method output_type
+	23, // [23:48] is the sub-list for method input_type
+	23, // [23:23] is the sub-list for extension type_name
+	23, // [23:23] is the sub-list for extension extendee
+	0,  // [0:23] is the sub-list for field type_name
 }
 
 func init() { file_core_v1_problem_problem_proto_init() }

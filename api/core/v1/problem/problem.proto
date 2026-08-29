@@ -387,10 +387,13 @@ message UserProfileReq {
 message UserProfileRes {
   int64 code = 1;
   string message = 2;
+  // 能力分最高的八个标签，供雷达和摘要使用。
   repeated TagScore radar = 3;
   repeated NamedCount platforms = 4;
   repeated NamedCount difficulties = 5;
   int64 total_ac = 6;
+  // 用户全部标签统计，供词云和可滚动 AC 排行使用。
+  repeated TagScore tag_stats = 7;
 }
 
 message ProgressReq {}

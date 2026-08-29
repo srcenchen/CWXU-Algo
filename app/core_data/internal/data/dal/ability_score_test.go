@@ -198,13 +198,21 @@ func TestTagAbilityScoreAcceptsAccumulatedBoundaryRounding(t *testing.T) {
 }
 
 func TestTagAbilityScoreUsesQualityAndBreadthMonotonically(t *testing.T) {
-	if got := TagAbilityScore(0.8*500, 500); math.Abs(got-79.015) > 1e-3 {
-		t.Fatalf("500 medium-quality problems score = %.3f, want about 79.015", got)
+	if got := TagAbilityScore(0.8*500, 500); math.Abs(got-75.405) > 1e-3 {
+		t.Fatalf("500 medium-quality problems score = %.3f, want about 75.405", got)
 	}
 	if TagAbilityScore(0.8*10, 10) <= TagAbilityScore(0.8*5, 5) {
 		t.Fatal("adding equal-quality solved problems should increase score")
 	}
 	if TagAbilityScore(0.9, 1) <= TagAbilityScore(0.5, 1) {
 		t.Fatal("higher mastery quality should increase score")
+	}
+	if TagAbilityScore(0.98, 1) <= TagAbilityScore(0.30, 2) {
+		t.Fatal("a tiny count difference must not dominate a large quality difference")
+	}
+	lowBreadth := TagAbilityScore(0.65*40, 40)
+	highBreadth := TagAbilityScore(0.65*160, 160)
+	if highBreadth-lowBreadth < 14 {
+		t.Fatalf("breadth confidence should visibly separate mature tags: low=%.3f high=%.3f gap=%.3f", lowBreadth, highBreadth, highBreadth-lowBreadth)
 	}
 }
