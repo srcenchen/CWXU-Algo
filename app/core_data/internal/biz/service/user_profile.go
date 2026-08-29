@@ -1025,7 +1025,9 @@ func (uc *ProblemUseCase) computeUserProfileFromPreaggregates(userID int64, iden
 	if radarErr != nil {
 		err := radarErr
 		log.Errorf("radar preagg user=%d: %v", userID, err)
-		computeErrs = append(computeErrs, fmt.Errorf("radar preagg: %w", err))
+		if !allowStaleRadar {
+			computeErrs = append(computeErrs, fmt.Errorf("radar preagg: %w", err))
+		}
 	} else if !radarSnapshot.Ready {
 		if !allowStaleRadar {
 			computeErrs = append(computeErrs, ErrUserProfileNotReady)

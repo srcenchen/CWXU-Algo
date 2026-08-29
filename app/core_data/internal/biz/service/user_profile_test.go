@@ -739,6 +739,25 @@ func TestUserProfileLightReadComponentFailurePropagates(t *testing.T) {
 	}
 }
 
+func TestUserProfileLightReadRadarFailureStillReturnsExistingStatistics(t *testing.T) {
+	db := profileTestDB(t)
+	const userID = int64(318)
+	seedProfileBuild(t, db, userID)
+	if err := db.Migrator().DropTable(&model.UserTagACSnapshot{}); err != nil {
+		t.Fatal(err)
+	}
+	_, rdb := profileTestRedis(t)
+	uc := &ProblemUseCase{data: &coredata.Data{DB: db, RDB: rdb}}
+
+	radar, platforms, _, total, err := uc.UserProfile(userID)
+	if err != nil {
+		t.Fatalf("radar-only failure must not fail the whole profile: %v", err)
+	}
+	if len(radar) != 0 || len(platforms) == 0 || total <= 0 {
+		t.Fatalf("partial profile radar=%+v platforms=%+v total=%d", radar, platforms, total)
+	}
+}
+
 func TestUserProfileColdReadNeverPublishesExactEvenWhenAggregateProofMatches(t *testing.T) {
 	db := profileTestDB(t)
 	const userID = int64(306)
