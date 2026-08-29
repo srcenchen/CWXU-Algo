@@ -42,7 +42,10 @@ type NewQOJ struct {
 	password string
 }
 
-const qojMaxVerdictLength = 64
+const (
+	qojMaxVerdictLength   = 64
+	qojMaxReasonableScore = 1_000_000
+)
 
 var (
 	qojReasonableVerdictRe = regexp.MustCompile(`^[\p{L}\p{N}][\p{L}\p{N} .,:;()/_+-]*$`)
@@ -105,10 +108,10 @@ func normalizeQOJResult(raw string) (string, error) {
 		return "WAITING", nil
 	}
 	if score, err := strconv.ParseFloat(upper, 64); err == nil {
-		if math.IsNaN(score) || math.IsInf(score, 0) || score < 0 || score > 100 {
+		if math.IsNaN(score) || math.IsInf(score, 0) || score < 0 || score > qojMaxReasonableScore {
 			return "", fmt.Errorf("异常 QOJ 分数: %q", upper)
 		}
-		if score == 100 {
+		if score >= 100 {
 			return "AC", nil
 		}
 		return "WA", nil
