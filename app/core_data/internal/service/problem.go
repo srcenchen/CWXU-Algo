@@ -482,6 +482,7 @@ func (s *ProblemService) UserProfile(ctx context.Context, req *problem.UserProfi
 	}
 	radar, plats, diffs, totalAC, err := s.uc.UserProfile(req.UserId)
 	if err != nil {
+		log.Errorf("problem user profile user=%d: %v", req.UserId, err)
 		return nil, errors.InternalServer("profile failed", "service unavailable")
 	}
 	tagStats := make([]*problem.TagScore, 0, len(radar))

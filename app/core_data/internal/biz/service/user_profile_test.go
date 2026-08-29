@@ -724,6 +724,42 @@ func TestUserProfileIdentityFailureFallsBackToExistingStatistics(t *testing.T) {
 	}
 }
 
+func TestUserProfileRedisFailureFallsBackToDatabaseStatistics(t *testing.T) {
+	db := profileTestDB(t)
+	const userID = int64(320)
+	seedProfileBuild(t, db, userID)
+	mr, rdb := profileTestRedis(t)
+	mr.Close()
+	uc := &ProblemUseCase{data: &coredata.Data{DB: db, RDB: rdb}}
+
+	_, platforms, _, total, err := uc.UserProfile(userID)
+	if err != nil {
+		t.Fatalf("redis read failure must degrade to database statistics: %v", err)
+	}
+	if total <= 0 || len(platforms) == 0 {
+		t.Fatalf("redis fallback lost existing statistics: total=%d platforms=%+v", total, platforms)
+	}
+}
+
+func TestUserProfileInvalidationFenceFallsBackToDatabaseStatistics(t *testing.T) {
+	db := profileTestDB(t)
+	const userID = int64(321)
+	seedProfileBuild(t, db, userID)
+	_, rdb := profileTestRedis(t)
+	if err := rdb.Set(context.Background(), profileGlobalGenerationKey, 1, 0).Err(); err != nil {
+		t.Fatal(err)
+	}
+	uc := &ProblemUseCase{data: &coredata.Data{DB: db, RDB: rdb}}
+
+	_, platforms, _, total, err := uc.UserProfile(userID)
+	if err != nil {
+		t.Fatalf("invalidation fence must not hide database statistics: %v", err)
+	}
+	if total <= 0 || len(platforms) == 0 {
+		t.Fatalf("invalidation fallback lost existing statistics: total=%d platforms=%+v", total, platforms)
+	}
+}
+
 func TestUserProfileLightReadComponentFailurePropagates(t *testing.T) {
 	db := profileTestDB(t)
 	const userID = int64(317)

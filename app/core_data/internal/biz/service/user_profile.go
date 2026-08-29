@@ -909,8 +909,25 @@ func (uc *ProblemUseCase) UserProfile(userID int64) (radar []struct {
 	ctx := context.Background()
 	generation, generationErr := readProfileCacheGeneration(ctx, uc.data.RDB, userID)
 	if generationErr != nil {
-		err = generationErr
-		return
+		// Redis only guards the profile cache. A cache outage or a stale
+		// invalidation fence must not turn the read-only profile endpoint into
+		// a site-wide 500: the durable aggregates in PostgreSQL remain usable.
+		// Do not attempt a cache read with an unknown generation; compute the
+		// lightweight database view. The normal scheduled queue can repair the
+		// cache once its dependencies are available again; enqueueing here would
+		// make every request wait on the same unavailable Redis claim path.
+		log.Warnf("user_profile cache generation unavailable, serving database fallback user=%d: %v", userID, generationErr)
+		identity, identityErr := dal.ReadProfileCacheIdentity(ctx, uc.data.DB, userID)
+		if identityErr != nil {
+			log.Warnf("user_profile identity unavailable during cache fallback user=%d: %v", userID, identityErr)
+			identity = dal.ProfileCacheIdentity{}
+		}
+		snap, fallbackErr := uc.computeUserProfileFromPreaggregates(userID, identity, true)
+		if fallbackErr != nil {
+			err = fmt.Errorf("user profile cache generation user=%d: %w; fallback: %v", userID, generationErr, fallbackErr)
+			return
+		}
+		return unpackProfile(snap)
 	}
 	identity, identityErr := dal.ReadProfileCacheIdentity(ctx, uc.data.DB, userID)
 	if identityErr != nil {
