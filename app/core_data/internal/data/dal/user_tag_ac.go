@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"cwxu-algo/app/core_data/internal/data/model"
@@ -17,6 +18,8 @@ import (
 )
 
 const CurrentUserTagAbilityScoreVersion uint = 1
+
+var userTagEmptyHealCursor atomic.Int64
 
 // abilityLookupBatchSize keeps normalized tuple predicates below common SQL
 // parameter limits while still avoiding one query per candidate.
@@ -283,11 +286,11 @@ func UserHasTaggedAC(ctx context.Context, db *gorm.DB, userID int64) (bool, erro
 	for id := range candidates {
 		ids = append(ids, id)
 	}
-	var n int64
-	if err := db.WithContext(ctx).Model(&model.ProblemTag{}).Where("problem_id IN ?", ids).Count(&n).Error; err != nil {
+	tagsByProblem, err := loadAbilityTags(ctx, db, ids)
+	if err != nil {
 		return false, err
 	}
-	return n > 0, nil
+	return len(tagsByProblem) > 0, nil
 }
 
 func ListUserIDsWithACButEmptyTagAC(ctx context.Context, db *gorm.DB, limit int) ([]int64, error) {
@@ -315,8 +318,68 @@ func ListUserIDsWithACButEmptyTagAC(ctx context.Context, db *gorm.DB, limit int)
 	if result.RowsAffected != 1 || global.ModelVersion == 0 || !global.Ready || global.SchemaVersion != CurrentProfileEvidenceSchemaVersion {
 		return nil, errors.New("user tag ability heal identity is not ready")
 	}
-	var ids []int64
-	err := db.WithContext(ctx).Raw(`
+	// Probe current zero-row publications first with an independent, bounded
+	// budget. Missing snapshots must not consume the whole maintenance batch,
+	// while legitimate empty publications must never cause an unbounded scan or
+	// more than one normal lookup batch of authoritative per-user validation.
+	emptyProbeLimit := limit
+	if emptyProbeLimit > abilityLookupBatchSize {
+		emptyProbeLimit = abilityLookupBatchSize
+	}
+	invalidBudget := (emptyProbeLimit + 1) / 2
+	loadEmptyWindow := func(afterUserID int64) ([]int64, error) {
+		var window []int64
+		err := db.WithContext(ctx).Raw(`
+			SELECT DISTINCT u.user_id
+			FROM user_ac_problems u
+			JOIN user_tag_ac_snapshots s ON s.user_id = u.user_id
+			LEFT JOIN user_profile_evidence_versions e ON e.user_id = u.user_id
+			WHERE u.user_id > ?
+				AND s.score_version = ? AND s.model_version = ?
+				AND s.evidence_dataset_revision = ?
+				AND s.evidence_user_revision = COALESCE(e.revision, 0)
+				AND s.row_count = 0
+			ORDER BY u.user_id
+			LIMIT ?
+		`, afterUserID, CurrentUserTagAbilityScoreVersion, global.ModelVersion, global.DatasetRevision, emptyProbeLimit).Scan(&window).Error
+		return window, err
+	}
+	afterUserID := userTagEmptyHealCursor.Load()
+	emptyIDs, err := loadEmptyWindow(afterUserID)
+	if err != nil {
+		return nil, err
+	}
+	if len(emptyIDs) == 0 && afterUserID != 0 {
+		afterUserID = 0
+		emptyIDs, err = loadEmptyWindow(afterUserID)
+		if err != nil {
+			return nil, err
+		}
+	}
+	ids := make([]int64, 0, limit)
+	for _, userID := range emptyIDs {
+		hasTaggedAC, err := UserHasTaggedAC(ctx, db, userID)
+		if err != nil {
+			return nil, err
+		}
+		userTagEmptyHealCursor.Store(userID)
+		if hasTaggedAC {
+			ids = append(ids, userID)
+			if len(ids) == invalidBudget {
+				break
+			}
+		}
+	}
+	if len(emptyIDs) == 0 {
+		userTagEmptyHealCursor.Store(0)
+	}
+
+	missingBudget := limit - len(ids)
+	if missingBudget == 0 {
+		return ids, nil
+	}
+	var missingIDs []int64
+	err = db.WithContext(ctx).Raw(`
 		SELECT DISTINCT u.user_id
 		FROM user_ac_problems u
 		LEFT JOIN user_profile_evidence_versions e ON e.user_id = u.user_id
@@ -329,8 +392,12 @@ func ListUserIDsWithACButEmptyTagAC(ctx context.Context, db *gorm.DB, limit int)
 		)
 		ORDER BY u.user_id
 		LIMIT ?
-	`, CurrentUserTagAbilityScoreVersion, global.ModelVersion, global.DatasetRevision, limit).Scan(&ids).Error
-	return ids, err
+	`, CurrentUserTagAbilityScoreVersion, global.ModelVersion, global.DatasetRevision, missingBudget).Scan(&missingIDs).Error
+	if err != nil {
+		return nil, err
+	}
+	ids = append(ids, missingIDs...)
+	return ids, nil
 }
 
 type abilityCandidate struct {
@@ -661,7 +728,7 @@ func resolveAbilityCandidates(acRows []model.UserACProblem, problems map[uint]mo
 	return candidates, candidateMatches
 }
 
-func loadAbilityFacts(ctx context.Context, db *gorm.DB, ids []uint, modelVersion uint64) (map[uint][]string, map[uint]float64, error) {
+func loadAbilityTags(ctx context.Context, db *gorm.DB, ids []uint) (map[uint][]string, error) {
 	tagsByProblem := map[uint][]string{}
 	for start := 0; start < len(ids); start += abilityLookupBatchSize {
 		end := start + abilityLookupBatchSize
@@ -670,13 +737,21 @@ func loadAbilityFacts(ctx context.Context, db *gorm.DB, ids []uint, modelVersion
 		}
 		var tags []model.ProblemTag
 		if err := db.WithContext(ctx).Where("problem_id IN ?", ids[start:end]).Find(&tags).Error; err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 		for _, row := range tags {
 			if tag := strings.TrimSpace(row.Tag); tag != "" {
 				tagsByProblem[row.ProblemID] = append(tagsByProblem[row.ProblemID], tag)
 			}
 		}
+	}
+	return tagsByProblem, nil
+}
+
+func loadAbilityFacts(ctx context.Context, db *gorm.DB, ids []uint, modelVersion uint64) (map[uint][]string, map[uint]float64, error) {
+	tagsByProblem, err := loadAbilityTags(ctx, db, ids)
+	if err != nil {
+		return nil, nil, err
 	}
 	hardness := map[uint]float64{}
 	for start := 0; start < len(ids); start += abilityLookupBatchSize {

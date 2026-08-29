@@ -14,6 +14,7 @@ import (
 type recordingProfilePublisher struct {
 	mu       sync.Mutex
 	events   []event.UserProfileEvent
+	bodies   [][]byte
 	failNext bool
 }
 
@@ -103,6 +104,7 @@ func (p *recordingProfilePublisher) Publish(_ string, _ string, _ bool, _ bool, 
 		return err
 	}
 	p.events = append(p.events, profileEvent)
+	p.bodies = append(p.bodies, append([]byte(nil), msg.Body...))
 	return nil
 }
 
@@ -110,6 +112,76 @@ func (p *recordingProfilePublisher) snapshot() []event.UserProfileEvent {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return append([]event.UserProfileEvent(nil), p.events...)
+}
+
+func (p *recordingProfilePublisher) snapshotBodies() [][]byte {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	out := make([][]byte, len(p.bodies))
+	for i := range p.bodies {
+		out[i] = append([]byte(nil), p.bodies[i]...)
+	}
+	return out
+}
+
+func TestUserProfileTaskPublishedClaimCarriesOwnershipToken(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		force bool
+		state string
+	}{
+		{name: "normal", state: userProfilePendingNormal},
+		{name: "force", force: true, state: userProfilePendingForce},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, rdb := newTestRedis(t)
+			pub := &recordingProfilePublisher{}
+			profileTask := NewUserProfileTaskWithPublisher(pub, rdb)
+			const userID = int64(48)
+			var result UserProfileEnqueueResult
+			if tc.force {
+				result = profileTask.DoForce(userID)
+			} else {
+				result = profileTask.Do(userID)
+			}
+			if !result.Published || result.Deduped || result.Failed {
+				t.Fatalf("enqueue=%+v", result)
+			}
+			bodies := pub.snapshotBodies()
+			if len(bodies) != 1 {
+				t.Fatalf("published bodies=%d", len(bodies))
+			}
+			var envelope struct {
+				ClaimToken string `json:"claim_token"`
+			}
+			if err := json.Unmarshal(bodies[0], &envelope); err != nil {
+				t.Fatal(err)
+			}
+			if envelope.ClaimToken == "" {
+				t.Fatal("ordinary profile event omitted its pending claim token")
+			}
+			want := tc.state + ":published:" + envelope.ClaimToken
+			if got := rdb.Get(t.Context(), userProfilePendingKey(userID)).Val(); got != want {
+				t.Fatalf("published pending=%q want=%q", got, want)
+			}
+		})
+	}
+}
+
+func TestUserProfileTaskForceDedupesTokenizedPublishedClaim(t *testing.T) {
+	_, rdb := newTestRedis(t)
+	pub := &recordingProfilePublisher{}
+	profileTask := NewUserProfileTaskWithPublisher(pub, rdb)
+	const userID = int64(49)
+	if err := rdb.Set(t.Context(), userProfilePendingKey(userID), "force:published:existing-token", userProfilePendingTTL).Err(); err != nil {
+		t.Fatal(err)
+	}
+	if result := profileTask.DoForce(userID); !result.Deduped || result.Published || result.Failed {
+		t.Fatalf("tokenized force pending was not deduped: %+v", result)
+	}
+	if events := pub.snapshot(); len(events) != 0 {
+		t.Fatalf("deduped force published events=%+v", events)
+	}
 }
 
 func TestUserProfileTaskForceUpgradesNormalPending(t *testing.T) {
@@ -124,11 +196,12 @@ func TestUserProfileTaskForceUpgradesNormalPending(t *testing.T) {
 		t.Fatalf("force must publish an upgrade, got %+v", got)
 	}
 	events := pub.snapshot()
-	if len(events) != 2 || events[0].Force || !events[1].Force {
+	if len(events) != 2 || events[0].Force || !events[1].Force || events[1].ClaimToken == "" {
 		t.Fatalf("published events=%+v", events)
 	}
-	if got := rdb.Get(t.Context(), userProfilePendingKey(41)).Val(); got != "force:published" {
-		t.Fatalf("pending state=%q want force:published", got)
+	wantPending := "force:published:" + events[1].ClaimToken
+	if got := rdb.Get(t.Context(), userProfilePendingKey(41)).Val(); got != wantPending {
+		t.Fatalf("pending state=%q want=%q", got, wantPending)
 	}
 }
 
@@ -143,10 +216,10 @@ func TestUserProfileTaskMaintenanceForceCarriesIntentAndBypassesPendingDedup(t *
 		t.Fatalf("maintenance enqueue=%+v", got)
 	}
 	events := pub.snapshot()
-	if len(events) != 2 || events[1].IntentID != "maintenance-intent" || !events[1].Force {
+	if len(events) != 2 || events[0].ClaimToken == "" || events[1].ClaimToken != "" || events[1].IntentID != "maintenance-intent" || !events[1].Force {
 		t.Fatalf("maintenance event=%+v", events)
 	}
-	if got := rdb.Get(t.Context(), userProfilePendingKey(47)).Val(); got != "force:published" {
+	if got := rdb.Get(t.Context(), userProfilePendingKey(47)).Val(); got != "force:published:"+events[0].ClaimToken {
 		t.Fatalf("maintenance enqueue must not alter ordinary pending state=%q", got)
 	}
 }
@@ -165,7 +238,13 @@ func TestUserProfileTaskPublishFailureAndCompletionAllowReenqueue(t *testing.T) 
 	if got := task.Do(42); !got.Published {
 		t.Fatalf("retry after failure=%+v", got)
 	}
-	task.ClearPending(42)
+	events := pub.snapshot()
+	if len(events) != 1 {
+		t.Fatalf("published events=%+v", events)
+	}
+	if err := task.ClearPending(42, events[0].Force, events[0].ClaimToken); err != nil {
+		t.Fatal(err)
+	}
 	if got := task.Do(42); !got.Published {
 		t.Fatalf("reenqueue after completion=%+v", got)
 	}

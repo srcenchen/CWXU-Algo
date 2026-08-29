@@ -31,7 +31,7 @@ if not current then
   return 1
 end
 if desired == 'force' then
-  if current == 'force' or current == 'force:published' then
+  if current == 'force' or current == 'force:published' or string.find(current, 'force:published:', 1, true) == 1 then
     return 0
   end
   redis.call('PSETEX', KEYS[1], ARGV[2], tentative)
@@ -59,6 +59,23 @@ var userProfilePublishClaimScript = redis.NewScript(`
 if redis.call('GET', KEYS[1]) == ARGV[1] then
   redis.call('PSETEX', KEYS[1], ARGV[3], ARGV[2])
   return 1
+end
+return 0
+`)
+
+var userProfileClearClaimScript = redis.NewScript(`
+local current = redis.call('GET', KEYS[1])
+if not current then return 0 end
+local state = ARGV[1]
+local token = ARGV[2]
+if token == '' then
+  if current == state .. ':published' then
+    return redis.call('DEL', KEYS[1])
+  end
+  return 0
+end
+if current == state .. ':publishing:' .. token or current == state .. ':published:' .. token then
+  return redis.call('DEL', KEYS[1])
 end
 return 0
 `)
@@ -177,7 +194,7 @@ func (t *UserProfileTask) do(userID int64, force bool) UserProfileEnqueueResult 
 	}
 	claimState := pendingState + ":publishing:" + claimToken
 	t.ensureQueue()
-	body, err := json.Marshal(event.UserProfileEvent{UserId: userID, Force: publishForce})
+	body, err := json.Marshal(event.UserProfileEvent{UserId: userID, Force: publishForce, ClaimToken: claimToken})
 	if err != nil {
 		t.releaseClaim(userID, claimState)
 		return UserProfileEnqueueResult{Failed: true}
@@ -192,20 +209,24 @@ func (t *UserProfileTask) do(userID int64, force bool) UserProfileEnqueueResult 
 		t.releaseClaim(userID, claimState)
 		return UserProfileEnqueueResult{Failed: true}
 	}
-	t.publishClaim(userID, claimState, pendingState+":published")
+	t.publishClaim(userID, claimState, pendingState+":published:"+claimToken)
 	return UserProfileEnqueueResult{Published: true}
 }
 
-// ClearPending consumer 成功/失败后释放，允许再次入队
-func (t *UserProfileTask) ClearPending(userID int64) {
-	t.clearPending(userID)
-}
-
-func (t *UserProfileTask) clearPending(userID int64) {
+// ClearPending consumer 成功或最终耗尽后释放，允许再次入队。
+// 只释放消息自身的 tentative/published claim；legacy 消息仅匹配旧 published 状态。
+// 返回 Redis 错误，以便耗尽恢复在释放失败时保留 MQ 消息；无匹配视为幂等成功。
+func (t *UserProfileTask) ClearPending(userID int64, force bool, claimToken string) error {
 	if t.rdb == nil || userID <= 0 {
-		return
+		return nil
 	}
-	_ = t.rdb.Del(context.Background(), userProfilePendingKey(userID)).Err()
+	pendingState := userProfilePendingNormal
+	if force {
+		pendingState = userProfilePendingForce
+	}
+	return userProfileClearClaimScript.Run(
+		context.Background(), t.rdb, []string{userProfilePendingKey(userID)}, pendingState, claimToken,
+	).Err()
 }
 
 func (t *UserProfileTask) releaseClaim(userID int64, state string) {

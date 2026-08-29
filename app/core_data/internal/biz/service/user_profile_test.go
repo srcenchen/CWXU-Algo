@@ -916,6 +916,11 @@ func TestUserProfileCacheHitDoesNotScanEvidenceHistory(t *testing.T) {
 	uc := &ProblemUseCase{data: &coredata.Data{DB: db, RDB: rdb}}
 	evidence := profileTestCacheIdentity(t, db, userID).Evidence.String()
 	snapshot := &UserProfileSnapshot{TotalAC: 88}
+	snapshot.Radar = append(snapshot.Radar, struct {
+		Tag     string
+		Score   float64
+		ACCount int64
+	}{Tag: "graph", Score: 50, ACCount: 1})
 	if err := uc.cacheBuiltProfile(context.Background(), userID, 1, evidence, snapshot); err != nil {
 		t.Fatal(err)
 	}
@@ -957,6 +962,134 @@ func TestUserProfileCacheHitDoesNotScanEvidenceHistory(t *testing.T) {
 	}
 	if got := factQueries.Load(); got != 0 {
 		t.Fatalf("cache hit scanned evidence history queries=%d", got)
+	}
+}
+
+func TestUserProfileExactEmptyCacheSelfHealsOnlyForTaggedACCandidates(t *testing.T) {
+	for _, tt := range []struct {
+		name        string
+		userID      int64
+		tags        []string
+		wantRebuild bool
+	}{
+		{name: "tagged AC candidate", userID: 318, tags: []string{"graph"}, wantRebuild: true},
+		{name: "legitimate empty radar", userID: 319},
+		{name: "whitespace tag is legitimate empty", userID: 320, tags: []string{" \t "}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			db := profileTestDB(t)
+			if err := db.Create(&model.AbilityModelState{ID: 1, ActiveVersion: 1}).Error; err != nil {
+				t.Fatal(err)
+			}
+			p := model.Problem{Platform: "Codeforces", ExternalID: fmt.Sprintf("%dA", tt.userID), Difficulty: "medium"}
+			if err := db.Create(&p).Error; err != nil {
+				t.Fatal(err)
+			}
+			for _, tag := range tt.tags {
+				if err := db.Create(&model.ProblemTag{ProblemID: p.ID, Tag: tag}).Error; err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := db.Create(&model.UserACProblem{
+				UserID: tt.userID, ProblemKey: fmt.Sprintf("p:%d", p.ID), Platform: p.Platform, FirstACAt: time.Now(),
+			}).Error; err != nil {
+				t.Fatal(err)
+			}
+			_, rdb := profileTestRedis(t)
+			pub := &serviceProfilePublisher{}
+			uc := &ProblemUseCase{
+				data:        &coredata.Data{DB: db, RDB: rdb},
+				profileTask: profiletask.NewUserProfileTaskWithPublisher(pub, rdb),
+			}
+			identity := profileTestCacheIdentity(t, db, tt.userID)
+			if err := uc.cacheBuiltProfile(context.Background(), tt.userID, identity.ModelVersion, identity.Evidence.String(), &UserProfileSnapshot{}); err != nil {
+				t.Fatal(err)
+			}
+			var sourceReads atomic.Int32
+			if err := db.Callback().Query().Before("gorm:query").Register("count_exact_empty_source_reads", func(tx *gorm.DB) {
+				if tx.Statement.Table == "user_ac_problems" {
+					sourceReads.Add(1)
+				}
+			}); err != nil {
+				t.Fatal(err)
+			}
+
+			for range 2 {
+				radar, _, _, _, err := uc.UserProfile(tt.userID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if len(radar) != 0 {
+					t.Fatalf("empty cache unexpectedly returned radar: %+v", radar)
+				}
+			}
+			if got := sourceReads.Load(); got != 1 {
+				t.Fatalf("two exact-empty requests performed %d authoritative source reads, want 1", got)
+			}
+			pub.mu.Lock()
+			events := append([]event.UserProfileEvent(nil), pub.events...)
+			pub.mu.Unlock()
+			if tt.wantRebuild {
+				if len(events) != 1 || events[0].UserId != tt.userID || !events[0].Force {
+					t.Fatalf("invalid empty exact cache event=%+v, want one force rebuild", events)
+				}
+			} else if len(events) != 0 {
+				t.Fatalf("legitimate empty exact cache entered a rebuild loop: %+v", events)
+			}
+		})
+	}
+}
+
+func TestUserProfileVerifiedEmptyCacheSkipsAuthoritativeValidation(t *testing.T) {
+	db := profileTestDB(t)
+	const userID = int64(321)
+	if err := db.Create(&model.AbilityModelState{ID: 1, ActiveVersion: 1}).Error; err != nil {
+		t.Fatal(err)
+	}
+	p := model.Problem{Platform: "Codeforces", ExternalID: "321A", Difficulty: "medium"}
+	if err := db.Create(&p).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&model.UserACProblem{
+		UserID: userID, ProblemKey: fmt.Sprintf("p:%d", p.ID), Platform: p.Platform, FirstACAt: time.Now(),
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	_, rdb := profileTestRedis(t)
+	pub := &serviceProfilePublisher{}
+	uc := &ProblemUseCase{
+		data:        &coredata.Data{DB: db, RDB: rdb},
+		profileTask: profiletask.NewUserProfileTaskWithPublisher(pub, rdb),
+	}
+	if err := uc.BuildAndCacheUserProfile(userID, true); err != nil {
+		t.Fatal(err)
+	}
+
+	var sourceReads atomic.Int32
+	if err := db.Callback().Query().Before("gorm:query").Register("count_verified_empty_source_reads", func(tx *gorm.DB) {
+		if tx.Statement.Table == "user_ac_problems" {
+			sourceReads.Add(1)
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		radar, _, _, _, err := uc.UserProfile(userID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(radar) != 0 {
+			t.Fatalf("verified empty cache unexpectedly returned radar: %+v", radar)
+		}
+	}
+	if got := sourceReads.Load(); got != 0 {
+		t.Fatalf("verified empty cache performed %d authoritative source reads, want 0", got)
+	}
+	pub.mu.Lock()
+	events := append([]event.UserProfileEvent(nil), pub.events...)
+	pub.mu.Unlock()
+	if len(events) != 0 {
+		t.Fatalf("verified legitimate empty cache entered rebuild: %+v", events)
 	}
 }
 

@@ -952,12 +952,23 @@ func TestListUserIDsWithACButEmptyTagACDistinguishesPublishedEmptyFromStale(t *t
 	setActiveAbilityVersion(t, db, 1)
 	now := time.Date(2026, 8, 29, 14, 0, 0, 0, time.UTC)
 	p := addUserTagProblem(t, db, "Codeforces", "empty-radar", "medium")
+	tagged := addUserTagProblem(t, db, "Codeforces", "bad-empty-radar", "medium", "graph")
+	whitespaceTagged := addUserTagProblem(t, db, "Codeforces", "whitespace-empty-radar", "medium", " \t ")
+	whitespaceExternal := addUserTagProblem(t, db, "Codeforces", "whitespace-external-empty-radar", "medium", " \t ")
 	for _, userID := range []int64{35, 350} {
 		addUserTagACKey(t, db, userID, fmt.Sprintf("p:%d", p.ID), "Codeforces", now)
 		if err := RebuildUserTagACForUser(ctx, db, userID); err != nil {
 			t.Fatal(err)
 		}
 	}
+	// Simulate a previously published current empty snapshot whose authoritative
+	// AC candidate now has a normalized tag. This is not a legitimate empty radar.
+	addUserTagACKey(t, db, 36, fmt.Sprintf("p:%d", tagged.ID), "Codeforces", now)
+	stampUserTagSnapshot(t, db, 36, 1)
+	addUserTagACKey(t, db, 37, fmt.Sprintf("p:%d", whitespaceTagged.ID), "Codeforces", now)
+	stampUserTagSnapshot(t, db, 37, 1)
+	addUserTagACKey(t, db, 38, "e:Codeforces:"+whitespaceExternal.ExternalID, "Codeforces", now)
+	stampUserTagSnapshot(t, db, 38, 1)
 	// Only user 350's published-empty snapshot is invalidated afterwards.
 	if err := db.Create(&model.SubmitLog{
 		UserID: 350, Platform: "Codeforces", SubmitID: "late", Status: "WA", Time: now,
@@ -972,8 +983,134 @@ func TestListUserIDsWithACButEmptyTagACDistinguishesPublishedEmptyFromStale(t *t
 	if containsUserID(ids, 35) {
 		t.Fatalf("current published-empty snapshot was repeatedly selected for heal: %v", ids)
 	}
+	if !containsUserID(ids, 36) {
+		t.Fatalf("current empty snapshot hid an authoritative tagged AC candidate: %v", ids)
+	}
+	if containsUserID(ids, 37) {
+		t.Fatalf("whitespace-only problem tag made a legitimate empty snapshot unhealthy: %v", ids)
+	}
+	if containsUserID(ids, 38) {
+		t.Fatalf("whitespace-only external problem tag made a legitimate empty snapshot unhealthy: %v", ids)
+	}
 	if !containsUserID(ids, 350) {
 		t.Fatalf("stale published-empty snapshot was not selected for heal: %v", ids)
+	}
+}
+
+func TestListUserIDsWithACButEmptyTagACRotatesBoundedEmptyWindow(t *testing.T) {
+	db := userTagAbilityTestDB(t)
+	ctx := context.Background()
+	setActiveAbilityVersion(t, db, 1)
+	now := time.Date(2026, 8, 29, 16, 30, 0, 0, time.UTC)
+	untagged := addUserTagProblem(t, db, "Codeforces", "rotating-legitimate-empty", "medium")
+	tagged := addUserTagProblem(t, db, "Codeforces", "rotating-invalid-empty", "medium", "graph")
+	for userID := int64(600); userID < 604; userID++ {
+		addUserTagACKey(t, db, userID, fmt.Sprintf("p:%d", untagged.ID), "Codeforces", now)
+		stampUserTagSnapshot(t, db, userID, 1)
+	}
+	addUserTagACKey(t, db, 999, fmt.Sprintf("p:%d", tagged.ID), "Codeforces", now)
+	stampUserTagSnapshot(t, db, 999, 1)
+
+	first, err := ListUserIDsWithACButEmptyTagAC(ctx, db, 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if containsUserID(first, 999) {
+		t.Fatalf("first bounded window unexpectedly reached high user: %v", first)
+	}
+	second, err := ListUserIDsWithACButEmptyTagAC(ctx, db, 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !containsUserID(second, 999) {
+		t.Fatalf("bounded window did not rotate to high invalid empty: first=%v second=%v", first, second)
+	}
+}
+
+func TestListUserIDsWithACButEmptyTagACReservesBudgetForInvalidEmptySnapshots(t *testing.T) {
+	db := userTagAbilityTestDB(t)
+	ctx := context.Background()
+	setActiveAbilityVersion(t, db, 1)
+	now := time.Date(2026, 8, 29, 15, 0, 0, 0, time.UTC)
+	tagged := addUserTagProblem(t, db, "Codeforces", "budgeted-invalid-empty", "medium", "graph")
+	for _, userID := range []int64{10, 11, 12} {
+		addUserTagACKey(t, db, userID, "n:Codeforces:unmapped", "Codeforces", now)
+	}
+	addUserTagACKey(t, db, 99, fmt.Sprintf("p:%d", tagged.ID), "Codeforces", now)
+	stampUserTagSnapshot(t, db, 99, 1)
+
+	ids, err := ListUserIDsWithACButEmptyTagAC(ctx, db, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ids) > 2 {
+		t.Fatalf("heal returned %d users above limit: %v", len(ids), ids)
+	}
+	if !containsUserID(ids, 99) {
+		t.Fatalf("missing snapshots consumed the whole heal budget: %v", ids)
+	}
+}
+
+func TestListUserIDsWithACButEmptyTagACBoundsLegitimateEmptyValidationWork(t *testing.T) {
+	db := userTagAbilityTestDB(t)
+	ctx := context.Background()
+	setActiveAbilityVersion(t, db, 1)
+	now := time.Date(2026, 8, 29, 16, 0, 0, 0, time.UTC)
+	untagged := addUserTagProblem(t, db, "Codeforces", "bounded-legitimate-empty", "medium")
+	for userID := int64(500); userID < 512; userID++ {
+		addUserTagACKey(t, db, userID, fmt.Sprintf("p:%d", untagged.ID), "Codeforces", now)
+		stampUserTagSnapshot(t, db, userID, 1)
+	}
+	var sourceReads int
+	if err := db.Callback().Query().Before("gorm:query").Register("count_bounded_empty_source_reads", func(tx *gorm.DB) {
+		if tx.Statement.Table == "user_ac_problems" {
+			sourceReads++
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	ids, err := ListUserIDsWithACButEmptyTagAC(ctx, db, 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ids) != 0 {
+		t.Fatalf("legitimate empty snapshots entered heal: %v", ids)
+	}
+	if sourceReads > 4 {
+		t.Fatalf("bounded heal performed %d per-user source reads for limit=4", sourceReads)
+	}
+}
+
+func TestListUserIDsWithACButEmptyTagACCapsValidationAtLookupBatchSize(t *testing.T) {
+	db := userTagAbilityTestDB(t)
+	ctx := context.Background()
+	setActiveAbilityVersion(t, db, 1)
+	now := time.Date(2026, 8, 29, 16, 15, 0, 0, time.UTC)
+	untagged := addUserTagProblem(t, db, "Codeforces", "hard-capped-legitimate-empty", "medium")
+	for offset := 0; offset < abilityLookupBatchSize+5; offset++ {
+		userID := int64(700 + offset)
+		addUserTagACKey(t, db, userID, fmt.Sprintf("p:%d", untagged.ID), "Codeforces", now)
+		stampUserTagSnapshot(t, db, userID, 1)
+	}
+	var sourceReads int
+	if err := db.Callback().Query().Before("gorm:query").Register("count_hard_capped_empty_source_reads", func(tx *gorm.DB) {
+		if tx.Statement.Table == "user_ac_problems" {
+			sourceReads++
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	ids, err := ListUserIDsWithACButEmptyTagAC(ctx, db, abilityLookupBatchSize+50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ids) != 0 {
+		t.Fatalf("legitimate empty snapshots entered heal: %v", ids)
+	}
+	if sourceReads > abilityLookupBatchSize {
+		t.Fatalf("heal performed %d source reads above hard cap %d", sourceReads, abilityLookupBatchSize)
 	}
 }
 

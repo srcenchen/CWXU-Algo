@@ -22,9 +22,10 @@ import (
 
 // 画像缓存：model+evidence 精确失效 + latest 兜底。
 const (
-	userProfileCacheSchema = "8"
-	userProfileLatestTTL   = 30 * 24 * time.Hour
-	userProfileExactTTL    = 7 * 24 * time.Hour
+	userProfileCacheSchema   = "8"
+	userProfileLatestTTL     = 30 * 24 * time.Hour
+	userProfileExactTTL      = 7 * 24 * time.Hour
+	userProfileEmptyProofTTL = 6 * time.Hour
 	// userProfileFpKey 用户 AC 指纹缓存：数据未变化时跳过重建，削 3h 整点画像风暴
 	userProfileFpPref           = "user_profile:fp:"
 	profileRadarLimit           = 8
@@ -542,6 +543,7 @@ func userProfileBuildVersion(modelVersion uint64, evidenceVersion string) string
 
 // profileLightSF 只折叠 HTTP light read；light read 从不写缓存。
 var profileLightSF singleflight.Group
+var profileEmptyValidationSF singleflight.Group
 
 var ErrUserProfileNotReady = errors.New("user profile aggregate is not ready")
 
@@ -585,7 +587,11 @@ type UserProfileSnapshot struct {
 	EvidenceVersion  string
 	GlobalGeneration uint64
 	UserGeneration   uint64
-	Radar            []struct {
+	// EmptyRadarVerified is set only by the authoritative MQ builder after it
+	// has rebuilt the tag aggregate. Legacy empty snapshots remain false and
+	// receive one source-data validation before being trusted.
+	EmptyRadarVerified bool
+	Radar              []struct {
 		Tag     string
 		Score   float64
 		ACCount int64
@@ -807,6 +813,7 @@ func (uc *ProblemUseCase) BuildAndCacheUserProfile(userID int64, force bool) err
 		if computeErr != nil {
 			return nil, computeErr
 		}
+		snap.EmptyRadarVerified = len(snap.Radar) == 0
 		if err := uc.cacheBuiltProfileAtGeneration(ctx, userID, modelVersion, evidenceVersion, generation, snap); err != nil {
 			return nil, err
 		}
@@ -832,6 +839,60 @@ func (uc *ProblemUseCase) buildUserProfileNow(userID int64, identity dal.Profile
 	}
 	snap, _ := v.(*UserProfileSnapshot)
 	return snap, nil
+}
+
+func (uc *ProblemUseCase) enqueueInvalidEmptyProfileRebuild(ctx context.Context, userID int64, snap *UserProfileSnapshot) {
+	if snap == nil || len(snap.Radar) != 0 || snap.EmptyRadarVerified || uc.data == nil || uc.data.DB == nil {
+		return
+	}
+	proofKey := fmt.Sprintf(
+		"problem:user_profile:s%s:u%d:empty-proof:m%d:e%s:g%d:u%d",
+		userProfileCacheSchema, userID, snap.ModelVersion, snap.EvidenceVersion, snap.GlobalGeneration, snap.UserGeneration,
+	)
+	readProof := func() string {
+		if uc.data.RDB == nil {
+			return ""
+		}
+		proof, err := uc.data.RDB.Get(ctx, proofKey).Result()
+		if err != nil && !errors.Is(err, redis.Nil) {
+			log.Warnf("user_profile read empty radar proof user=%d: %v", userID, err)
+			return ""
+		}
+		if proof == "tagged" || proof == "legitimate" {
+			return proof
+		}
+		return ""
+	}
+	proof := readProof()
+	if proof == "" {
+		value, err, _ := profileEmptyValidationSF.Do(proofKey, func() (interface{}, error) {
+			if cached := readProof(); cached != "" {
+				return cached, nil
+			}
+			hasTaggedAC, err := dal.UserHasTaggedAC(ctx, uc.data.DB, userID)
+			if err != nil {
+				return "", err
+			}
+			result := "legitimate"
+			if hasTaggedAC {
+				result = "tagged"
+			}
+			if uc.data.RDB != nil {
+				if err := uc.data.RDB.Set(ctx, proofKey, result, userProfileEmptyProofTTL).Err(); err != nil {
+					log.Warnf("user_profile write empty radar proof user=%d: %v", userID, err)
+				}
+			}
+			return result, nil
+		})
+		if err != nil {
+			log.Warnf("user_profile validate empty radar user=%d: %v", userID, err)
+			return
+		}
+		proof, _ = value.(string)
+	}
+	if proof == "tagged" {
+		uc.enqueueUserProfileRebuildForce(userID)
+	}
 }
 
 // UserProfile 读路径：缓存优先；HTTP 永不做 tag_ac 重 JOIN。
@@ -864,6 +925,7 @@ func (uc *ProblemUseCase) UserProfile(userID int64) (radar []struct {
 	if snap, ok := uc.readProfileCacheAtGeneration(ctx, userID, userProfileExactCacheKeyForGeneration(userID, modelVersion, evidenceVersion, generation), generation); ok &&
 		snap.SchemaVersion == userProfileCacheSchema && snap.ModelVersion == modelVersion && snap.EvidenceVersion == evidenceVersion &&
 		snap.GlobalGeneration == generation.Global && snap.UserGeneration == generation.User {
+		uc.enqueueInvalidEmptyProfileRebuild(ctx, userID, snap)
 		return unpackProfile(snap)
 	}
 	// 精确 miss：证据和 generation 必须完全匹配；模型落后一版时允许

@@ -72,8 +72,20 @@ func (c *UserProfileConsumer) handleExhausted(body []byte) error {
 		log.Errorf("user_profile exhausted poison message: %v", err)
 		return nil
 	}
-	if msg.IntentID == "" || msg.UserId <= 0 {
+	if msg.UserId <= 0 {
 		return nil
+	}
+	if msg.IntentID == "" {
+		if c.profileTask == nil {
+			return fmt.Errorf("user_profile pending dependency unavailable")
+		}
+		if err := c.profileTask.ClearPending(msg.UserId, msg.Force, msg.ClaimToken); err != nil {
+			return fmt.Errorf("user_profile clear exhausted pending user=%d: %w", msg.UserId, err)
+		}
+		return nil
+	}
+	if c.problem == nil {
+		return fmt.Errorf("user_profile builder dependency unavailable")
 	}
 	return c.problem.MarkAbilityMaintenanceTargetDue(context.Background(), msg.IntentID, msg.UserId)
 }
@@ -86,6 +98,12 @@ func (c *UserProfileConsumer) handle(body []byte) error {
 	if msg.UserId <= 0 {
 		return nil
 	}
+	if c.problem == nil {
+		return fmt.Errorf("user_profile builder dependency unavailable")
+	}
+	if msg.IntentID == "" && c.profileTask == nil {
+		return fmt.Errorf("user_profile pending dependency unavailable")
+	}
 	start := time.Now()
 	if err := c.problem.BuildAndCacheUserProfile(msg.UserId, msg.Force); err != nil {
 		log.Errorf("user_profile build user=%d: %v", msg.UserId, err)
@@ -96,7 +114,9 @@ func (c *UserProfileConsumer) handle(body []byte) error {
 			return fmt.Errorf("user_profile confirm intent=%s user=%d: %w", msg.IntentID, msg.UserId, err)
 		}
 	} else if c.profileTask != nil {
-		c.profileTask.ClearPending(msg.UserId)
+		if err := c.profileTask.ClearPending(msg.UserId, msg.Force, msg.ClaimToken); err != nil {
+			return fmt.Errorf("user_profile clear pending user=%d: %w", msg.UserId, err)
+		}
 	}
 	log.Infof("user_profile built user=%d cost=%s", msg.UserId, time.Since(start).Round(time.Millisecond))
 	return nil
