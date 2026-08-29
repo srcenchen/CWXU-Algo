@@ -157,6 +157,40 @@ func TestRunUserProfilePrewarmStartupForcesNewStatsBeforeEnqueue(t *testing.T) {
 	}
 }
 
+func TestRunUserProfilePrewarmStartupRunsOnlyOnceAfterSuccess(t *testing.T) {
+	db := cronAbilityTestDB(t, false)
+	addCronAbilityCandidate(t, db, 108)
+	pub := &cronAbilityProfilePublisher{}
+	refresher := &fakeCronAbilityStatsRefresher{version: 4}
+	cronTask := &CronTask{db: db, profile: NewUserProfileTaskWithPublisher(pub, nil), abilityStats: refresher}
+
+	cronTask.runUserProfilePrewarm(profilePrewarmStartup)
+	cronTask.runUserProfilePrewarm(profilePrewarmStartup)
+
+	if refresher.calls != 1 || len(pub.snapshot()) != 1 {
+		t.Fatalf("one-time startup refresh calls=%d events=%+v", refresher.calls, pub.snapshot())
+	}
+	var marker model.AbilityProfileScheduleRun
+	if err := db.First(&marker, "period = ?", oneTimeAbilityProfileMigration).Error; err != nil {
+		t.Fatalf("missing one-time completion marker: %v", err)
+	}
+}
+
+func TestRunUserProfilePrewarmStartupRetriesAfterPublishFailure(t *testing.T) {
+	db := cronAbilityTestDB(t, false)
+	addCronAbilityCandidate(t, db, 109)
+	pub := &cronAbilityProfilePublisher{failNext: true}
+	refresher := &fakeCronAbilityStatsRefresher{version: 5}
+	cronTask := &CronTask{db: db, profile: NewUserProfileTaskWithPublisher(pub, nil), abilityStats: refresher}
+
+	cronTask.runUserProfilePrewarm(profilePrewarmStartup)
+	cronTask.runUserProfilePrewarm(profilePrewarmStartup)
+
+	if refresher.calls != 2 || len(pub.snapshot()) != 1 {
+		t.Fatalf("failed startup was not retried calls=%d events=%+v", refresher.calls, pub.snapshot())
+	}
+}
+
 func TestRunUserProfilePrewarmRefreshFailurePublishesNothing(t *testing.T) {
 	db := cronAbilityTestDB(t, false)
 	addCronAbilityCandidate(t, db, 102)

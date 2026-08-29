@@ -437,6 +437,7 @@ const (
 	profilePrewarmDaily profilePrewarmSource = iota
 	profilePrewarmEmptyHeal
 	profilePrewarmStartup
+	oneTimeAbilityProfileMigration = "migration-ability-profile-v2"
 )
 
 // runUserProfilePrewarm 将有 AC 的用户入队画像预计算（队列内会 RebuildUserTagAC）。
@@ -447,7 +448,17 @@ func (t *CronTask) runUserProfilePrewarm(source profilePrewarmSource) {
 	if t.profile == nil || t.db == nil || t.abilityStats == nil {
 		return
 	}
-	full := source == profilePrewarmDaily
+	if source == profilePrewarmStartup {
+		var completed int64
+		if err := t.db.Model(&model.AbilityProfileScheduleRun{}).Where("period = ?", oneTimeAbilityProfileMigration).Count(&completed).Error; err != nil {
+			log.Errorf("CronTask user_profile startup marker: %v", err)
+			return
+		}
+		if completed > 0 {
+			return
+		}
+	}
+	full := source == profilePrewarmDaily || source == profilePrewarmStartup
 	var refreshMode AbilityStatsRefreshMode
 	switch source {
 	case profilePrewarmDaily:
@@ -510,7 +521,11 @@ func (t *CronTask) runUserProfilePrewarm(source profilePrewarmSource) {
 		if gate == nil {
 			gate = newDBProfileFullScheduleGate(t.db)
 		}
-		if _, err := gate.Run(context.Background(), abilityStatsDailyPeriod(time.Now()), modelVersion, run); err != nil {
+		period := abilityStatsDailyPeriod(time.Now())
+		if source == profilePrewarmStartup {
+			period = oneTimeAbilityProfileMigration
+		}
+		if _, err := gate.Run(context.Background(), period, modelVersion, run); err != nil {
 			log.Errorf("CronTask user_profile full schedule: %v", err)
 		}
 		return
