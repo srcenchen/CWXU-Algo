@@ -1,6 +1,7 @@
 package model
 
 import (
+	"bytes"
 	"database/sql/driver"
 	"encoding/json"
 	"time"
@@ -86,7 +87,28 @@ func (s *SolutionsMeta) Scan(value interface{}) error {
 		*s = SolutionsMeta{}
 		return nil
 	}
-	return json.Unmarshal(b, s)
+	trimmed := bytes.TrimSpace(b)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		*s = SolutionsMeta{}
+		return nil
+	}
+	// Older imports stored a single solution object instead of the current
+	// array-shaped JSON value. Treat it as a one-item list so one malformed
+	// legacy row cannot block problem maintenance recovery or profile rebuilds.
+	if trimmed[0] == '{' {
+		var item SolutionMeta
+		if err := json.Unmarshal(trimmed, &item); err != nil {
+			return err
+		}
+		*s = SolutionsMeta{item}
+		return nil
+	}
+	var parsed SolutionsMeta
+	if err := json.Unmarshal(trimmed, &parsed); err != nil {
+		return err
+	}
+	*s = parsed
+	return nil
 }
 
 // Problem 全局去重题库
