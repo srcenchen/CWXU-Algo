@@ -705,7 +705,7 @@ func TestUserProfileColdReadDoesNotPublishActiveModelRowsFromOldEvidence(t *test
 	}
 }
 
-func TestUserProfileIdentityFailureFailsClosedBeforeLightRead(t *testing.T) {
+func TestUserProfileIdentityFailureFallsBackToExistingStatistics(t *testing.T) {
 	db := profileTestDB(t)
 	const userID = int64(316)
 	seedProfileBuild(t, db, userID)
@@ -714,25 +714,13 @@ func TestUserProfileIdentityFailureFailsClosedBeforeLightRead(t *testing.T) {
 	}
 	_, rdb := profileTestRedis(t)
 	uc := &ProblemUseCase{data: &coredata.Data{DB: db, RDB: rdb}}
-	var lightQueries atomic.Int32
-	recordLightQuery := func(tx *gorm.DB) {
-		sqlText := strings.ToLower(tx.Statement.SQL.String())
-		if strings.Contains(sqlText, "user_tag_ac_snapshots") || strings.Contains(sqlText, "user_ac_problems") {
-			lightQueries.Add(1)
-		}
-	}
-	if err := db.Callback().Raw().Before("gorm:raw").Register("test:identity_failure_no_light_raw", recordLightQuery); err != nil {
-		t.Fatal(err)
-	}
-	if err := db.Callback().Query().Before("gorm:query").Register("test:identity_failure_no_light_query", recordLightQuery); err != nil {
-		t.Fatal(err)
-	}
 
-	if _, _, _, _, err := uc.UserProfile(userID); err == nil {
-		t.Fatal("unready durable identity must fail the HTTP profile read")
+	_, platforms, _, total, err := uc.UserProfile(userID)
+	if err != nil {
+		t.Fatalf("unready durable identity must degrade instead of failing HTTP: %v", err)
 	}
-	if got := lightQueries.Load(); got != 0 {
-		t.Fatalf("identity failure still queried unverified light aggregates: %d", got)
+	if total <= 0 || len(platforms) == 0 {
+		t.Fatalf("fallback profile lost existing statistics: total=%d platforms=%+v", total, platforms)
 	}
 }
 

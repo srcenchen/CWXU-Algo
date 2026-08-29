@@ -915,8 +915,13 @@ func (uc *ProblemUseCase) UserProfile(userID int64) (radar []struct {
 	identity, identityErr := dal.ReadProfileCacheIdentity(ctx, uc.data.DB, userID)
 	if identityErr != nil {
 		uc.enqueueUserProfileRebuildForce(userID)
-		err = fmt.Errorf("user profile identity user=%d: %w", userID, identityErr)
-		return
+		log.Warnf("user_profile identity unavailable, serving fallback user=%d: %v", userID, identityErr)
+		snap, fallbackErr := uc.computeUserProfileFromPreaggregates(userID, dal.ProfileCacheIdentity{}, true)
+		if fallbackErr != nil {
+			err = fmt.Errorf("user profile identity user=%d: %w; fallback: %v", userID, identityErr, fallbackErr)
+			return
+		}
+		return unpackProfile(snap)
 	}
 	modelVersion := identity.ModelVersion
 	evidenceVersion := identity.Evidence.String()
