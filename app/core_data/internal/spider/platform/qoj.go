@@ -74,8 +74,9 @@ func normalizeQOJResult(raw string) (string, error) {
 	if result == "" {
 		return "", fmt.Errorf("QOJ 结果为空")
 	}
-	upper := strings.ToUpper(result)
-	upper = strings.TrimSpace(strings.TrimRight(upper, "✓✔✅"))
+	resultWithoutMarker := strings.TrimRight(result, "✓✔✅")
+	hasAcceptedMarker := resultWithoutMarker != result
+	upper := strings.ToUpper(strings.TrimSpace(resultWithoutMarker))
 	if upper == "" {
 		return "", fmt.Errorf("QOJ 结果为空")
 	}
@@ -111,7 +112,7 @@ func normalizeQOJResult(raw string) (string, error) {
 		if math.IsNaN(score) || math.IsInf(score, 0) || score < 0 || score > qojMaxReasonableScore {
 			return "", fmt.Errorf("异常 QOJ 分数: %q", upper)
 		}
-		if score >= 100 {
+		if hasAcceptedMarker {
 			return "AC", nil
 		}
 		return "WA", nil

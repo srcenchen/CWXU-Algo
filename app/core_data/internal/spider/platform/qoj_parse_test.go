@@ -16,9 +16,9 @@ func TestNormalizeQOJResult(t *testing.T) {
 		status  string
 		wantErr bool
 	}{
-		{name: "integer full score", raw: "100", status: "AC"},
+		{name: "integer full score without marker", raw: "100", status: "WA"},
 		{name: "integer full score marker", raw: "100 ✓", status: "AC"},
-		{name: "decimal full score", raw: "100.0", status: "AC"},
+		{name: "decimal full score without marker", raw: "100.0", status: "WA"},
 		{name: "partial score", raw: "99", status: "WA"},
 		{name: "zero score", raw: "0", status: "WA"},
 		{name: "accepted text", raw: "Accepted", status: "AC"},
@@ -47,8 +47,10 @@ func TestNormalizeQOJResult(t *testing.T) {
 		{name: "nan score marker", raw: "NaN ✓", wantErr: true},
 		{name: "infinite score", raw: "+Inf", wantErr: true},
 		{name: "negative score", raw: "-1", wantErr: true},
-		{name: "score above full", raw: "110", status: "AC"},
-		{name: "score above full marker", raw: "110 ✓", status: "AC"},
+		{name: "score above full without marker", raw: "110", status: "WA"},
+		{name: "score above full check mark", raw: "110 ✓", status: "AC"},
+		{name: "score above full heavy check mark", raw: "110 ✔", status: "AC"},
+		{name: "score above full emoji check mark", raw: "110 ✅", status: "AC"},
 		{name: "implausibly high score", raw: "1000001", wantErr: true},
 		{name: "authentication error is not a verdict", raw: "Access denied", wantErr: true},
 		{name: "service error is not a verdict", raw: "Central failure", wantErr: true},
@@ -72,6 +74,17 @@ func TestNormalizeQOJResult(t *testing.T) {
 				t.Fatalf("normalizeQOJResult(%q)=%q, want %q", tt.raw, got, tt.status)
 			}
 		})
+	}
+}
+
+func TestParseQOJSubmissionPageKeepsUnmarkedScoreAboveFull(t *testing.T) {
+	html := `<tbody>` + qojTestRow("1", "110", "2026-08-24 12:00:00") + `</tbody>`
+	logs, _, err := parseQOJSubmissionPage(html, 7, 2, map[string]struct{}{})
+	if err != nil {
+		t.Fatalf("parseQOJSubmissionPage: %v", err)
+	}
+	if len(logs) != 1 || logs[0].Status != "WA" {
+		t.Fatalf("logs=%+v, want one WA submission", logs)
 	}
 }
 
