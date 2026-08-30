@@ -9,6 +9,8 @@ import (
 	"cwxu-algo/app/core_data/internal/data/model"
 	profiletask "cwxu-algo/app/core_data/task"
 
+	"github.com/alicebob/miniredis/v2"
+	"github.com/redis/go-redis/v9"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
@@ -29,6 +31,39 @@ func bindBacklogTestDB(t *testing.T) *gorm.DB {
 		t.Fatal(err)
 	}
 	return db
+}
+
+func TestBindSubmitsAfterSpiderOnlyRebuildsMarkedPlatform(t *testing.T) {
+	db := bindBacklogTestDB(t)
+	mr := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	pub := &rebuildProfilesPublisher{}
+	uc := &ProblemUseCase{
+		data:        &coredata.Data{DB: db, RDB: rdb},
+		profileTask: profiletask.NewUserProfileTaskWithPublisher(pub, rdb),
+	}
+	if err := profiletask.MarkProfileRebuildAfterBinding(rdb, 77, "LuoGu"); err != nil {
+		t.Fatal(err)
+	}
+	if err := uc.BindSubmitsAfterSpiderForPlatform(77, "CodeForces"); err != nil {
+		t.Fatal(err)
+	}
+	if events := pub.snapshot(); len(events) != 0 {
+		t.Fatalf("unrelated platform consumed rebuild marker: %+v", events)
+	}
+	if got := rdb.Exists(t.Context(), profiletask.ProfileRebuildAfterBindingKey(77, "LuoGu")).Val(); got != 1 {
+		t.Fatalf("rebuild marker was consumed by unrelated platform: exists=%d", got)
+	}
+	if err := uc.BindSubmitsAfterSpiderForPlatform(77, "LuoGu"); err != nil {
+		t.Fatal(err)
+	}
+	events := pub.snapshot()
+	if len(events) != 1 || !events[0].Force || events[0].UserId != 77 {
+		t.Fatalf("marked platform did not force rebuild: %+v", events)
+	}
+	if got := rdb.Exists(t.Context(), profiletask.ProfileRebuildAfterBindingKey(77, "LuoGu")).Val(); got != 0 {
+		t.Fatalf("rebuild marker not cleared after successful enqueue: exists=%d", got)
+	}
 }
 
 func seedUnboundCodeforcesSubmits(t *testing.T, db *gorm.DB, userID int64, count int, isAC bool) {

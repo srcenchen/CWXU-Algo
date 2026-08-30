@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"cwxu-algo/app/core_data/internal/data/model"
+	"cwxu-algo/app/core_data/internal/spider"
 
 	"github.com/go-kratos/kratos/v2/log"
 	"github.com/redis/go-redis/v9"
@@ -23,6 +24,7 @@ const (
 	clientSyncEffectBatchSize       = 100
 	clientSyncPostProcessBatchSize  = 16
 	clientSyncReceiptCleanupBatch   = 500
+	clientSyncAuditCleanupBatch     = 500
 	clientSyncJobLease              = 5 * time.Minute
 	clientSyncCompletedJobRetention = 24 * time.Hour
 )
@@ -79,7 +81,64 @@ func (uc *SpiderUseCase) RunClientSyncMaintenanceOnce(ctx context.Context, now t
 	if err := uc.cleanupClientSyncJobs(ctx, now); err != nil {
 		errs = append(errs, err)
 	}
+	if err := uc.expireClientSyncAudits(ctx, now); err != nil {
+		errs = append(errs, err)
+	}
+	if err := uc.cleanupClientSyncAudits(ctx, now); err != nil {
+		errs = append(errs, err)
+	}
 	return errors.Join(errs...)
+}
+
+func (uc *SpiderUseCase) expireClientSyncAudits(ctx context.Context, now time.Time) error {
+	if !uc.data.DB.Migrator().HasTable(&model.ClientSyncAudit{}) {
+		return nil
+	}
+	cutoff := now.UTC().Add(-30 * time.Minute)
+	terminal := now.UTC()
+	var candidates []model.ClientSyncAudit
+	if err := uc.data.DB.WithContext(ctx).Where("status = ? AND terminal_at IS NULL AND updated_at <= ?", "running", cutoff).
+		Order("updated_at ASC").Limit(clientSyncAuditCleanupBatch).Find(&candidates).Error; err != nil {
+		return err
+	}
+	for i := range candidates {
+		if uc.data.RDB != nil {
+			exists, err := uc.data.RDB.Exists(ctx, "luogu:sync:session:"+candidates[i].SessionID).Result()
+			if err != nil {
+				return err
+			}
+			if exists > 0 {
+				continue
+			}
+		}
+		result := uc.data.DB.WithContext(ctx).Model(&model.ClientSyncAudit{}).
+			Where("session_id = ? AND status = ? AND terminal_at IS NULL AND updated_at <= ?", candidates[i].SessionID, "running", cutoff).
+			Updates(map[string]interface{}{
+				"status": "expired", "completion_reason": "session_expired",
+				"error_code": "SESSION_EXPIRED", "error_message": "同步会话已过期",
+				"terminal_at": terminal, "retention_until": terminal.Add(clientSyncAuditRetention), "updated_at": terminal,
+			})
+		if result.Error != nil {
+			return result.Error
+		}
+	}
+	return nil
+}
+
+func (uc *SpiderUseCase) cleanupClientSyncAudits(ctx context.Context, now time.Time) error {
+	if !uc.data.DB.Migrator().HasTable(&model.ClientSyncAudit{}) {
+		return nil
+	}
+	var sessionIDs []string
+	if err := uc.data.DB.WithContext(ctx).Model(&model.ClientSyncAudit{}).
+		Where("terminal_at IS NOT NULL AND retention_until < ?", now.UTC()).
+		Order("retention_until ASC").Limit(clientSyncAuditCleanupBatch).Pluck("session_id", &sessionIDs).Error; err != nil {
+		return err
+	}
+	if len(sessionIDs) == 0 {
+		return nil
+	}
+	return uc.data.DB.WithContext(ctx).Where("session_id IN ? AND terminal_at IS NOT NULL AND retention_until < ?", sessionIDs, now.UTC()).Delete(&model.ClientSyncAudit{}).Error
 }
 
 func (uc *SpiderUseCase) reserveClientSyncReceipt(ctx context.Context, tx *gorm.DB, userID int64, platform string, page ClientSyncPageImport, dirty bool) error {
@@ -152,6 +211,16 @@ func (uc *SpiderUseCase) applyClientSyncReceiptEffects(ctx context.Context, rece
 		return updated.Error
 	}
 	receipt.EffectsAppliedAt = &now
+	// 最后一页提交成功后立即开始题库绑定，不必等下一次一分钟维护
+	// tick。维护任务仍保留作为崩溃/重试兜底，绑定本身是幂等的。
+	if receipt.CompletionReason != "" && uc.problem != nil {
+		userID := receipt.UserID
+		go func() {
+			if err := uc.problem.BindSubmitsAfterSpiderForPlatform(userID, spider.LuoGu); err != nil {
+				log.Warnf("client-sync immediate submit binding user=%d: %v", userID, err)
+			}
+		}()
+	}
 	return nil
 }
 
@@ -297,7 +366,7 @@ func (uc *SpiderUseCase) runClientSyncPostProcess(userID int64) error {
 	if uc.problem == nil {
 		return fmt.Errorf("problem postprocess is not configured")
 	}
-	return uc.problem.BindSubmitsAfterSpider(userID)
+	return uc.problem.BindSubmitsAfterSpiderForPlatform(userID, spider.LuoGu)
 }
 
 func (uc *SpiderUseCase) cleanupClientSyncReceipts(ctx context.Context, now time.Time) error {

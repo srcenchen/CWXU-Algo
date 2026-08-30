@@ -759,9 +759,9 @@ func (uc *ProblemUseCase) ForcePublishMaintenanceUserProfile(userID int64, inten
 	return nil
 }
 
-// BuildAndCacheUserProfile MQ consumer 用：先全量重建 user_tag_ac，再算画像写缓存。
-// force=false 时按用户 AC 指纹跳过「数据未变化」的用户（3h 整点爬虫风暴主要削这里）。
-// 重 JOIN 只在队列里跑；key 与 HTTP 轻量路径分离，避免抢到「未重建」的空结果。
+// BuildAndCacheUserProfile MQ consumer 用。force=true 才重建 user_tag_ac；
+// 普通提交事件只做轻量读取，不实时重算历史题目。正式快照由强制绑定
+// 重构或每日活跃用户批处理发布。
 func (uc *ProblemUseCase) BuildAndCacheUserProfile(userID int64, force bool) error {
 	if userID <= 0 {
 		return fmt.Errorf("invalid user_id")
@@ -794,11 +794,23 @@ func (uc *ProblemUseCase) BuildAndCacheUserProfile(userID int64, force bool) err
 		}
 		// 系统过载时先退避，画像重 JOIN 让路给在线访问（最多等 30s）
 		loadgate.Global().Wait(ctx, 30*time.Second)
-		// 雷达预聚合从 user_ac_problems×problem_tags 重算，保证「做过有标签的题就一定有雷达」
-		if err := dal.RebuildUserTagACForUserAtIdentity(ctx, uc.data.DB, userID, identity); err != nil {
-			return nil, err
+		// 普通提交失效只刷新画像缓存，不重新 JOIN 全部历史题目。新 AC
+		// 在题库绑定完成后由 force 任务处理；全量重算仅保留给 force/
+		// 维护任务，避免每次同步都把旧题重新分析一遍。
+		if force {
+			if err := dal.RebuildUserTagACForUserAtIdentity(ctx, uc.data.DB, userID, identity); err != nil {
+				return nil, err
+			}
 		}
-		snap, computeErr := uc.computeUserProfileAtIdentity(userID, identity)
+		var snap *UserProfileSnapshot
+		var computeErr error
+		if force {
+			snap, computeErr = uc.computeUserProfileAtIdentity(userID, identity)
+		} else {
+			// 普通缓存刷新允许读取上一版已发布雷达，避免新提交尚未
+			// 绑定/打标时把缓存写成空画像。
+			snap, computeErr = uc.computeUserProfileForLightReadAtIdentity(userID, identity)
+		}
 		identityAfter, err := dal.ReadProfileCacheIdentity(ctx, uc.data.DB, userID)
 		if err != nil {
 			return nil, err
@@ -811,6 +823,12 @@ func (uc *ProblemUseCase) BuildAndCacheUserProfile(userID int64, force bool) err
 		}
 		if computeErr != nil {
 			return nil, computeErr
+		}
+		if !force {
+			// 普通提交事件不发布画像快照：它只负责让统计缓存失效。
+			// 雷达由绑定完成后的 force 任务或每日 02:00 活跃用户任务
+			// 发布，避免把旧证据/旧模型伪装成当前快照。
+			return snap, nil
 		}
 		snap.EmptyRadarVerified = len(snap.Radar) == 0
 		if err := uc.cacheBuiltProfileAtGeneration(ctx, userID, modelVersion, evidenceVersion, generation, snap); err != nil {
@@ -931,7 +949,6 @@ func (uc *ProblemUseCase) UserProfile(userID int64) (radar []struct {
 	}
 	identity, identityErr := dal.ReadProfileCacheIdentity(ctx, uc.data.DB, userID)
 	if identityErr != nil {
-		uc.enqueueUserProfileRebuildForce(userID)
 		log.Warnf("user_profile identity unavailable, serving fallback user=%d: %v", userID, identityErr)
 		snap, fallbackErr := uc.computeUserProfileFromPreaggregates(userID, dal.ProfileCacheIdentity{}, true)
 		if fallbackErr != nil {
@@ -946,7 +963,6 @@ func (uc *ProblemUseCase) UserProfile(userID int64) (radar []struct {
 	if snap, ok := uc.readProfileCacheAtGeneration(ctx, userID, userProfileExactCacheKeyForGeneration(userID, modelVersion, evidenceVersion, generation), generation); ok &&
 		snap.SchemaVersion == userProfileCacheSchema && snap.ModelVersion == modelVersion && snap.EvidenceVersion == evidenceVersion &&
 		snap.GlobalGeneration == generation.Global && snap.UserGeneration == generation.User {
-		uc.enqueueInvalidEmptyProfileRebuild(ctx, userID, snap)
 		return unpackProfile(snap)
 	}
 	// 精确 miss：证据和 generation 必须完全匹配；模型落后一版时允许
@@ -957,12 +973,10 @@ func (uc *ProblemUseCase) UserProfile(userID int64) (radar []struct {
 			snap.GlobalGeneration == generation.Global && snap.UserGeneration == generation.User
 		if !latestReadable {
 			log.Infof("user_profile reject stale latest user=%d snapshot model=%d evidence=%s", userID, snap.ModelVersion, snap.EvidenceVersion)
-			uc.enqueueUserProfileRebuildForce(userID)
 		} else {
 			if snap.ModelVersion < modelVersion {
 				log.Infof("user_profile serve stale model user=%d snapshot=%d active=%d", userID, snap.ModelVersion, modelVersion)
 			}
-			uc.enqueueUserProfileRebuildForce(userID)
 			return unpackProfile(snap)
 		}
 	}
@@ -972,11 +986,9 @@ func (uc *ProblemUseCase) UserProfile(userID int64) (radar []struct {
 	snap, e := uc.buildUserProfileNow(userID, identity)
 	if e != nil {
 		log.Errorf("user_profile on-demand user=%d: %v", userID, e)
-		uc.EnqueueUserProfileRebuild(userID)
 		err = e
 		return
 	}
-	uc.enqueueUserProfileRebuildForce(userID)
 	log.Infof("user_profile on-demand user=%d cost=%s", userID, time.Since(start).Round(time.Millisecond))
 	return unpackProfile(snap)
 }
@@ -1039,9 +1051,13 @@ func (uc *ProblemUseCase) computeUserProfileFromPreaggregates(userID int64, iden
 	radarSnapshot, radarErr := dal.ListUserTagAbilitySnapshot(
 		context.Background(), uc.data.DB, userID, identity, allowStaleRadar, int(^uint(0)>>1),
 	)
-	if allowStaleRadar && radarErr != nil {
+	if allowStaleRadar && (radarErr != nil || !radarSnapshot.Ready) {
 		if recovered, recoverErr := dal.ListLatestUserTagACRows(context.Background(), uc.data.DB, userID, int(^uint(0)>>1)); recoverErr == nil && recovered.Ready {
-			log.Warnf("radar snapshot unavailable, serving latest score rows user=%d model=%d: %v", userID, recovered.ModelVersion, radarErr)
+			if radarErr != nil {
+				log.Warnf("radar snapshot unavailable, serving latest score rows user=%d model=%d: %v", userID, recovered.ModelVersion, radarErr)
+			} else {
+				log.Infof("radar snapshot not ready, serving latest score rows user=%d model=%d", userID, recovered.ModelVersion)
+			}
 			radarSnapshot, radarErr = recovered, nil
 		}
 	}

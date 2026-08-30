@@ -732,18 +732,8 @@ func DeletePlatformUserAC(ctx context.Context, db *gorm.DB, userID int64, platfo
 			return err
 		}
 	}
-	// user_tag_ac 是跨平台聚合。换绑任一平台后整用户清空，待新数据绑定完成再全量重建，
-	// 避免把旧账号的标签贡献与仍绑定的平台混合展示。
-	if db.Migrator().HasTable(&model.UserTagACSnapshot{}) {
-		if err := db.WithContext(ctx).Where("user_id = ?", userID).Delete(&model.UserTagACSnapshot{}).Error; err != nil {
-			return err
-		}
-	}
-	if db.Migrator().HasTable(&model.UserTagAC{}) {
-		if err := db.WithContext(ctx).Where("user_id = ?", userID).Delete(&model.UserTagAC{}).Error; err != nil {
-			return err
-		}
-	}
+	// user_tag_ac 是跨平台聚合。换绑期间保留旧快照，等新账号爬取完成
+	// 后再由强制重构原子替换；这样不会因为换绑/爬取空窗把画像清空。
 	return nil
 }
 

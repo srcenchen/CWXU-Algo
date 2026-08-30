@@ -273,6 +273,9 @@ func TestExecuteSetSpiderMaintenanceReleasesPlatformLockBeforeFenceAndRecrawlTai
 	if lockLeaked.Load() {
 		t.Fatal("set binding platform lock was retained through fence/recrawl tail")
 	}
+	if got := rdb.Exists(ctx, task.ProfileRebuildAfterBindingKey(42, "LuoGu")).Val(); got != 1 {
+		t.Fatalf("replacement crawl did not receive a platform-scoped profile marker: exists=%d", got)
+	}
 }
 
 func TestSpiderMaintenanceStaleScannerClaimFailureAbandonsFence(t *testing.T) {

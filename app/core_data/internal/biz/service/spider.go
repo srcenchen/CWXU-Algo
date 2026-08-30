@@ -309,7 +309,11 @@ func (uc *SpiderUseCase) ScheduleSubmitPostProcess(userID int64) {
 	if uc == nil || uc.problem == nil || userID <= 0 {
 		return
 	}
-	go uc.problem.BindSubmitsAfterSpider(userID)
+	go func() {
+		if err := uc.problem.BindSubmitsAfterSpiderForPlatform(userID, spider.LuoGu); err != nil {
+			log.Warnf("SpiderUseCase: bind browser-sync submits user=%d platform=%s: %v", userID, spider.LuoGu, err)
+		}
+	}()
 }
 
 func (uc *SpiderUseCase) importSubmitLogs(ctx context.Context, userId int64, platform string, generation int64, logs []model.SubmitLog, opts submitImportOptions) (SubmitImportResult, error) {
@@ -362,6 +366,11 @@ func (uc *SpiderUseCase) importSubmitLogs(ctx context.Context, userId int64, pla
 		if found {
 			if effectErr := uc.applyClientSyncReceiptEffects(ctx, receipt); effectErr != nil {
 				return result, kratoserrors.ServiceUnavailable("SYNC_UNAVAILABLE", "同步服务暂不可用")
+			}
+			page := *opts.clientPage
+			progress := ClientSyncAuditProgress{SessionID: page.SessionID, ProcessedPages: replayed.ProcessedPages, RemoteCount: replayed.RemoteCount, Inserted: replayed.Inserted, RestartCount: page.Restart, UpdatedAt: page.CompletedAt}
+			if auditErr := uc.UpdateClientSyncAudit(ctx, progress); auditErr != nil {
+				log.Warnf("client-sync audit replay session=%s: %v", page.SessionID, auditErr)
 			}
 			*opts.clientResult = replayed
 			return SubmitImportResult{Inserted: replayed.PageInserted}, nil
@@ -628,6 +637,16 @@ func (uc *SpiderUseCase) persistClientSyncPage(ctx context.Context, userID int64
 			return result, kratoserrors.Conflict("SUBMIT_OWNER_CONFLICT", "提交记录已属于其他用户")
 		}
 		return result, err
+	}
+	// Audit is intentionally outside the submit/receipt transaction: audit
+	// availability must never roll back an otherwise valid idempotent page.
+	progress := ClientSyncAuditProgress{SessionID: page.SessionID, ProcessedPages: pageResult.ProcessedPages, RemoteCount: pageResult.RemoteCount, Inserted: pageResult.Inserted, RestartCount: page.Restart, UpdatedAt: page.CompletedAt}
+	if auditErr := uc.UpdateClientSyncAudit(ctx, progress); auditErr != nil {
+		log.Warnf("client-sync audit progress session=%s: %v", page.SessionID, auditErr)
+	} else if pageResult.CompletionReason != "" {
+		if auditErr := uc.TerminateClientSyncAudit(ctx, page.SessionID, "completed", pageResult.CompletionReason, "", "", page.CompletedAt); auditErr != nil {
+			log.Warnf("client-sync audit completion session=%s: %v", page.SessionID, auditErr)
+		}
 	}
 	*opts.clientResult = pageResult
 	result.Inserted = pageResult.PageInserted
@@ -1049,6 +1068,18 @@ func applyOjCredentials(rt *sitesettings.Runtime, luogu, qoj interface{ SetCrede
 	}
 }
 
+func (uc *SpiderUseCase) hasProfileRebuildAfterBindingMarker(userID int64, platform string) bool {
+	if uc == nil || uc.data == nil || uc.data.RDB == nil || userID <= 0 || strings.TrimSpace(platform) == "" {
+		return false
+	}
+	marked, err := task.HasProfileRebuildAfterBinding(context.Background(), uc.data.RDB, userID, platform)
+	if err != nil {
+		log.Warnf("Spider: read profile rebind marker user=%d platform=%s: %v", userID, platform, err)
+		return false
+	}
+	return marked
+}
+
 // loadOnePlatform 返回 (是否有数据变更, error)
 func (uc *SpiderUseCase) loadOnePlatform(ctx context.Context, userId int64, plat model.Platform, needAll bool) (bool, error) {
 	uc.injectOjCredentials(ctx)
@@ -1089,10 +1120,15 @@ func (uc *SpiderUseCase) loadOnePlatform(ctx context.Context, userId int64, plat
 			// 与提交/比赛一并刷新 rating（未实现 RatingFetcher 的平台自动跳过）
 			uc.fetchAndSaveRating(plat)
 			log.Infof("Spider: %s %s 成功 new_rows=%d", plat.Platform, plat.Username, rows)
-			if anyChange && uc.problem != nil {
-				// 异步绑定，避免在 spider worker 内串行 resolve 拖垮队列
-				uid := userId
-				go uc.problem.BindSubmitsAfterSpider(uid)
+			if (anyChange || uc.hasProfileRebuildAfterBindingMarker(userId, plat.Platform)) && uc.problem != nil {
+				// 异步绑定，避免在 spider worker 内串行 resolve 拖垮队列。
+				// 只有对应 OJ 的换绑标记才会在绑定完成后触发强制画像。
+				uid, platform := userId, plat.Platform
+				go func() {
+					if err := uc.problem.BindSubmitsAfterSpiderForPlatform(uid, platform); err != nil {
+						log.Warnf("Spider: bind submits after crawl user=%d platform=%s: %v", uid, platform, err)
+					}
+				}()
 			}
 			uc.recordOjStatus(ctx, plat.Platform, "ok", "")
 			return anyChange, nil
@@ -1208,8 +1244,6 @@ func (uc *SpiderUseCase) invalidateCache(userId int64) {
 	// 热用户：异步预热 period 缓存（读路径更快，2c4g 上仅高热度触发）
 	go MaybeWarmUserPeriod(context.Background(), uc.data.DB, rdb, userId)
 
-	// 画像：ver 已变，入队后台重算（HTTP 先读 latest 兜底）
-	if uc.problem != nil {
-		uc.problem.EnqueueUserProfileRebuild(userId)
-	}
+	// 画像不在每次提交后实时重构；由每日 02:00 活跃用户任务，或
+	// 换绑 OJ 的对应全量爬取完成后触发。
 }

@@ -26,6 +26,7 @@ var userTagEmptyHealCursor atomic.Int64
 const abilityLookupBatchSize = 200
 
 var ErrUserTagAbilityModelChanged = errors.New("user tag ability model changed; retry rebuild")
+var ErrUserTagAbilityIncomplete = errors.New("user tag ability facts incomplete; keep previous snapshot")
 var ErrUserTagAbilityEvidenceChanged = errors.New("user tag ability evidence changed; retry rebuild")
 var ErrUserTagAbilitySnapshotCorrupt = errors.New("user tag ability snapshot is inconsistent")
 
@@ -578,6 +579,9 @@ func RebuildUserTagACForUserAtIdentity(ctx context.Context, db *gorm.DB, userID 
 	}
 	candidates, externalMatches := resolveAbilityCandidates(acRows, problemByID, extKeys)
 	if len(candidates) == 0 {
+		if len(acRows) > 0 && userHasPublishedTagRows(ctx, db, userID) {
+			return ErrUserTagAbilityIncomplete
+		}
 		return replaceUserTagAbilityRows(ctx, db, userID, identity, nil)
 	}
 
@@ -589,6 +593,19 @@ func RebuildUserTagACForUserAtIdentity(ctx context.Context, db *gorm.DB, userID 
 	tagsByProblem, hardnessByProblem, err := loadAbilityFacts(ctx, db, ids, modelVersion)
 	if err != nil {
 		return err
+	}
+	missingFacts, taggedFacts := false, false
+	for _, id := range ids {
+		if len(tagsByProblem[id]) == 0 {
+			missingFacts = true
+		} else {
+			taggedFacts = true
+		}
+	}
+	// 题库绑定/AI 打标是异步的。只要本次结果不完整，就不能用部分
+	// 结果覆盖已有聚合；等题面标签齐全后由绑定/每日任务重试。
+	if missingFacts && (taggedFacts || userHasPublishedTagRows(ctx, db, userID)) {
+		return ErrUserTagAbilityIncomplete
 	}
 	submitsByProblem, completePlatforms, backlogPlatforms, err := loadAbilityEvidence(ctx, db, userID, candidates, externalMatches)
 	if err != nil {
@@ -809,6 +826,18 @@ func loadAbilityFacts(ctx context.Context, db *gorm.DB, ids []uint, modelVersion
 	return tagsByProblem, hardness, nil
 }
 
+func userHasPublishedTagRows(ctx context.Context, db *gorm.DB, userID int64) bool {
+	if db == nil || userID <= 0 {
+		return false
+	}
+	var count int64
+	if err := db.WithContext(ctx).Model(&model.UserTagAC{}).
+		Where("user_id = ? AND count > 0", userID).Count(&count).Error; err != nil {
+		return false
+	}
+	return count > 0
+}
+
 func loadAbilityEvidence(ctx context.Context, db *gorm.DB, userID int64, candidates map[uint]abilityCandidate, externalMatches map[abilityExternalKey][]model.Problem) (map[uint][]abilitySubmit, map[string]bool, map[string]bool, error) {
 	logs := make([]model.SubmitLog, 0)
 	backlog := map[string]bool{}
@@ -1001,16 +1030,29 @@ func replaceUserTagAbilityRows(ctx context.Context, db *gorm.DB, userID int64, e
 		if err := compareUserTagAbilityIdentity(current, expected); err != nil {
 			return err
 		}
-		if err := tx.Where("user_id = ?", userID).Delete(&model.UserTagAC{}).Error; err != nil {
-			return err
-		}
 		if len(rows) > 0 {
 			for i := range rows {
 				rows[i].UserID = userID
 				rows[i].ScoreVersion = CurrentUserTagAbilityScoreVersion
 				rows[i].ModelVersion = expected.ModelVersion
 			}
-			if err := tx.CreateInBatches(&rows, 200).Error; err != nil {
+			if err := tx.Clauses(clause.OnConflict{
+				Columns:   []clause.Column{{Name: "user_id"}, {Name: "tag"}},
+				DoUpdates: clause.AssignmentColumns([]string{"count", "weight", "score_version", "model_version"}),
+			}).CreateInBatches(&rows, 200).Error; err != nil {
+				return err
+			}
+		}
+		if len(rows) == 0 {
+			if err := tx.Where("user_id = ?", userID).Delete(&model.UserTagAC{}).Error; err != nil {
+				return err
+			}
+		} else {
+			tags := make([]string, 0, len(rows))
+			for _, row := range rows {
+				tags = append(tags, row.Tag)
+			}
+			if err := tx.Where("user_id = ? AND tag NOT IN ?", userID, tags).Delete(&model.UserTagAC{}).Error; err != nil {
 				return err
 			}
 		}

@@ -590,12 +590,9 @@ func (t *CronTask) Do() {
 	_, _ = c.AddFunc("*/5 * * * *", func() {
 		t.runCalendarNotify()
 	})
-	// 画像/雷达：每天 03:15 全量刷新一次；每 6h 只补「有 AC 但雷达空」的用户
-	_, _ = c.AddFunc("15 3 * * *", func() {
+	// 画像/雷达：每天 02:00 只为活跃用户全量刷新；提交过程不实时重构。
+	_, _ = c.AddFunc("0 2 * * *", func() {
 		t.runUserProfilePrewarm(profilePrewarmDaily)
-	})
-	_, _ = c.AddFunc("20 */6 * * *", func() {
-		t.runUserProfilePrewarm(profilePrewarmEmptyHeal)
 	})
 	// 启动后异步跑一次爬取，避免空库等到下一个 12h 点
 	go func() {
@@ -607,23 +604,13 @@ func (t *CronTask) Do() {
 		}
 		t.runCalendarCrawl()
 	}()
-	// 启动约 45s 后跑一轮空雷达补漏（不阻塞启动）
-	go func() {
-		time.Sleep(45 * time.Second)
-		select {
-		case <-t.stopCh:
-			return
-		default:
-		}
-		t.runUserProfilePrewarm(profilePrewarmStartup)
-	}()
 	c.Start()
 	t.cron = c
 	t.running = true
 	stopCh := t.stopCh
 	t.mu.Unlock()
 
-	log.Infof("CronTask started: backup schedule checked every minute; spider/summary 5m; calendar 12h; user_profile daily 03:15 + empty-radar heal 6h")
+	log.Infof("CronTask started: backup schedule checked every minute; spider/summary 5m; calendar 12h; user_profile daily 02:00 active users")
 
 	defer func() {
 		t.mu.Lock()

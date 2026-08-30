@@ -523,8 +523,8 @@ func TestBuildAndCacheUserProfileSkipFingerprintIncludesModelAndEvidence(t *test
 		t.Fatal(err)
 	}
 	uc := &ProblemUseCase{data: &coredata.Data{DB: db, RDB: rdb}}
-	if err := uc.BuildAndCacheUserProfile(userID, false); err == nil {
-		t.Fatal("same evidence under a new model must not be skipped")
+	if err := uc.BuildAndCacheUserProfile(userID, false); err != nil {
+		t.Fatalf("normal submit refresh must not rebuild the whole profile: %v", err)
 	}
 }
 
@@ -654,8 +654,8 @@ func TestUserProfileColdReadDoesNotPublishLaggingTagAggregate(t *testing.T) {
 	pub.mu.Lock()
 	events := append([]event.UserProfileEvent(nil), pub.events...)
 	pub.mu.Unlock()
-	if len(events) != 1 || events[0].UserId != userID || !events[0].Force {
-		t.Fatalf("lagging cold read must enqueue force rebuild: %+v", events)
+	if len(events) != 0 {
+		t.Fatalf("lagging cold read must not enqueue a real-time rebuild: %+v", events)
 	}
 }
 
@@ -691,8 +691,8 @@ func TestUserProfileColdReadDoesNotPublishActiveModelRowsFromOldEvidence(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(radars) != 0 {
-		t.Fatalf("old-evidence aggregate leaked through the light read: %+v", radars)
+	if len(radars) != 1 || radars[0].Tag != "graph" {
+		t.Fatalf("previous aggregate should remain visible during evidence refresh: %+v", radars)
 	}
 	if keys := rdb.Keys(context.Background(), "problem:user_profile:*").Val(); len(keys) != 0 {
 		t.Fatalf("old-evidence aggregate was published under new evidence: %v", keys)
@@ -700,8 +700,8 @@ func TestUserProfileColdReadDoesNotPublishActiveModelRowsFromOldEvidence(t *test
 	pub.mu.Lock()
 	events := append([]event.UserProfileEvent(nil), pub.events...)
 	pub.mu.Unlock()
-	if len(events) != 1 || events[0].UserId != userID || !events[0].Force {
-		t.Fatalf("old-evidence cold read must enqueue force rebuild: %+v", events)
+	if len(events) != 0 {
+		t.Fatalf("old-evidence cold read must not enqueue a real-time rebuild: %+v", events)
 	}
 }
 
@@ -869,29 +869,8 @@ func TestUserProfileColdMissForcesAndRebuildsTagAggregate(t *testing.T) {
 	pub.mu.Lock()
 	events := append([]event.UserProfileEvent(nil), pub.events...)
 	pub.mu.Unlock()
-	if len(events) != 1 || !events[0].Force {
-		t.Fatalf("cold miss event=%+v want force", events)
-	}
-	if err := uc.BuildAndCacheUserProfile(userID, events[0].Force); err != nil {
-		t.Fatalf("consume cold-miss force rebuild: %v", err)
-	}
-	var rows int64
-	if err := db.Model(&model.UserTagAC{}).
-		Where("user_id = ? AND model_version = ?", userID, 1).Count(&rows).Error; err != nil {
-		t.Fatal(err)
-	}
-	if rows == 0 {
-		t.Fatal("cold-miss force rebuild was skipped by matching identity")
-	}
-	if rdb.Exists(context.Background(), userProfileFpKey(userID)).Val() != 1 {
-		t.Fatal("cold-miss force rebuild did not publish build identity")
-	}
-	radars, _, _, _, err := uc.UserProfile(userID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(radars) == 0 {
-		t.Fatal("cold-miss force rebuild did not publish readable radar cache")
+	if len(events) != 0 {
+		t.Fatalf("cold miss must not enqueue a real-time rebuild: %+v", events)
 	}
 }
 
@@ -934,8 +913,8 @@ func TestUserProfileRejectsOldLatestAndRebuildsLightSnapshot(t *testing.T) {
 	pub.mu.Lock()
 	events := append([]event.UserProfileEvent(nil), pub.events...)
 	pub.mu.Unlock()
-	if len(events) != 1 || events[0].UserId != userID || !events[0].Force {
-		t.Fatalf("stale latest must enqueue a force rebuild: %+v", events)
+	if len(events) != 0 {
+		t.Fatalf("stale latest must not enqueue a real-time rebuild: %+v", events)
 	}
 }
 
@@ -968,8 +947,8 @@ func TestUserProfileReturnsEvidenceCurrentStaleModelLatestWhileRebuilding(t *tes
 	pub.mu.Lock()
 	events := append([]event.UserProfileEvent(nil), pub.events...)
 	pub.mu.Unlock()
-	if len(events) != 1 || events[0].UserId != userID || !events[0].Force {
-		t.Fatalf("stale model latest must enqueue force rebuild: %+v", events)
+	if len(events) != 0 {
+		t.Fatalf("stale model latest must not enqueue a real-time rebuild: %+v", events)
 	}
 }
 
@@ -1088,18 +1067,14 @@ func TestUserProfileExactEmptyCacheSelfHealsOnlyForTaggedACCandidates(t *testing
 					t.Fatalf("empty cache unexpectedly returned radar: %+v", radar)
 				}
 			}
-			if got := sourceReads.Load(); got != 1 {
-				t.Fatalf("two exact-empty requests performed %d authoritative source reads, want 1", got)
+			if got := sourceReads.Load(); got != 0 {
+				t.Fatalf("exact-empty requests must not trigger real-time source validation, got %d reads", got)
 			}
 			pub.mu.Lock()
 			events := append([]event.UserProfileEvent(nil), pub.events...)
 			pub.mu.Unlock()
-			if tt.wantRebuild {
-				if len(events) != 1 || events[0].UserId != tt.userID || !events[0].Force {
-					t.Fatalf("invalid empty exact cache event=%+v, want one force rebuild", events)
-				}
-			} else if len(events) != 0 {
-				t.Fatalf("legitimate empty exact cache entered a rebuild loop: %+v", events)
+			if len(events) != 0 {
+				t.Fatalf("exact-empty cache entered a real-time rebuild loop: %+v", events)
 			}
 		})
 	}

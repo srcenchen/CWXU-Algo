@@ -346,6 +346,12 @@ func (s *SpiderService) finishSetSpiderMaintenanceTail(ctx context.Context, pend
 		if err := s.rdb.Incr(ctx, "statistic:period:global:ver").Err(); err != nil {
 			return err
 		}
+		// The forced profile rebuild is consumed only by this platform's
+		// post-crawl binding pass. Keeping it out of the generic user key avoids
+		// another OJ's incremental sync rebuilding too early.
+		if err := task.MarkProfileRebuildAfterBinding(s.rdb, payload.UserID, payload.Platform); err != nil {
+			return err
+		}
 	}
 	s.spider.ResetDedup(payload.UserID, payload.Platform)
 	result := s.spider.DoPlatform(payload.UserID, payload.Platform, true)

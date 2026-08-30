@@ -385,6 +385,23 @@ type fakeLuoguImporter struct {
 	entered       chan struct{}
 	release       <-chan struct{}
 	enterOnce     sync.Once
+	auditDB       *gorm.DB
+}
+
+func (i *fakeLuoguImporter) StartClientSyncAudit(_ context.Context, start bizservice.ClientSyncAuditStart) error {
+	if i.auditDB == nil {
+		return nil
+	}
+	return i.auditDB.Create(&model.ClientSyncAudit{SessionID: start.SessionID, AuthorizationID: start.AuthorizationID, UserID: start.UserID, Platform: start.Platform, OJUID: start.OJUID, ClientKind: start.ClientKind, ClientVersion: start.ClientVersion, Status: "running", StartedAt: start.StartedAt, UpdatedAt: start.StartedAt}).Error
+}
+func (i *fakeLuoguImporter) UpdateClientSyncAudit(_ context.Context, p bizservice.ClientSyncAuditProgress) error {
+	return nil
+}
+func (i *fakeLuoguImporter) TerminateClientSyncAudit(_ context.Context, sessionID, status, reason, code, message string, at time.Time) error {
+	if i.auditDB == nil {
+		return nil
+	}
+	return i.auditDB.Model(&model.ClientSyncAudit{}).Where("session_id = ? AND terminal_at IS NULL", sessionID).Updates(map[string]interface{}{"status": status, "completion_reason": reason, "error_code": code, "error_message": message, "terminal_at": at, "retention_until": at.Add(7 * 24 * time.Hour), "updated_at": at}).Error
 }
 
 type fakeLuoguSessionFinalizingImporter struct {
@@ -507,7 +524,7 @@ func useDurableLuoguProfileRelay(svc *SpiderService, db *gorm.DB, rdb *redis.Cli
 	return publisher
 }
 
-func TestRemoveInvalidLuoguBindingRebuildsAndForcePublishesProfile(t *testing.T) {
+func TestRemoveInvalidLuoguBindingPreservesProfileUntilReplacementCrawl(t *testing.T) {
 	svc, db, rdb, _, _ := newLuoguSyncServiceTest(t)
 	ctx := context.Background()
 	if err := db.AutoMigrate(
@@ -558,8 +575,8 @@ func TestRemoveInvalidLuoguBindingRebuildsAndForcePublishesProfile(t *testing.T)
 	if err := db.Where("user_id = ?", 7).Find(&rows).Error; err != nil {
 		t.Fatal(err)
 	}
-	if len(rows) != 1 || rows[0].Tag != "dp" || rows[0].Count != 1 {
-		t.Fatalf("remaining canonical AC aggregate was not rebuilt: %+v", rows)
+	if len(rows) != 1 || rows[0].Tag != "legacy" || rows[0].Count != 99 {
+		t.Fatalf("existing canonical AC aggregate was not preserved: %+v", rows)
 	}
 	if keys := rdb.Keys(ctx, "problem:user_profile:s*:u7:*").Val(); len(keys) != 0 {
 		t.Fatalf("stale profile caches survived invalid binding removal: %v", keys)
@@ -567,16 +584,14 @@ func TestRemoveInvalidLuoguBindingRebuildsAndForcePublishesProfile(t *testing.T)
 	if rdb.Exists(ctx, "user_profile:fp:7").Val() != 0 {
 		t.Fatal("stale profile fingerprint survived invalid binding removal")
 	}
-	events := publisher.snapshot()
-	if len(events) != 1 || events[0].UserId != 7 || !events[0].Force {
-		t.Fatalf("profile was not force published after invalid binding removal: %+v", events)
+	if events := publisher.snapshot(); len(events) != 0 {
+		t.Fatalf("invalid binding cleanup rebuilt profile before replacement crawl: %+v", events)
 	}
 }
 
-func TestLuoguCleanupRelaysDueDeliveredTargetWithOriginalIntent(t *testing.T) {
-	svc, db, rdb, _, _ := newLuoguSyncServiceTest(t)
+func TestLuoguCleanupClearsDueDeliveredTargetWithoutRebuild(t *testing.T) {
+	svc, db, _, _, _ := newLuoguSyncServiceTest(t)
 	ctx := context.Background()
-	publisher := useDurableLuoguProfileRelay(svc, db, rdb)
 
 	intentID := "luogu-due-intent"
 	pending := model.AbilityMaintenancePending{
@@ -600,20 +615,13 @@ func TestLuoguCleanupRelaysDueDeliveredTargetWithOriginalIntent(t *testing.T) {
 	if _, err := svc.removeInvalidLuoguBinding(ctx, 7, "2245873"); err != nil {
 		t.Fatal(err)
 	}
-	events := publisher.snapshot()
-	if len(events) != 1 || events[0].UserId != 7 || !events[0].Force || events[0].IntentID != intentID {
-		t.Fatalf("maintenance retry event=%+v", events)
-	}
-	var target model.AbilityMaintenanceTarget
-	if err := db.First(&target, "intent_id = ? AND user_id = ?", intentID, 7).Error; err != nil {
-		t.Fatal(err)
-	}
-	if target.State != "delivered" || target.PublishAttempts != 1 || !target.NextRetryAt.After(time.Now()) {
-		t.Fatalf("due target was not re-leased: %+v", target)
-	}
 	var parentCount int64
-	if err := db.Model(&model.AbilityMaintenancePending{}).Where("scope = ?", pending.Scope).Count(&parentCount).Error; err != nil || parentCount != 1 {
-		t.Fatalf("unconsumed cleanup parent count=%d err=%v", parentCount, err)
+	if err := db.Model(&model.AbilityMaintenancePending{}).Where("scope = ?", pending.Scope).Count(&parentCount).Error; err != nil || parentCount != 0 {
+		t.Fatalf("cleanup parent count=%d err=%v", parentCount, err)
+	}
+	var targetCount int64
+	if err := db.Model(&model.AbilityMaintenanceTarget{}).Where("intent_id = ?", intentID).Count(&targetCount).Error; err != nil || targetCount != 0 {
+		t.Fatalf("cleanup target count=%d err=%v", targetCount, err)
 	}
 }
 
@@ -748,8 +756,8 @@ func TestLuoguCleanupConsumerConfirmationRaceCompletesOnlyAfterConsumption(t *te
 	if _, err := svc.removeInvalidLuoguBinding(ctx, 7, "2245873"); err != nil {
 		t.Fatal(err)
 	}
-	if events := publisher.snapshot(); len(events) != 1 || events[0].IntentID != intentID {
-		t.Fatalf("confirmation race event=%+v", events)
+	if events := publisher.snapshot(); len(events) != 0 {
+		t.Fatalf("confirmation race rebuilt profile=%+v", events)
 	}
 	var parentCount, targetCount int64
 	if err := db.Model(&model.AbilityMaintenancePending{}).Where("scope = ?", pending.Scope).Count(&parentCount).Error; err != nil {
@@ -801,12 +809,12 @@ func TestLuoguCleanupTailSkipsReplacementBindingSessionAndCrawlerKeys(t *testing
 			t.Fatalf("replacement key %s was cleared: %q", key, value)
 		}
 	}
-	var current model.AbilityMaintenancePending
-	if err := db.First(&current, "scope = ?", pending.Scope).Error; err != nil {
+	var pendingCount int64
+	if err := db.Model(&model.AbilityMaintenancePending{}).Where("scope = ?", pending.Scope).Count(&pendingCount).Error; err != nil {
 		t.Fatal(err)
 	}
-	if current.Phase != "tail_finalized" {
-		t.Fatalf("tail phase=%q", current.Phase)
+	if pendingCount != 0 {
+		t.Fatalf("replacement cleanup left durable intent count=%d", pendingCount)
 	}
 }
 
@@ -983,11 +991,12 @@ func TestLuoguCleanupTailReplaysAfterCleanupBeforePhaseCommit(t *testing.T) {
 	if err != nil || !removed {
 		t.Fatalf("tail replay removed=%v err=%v", removed, err)
 	}
-	if err := db.Where("scope = ?", luoguCleanupScope(7)).First(&pending).Error; err != nil {
+	var pendingCount int64
+	if err := db.Model(&model.AbilityMaintenancePending{}).Where("scope = ?", luoguCleanupScope(7)).Count(&pendingCount).Error; err != nil {
 		t.Fatal(err)
 	}
-	if pending.Phase != "tail_finalized" {
-		t.Fatalf("replayed pending phase=%q want tail_finalized", pending.Phase)
+	if pendingCount != 0 {
+		t.Fatalf("replayed cleanup left durable intent count=%d", pendingCount)
 	}
 }
 
@@ -1038,8 +1047,8 @@ func TestLuoguCleanupGenerationBumpUsesCurrentProfileOwner(t *testing.T) {
 	}
 }
 
-func TestRemoveInvalidLuoguBindingPublishFailureRecoversWithoutBinding(t *testing.T) {
-	svc, db, rdb, _, importer := newLuoguSyncServiceTest(t)
+func TestRemoveInvalidLuoguBindingIgnoresProfilePublisherUntilReplacementCrawl(t *testing.T) {
+	svc, db, _, _, importer := newLuoguSyncServiceTest(t)
 	ctx := context.Background()
 	if err := db.AutoMigrate(
 		&model.Problem{}, &model.ProblemTag{}, &model.UserTagAC{}, &model.UserProblemStatus{},
@@ -1065,35 +1074,17 @@ func TestRemoveInvalidLuoguBindingPublishFailureRecoversWithoutBinding(t *testin
 		t.Fatal(err)
 	}
 	importer.profileErr = errors.New("forced profile publish failure")
-	if removed, err := svc.removeInvalidLuoguBinding(ctx, 7, "2245873"); err == nil || removed {
-		t.Fatalf("first cleanup removed=%v err=%v", removed, err)
+	if removed, err := svc.removeInvalidLuoguBinding(ctx, 7, "2245873"); err != nil || !removed {
+		t.Fatalf("cleanup should not publish a profile before replacement crawl removed=%v err=%v", removed, err)
 	}
 	var bindingCount, pendingCount int64
 	_ = db.Model(&model.Platform{}).Where("user_id = ? AND platform = ?", 7, "LuoGu").Count(&bindingCount).Error
 	_ = db.Model(&model.AbilityMaintenancePending{}).Where("scope = ?", luoguCleanupScope(7)).Count(&pendingCount).Error
-	if bindingCount != 0 || pendingCount != 1 {
-		t.Fatalf("failed publish lost durable cleanup: binding=%d pending=%d", bindingCount, pendingCount)
+	if bindingCount != 0 || pendingCount != 0 {
+		t.Fatalf("cleanup did not clear durable intent: binding=%d pending=%d", bindingCount, pendingCount)
 	}
-	importer.mu.Lock()
-	importer.profileErr = nil
-	importer.mu.Unlock()
-	useDurableLuoguProfileRelay(svc, db, rdb)
-	removed, err := svc.removeInvalidLuoguBinding(ctx, 7, "2245873")
-	if err != nil || !removed {
-		t.Fatalf("no-binding recovery removed=%v err=%v", removed, err)
-	}
-	if err := db.Model(&model.AbilityMaintenanceTarget{}).Where("intent_id IN (SELECT operation_id FROM ability_maintenance_pending WHERE scope = ?)", luoguCleanupScope(7)).Update("state", "consumed").Error; err != nil {
-		t.Fatal(err)
-	}
-	_, err = svc.removeInvalidLuoguBinding(ctx, 7, "2245873")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := db.Model(&model.AbilityMaintenancePending{}).Where("scope = ?", luoguCleanupScope(7)).Count(&pendingCount).Error; err != nil || pendingCount != 0 {
-		t.Fatalf("recovered cleanup pending=%d err=%v", pendingCount, err)
-	}
-	if generation := rdb.Get(ctx, "problem:user_profile:generation:user:7").Val(); generation == "" {
-		t.Fatal("cleanup recovery lost generation tombstone")
+	if events := importer.profileCalls; events != 0 {
+		t.Fatalf("profile publisher was called during cleanup: %d", events)
 	}
 }
 
@@ -1116,8 +1107,8 @@ func prepareInvalidLuoguCleanupRecoveryTest(t *testing.T) (*SpiderService, *gorm
 	return svc, db, rdb
 }
 
-func TestRemoveInvalidLuoguBindingRebuildFailureRecoversWithoutBinding(t *testing.T) {
-	svc, db, rdb := prepareInvalidLuoguCleanupRecoveryTest(t)
+func TestRemoveInvalidLuoguBindingDoesNotRebuildDuringCleanup(t *testing.T) {
+	svc, db, _ := prepareInvalidLuoguCleanupRecoveryTest(t)
 	var failOnce sync.Once
 	if err := db.Callback().Query().Before("gorm:query").Register("test:fail_luogu_rebuild_once", func(tx *gorm.DB) {
 		if tx.Statement != nil && tx.Statement.Table == "ability_model_state" {
@@ -1130,29 +1121,14 @@ func TestRemoveInvalidLuoguBindingRebuildFailureRecoversWithoutBinding(t *testin
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if removed, err := svc.removeInvalidLuoguBinding(context.Background(), 7, "2245873"); err == nil || removed {
-		t.Fatalf("first cleanup removed=%v err=%v", removed, err)
+	if removed, err := svc.removeInvalidLuoguBinding(context.Background(), 7, "2245873"); err != nil || !removed {
+		t.Fatalf("cleanup unexpectedly rebuilt profile removed=%v err=%v", removed, err)
 	}
 	var bindingCount, pendingCount int64
 	_ = db.Model(&model.Platform{}).Where("user_id = ? AND platform = ?", 7, "LuoGu").Count(&bindingCount).Error
 	_ = db.Model(&model.AbilityMaintenancePending{}).Where("scope = ?", luoguCleanupScope(7)).Count(&pendingCount).Error
-	if bindingCount != 0 || pendingCount != 1 {
-		t.Fatalf("rebuild failure lost durable cleanup: binding=%d pending=%d", bindingCount, pendingCount)
-	}
-	useDurableLuoguProfileRelay(svc, db, rdb)
-	removed, err := svc.removeInvalidLuoguBinding(context.Background(), 7, "2245873")
-	if err != nil || !removed {
-		t.Fatalf("no-binding rebuild recovery removed=%v err=%v", removed, err)
-	}
-	if err := db.Model(&model.AbilityMaintenanceTarget{}).Where("intent_id IN (SELECT operation_id FROM ability_maintenance_pending WHERE scope = ?)", luoguCleanupScope(7)).Update("state", "consumed").Error; err != nil {
-		t.Fatal(err)
-	}
-	_, err = svc.removeInvalidLuoguBinding(context.Background(), 7, "2245873")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := db.Model(&model.AbilityMaintenancePending{}).Where("scope = ?", luoguCleanupScope(7)).Count(&pendingCount).Error; err != nil || pendingCount != 0 {
-		t.Fatalf("recovered cleanup pending=%d err=%v", pendingCount, err)
+	if bindingCount != 0 || pendingCount != 0 {
+		t.Fatalf("cleanup did not clear durable intent: binding=%d pending=%d", bindingCount, pendingCount)
 	}
 }
 
@@ -1217,11 +1193,12 @@ func TestRemoveInvalidLuoguBindingDoesNotFinalizeTailWhenSessionFinalizerFails(t
 	if err != nil || !removed {
 		t.Fatalf("session finalizer recovery removed=%v err=%v", removed, err)
 	}
-	if err := db.Where("scope = ?", luoguCleanupScope(7)).First(&pending).Error; err != nil {
+	var pendingCount int64
+	if err := db.Model(&model.AbilityMaintenancePending{}).Where("scope = ?", luoguCleanupScope(7)).Count(&pendingCount).Error; err != nil {
 		t.Fatal(err)
 	}
-	if pending.Phase != "tail_finalized" {
-		t.Fatalf("recovered pending phase=%q want tail_finalized", pending.Phase)
+	if pendingCount != 0 {
+		t.Fatalf("successful cleanup left durable intent count=%d", pendingCount)
 	}
 	if rdb.Exists(ctx, luoguSyncActiveKey(7, "2245873"), luoguSyncSessionKey(started.SessionId)).Val() != 0 {
 		t.Fatal("recovered session finalization left Redis session keys")
@@ -1254,11 +1231,12 @@ func TestRemoveInvalidLuoguBindingDoesNotFinalizeTailWhenCacheInvalidationFails(
 			if err != nil || !removed {
 				t.Fatalf("tail command recovery removed=%v err=%v", removed, err)
 			}
-			if err := db.Where("scope = ?", luoguCleanupScope(7)).First(&pending).Error; err != nil {
+			var remaining int64
+			if err := db.Model(&model.AbilityMaintenancePending{}).Where("scope = ?", luoguCleanupScope(7)).Count(&remaining).Error; err != nil {
 				t.Fatal(err)
 			}
-			if pending.Phase != "tail_finalized" {
-				t.Fatalf("recovered pending phase=%q want tail_finalized", pending.Phase)
+			if remaining != 0 {
+				t.Fatalf("successful cleanup left durable intent count=%d", remaining)
 			}
 		})
 	}
@@ -1275,12 +1253,12 @@ func TestRemoveInvalidLuoguBindingClearsStaleActiveSessionReference(t *testing.T
 	if err != nil || !removed {
 		t.Fatalf("stale active session blocked cleanup: removed=%v err=%v", removed, err)
 	}
-	var pending model.AbilityMaintenancePending
-	if err := db.Where("scope = ?", luoguCleanupScope(7)).First(&pending).Error; err != nil {
+	var pendingCount int64
+	if err := db.Model(&model.AbilityMaintenancePending{}).Where("scope = ?", luoguCleanupScope(7)).Count(&pendingCount).Error; err != nil {
 		t.Fatal(err)
 	}
-	if pending.Phase != "tail_finalized" {
-		t.Fatalf("pending phase=%q want tail_finalized", pending.Phase)
+	if pendingCount != 0 {
+		t.Fatalf("successful cleanup left durable intent count=%d", pendingCount)
 	}
 	if rdb.Exists(ctx, activeKey).Val() != 0 {
 		t.Fatal("stale active session reference survived cleanup")
@@ -1461,7 +1439,6 @@ func TestRemoveInvalidLuoguBindingResumesCleanupWhenCancelledReplacementDisappea
 	if err := db.Where("user_id = ? AND platform = ?", 7, "LuoGu").Delete(&model.Platform{}).Error; err != nil {
 		t.Fatal(err)
 	}
-	publisher := useDurableLuoguProfileRelay(svc, db, rdb)
 	removed, err := svc.removeInvalidLuoguBinding(ctx, 7, "2245873")
 	if err != nil || !removed {
 		t.Fatalf("cancelled cleanup did not resume after replacement disappeared: removed=%v err=%v", removed, err)
@@ -1473,19 +1450,8 @@ func TestRemoveInvalidLuoguBindingResumesCleanupWhenCancelledReplacementDisappea
 	if err := db.Model(&model.AbilityMaintenanceTarget{}).Where("intent_id = ?", pending.OperationID).Count(&targetCount).Error; err != nil {
 		t.Fatal(err)
 	}
-	if parentCount != 1 || targetCount != 1 {
-		t.Fatalf("resumed cleanup lost durable delivery state parent=%d target=%d", parentCount, targetCount)
-	}
-	var current model.AbilityMaintenancePending
-	if err := db.Where("scope = ?", pending.Scope).First(&current).Error; err != nil {
-		t.Fatal(err)
-	}
-	if current.Phase != "tail_finalized" {
-		t.Fatalf("resumed cleanup phase=%q want tail_finalized", current.Phase)
-	}
-	events := publisher.snapshot()
-	if len(events) != 1 || events[0].IntentID != pending.OperationID || events[0].UserId != 7 {
-		t.Fatalf("resumed cleanup event=%+v", events)
+	if parentCount != 0 || targetCount != 0 {
+		t.Fatalf("resumed cleanup left durable delivery state parent=%d target=%d", parentCount, targetCount)
 	}
 	generationKey := "problem:user_profile:generation:user:7"
 	generation, parseErr := strconv.ParseInt(rdb.Get(ctx, generationKey).Val(), 10, 64)
@@ -1498,7 +1464,7 @@ func TestRemoveInvalidLuoguBindingResumesCleanupWhenCancelledReplacementDisappea
 }
 
 func TestRemoveInvalidLuoguBindingResumesCleanupWhenCancelledReplacementIsInvalid(t *testing.T) {
-	svc, db, rdb := prepareInvalidLuoguCleanupRecoveryTest(t)
+	svc, db, _ := prepareInvalidLuoguCleanupRecoveryTest(t)
 	ctx := context.Background()
 	var old model.Platform
 	if err := db.Where("user_id = ? AND platform = ?", 7, "LuoGu").First(&old).Error; err != nil {
@@ -1518,7 +1484,6 @@ func TestRemoveInvalidLuoguBindingResumesCleanupWhenCancelledReplacementIsInvali
 	}).Error; err != nil {
 		t.Fatal(err)
 	}
-	publisher := useDurableLuoguProfileRelay(svc, db, rdb)
 	removed, err := svc.removeInvalidLuoguBinding(ctx, 7, "2245873")
 	if err != nil || !removed {
 		t.Fatalf("invalid replacement cleanup removed=%v err=%v", removed, err)
@@ -1530,16 +1495,12 @@ func TestRemoveInvalidLuoguBindingResumesCleanupWhenCancelledReplacementIsInvali
 	if bindingCount != 0 {
 		t.Fatalf("invalid replacement binding survived count=%d", bindingCount)
 	}
-	var current model.AbilityMaintenancePending
-	if err := db.Where("scope = ?", pending.Scope).First(&current).Error; err != nil {
+	var pendingCount int64
+	if err := db.Model(&model.AbilityMaintenancePending{}).Where("scope = ?", pending.Scope).Count(&pendingCount).Error; err != nil {
 		t.Fatal(err)
 	}
-	if current.Phase != "tail_finalized" {
-		t.Fatalf("invalid replacement cleanup phase=%q want tail_finalized", current.Phase)
-	}
-	events := publisher.snapshot()
-	if len(events) != 1 || events[0].IntentID != pending.OperationID || events[0].UserId != 7 {
-		t.Fatalf("invalid replacement cleanup event=%+v", events)
+	if pendingCount != 0 {
+		t.Fatalf("invalid replacement cleanup left durable intent count=%d", pendingCount)
 	}
 }
 
@@ -2379,6 +2340,113 @@ func TestLuoguSyncStatusRestoresCompletedResponse(t *testing.T) {
 	}
 	if !status.Done || !status.Connected || status.CompletionReason != "remote_end" || status.Inserted != completed.Inserted || status.ProcessedPages != completed.ProcessedPages {
 		t.Fatalf("status=%+v completed=%+v", status, completed)
+	}
+}
+
+func TestLuoguSyncCreatesAndCompletesSessionAudit(t *testing.T) {
+	svc, db, rdb, _, _ := newLuoguSyncServiceTest(t)
+	if err := db.AutoMigrate(
+		&model.ClientSyncAudit{}, &model.ClientSyncPageReceipt{}, &model.ClientSyncPostProcessJob{},
+	); err != nil {
+		t.Fatal(err)
+	}
+	svc.luoguImporter = bizservice.NewSpiderUseCase(&coredata.Data{DB: db, RDB: rdb}, nil, nil)
+	started := startLuoguTestSession(t, svc)
+	var running model.ClientSyncAudit
+	if err := db.First(&running, "session_id = ?", started.SessionId).Error; err != nil {
+		t.Fatal(err)
+	}
+	if running.Status != "running" || running.AuthorizationID != 11 || running.UserID != 7 || running.OJUID != "2245873" || running.ClientVersion != "1.0.0" {
+		t.Fatalf("running audit = %+v", running)
+	}
+	completed, err := svc.UploadLuoguSyncPage(luoguHeaderContext(luoguSyncSessionHeader, started.SessionToken), &spiderpb.UploadLuoguSyncPageReq{LuoguUid: "2245873", Page: 1, RemoteCount: 0, PerPage: 20})
+	if err != nil || !completed.Done {
+		t.Fatalf("completion=%+v err=%v", completed, err)
+	}
+	var audit model.ClientSyncAudit
+	if err := db.First(&audit, "session_id = ?", started.SessionId).Error; err != nil {
+		t.Fatal(err)
+	}
+	if audit.Status != "completed" || audit.CompletionReason != "remote_end" || audit.ProcessedPages != 1 || audit.TerminalAt == nil || !audit.RetentionUntil.Equal(audit.TerminalAt.Add(7*24*time.Hour)) {
+		t.Fatalf("completed audit = %+v", audit)
+	}
+}
+
+func TestLuoguSyncPurgeRemovesIndexedSessionKeys(t *testing.T) {
+	svc, _, rdb, _, _ := newLuoguSyncServiceTest(t)
+	ctx := context.Background()
+	if err := rdb.SAdd(ctx, luoguSyncUserSessionsKey(7), "session-to-delete").Err(); err != nil {
+		t.Fatal(err)
+	}
+	if err := rdb.SAdd(ctx, luoguSyncUserUIDsKey(7), "2245873").Err(); err != nil {
+		t.Fatal(err)
+	}
+	if err := rdb.Set(ctx, luoguSyncActiveKey(7, "2245873"), "session-to-delete", time.Hour).Err(); err != nil {
+		t.Fatal(err)
+	}
+	if err := rdb.HSet(ctx, luoguSyncSessionKey("session-to-delete"), "user_id", 7, "token_hash", "session-hash", "authorization_id", 11, "luogu_uid", "2245873", "request_id_hash", "request-hash").Err(); err != nil {
+		t.Fatal(err)
+	}
+	if err := rdb.Set(ctx, luoguSyncTokenKey("session-hash"), "session-to-delete", time.Hour).Err(); err != nil {
+		t.Fatal(err)
+	}
+	if err := rdb.Set(ctx, luoguSyncIssuanceKey(11, "request-hash"), "session-to-delete", time.Hour).Err(); err != nil {
+		t.Fatal(err)
+	}
+	if err := rdb.Set(ctx, luoguSyncCooldownKey(7, "2245873"), "1", time.Hour).Err(); err != nil {
+		t.Fatal(err)
+	}
+	if err := rdb.Set(ctx, luoguSyncLockKey("session-to-delete"), "lock", time.Hour).Err(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.purgeLuoguSyncRedis(ctx, 7); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{luoguSyncUserSessionsKey(7), luoguSyncUserUIDsKey(7), luoguSyncActiveKey(7, "2245873"), luoguSyncSessionKey("session-to-delete"), luoguSyncTokenKey("session-hash"), luoguSyncIssuanceKey(11, "request-hash"), luoguSyncCooldownKey(7, "2245873"), luoguSyncLockKey("session-to-delete")} {
+		if rdb.Exists(ctx, key).Val() != 0 {
+			t.Fatalf("key still exists: %s", key)
+		}
+	}
+}
+
+func TestExpiredLuoguSyncAuditRejectsPageBeforeImport(t *testing.T) {
+	svc, db, _, _, importer := newLuoguSyncServiceTest(t)
+	if err := db.AutoMigrate(&model.ClientSyncAudit{}); err != nil {
+		t.Fatal(err)
+	}
+	started := startLuoguTestSession(t, svc)
+	now := time.Now().UTC()
+	if err := db.Create(&model.ClientSyncAudit{SessionID: started.SessionId, AuthorizationID: 11, UserID: 7, Platform: "luogu", OJUID: "2245873", ClientKind: "userscript", ClientVersion: "1.0.0", Status: "expired", StartedAt: now, UpdatedAt: now, TerminalAt: &now, RetentionUntil: now.Add(7 * 24 * time.Hour)}).Error; err != nil {
+		t.Fatal(err)
+	}
+	_, err := svc.UploadLuoguSyncPage(luoguHeaderContext(luoguSyncSessionHeader, started.SessionToken), &spiderpb.UploadLuoguSyncPageReq{LuoguUid: "2245873", Page: 1, RemoteCount: 0, PerPage: 20})
+	if luoguReason(err) != "SESSION_EXPIRED" {
+		t.Fatalf("expired page reason = %q err=%v", luoguReason(err), err)
+	}
+	if importer.calls != 0 {
+		t.Fatalf("expired page imported records: calls=%d", importer.calls)
+	}
+}
+
+func TestLuoguSyncImporterInternalErrorWritesFailedAudit(t *testing.T) {
+	svc, db, _, _, importer := newLuoguSyncServiceTest(t)
+	if err := db.AutoMigrate(&model.ClientSyncAudit{}); err != nil {
+		t.Fatal(err)
+	}
+	importer.auditDB = db
+	started := startLuoguTestSession(t, svc)
+	importer.err = errors.New("database unavailable")
+	state, err := svc.loadLuoguSessionByID(context.Background(), started.SessionId)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = svc.mapLuoguImporterError(context.Background(), state, errors.New("database unavailable"))
+	var audit model.ClientSyncAudit
+	if err := db.First(&audit, "session_id = ?", started.SessionId).Error; err != nil {
+		t.Fatal(err)
+	}
+	if audit.Status != "failed" || audit.ErrorMessage == "" {
+		t.Fatalf("internal importer error was not audited: %+v", audit)
 	}
 }
 

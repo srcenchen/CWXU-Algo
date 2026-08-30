@@ -77,6 +77,12 @@ type luoguSessionFinalizer interface {
 	MarkClientSyncSessionTerminated(context.Context, string, time.Time) error
 }
 
+type luoguSyncAuditor interface {
+	StartClientSyncAudit(context.Context, bizservice.ClientSyncAuditStart) error
+	UpdateClientSyncAudit(context.Context, bizservice.ClientSyncAuditProgress) error
+	TerminateClientSyncAudit(context.Context, string, string, string, string, string, time.Time) error
+}
+
 type luoguProfilePublisher interface {
 	RelayAbilityMaintenanceTargets(context.Context, *model.AbilityMaintenancePending) error
 }
@@ -156,6 +162,12 @@ func luoguSyncIssuanceKey(authorizationID uint64, requestIDHash string) string {
 	return fmt.Sprintf("luogu:sync:issuance:%d:%s", authorizationID, requestIDHash)
 }
 func luoguSyncLockKey(id string) string { return "luogu:sync:lock:" + id }
+func luoguSyncUserSessionsKey(userID int64) string {
+	return fmt.Sprintf("luogu:sync:user-sessions:%d", userID)
+}
+func luoguSyncUserUIDsKey(userID int64) string {
+	return fmt.Sprintf("luogu:sync:user-uids:%d", userID)
+}
 
 var luoguStartScript = redis.NewScript(`
 local issued = redis.call("GET", KEYS[5])
@@ -202,6 +214,10 @@ redis.call("PEXPIRE", KEYS[3], ARGV[13])
 redis.call("SET", KEYS[1], ARGV[4], "PX", ARGV[13])
 redis.call("SET", KEYS[4], ARGV[4], "PX", ARGV[13])
 redis.call("SET", KEYS[5], ARGV[4], "PX", ARGV[13])
+redis.call("SADD", KEYS[6], ARGV[4])
+redis.call("PEXPIRE", KEYS[6], ARGV[13])
+redis.call("SADD", KEYS[7], ARGV[8])
+redis.call("PEXPIRE", KEYS[7], ARGV[13])
 return {"NEW", ARGV[4]}
 `)
 
@@ -278,7 +294,7 @@ func (s *SpiderService) StartLuoguSync(ctx context.Context, req *spiderpb.StartL
 	tokenHash := hashLuoguSessionToken(sessionToken)
 	activeKey := luoguSyncActiveKey(identity.UserID, identity.LuoguUID)
 	result, err := luoguStartScript.Run(ctx, s.rdb,
-		[]string{activeKey, luoguSyncCooldownKey(identity.UserID, identity.LuoguUID), luoguSyncSessionKey(sessionID), luoguSyncTokenKey(tokenHash), luoguSyncIssuanceKey(identity.AuthorizationID, requestIDHash)},
+		[]string{activeKey, luoguSyncCooldownKey(identity.UserID, identity.LuoguUID), luoguSyncSessionKey(sessionID), luoguSyncTokenKey(tokenHash), luoguSyncIssuanceKey(identity.AuthorizationID, requestIDHash), luoguSyncUserSessionsKey(identity.UserID), luoguSyncUserUIDsKey(identity.UserID)},
 		"luogu:sync:session:", nextAvailableAt.Unix(), luoguSyncCooldown.Milliseconds(), sessionID, tokenHash,
 		identity.AuthorizationID, identity.UserID, identity.LuoguUID, identity.ClientKind, generation,
 		binding.ClientSyncHeadSubmitID, expiresAt.Unix(), luoguSyncSessionTTL.Milliseconds(), requestIDHash,
@@ -311,13 +327,26 @@ func (s *SpiderService) StartLuoguSync(ctx context.Context, req *spiderpb.StartL
 		if state.TokenHash != hashLuoguSessionToken(sessionToken) {
 			return nil, kratoserrors.Unauthorized("SESSION_EXPIRED", "同步会话已失效")
 		}
+		s.recordLuoguSyncAuditStart(ctx, state, identity.ClientVersion, now)
 		return luoguStartResponse(state, sessionToken, true), nil
 	}
 	state, err := s.loadLuoguSessionByID(ctx, sessionID)
 	if err != nil {
 		return nil, err
 	}
+	s.recordLuoguSyncAuditStart(ctx, state, identity.ClientVersion, now)
 	return luoguStartResponse(state, sessionToken, false), nil
+}
+
+func (s *SpiderService) recordLuoguSyncAuditStart(ctx context.Context, state *luoguSession, clientVersion string, startedAt time.Time) {
+	if state == nil {
+		return
+	}
+	if auditor, ok := s.luoguImporter.(luoguSyncAuditor); ok {
+		if auditErr := auditor.StartClientSyncAudit(ctx, bizservice.ClientSyncAuditStart{SessionID: state.ID, AuthorizationID: state.AuthorizationID, UserID: state.UserID, Platform: "luogu", OJUID: state.LuoguUID, ClientKind: state.ClientKind, ClientVersion: clientVersion, StartedAt: startedAt}); auditErr != nil {
+			log.Warnf("client-sync audit start session=%s: %v", state.ID, auditErr)
+		}
+	}
 }
 
 func (s *SpiderService) LuoguSyncStatus(ctx context.Context, _ *spiderpb.LuoguSyncStatusReq) (*spiderpb.LuoguSyncStatusRes, error) {
@@ -326,6 +355,9 @@ func (s *SpiderService) LuoguSyncStatus(ctx context.Context, _ *spiderpb.LuoguSy
 		return nil, err
 	}
 	if err := s.refreshLuoguSessionTTL(ctx, state); err != nil {
+		return nil, err
+	}
+	if err := s.ensureLuoguSyncAuditActive(ctx, state); err != nil {
 		return nil, err
 	}
 	response := &spiderpb.LuoguSyncStatusRes{
@@ -338,6 +370,16 @@ func (s *SpiderService) LuoguSyncStatus(ctx context.Context, _ *spiderpb.LuoguSy
 		if json.Unmarshal([]byte(state.LastResponse), &completed) == nil {
 			response.Connected = completed.Connected
 			response.CompletionReason = completed.CompletionReason
+		}
+	}
+	if auditor, ok := s.luoguImporter.(luoguSyncAuditor); ok {
+		if auditErr := auditor.UpdateClientSyncAudit(ctx, bizservice.ClientSyncAuditProgress{SessionID: state.ID, ProcessedPages: state.ProcessedPages, RemoteCount: state.RemoteCount, Inserted: state.Inserted, RestartCount: state.Restarts, UpdatedAt: s.luoguNow()}); auditErr != nil {
+			log.Warnf("client-sync audit status session=%s: %v", state.ID, auditErr)
+		}
+		if state.Done && response.CompletionReason != "" {
+			if auditErr := auditor.TerminateClientSyncAudit(ctx, state.ID, "completed", response.CompletionReason, "", "", s.luoguNow()); auditErr != nil {
+				log.Warnf("client-sync audit completion session=%s: %v", state.ID, auditErr)
+			}
 		}
 	}
 	return response, nil
@@ -363,6 +405,9 @@ func (s *SpiderService) UploadLuoguSyncPage(ctx context.Context, req *spiderpb.U
 	if err := s.validateLuoguSessionState(ctx, state, authorizedTokenHash); err != nil {
 		return nil, err
 	}
+	if err := s.ensureLuoguSyncAuditActive(ctx, state); err != nil {
+		return nil, err
+	}
 	if err := validateLuoguPage(req, state, s.luoguNow()); err != nil {
 		return nil, err
 	}
@@ -373,6 +418,12 @@ func (s *SpiderService) UploadLuoguSyncPage(ctx context.Context, req *spiderpb.U
 	if req.Page == state.LastPage && digest == state.LastPageDigest && state.LastResponse != "" {
 		var previous spiderpb.UploadLuoguSyncPageRes
 		if json.Unmarshal([]byte(state.LastResponse), &previous) == nil {
+			if auditor, ok := s.luoguImporter.(luoguSyncAuditor); ok {
+				_ = auditor.UpdateClientSyncAudit(ctx, bizservice.ClientSyncAuditProgress{SessionID: state.ID, ProcessedPages: state.ProcessedPages, RemoteCount: state.RemoteCount, Inserted: state.Inserted, RestartCount: state.Restarts, UpdatedAt: s.luoguNow()})
+				if previous.Done {
+					_ = auditor.TerminateClientSyncAudit(ctx, state.ID, "completed", previous.CompletionReason, "", "", s.luoguNow())
+				}
+			}
 			return &previous, nil
 		}
 	}
@@ -483,12 +534,14 @@ func (s *SpiderService) UploadLuoguSyncPage(ctx context.Context, req *spiderpb.U
 	encoded, _ := json.Marshal(response)
 	state.LastPage, state.LastPageDigest, state.LastResponse = req.Page, digest, string(encoded)
 	if err := s.storeLuoguSession(ctx, state, done); err != nil {
+		s.failLuoguSyncAudit(state, err)
 		return nil, err
 	}
 	return response, nil
 }
 
 func (s *SpiderService) mapLuoguImporterError(ctx context.Context, state *luoguSession, err error) error {
+	s.failLuoguSyncAudit(state, err)
 	if kratoserrors.Reason(err) == "SYNC_BINDING_CHANGED" {
 		s.terminateLuoguSession(ctx, state)
 		return kratoserrors.Unauthorized("SESSION_EXPIRED", "同步会话已失效")
@@ -497,6 +550,18 @@ func (s *SpiderService) mapLuoguImporterError(ctx context.Context, state *luoguS
 		s.terminateLuoguSession(ctx, state)
 	}
 	return err
+}
+
+func (s *SpiderService) failLuoguSyncAudit(state *luoguSession, err error) {
+	if state == nil || err == nil {
+		return
+	}
+	if auditor, ok := s.luoguImporter.(luoguSyncAuditor); ok {
+		code := kratoserrors.Reason(err)
+		if auditErr := auditor.TerminateClientSyncAudit(context.Background(), state.ID, "failed", "failed", code, kratoserrors.FromError(err).Message, s.luoguNow()); auditErr != nil {
+			log.Warnf("client-sync audit failure session=%s: %v", state.ID, auditErr)
+		}
+	}
 }
 
 func validateLuoguStartRequest(req *spiderpb.StartLuoguSyncReq, identity luoguPluginIdentity) error {
@@ -830,7 +895,10 @@ func (s *SpiderService) removeInvalidLuoguBinding(ctx context.Context, userID in
 		}
 	}
 	if pending.Phase == "tail_finalized" {
-		return true, s.publishAndClearLuoguCleanup(ctx, pending)
+		// The replacement crawl has not necessarily happened yet. Finish the
+		// cleanup intent without publishing a profile; the new binding's
+		// platform-scoped marker will trigger the rebuild after its crawl.
+		return true, s.clearLuoguCleanupIntent(ctx, pending)
 	}
 	profileToken, err := bizservice.BeginUserProfileInvalidationForIntent(ctx, s.rdb, userID, pending.OperationID)
 	if err != nil {
@@ -983,9 +1051,8 @@ func (s *SpiderService) removeInvalidLuoguBinding(ctx context.Context, userID in
 	if err := validateOwner(); err != nil {
 		return false, abandon(err)
 	}
-	if err := dal.RebuildUserTagACForUser(workCtx, s.db, userID); err != nil {
-		return false, abandon(err)
-	}
+	// 换绑清理阶段只删除旧 OJ 的源数据，保留已发布画像；新绑定的
+	// 提交爬完后由 BindSubmitsAfterSpider 触发强制重构原子替换。
 	if pending.Phase == "facts" {
 		if err := validateOwner(); err != nil {
 			return false, abandon(err)
@@ -1016,7 +1083,11 @@ func (s *SpiderService) removeInvalidLuoguBinding(ctx context.Context, userID in
 		}
 	}
 	if pending.Phase == "tail_finalized" {
-		if err := s.publishAndClearLuoguCleanup(ctx, pending); err != nil {
+		// Invalid-binding cleanup must not rebuild the profile: the replacement
+		// OJ has not been crawled yet. Keep the existing user_tag_ac rows and
+		// finish only the durable cleanup intent; SetSpider marks the new OJ so
+		// its post-crawl binding pass performs the forced rebuild.
+		if err := s.clearLuoguCleanupIntent(ctx, pending); err != nil {
 			return false, err
 		}
 	}
@@ -1146,6 +1217,12 @@ func (s *SpiderService) validateLuoguSessionState(ctx context.Context, state *lu
 	if state == nil || state.TokenHash != tokenHash {
 		return kratoserrors.Unauthorized("SESSION_EXPIRED", "同步会话已失效")
 	}
+	if s.db != nil && s.db.Migrator().HasTable(&model.ClientSyncAudit{}) {
+		var audit model.ClientSyncAudit
+		if err := s.db.WithContext(ctx).Select("status").First(&audit, "session_id = ?", state.ID).Error; err == nil && audit.Status == "expired" {
+			return kratoserrors.Unauthorized("SESSION_EXPIRED", "同步会话已过期")
+		}
+	}
 	id, err := s.rdb.Get(ctx, luoguSyncTokenKey(tokenHash)).Result()
 	if err != nil || id != state.ID {
 		return kratoserrors.Unauthorized("SESSION_EXPIRED", "同步会话已失效")
@@ -1248,6 +1325,7 @@ func (s *SpiderService) refreshLuoguSessionTTL(ctx context.Context, state *luogu
 func (s *SpiderService) restartLuoguScan(ctx context.Context, state *luoguSession, remoteCount, perPage int32) (*spiderpb.UploadLuoguSyncPageRes, error) {
 	state.Restarts++
 	if state.Restarts > luoguSyncMaxRestarts {
+		s.failLuoguSyncAudit(state, kratoserrors.Conflict("LUOGU_RECORDS_CHANGED", "洛谷记录持续变化，请稍后重试"))
 		s.terminateLuoguSession(ctx, state)
 		return nil, kratoserrors.Conflict("LUOGU_RECORDS_CHANGED", "洛谷记录持续变化，请稍后重试")
 	}
@@ -1260,6 +1338,11 @@ func (s *SpiderService) restartLuoguScan(ctx context.Context, state *luoguSessio
 	if err := s.storeLuoguSession(ctx, state, false); err != nil {
 		return nil, err
 	}
+	if auditor, ok := s.luoguImporter.(luoguSyncAuditor); ok {
+		if auditErr := auditor.UpdateClientSyncAudit(ctx, bizservice.ClientSyncAuditProgress{SessionID: state.ID, ProcessedPages: 0, RemoteCount: remoteCount, Inserted: state.Inserted, RestartCount: state.Restarts, UpdatedAt: s.luoguNow()}); auditErr != nil {
+			log.Warnf("client-sync audit restart session=%s: %v", state.ID, auditErr)
+		}
+	}
 	return response, nil
 }
 
@@ -1270,7 +1353,14 @@ func (s *SpiderService) markLuoguSessionTerminated(state *luoguSession) error {
 	if finalizer, ok := s.luoguImporter.(luoguSessionFinalizer); ok {
 		markCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		return finalizer.MarkClientSyncSessionTerminated(markCtx, state.ID, s.luoguNow())
+		if err := finalizer.MarkClientSyncSessionTerminated(markCtx, state.ID, s.luoguNow()); err != nil {
+			return err
+		}
+	}
+	if auditor, ok := s.luoguImporter.(luoguSyncAuditor); ok && !state.Done {
+		if err := auditor.TerminateClientSyncAudit(context.Background(), state.ID, "terminated", "terminated", "SESSION_TERMINATED", "同步会话已终止", s.luoguNow()); err != nil {
+			return err
+		}
 	}
 	if state.Inserted > 0 && !state.Done && s.luoguImporter != nil {
 		s.luoguImporter.ScheduleSubmitPostProcess(state.UserID)
@@ -1282,11 +1372,86 @@ func (s *SpiderService) deleteLuoguSessionKeys(ctx context.Context, state *luogu
 	if s == nil || s.rdb == nil || state == nil {
 		return nil
 	}
-	return luoguTerminateScript.Run(ctx, s.rdb, []string{
+	err := luoguTerminateScript.Run(ctx, s.rdb, []string{
 		luoguSyncSessionKey(state.ID), luoguSyncTokenKey(state.TokenHash),
 		luoguSyncActiveKey(state.UserID, state.LuoguUID), luoguSyncLockKey(state.ID),
 		luoguSyncIssuanceKey(state.AuthorizationID, state.RequestIDHash),
 	}, state.ID).Err()
+	_ = s.rdb.SRem(ctx, luoguSyncUserSessionsKey(state.UserID), state.ID).Err()
+	return err
+}
+
+func (s *SpiderService) ensureLuoguSyncAuditActive(ctx context.Context, state *luoguSession) error {
+	if s == nil || s.db == nil || state == nil || !s.db.Migrator().HasTable(&model.ClientSyncAudit{}) {
+		return nil
+	}
+	now := s.luoguNow().UTC()
+	updated := s.db.WithContext(ctx).Model(&model.ClientSyncAudit{}).
+		Where("session_id = ? AND status = ? AND terminal_at IS NULL AND updated_at > ?", state.ID, "running", now.Add(-luoguSyncSessionTTL)).
+		Updates(map[string]interface{}{"updated_at": now})
+	if updated.Error != nil {
+		log.Warnf("client-sync audit activity session=%s: %v", state.ID, updated.Error)
+		return nil
+	}
+	if updated.RowsAffected == 1 {
+		return nil
+	}
+	var audit model.ClientSyncAudit
+	if err := s.db.WithContext(ctx).Select("status").First(&audit, "session_id = ?", state.ID).Error; err == nil && audit.Status == "expired" {
+		return kratoserrors.Unauthorized("SESSION_EXPIRED", "同步会话已过期")
+	}
+	return nil
+}
+
+// purgeLuoguSyncRedis removes only sessions indexed for this user. The index
+// avoids a Redis KEYS scan and also covers session-specific token/lock keys.
+func (s *SpiderService) purgeLuoguSyncRedis(ctx context.Context, userID int64) (int, error) {
+	if s == nil || s.rdb == nil || userID <= 0 {
+		return 0, nil
+	}
+	index := luoguSyncUserSessionsKey(userID)
+	sessionIDs, err := s.rdb.SMembers(ctx, index).Result()
+	if err != nil {
+		return 0, err
+	}
+	deleted := 0
+	for _, sessionID := range sessionIDs {
+		values, readErr := s.rdb.HGetAll(ctx, luoguSyncSessionKey(sessionID)).Result()
+		if readErr != nil {
+			return deleted, readErr
+		}
+		keys := []string{luoguSyncSessionKey(sessionID), luoguSyncLockKey(sessionID)}
+		if uid := parseInt64(values["user_id"]); uid == userID {
+			keys = append(keys, luoguSyncActiveKey(userID, values["luogu_uid"]), luoguSyncCooldownKey(userID, values["luogu_uid"]))
+		}
+		if hash := values["token_hash"]; hash != "" {
+			keys = append(keys, luoguSyncTokenKey(hash))
+		}
+		if authID := parseUint64(values["authorization_id"]); authID > 0 && values["request_id_hash"] != "" {
+			keys = append(keys, luoguSyncIssuanceKey(authID, values["request_id_hash"]))
+		}
+		if err := s.rdb.Del(ctx, keys...).Err(); err != nil {
+			return deleted, err
+		}
+		_ = s.rdb.SRem(ctx, index, sessionID).Err()
+		deleted++
+	}
+	if err := s.rdb.Del(ctx, index).Err(); err != nil {
+		return deleted, err
+	}
+	uids, err := s.rdb.SMembers(ctx, luoguSyncUserUIDsKey(userID)).Result()
+	if err != nil {
+		return deleted, err
+	}
+	for _, uid := range uids {
+		if err := s.rdb.Del(ctx, luoguSyncActiveKey(userID, uid), luoguSyncCooldownKey(userID, uid)).Err(); err != nil {
+			return deleted, err
+		}
+	}
+	if err := s.rdb.Del(ctx, luoguSyncUserUIDsKey(userID)).Err(); err != nil {
+		return deleted, err
+	}
+	return deleted, nil
 }
 
 func (s *SpiderService) finalizeLuoguSessionForCleanup(ctx context.Context, state *luoguSession) error {

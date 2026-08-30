@@ -83,10 +83,33 @@ const (
 	mqMaxPriority         int32 = 10
 )
 
-// BindSubmitsAfterSpider 爬虫写入提交后绑定/创建题库（增量，最高优先级入队）
-// 绑完后入队画像重建（含 user_tag_ac 全量重算），保证「绑平台更新一次」雷达最终有数。
+// BindSubmitsAfterSpider 爬虫写入提交后绑定/创建题库（增量）。普通增量
+// 不触发画像重构；画像由每日任务或具体 OJ 换绑后的完成标记触发。
 func (uc *ProblemUseCase) BindSubmitsAfterSpider(userId int64) error {
+	return uc.bindSubmitsAfterSpider(userId, "")
+}
+
+// BindSubmitsAfterSpiderForPlatform is used when a platform-specific full
+// crawl has just completed. Only the matching rebind marker may trigger a
+// forced profile rebuild, so another OJ's incremental sync cannot consume it.
+func (uc *ProblemUseCase) BindSubmitsAfterSpiderForPlatform(userID int64, platform string) error {
+	return uc.bindSubmitsAfterSpider(userID, strings.TrimSpace(platform))
+}
+
+func (uc *ProblemUseCase) bindSubmitsAfterSpider(userId int64, platform string) error {
 	ctx := context.Background()
+	markedForRebuild := false
+	if platform != "" && uc.data != nil && uc.data.RDB != nil {
+		var err error
+		markedForRebuild, err = task.HasProfileRebuildAfterBinding(ctx, uc.data.RDB, userId, platform)
+		if err != nil {
+			// Redis only carries the post-rebind trigger. Keep the marker for a
+			// retry, but do not block durable submit/problem binding on a cache
+			// outage.
+			log.Warnf("BindSubmitsAfterSpider profile marker user=%d platform=%s: %v", userId, platform, err)
+			markedForRebuild = false
+		}
+	}
 	var highWatermark uint
 	if err := uc.data.DB.WithContext(ctx).Model(&model.SubmitLog{}).
 		Where("user_id = ?", userId).
@@ -142,11 +165,21 @@ func (uc *ProblemUseCase) BindSubmitsAfterSpider(userId int64) error {
 			errs = append(errs, err)
 		}
 	}
-	// 入队雷达+画像重建（队列内 RebuildUserTagAC；不挡爬虫 worker）
 	if err := errors.Join(errs...); err != nil {
 		return err
 	}
-	uc.EnqueueUserProfileRebuild(userId)
+	if markedForRebuild {
+		if uc.profileTask == nil {
+			return fmt.Errorf("user profile publisher unavailable")
+		}
+		result := uc.profileTask.DoForce(userId)
+		if !result.KeepClaim() {
+			return fmt.Errorf("force publish user profile %d failed", userId)
+		}
+		if err := task.ClearProfileRebuildAfterBinding(ctx, uc.data.RDB, userId, platform); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

@@ -162,6 +162,27 @@ func TestRebuildUserTagAbilityCanonicalKeysAndSharedQuality(t *testing.T) {
 	}
 }
 
+func TestRebuildUserTagAbilityKeepsPreviousRowsWhenFactsIncomplete(t *testing.T) {
+	db := userTagAbilityTestDB(t)
+	ctx := context.Background()
+	setActiveAbilityVersion(t, db, 1)
+	p := addUserTagProblem(t, db, "Codeforces", "pending-facts", "medium")
+	addUserTagACKey(t, db, 1, fmt.Sprintf("p:%d", p.ID), "Codeforces", time.Now())
+	if err := db.Create(&model.UserTagAC{
+		UserID: 1, Tag: "old", Count: 3, Weight: 2.4,
+		ScoreVersion: CurrentUserTagAbilityScoreVersion, ModelVersion: 1,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := RebuildUserTagACForUser(ctx, db, 1); !errors.Is(err, ErrUserTagAbilityIncomplete) {
+		t.Fatalf("incomplete problem facts must keep the previous aggregate, err=%v", err)
+	}
+	rows := tagAbilityRows(t, db, 1)
+	if len(rows) != 1 || rows["old"].Count != 3 {
+		t.Fatalf("previous aggregate was deleted during incomplete rebuild: %+v", rows)
+	}
+}
+
 func TestRebuildUserTagAbilityEvidenceCoverageAndSyntheticNeutral(t *testing.T) {
 	db := userTagAbilityTestDB(t)
 	ctx := context.Background()

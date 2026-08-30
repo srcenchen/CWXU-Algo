@@ -29,7 +29,7 @@ func userACCleanupTestDB(t *testing.T) *gorm.DB {
 	return db
 }
 
-func TestDeletePlatformUserACClearsCrossPlatformUserTagAggregate(t *testing.T) {
+func TestDeletePlatformUserACPreservesTagAggregateUntilRebuild(t *testing.T) {
 	db := userACCleanupTestDB(t)
 	now := time.Now()
 	rows := []model.UserACProblem{
@@ -63,7 +63,7 @@ func TestDeletePlatformUserACClearsCrossPlatformUserTagAggregate(t *testing.T) {
 	if err := db.Model(&model.UserTagAC{}).Where("user_id = ?", 82).Count(&kept).Error; err != nil {
 		t.Fatal(err)
 	}
-	if removed != 0 || kept != 1 {
+	if removed != 1 || kept != 1 {
 		t.Fatalf("tag rows removed-user=%d other-user=%d", removed, kept)
 	}
 	if err := db.Model(&model.UserTagACSnapshot{}).Where("user_id = ?", 81).Count(&removed).Error; err != nil {
@@ -72,7 +72,7 @@ func TestDeletePlatformUserACClearsCrossPlatformUserTagAggregate(t *testing.T) {
 	if err := db.Model(&model.UserTagACSnapshot{}).Where("user_id = ?", 82).Count(&kept).Error; err != nil {
 		t.Fatal(err)
 	}
-	if removed != 0 || kept != 1 {
+	if removed != 1 || kept != 1 {
 		t.Fatalf("snapshot rows removed-user=%d other-user=%d", removed, kept)
 	}
 }
