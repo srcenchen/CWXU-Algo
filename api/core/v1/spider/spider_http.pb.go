@@ -19,6 +19,7 @@ var _ = binding.EncodeURL
 
 const _ = http.SupportPackageIsVersion1
 
+const OperationSpiderAdminListClientSyncAudits = "/api.core.v1.spider.Spider/AdminListClientSyncAudits"
 const OperationSpiderGetPlatformUsers = "/api.core.v1.spider.Spider/GetPlatformUsers"
 const OperationSpiderGetSpiderMonitor = "/api.core.v1.spider.Spider/GetSpiderMonitor"
 const OperationSpiderLuoguSyncStatus = "/api.core.v1.spider.Spider/LuoguSyncStatus"
@@ -37,6 +38,8 @@ const OperationSpiderUpdatePlatform = "/api.core.v1.spider.Spider/UpdatePlatform
 const OperationSpiderUploadLuoguSyncPage = "/api.core.v1.spider.Spider/UploadLuoguSyncPage"
 
 type SpiderHTTPServer interface {
+	// AdminListClientSyncAudits Requires site.user.sync. This route uses the normal user JWT.
+	AdminListClientSyncAudits(context.Context, *AdminListClientSyncAuditsReq) (*AdminListClientSyncAuditsRes, error)
 	// GetPlatformUsers 站管：某 OJ 的绑定用户列表（仅站管）
 	GetPlatformUsers(context.Context, *GetPlatformUsersReq) (*GetPlatformUsersRes, error)
 	// GetSpiderMonitor 运维：各 OJ 爬虫模块监控（仅站管）
@@ -88,6 +91,7 @@ func RegisterSpiderHTTPServer(s *http.Server, srv SpiderHTTPServer) {
 	r.POST("/v1/core/spider/luogu-sync/start", _Spider_StartLuoguSync0_HTTP_Handler(srv))
 	r.GET("/v1/core/spider/luogu-sync/status", _Spider_LuoguSyncStatus0_HTTP_Handler(srv))
 	r.POST("/v1/core/spider/luogu-sync/page", _Spider_UploadLuoguSyncPage0_HTTP_Handler(srv))
+	r.GET("/v1/core/admin/plugins/sync-audits", _Spider_AdminListClientSyncAudits0_HTTP_Handler(srv))
 	r.GET("/v1/core/spider/luogu/resolve-user", _Spider_ResolveLuoguUser0_HTTP_Handler(srv))
 }
 
@@ -406,6 +410,25 @@ func _Spider_UploadLuoguSyncPage0_HTTP_Handler(srv SpiderHTTPServer) func(ctx ht
 	}
 }
 
+func _Spider_AdminListClientSyncAudits0_HTTP_Handler(srv SpiderHTTPServer) func(ctx http.Context) error {
+	return func(ctx http.Context) error {
+		var in AdminListClientSyncAuditsReq
+		if err := ctx.BindQuery(&in); err != nil {
+			return err
+		}
+		http.SetOperation(ctx, OperationSpiderAdminListClientSyncAudits)
+		h := ctx.Middleware(func(ctx context.Context, req interface{}) (interface{}, error) {
+			return srv.AdminListClientSyncAudits(ctx, req.(*AdminListClientSyncAuditsReq))
+		})
+		out, err := h(ctx, &in)
+		if err != nil {
+			return err
+		}
+		reply := out.(*AdminListClientSyncAuditsRes)
+		return ctx.Result(200, reply)
+	}
+}
+
 func _Spider_ResolveLuoguUser0_HTTP_Handler(srv SpiderHTTPServer) func(ctx http.Context) error {
 	return func(ctx http.Context) error {
 		var in ResolveLuoguUserReq
@@ -426,6 +449,8 @@ func _Spider_ResolveLuoguUser0_HTTP_Handler(srv SpiderHTTPServer) func(ctx http.
 }
 
 type SpiderHTTPClient interface {
+	// AdminListClientSyncAudits Requires site.user.sync. This route uses the normal user JWT.
+	AdminListClientSyncAudits(ctx context.Context, req *AdminListClientSyncAuditsReq, opts ...http.CallOption) (rsp *AdminListClientSyncAuditsRes, err error)
 	// GetPlatformUsers 站管：某 OJ 的绑定用户列表（仅站管）
 	GetPlatformUsers(ctx context.Context, req *GetPlatformUsersReq, opts ...http.CallOption) (rsp *GetPlatformUsersRes, err error)
 	// GetSpiderMonitor 运维：各 OJ 爬虫模块监控（仅站管）
@@ -466,6 +491,20 @@ type SpiderHTTPClientImpl struct {
 
 func NewSpiderHTTPClient(client *http.Client) SpiderHTTPClient {
 	return &SpiderHTTPClientImpl{client}
+}
+
+// AdminListClientSyncAudits Requires site.user.sync. This route uses the normal user JWT.
+func (c *SpiderHTTPClientImpl) AdminListClientSyncAudits(ctx context.Context, in *AdminListClientSyncAuditsReq, opts ...http.CallOption) (*AdminListClientSyncAuditsRes, error) {
+	var out AdminListClientSyncAuditsRes
+	pattern := "/v1/core/admin/plugins/sync-audits"
+	path := binding.EncodeURL(pattern, in, true)
+	opts = append(opts, http.Operation(OperationSpiderAdminListClientSyncAudits))
+	opts = append(opts, http.PathTemplate(pattern))
+	err := c.cc.Invoke(ctx, "GET", path, nil, &out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
 }
 
 // GetPlatformUsers 站管：某 OJ 的绑定用户列表（仅站管）

@@ -35,6 +35,13 @@ service LuoguPlugin {
     };
   }
 
+  // Requires site.user.sync (site administrators bypass permission checks).
+  rpc AdminListAuthorizations(AdminListPluginAuthorizationsReq) returns (AdminListPluginAuthorizationsRes) {
+    option (google.api.http) = {
+      get: "/v1/user/admin/plugins/authorizations"
+    };
+  }
+
   // Requires the normal GoAlgo JWT. Set all=true to revoke every Luogu sync
   // device belonging to the current user.
   rpc Revoke(RevokeReq) returns (RevokeRes) {
@@ -100,6 +107,38 @@ message PluginAuthorizationInfo {
 
 message ListAuthorizationsRes {
   repeated PluginAuthorizationInfo authorizations = 1;
+}
+
+message AdminListPluginAuthorizationsReq {
+  int32 page_num = 1;
+  int32 page_size = 2;
+  string keyword = 3;
+  string status = 4;
+  string platform = 5;
+}
+
+message AdminPluginAuthorizationInfo {
+  uint64 id = 1;
+  uint64 user_id = 2;
+  string username = 3;
+  string name = 4;
+  string provider = 5;
+  string platform = 6;
+  string oj_uid = 7;
+  string client_kind = 8;
+  string client_version = 9;
+  int64 accepted_at = 10;
+  int64 expires_at = 11;
+  int64 last_used_at = 12;
+  int64 revoked_at = 13;
+  string status = 14;
+}
+
+message AdminListPluginAuthorizationsRes {
+  repeated AdminPluginAuthorizationInfo list = 1;
+  int64 total = 2;
+  int32 page_num = 3;
+  int32 page_size = 4;
 }
 
 message RevokeReq {

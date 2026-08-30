@@ -40,6 +40,24 @@ if redis.call("GET", KEYS[1]) == ARGV[1] then
 end
 return 0`)
 
+func clientSyncAuditKeywordCondition(dialect string) string {
+	if dialect == "sqlite" {
+		return "LOWER(oj_uid) LIKE LOWER(?) OR LOWER(client_version) LIKE LOWER(?) OR CAST(user_id AS TEXT) LIKE ?"
+	}
+	return "oj_uid ILIKE ? OR client_version ILIKE ? OR CAST(user_id AS TEXT) ILIKE ?"
+}
+
+func normalizeClientSyncAuditPlatform(platform string) (string, error) {
+	switch strings.TrimSpace(platform) {
+	case "":
+		return "", nil
+	case "luogu", "LuoGu":
+		return "luogu", nil
+	default:
+		return "", errors.BadRequest("INVALID_PLATFORM", "平台无效")
+	}
+}
+
 var (
 	SetForbidden    = errors.Forbidden("权限错误", "权限不允许，设置失败")
 	InternalError   = errors.InternalServer("内部错误", "内部错误，操作失败")
@@ -87,6 +105,74 @@ func (s SpiderService) Update(ctx context.Context, req *spider.UpdateReq) (*spid
 		Code:    0,
 		Message: "更新成功，请稍等片刻，该用户的全量 OJ 数据正在同步",
 	}, nil
+}
+
+func (s *SpiderService) AdminListClientSyncAudits(ctx context.Context, req *spider.AdminListClientSyncAuditsReq) (*spider.AdminListClientSyncAuditsRes, error) {
+	if !auth.HasPerm(ctx, rbac.PermSiteUserSync) {
+		return nil, errors.Forbidden("SYNC_AUDIT_PERMISSION_DENIED", "需要用户同步运维权限")
+	}
+	pageNum, pageSize := int32(1), int32(20)
+	if req != nil {
+		if req.PageNum > 0 {
+			pageNum = req.PageNum
+		}
+		if req.PageSize > 0 {
+			pageSize = req.PageSize
+		}
+	}
+	if pageSize > 100 {
+		pageSize = 100
+	}
+	q := s.db.WithContext(ctx).Model(&model.ClientSyncAudit{})
+	if req != nil {
+		if keyword := strings.TrimSpace(req.Keyword); keyword != "" {
+			like := "%" + keyword + "%"
+			condition := clientSyncAuditKeywordCondition(s.db.Dialector.Name())
+			q = q.Where(condition, like, like, like)
+		}
+		platform, err := normalizeClientSyncAuditPlatform(req.Platform)
+		if err != nil {
+			return nil, err
+		}
+		if platform != "" {
+			q = q.Where("platform = ?", platform)
+		}
+		if v := strings.TrimSpace(req.Status); v != "" {
+			switch v {
+			case "running", "completed", "failed", "terminated", "expired":
+			default:
+				return nil, errors.BadRequest("INVALID_STATUS", "同步状态无效")
+			}
+			q = q.Where("status = ?", v)
+		}
+		if req.From > 0 && req.To > 0 && req.From > req.To {
+			return nil, errors.BadRequest("INVALID_TIME_RANGE", "时间范围无效")
+		}
+		if req.From > 0 {
+			q = q.Where("started_at >= ?", time.Unix(req.From, 0).UTC())
+		}
+		if req.To > 0 {
+			q = q.Where("started_at <= ?", time.Unix(req.To, 0).UTC())
+		}
+	}
+	var total int64
+	if err := q.Count(&total).Error; err != nil {
+		return nil, errors.InternalServer("SYNC_AUDIT_LIST_FAILED", "加载同步日志失败")
+	}
+	var rows []model.ClientSyncAudit
+	if err := q.Order("started_at DESC").Offset(int((pageNum - 1) * pageSize)).Limit(int(pageSize)).Find(&rows).Error; err != nil {
+		return nil, errors.InternalServer("SYNC_AUDIT_LIST_FAILED", "加载同步日志失败")
+	}
+	items := make([]*spider.ClientSyncAuditInfo, 0, len(rows))
+	for i := range rows {
+		r := &rows[i]
+		item := &spider.ClientSyncAuditInfo{SessionId: r.SessionID, AuthorizationId: r.AuthorizationID, UserId: r.UserID, Platform: "luogu", OjUid: r.OJUID, ClientKind: r.ClientKind, ClientVersion: r.ClientVersion, Status: r.Status, CompletionReason: r.CompletionReason, StartedAt: r.StartedAt.Unix(), UpdatedAt: r.UpdatedAt.Unix(), ProcessedPages: r.ProcessedPages, RemoteCount: r.RemoteCount, Inserted: r.Inserted, RestartCount: r.RestartCount, ErrorCode: r.ErrorCode, ErrorMessage: r.ErrorMessage}
+		if r.TerminalAt != nil {
+			item.TerminalAt = r.TerminalAt.Unix()
+		}
+		items = append(items, item)
+	}
+	return &spider.AdminListClientSyncAuditsRes{List: items, Total: total, PageNum: pageNum, PageSize: pageSize}, nil
 }
 
 // UpdateAll 管理员一键触发所有已绑定 OJ 用户的全量更新（分批入队，削峰）
@@ -870,6 +956,9 @@ func (s SpiderService) purgeUserDataLocked(ctx context.Context, uid int64, valid
 	}
 	if err := s.rdb.Del(ctx, keys...).Err(); err != nil {
 		log.Warnf("PurgeUserData: redis del user=%d: %v", uid, err)
+	}
+	if _, err := (&s).purgeLuoguSyncRedis(ctx, uid); err != nil {
+		log.Warnf("PurgeUserData: luogu sync redis user=%d: %v", uid, err)
 	}
 	if err := validateStage(); err != nil {
 		return true, err

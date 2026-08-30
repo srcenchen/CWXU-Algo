@@ -19,25 +19,26 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	Spider_SetSpider_FullMethodName              = "/api.core.v1.spider.Spider/SetSpider"
-	Spider_GetSpider_FullMethodName              = "/api.core.v1.spider.Spider/GetSpider"
-	Spider_Update_FullMethodName                 = "/api.core.v1.spider.Spider/Update"
-	Spider_UpdateAll_FullMethodName              = "/api.core.v1.spider.Spider/UpdateAll"
-	Spider_PurgeUserData_FullMethodName          = "/api.core.v1.spider.Spider/PurgeUserData"
-	Spider_SubmitInventory_FullMethodName        = "/api.core.v1.spider.Spider/SubmitInventory"
-	Spider_PurgeSubmitsAndRecrawl_FullMethodName = "/api.core.v1.spider.Spider/PurgeSubmitsAndRecrawl"
-	Spider_EnqueueUserSpider_FullMethodName      = "/api.core.v1.spider.Spider/EnqueueUserSpider"
-	Spider_GetSpiderMonitor_FullMethodName       = "/api.core.v1.spider.Spider/GetSpiderMonitor"
-	Spider_TogglePlatform_FullMethodName         = "/api.core.v1.spider.Spider/TogglePlatform"
-	Spider_UpdatePlatform_FullMethodName         = "/api.core.v1.spider.Spider/UpdatePlatform"
-	Spider_RepairContestCells_FullMethodName     = "/api.core.v1.spider.Spider/RepairContestCells"
-	Spider_GetPlatformUsers_FullMethodName       = "/api.core.v1.spider.Spider/GetPlatformUsers"
-	Spider_RefreshSpider_FullMethodName          = "/api.core.v1.spider.Spider/RefreshSpider"
-	Spider_RefreshSpiderStatus_FullMethodName    = "/api.core.v1.spider.Spider/RefreshSpiderStatus"
-	Spider_StartLuoguSync_FullMethodName         = "/api.core.v1.spider.Spider/StartLuoguSync"
-	Spider_LuoguSyncStatus_FullMethodName        = "/api.core.v1.spider.Spider/LuoguSyncStatus"
-	Spider_UploadLuoguSyncPage_FullMethodName    = "/api.core.v1.spider.Spider/UploadLuoguSyncPage"
-	Spider_ResolveLuoguUser_FullMethodName       = "/api.core.v1.spider.Spider/ResolveLuoguUser"
+	Spider_SetSpider_FullMethodName                 = "/api.core.v1.spider.Spider/SetSpider"
+	Spider_GetSpider_FullMethodName                 = "/api.core.v1.spider.Spider/GetSpider"
+	Spider_Update_FullMethodName                    = "/api.core.v1.spider.Spider/Update"
+	Spider_UpdateAll_FullMethodName                 = "/api.core.v1.spider.Spider/UpdateAll"
+	Spider_PurgeUserData_FullMethodName             = "/api.core.v1.spider.Spider/PurgeUserData"
+	Spider_SubmitInventory_FullMethodName           = "/api.core.v1.spider.Spider/SubmitInventory"
+	Spider_PurgeSubmitsAndRecrawl_FullMethodName    = "/api.core.v1.spider.Spider/PurgeSubmitsAndRecrawl"
+	Spider_EnqueueUserSpider_FullMethodName         = "/api.core.v1.spider.Spider/EnqueueUserSpider"
+	Spider_GetSpiderMonitor_FullMethodName          = "/api.core.v1.spider.Spider/GetSpiderMonitor"
+	Spider_TogglePlatform_FullMethodName            = "/api.core.v1.spider.Spider/TogglePlatform"
+	Spider_UpdatePlatform_FullMethodName            = "/api.core.v1.spider.Spider/UpdatePlatform"
+	Spider_RepairContestCells_FullMethodName        = "/api.core.v1.spider.Spider/RepairContestCells"
+	Spider_GetPlatformUsers_FullMethodName          = "/api.core.v1.spider.Spider/GetPlatformUsers"
+	Spider_RefreshSpider_FullMethodName             = "/api.core.v1.spider.Spider/RefreshSpider"
+	Spider_RefreshSpiderStatus_FullMethodName       = "/api.core.v1.spider.Spider/RefreshSpiderStatus"
+	Spider_StartLuoguSync_FullMethodName            = "/api.core.v1.spider.Spider/StartLuoguSync"
+	Spider_LuoguSyncStatus_FullMethodName           = "/api.core.v1.spider.Spider/LuoguSyncStatus"
+	Spider_UploadLuoguSyncPage_FullMethodName       = "/api.core.v1.spider.Spider/UploadLuoguSyncPage"
+	Spider_AdminListClientSyncAudits_FullMethodName = "/api.core.v1.spider.Spider/AdminListClientSyncAudits"
+	Spider_ResolveLuoguUser_FullMethodName          = "/api.core.v1.spider.Spider/ResolveLuoguUser"
 )
 
 // SpiderClient is the client API for Spider service.
@@ -79,6 +80,8 @@ type SpiderClient interface {
 	LuoguSyncStatus(ctx context.Context, in *LuoguSyncStatusReq, opts ...grpc.CallOption) (*LuoguSyncStatusRes, error)
 	// Upload one normalized Luogu record page using X-GoAlgo-Sync-Session.
 	UploadLuoguSyncPage(ctx context.Context, in *UploadLuoguSyncPageReq, opts ...grpc.CallOption) (*UploadLuoguSyncPageRes, error)
+	// Requires site.user.sync. This route uses the normal user JWT.
+	AdminListClientSyncAudits(ctx context.Context, in *AdminListClientSyncAuditsReq, opts ...grpc.CallOption) (*AdminListClientSyncAuditsRes, error)
 	// 公开只读：将洛谷 UID 或用户名规范化为成对身份。
 	ResolveLuoguUser(ctx context.Context, in *ResolveLuoguUserReq, opts ...grpc.CallOption) (*ResolveLuoguUserRes, error)
 }
@@ -271,6 +274,16 @@ func (c *spiderClient) UploadLuoguSyncPage(ctx context.Context, in *UploadLuoguS
 	return out, nil
 }
 
+func (c *spiderClient) AdminListClientSyncAudits(ctx context.Context, in *AdminListClientSyncAuditsReq, opts ...grpc.CallOption) (*AdminListClientSyncAuditsRes, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AdminListClientSyncAuditsRes)
+	err := c.cc.Invoke(ctx, Spider_AdminListClientSyncAudits_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *spiderClient) ResolveLuoguUser(ctx context.Context, in *ResolveLuoguUserReq, opts ...grpc.CallOption) (*ResolveLuoguUserRes, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ResolveLuoguUserRes)
@@ -320,6 +333,8 @@ type SpiderServer interface {
 	LuoguSyncStatus(context.Context, *LuoguSyncStatusReq) (*LuoguSyncStatusRes, error)
 	// Upload one normalized Luogu record page using X-GoAlgo-Sync-Session.
 	UploadLuoguSyncPage(context.Context, *UploadLuoguSyncPageReq) (*UploadLuoguSyncPageRes, error)
+	// Requires site.user.sync. This route uses the normal user JWT.
+	AdminListClientSyncAudits(context.Context, *AdminListClientSyncAuditsReq) (*AdminListClientSyncAuditsRes, error)
 	// 公开只读：将洛谷 UID 或用户名规范化为成对身份。
 	ResolveLuoguUser(context.Context, *ResolveLuoguUserReq) (*ResolveLuoguUserRes, error)
 	mustEmbedUnimplementedSpiderServer()
@@ -385,6 +400,9 @@ func (UnimplementedSpiderServer) LuoguSyncStatus(context.Context, *LuoguSyncStat
 }
 func (UnimplementedSpiderServer) UploadLuoguSyncPage(context.Context, *UploadLuoguSyncPageReq) (*UploadLuoguSyncPageRes, error) {
 	return nil, status.Error(codes.Unimplemented, "method UploadLuoguSyncPage not implemented")
+}
+func (UnimplementedSpiderServer) AdminListClientSyncAudits(context.Context, *AdminListClientSyncAuditsReq) (*AdminListClientSyncAuditsRes, error) {
+	return nil, status.Error(codes.Unimplemented, "method AdminListClientSyncAudits not implemented")
 }
 func (UnimplementedSpiderServer) ResolveLuoguUser(context.Context, *ResolveLuoguUserReq) (*ResolveLuoguUserRes, error) {
 	return nil, status.Error(codes.Unimplemented, "method ResolveLuoguUser not implemented")
@@ -734,6 +752,24 @@ func _Spider_UploadLuoguSyncPage_Handler(srv interface{}, ctx context.Context, d
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Spider_AdminListClientSyncAudits_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AdminListClientSyncAuditsReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SpiderServer).AdminListClientSyncAudits(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Spider_AdminListClientSyncAudits_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SpiderServer).AdminListClientSyncAudits(ctx, req.(*AdminListClientSyncAuditsReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _Spider_ResolveLuoguUser_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ResolveLuoguUserReq)
 	if err := dec(in); err != nil {
@@ -830,6 +866,10 @@ var Spider_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "UploadLuoguSyncPage",
 			Handler:    _Spider_UploadLuoguSyncPage_Handler,
+		},
+		{
+			MethodName: "AdminListClientSyncAudits",
+			Handler:    _Spider_AdminListClientSyncAudits_Handler,
 		},
 		{
 			MethodName: "ResolveLuoguUser",

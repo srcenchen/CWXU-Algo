@@ -22,6 +22,7 @@ const (
 	LuoguPlugin_AuthorizeCode_FullMethodName            = "/api.user.v1.plugin.LuoguPlugin/AuthorizeCode"
 	LuoguPlugin_Token_FullMethodName                    = "/api.user.v1.plugin.LuoguPlugin/Token"
 	LuoguPlugin_ListAuthorizations_FullMethodName       = "/api.user.v1.plugin.LuoguPlugin/ListAuthorizations"
+	LuoguPlugin_AdminListAuthorizations_FullMethodName  = "/api.user.v1.plugin.LuoguPlugin/AdminListAuthorizations"
 	LuoguPlugin_Revoke_FullMethodName                   = "/api.user.v1.plugin.LuoguPlugin/Revoke"
 	LuoguPlugin_ValidateLuoguPluginToken_FullMethodName = "/api.user.v1.plugin.LuoguPlugin/ValidateLuoguPluginToken"
 )
@@ -40,6 +41,8 @@ type LuoguPluginClient interface {
 	Token(ctx context.Context, in *TokenReq, opts ...grpc.CallOption) (*TokenRes, error)
 	// Requires the normal GoAlgo JWT.
 	ListAuthorizations(ctx context.Context, in *ListAuthorizationsReq, opts ...grpc.CallOption) (*ListAuthorizationsRes, error)
+	// Requires site.user.sync (site administrators bypass permission checks).
+	AdminListAuthorizations(ctx context.Context, in *AdminListPluginAuthorizationsReq, opts ...grpc.CallOption) (*AdminListPluginAuthorizationsRes, error)
 	// Requires the normal GoAlgo JWT. Set all=true to revoke every Luogu sync
 	// device belonging to the current user.
 	Revoke(ctx context.Context, in *RevokeReq, opts ...grpc.CallOption) (*RevokeRes, error)
@@ -85,6 +88,16 @@ func (c *luoguPluginClient) ListAuthorizations(ctx context.Context, in *ListAuth
 	return out, nil
 }
 
+func (c *luoguPluginClient) AdminListAuthorizations(ctx context.Context, in *AdminListPluginAuthorizationsReq, opts ...grpc.CallOption) (*AdminListPluginAuthorizationsRes, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AdminListPluginAuthorizationsRes)
+	err := c.cc.Invoke(ctx, LuoguPlugin_AdminListAuthorizations_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *luoguPluginClient) Revoke(ctx context.Context, in *RevokeReq, opts ...grpc.CallOption) (*RevokeRes, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(RevokeRes)
@@ -119,6 +132,8 @@ type LuoguPluginServer interface {
 	Token(context.Context, *TokenReq) (*TokenRes, error)
 	// Requires the normal GoAlgo JWT.
 	ListAuthorizations(context.Context, *ListAuthorizationsReq) (*ListAuthorizationsRes, error)
+	// Requires site.user.sync (site administrators bypass permission checks).
+	AdminListAuthorizations(context.Context, *AdminListPluginAuthorizationsReq) (*AdminListPluginAuthorizationsRes, error)
 	// Requires the normal GoAlgo JWT. Set all=true to revoke every Luogu sync
 	// device belonging to the current user.
 	Revoke(context.Context, *RevokeReq) (*RevokeRes, error)
@@ -142,6 +157,9 @@ func (UnimplementedLuoguPluginServer) Token(context.Context, *TokenReq) (*TokenR
 }
 func (UnimplementedLuoguPluginServer) ListAuthorizations(context.Context, *ListAuthorizationsReq) (*ListAuthorizationsRes, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListAuthorizations not implemented")
+}
+func (UnimplementedLuoguPluginServer) AdminListAuthorizations(context.Context, *AdminListPluginAuthorizationsReq) (*AdminListPluginAuthorizationsRes, error) {
+	return nil, status.Error(codes.Unimplemented, "method AdminListAuthorizations not implemented")
 }
 func (UnimplementedLuoguPluginServer) Revoke(context.Context, *RevokeReq) (*RevokeRes, error) {
 	return nil, status.Error(codes.Unimplemented, "method Revoke not implemented")
@@ -224,6 +242,24 @@ func _LuoguPlugin_ListAuthorizations_Handler(srv interface{}, ctx context.Contex
 	return interceptor(ctx, in, info, handler)
 }
 
+func _LuoguPlugin_AdminListAuthorizations_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AdminListPluginAuthorizationsReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(LuoguPluginServer).AdminListAuthorizations(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: LuoguPlugin_AdminListAuthorizations_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(LuoguPluginServer).AdminListAuthorizations(ctx, req.(*AdminListPluginAuthorizationsReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _LuoguPlugin_Revoke_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(RevokeReq)
 	if err := dec(in); err != nil {
@@ -278,6 +314,10 @@ var LuoguPlugin_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListAuthorizations",
 			Handler:    _LuoguPlugin_ListAuthorizations_Handler,
+		},
+		{
+			MethodName: "AdminListAuthorizations",
+			Handler:    _LuoguPlugin_AdminListAuthorizations_Handler,
 		},
 		{
 			MethodName: "Revoke",

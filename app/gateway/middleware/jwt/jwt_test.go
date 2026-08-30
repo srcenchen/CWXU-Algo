@@ -128,6 +128,10 @@ func TestLuoguPluginTokenExchangeIsTheOnlyPublicPluginAuthorizationPath(t *testi
 		"/api/user/plugin/luogu/authorizations",
 		"/v1/user/plugin/luogu/revoke",
 		"/api/user/plugin/luogu/revoke",
+		"/v1/user/admin/plugins/authorizations",
+		"/api/user/admin/plugins/authorizations",
+		"/v1/core/admin/plugins/sync-audits",
+		"/api/core/admin/plugins/sync-audits",
 	} {
 		if _, ok := publicExact[protectedPath]; ok {
 			t.Errorf("JWT-protected Luogu plugin path is public: %s", protectedPath)

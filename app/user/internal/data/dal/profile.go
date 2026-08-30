@@ -1740,6 +1740,11 @@ func (d *ProfileDal) Delete(ctx context.Context, userId int64) error {
 	return data2.UpdateCacheDal(ctx, d.rdb, cacheKey, func() error {
 		return d.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 			uid := uint(userId)
+			// Authorization rows must disappear in the same transaction as the user,
+			// making every persisted device token invalid before hard deletion.
+			if err := tx.Where("user_id = ?", uid).Delete(&model.PluginAuthorization{}).Error; err != nil {
+				return err
+			}
 			if err := tx.Where("follower_id = ? OR followee_id = ?", uid, uid).
 				Delete(&model.UserFollow{}).Error; err != nil {
 				return err

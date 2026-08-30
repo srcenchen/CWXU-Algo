@@ -95,6 +95,50 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/api.core.v1.community.ActivityFeedRes'
+    /v1/core/admin/plugins/sync-audits:
+        get:
+            tags:
+                - Spider
+            description: Requires site.user.sync. This route uses the normal user JWT.
+            operationId: Spider_AdminListClientSyncAudits
+            parameters:
+                - name: pageNum
+                  in: query
+                  schema:
+                    type: integer
+                    format: int32
+                - name: pageSize
+                  in: query
+                  schema:
+                    type: integer
+                    format: int32
+                - name: keyword
+                  in: query
+                  schema:
+                    type: string
+                - name: platform
+                  in: query
+                  schema:
+                    type: string
+                - name: status
+                  in: query
+                  schema:
+                    type: string
+                - name: from
+                  in: query
+                  schema:
+                    type: string
+                - name: to
+                  in: query
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.core.v1.spider.AdminListClientSyncAuditsRes'
     /v1/core/backup/key:
         get:
             tags:
@@ -2242,6 +2286,42 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/api.core.v1.community.UserRecentSolutionsRes'
+    /v1/user/admin/plugins/authorizations:
+        get:
+            tags:
+                - LuoguPlugin
+            description: Requires site.user.sync (site administrators bypass permission checks).
+            operationId: LuoguPlugin_AdminListAuthorizations
+            parameters:
+                - name: pageNum
+                  in: query
+                  schema:
+                    type: integer
+                    format: int32
+                - name: pageSize
+                  in: query
+                  schema:
+                    type: integer
+                    format: int32
+                - name: keyword
+                  in: query
+                  schema:
+                    type: string
+                - name: status
+                  in: query
+                  schema:
+                    type: string
+                - name: platform
+                  in: query
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.user.v1.plugin.AdminListPluginAuthorizationsRes'
     /v1/user/auth/change-password:
         post:
             tags:
@@ -8504,6 +8584,63 @@ components:
                     type: string
                 data:
                     $ref: '#/components/schemas/api.core.v1.problemset.ProblemsetInfo'
+        api.core.v1.spider.AdminListClientSyncAuditsRes:
+            type: object
+            properties:
+                list:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/api.core.v1.spider.ClientSyncAuditInfo'
+                total:
+                    type: string
+                pageNum:
+                    type: integer
+                    format: int32
+                pageSize:
+                    type: integer
+                    format: int32
+        api.core.v1.spider.ClientSyncAuditInfo:
+            type: object
+            properties:
+                sessionId:
+                    type: string
+                authorizationId:
+                    type: string
+                userId:
+                    type: string
+                platform:
+                    type: string
+                ojUid:
+                    type: string
+                clientKind:
+                    type: string
+                clientVersion:
+                    type: string
+                status:
+                    type: string
+                completionReason:
+                    type: string
+                startedAt:
+                    type: string
+                updatedAt:
+                    type: string
+                terminalAt:
+                    type: string
+                processedPages:
+                    type: integer
+                    format: int32
+                remoteCount:
+                    type: integer
+                    format: int32
+                inserted:
+                    type: string
+                restartCount:
+                    type: integer
+                    format: int32
+                errorCode:
+                    type: string
+                errorMessage:
+                    type: string
         api.core.v1.spider.GetPlatformUsersRes:
             type: object
             properties:
@@ -12447,6 +12584,52 @@ components:
                 content:
                     type: string
                     description: 仅 create/get/admin-list 返回正文；mine 不含
+        api.user.v1.plugin.AdminListPluginAuthorizationsRes:
+            type: object
+            properties:
+                list:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/api.user.v1.plugin.AdminPluginAuthorizationInfo'
+                total:
+                    type: string
+                pageNum:
+                    type: integer
+                    format: int32
+                pageSize:
+                    type: integer
+                    format: int32
+        api.user.v1.plugin.AdminPluginAuthorizationInfo:
+            type: object
+            properties:
+                id:
+                    type: string
+                userId:
+                    type: string
+                username:
+                    type: string
+                name:
+                    type: string
+                provider:
+                    type: string
+                platform:
+                    type: string
+                ojUid:
+                    type: string
+                clientKind:
+                    type: string
+                clientVersion:
+                    type: string
+                acceptedAt:
+                    type: string
+                expiresAt:
+                    type: string
+                lastUsedAt:
+                    type: string
+                revokedAt:
+                    type: string
+                status:
+                    type: string
         api.user.v1.plugin.AuthorizeCodeReq:
             type: object
             properties:

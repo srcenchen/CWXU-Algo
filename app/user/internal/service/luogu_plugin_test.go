@@ -5,17 +5,22 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
 	"time"
 
 	pb "cwxu-algo/api/user/v1/plugin"
+	_const "cwxu-algo/app/common/const"
+	"cwxu-algo/app/common/rbac"
+	"cwxu-algo/app/common/utils/auth"
 	"cwxu-algo/app/user/internal/data"
 	"cwxu-algo/app/user/internal/data/model"
 
 	"github.com/alicebob/miniredis/v2"
 	kerrors "github.com/go-kratos/kratos/v2/errors"
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/redis/go-redis/v9"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
@@ -33,6 +38,9 @@ func newLuoguPluginTestService(t *testing.T) (*LuoguPluginService, *gorm.DB, *mi
 	}
 	if err := db.AutoMigrate(&model.PluginAuthorization{}); err != nil {
 		t.Fatalf("migrate plugin authorizations: %v", err)
+	}
+	if err := db.AutoMigrate(&model.User{}); err != nil {
+		t.Fatalf("migrate users: %v", err)
 	}
 	mr := miniredis.RunT(t)
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
@@ -64,6 +72,20 @@ func luoguUserContext(t *testing.T, userID uint) context.Context {
 	return ctxWithBearer(adminBlogImageToken(t, userID, false))
 }
 
+func adminTokenWithPermissions(t *testing.T, userID uint, siteAdmin bool, perms ...string) string {
+	t.Helper()
+	privPEM, pubPEM := genTestRSAKeys(t)
+	if err := _const.ConfigureJWTKeys(privPEM, pubPEM); err != nil {
+		t.Fatal(err)
+	}
+	claims := auth.JwtPayload{RegisteredClaims: jwt.RegisteredClaims{ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour))}, UserID: userID, IsSiteAdmin: siteAdmin, Pm: rbac.Encode(perms)}
+	token, err := jwt.NewWithClaims(jwt.SigningMethodRS256, claims).SignedString(_const.JWTPrivateKey())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return token
+}
+
 func luoguErrorReason(t *testing.T, err error) string {
 	t.Helper()
 	if err == nil {
@@ -74,6 +96,14 @@ func luoguErrorReason(t *testing.T, err error) string {
 
 func issueLuoguCode(t *testing.T, svc *LuoguPluginService, userID uint) *pb.AuthorizeCodeRes {
 	t.Helper()
+	var user model.User
+	if err := svc.db.First(&user, userID).Error; err == gorm.ErrRecordNotFound {
+		if err := svc.db.Create(&model.User{ID: userID, Username: fmt.Sprintf("user-%d", userID), Email: fmt.Sprintf("user-%d@example.test", userID), Password: "x"}).Error; err != nil {
+			t.Fatalf("create test user: %v", err)
+		}
+	} else if err != nil {
+		t.Fatalf("load test user: %v", err)
+	}
 	res, err := svc.AuthorizeCode(luoguUserContext(t, userID), luoguAuthorizeReq())
 	if err != nil {
 		t.Fatalf("AuthorizeCode: %v", err)
@@ -324,5 +354,99 @@ func TestLuoguPluginAuthorizationModelHasOnlySecurityReviewedFields(t *testing.T
 		if got := typ.Field(i).Name; got != field {
 			t.Fatalf("field %d = %s, want %s", i, got, field)
 		}
+	}
+}
+
+func TestAdminListPluginAuthorizationsRequiresSyncPermissionAndOmitsTokenHash(t *testing.T) {
+	svc, db, _ := newLuoguPluginTestService(t)
+	if err := db.AutoMigrate(&model.User{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&model.User{ID: 71, Username: "CaseSensitive", Name: "Alice Example", Email: "alice@example.test", Password: "x"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	rows := []model.PluginAuthorization{
+		{UserID: 71, Provider: "luogu", ClientKind: "userscript", ClientVersion: "v0.2.7-beta", LuoguUID: "998877", TokenHash: "sha256:secret", RiskVersion: LuoguPluginRiskVersion, AcceptedAt: now, ExpiresAt: now.Add(time.Hour)},
+		{UserID: 71, Provider: "luogu", ClientKind: "userscript", ClientVersion: "v0.1.0", LuoguUID: "112233", TokenHash: "sha256:other", RiskVersion: LuoguPluginRiskVersion, AcceptedAt: now, ExpiresAt: now.Add(-time.Hour)},
+	}
+	if err := db.Create(&rows).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := svc.AdminListAuthorizations(luoguUserContext(t, 72), &pb.AdminListPluginAuthorizationsReq{}); luoguErrorReason(t, err) != "PLUGIN_AUTHORIZATION_PERMISSION_DENIED" {
+		t.Fatalf("ordinary user reason = %s", kerrors.FromError(err).Reason)
+	}
+	if _, err := svc.AdminListAuthorizations(ctxWithBearer(adminTokenWithPermissions(t, 73, true)), &pb.AdminListPluginAuthorizationsReq{PageNum: 1, PageSize: 1}); err != nil {
+		t.Fatalf("site admin bypass: %v", err)
+	}
+	ctx := ctxWithBearer(adminTokenWithPermissions(t, 72, false, rbac.PermSiteUserSync))
+	res, err := svc.AdminListAuthorizations(ctx, &pb.AdminListPluginAuthorizationsReq{PageNum: 1, PageSize: 1, Keyword: "0.2.7", Status: "active", Platform: "luogu"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Total != 1 || len(res.List) != 1 || res.List[0].Username != "CaseSensitive" || res.List[0].Status != "active" {
+		t.Fatalf("unexpected filtered page: %+v", res)
+	}
+	if res.List[0].Provider != "luogu" || res.List[0].Platform != "luogu" {
+		t.Fatalf("platform contract = provider %q platform %q, want luogu", res.List[0].Provider, res.List[0].Platform)
+	}
+	encoded, err := json.Marshal(res)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), "secret") || strings.Contains(string(encoded), "tokenHash") {
+		t.Fatalf("response leaked token material: %s", encoded)
+	}
+}
+
+func TestAdminListPluginAuthorizationsNormalizesLuoguAliasAndRejectsInvalidPlatform(t *testing.T) {
+	svc, db, _ := newLuoguPluginTestService(t)
+	now := time.Now().UTC()
+	if err := db.Create(&model.User{ID: 74, Username: "platform-user", Email: "platform@example.test", Password: "x"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&model.PluginAuthorization{UserID: 74, Provider: "luogu", ClientKind: "userscript", ClientVersion: "1", LuoguUID: "1", TokenHash: "sha256:x", RiskVersion: LuoguPluginRiskVersion, AcceptedAt: now, ExpiresAt: now.Add(time.Hour)}).Error; err != nil {
+		t.Fatal(err)
+	}
+	ctx := ctxWithBearer(adminTokenWithPermissions(t, 72, false, rbac.PermSiteUserSync))
+	res, err := svc.AdminListAuthorizations(ctx, &pb.AdminListPluginAuthorizationsReq{Platform: "LuoGu"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Total != 1 || len(res.List) != 1 || res.List[0].Provider != "luogu" || res.List[0].Platform != "luogu" {
+		t.Fatalf("normalized platform result = %+v", res)
+	}
+	if _, err := svc.AdminListAuthorizations(ctx, &pb.AdminListPluginAuthorizationsReq{Platform: "qoj"}); luoguErrorReason(t, err) != "INVALID_PLATFORM" {
+		t.Fatalf("invalid platform reason = %s", kerrors.FromError(err).Reason)
+	}
+}
+
+func TestAdminPluginAuthorizationPostgresKeywordUsesILike(t *testing.T) {
+	condition := pluginAuthorizationKeywordCondition("postgres")
+	for _, column := range []string{"u.username ILIKE", "u.name ILIKE", "pa.luogu_uid ILIKE", "pa.client_version ILIKE"} {
+		if !strings.Contains(condition, column) {
+			t.Fatalf("condition %q missing %q", condition, column)
+		}
+	}
+}
+
+func TestLuoguPluginTokenRejectsGrantForDeletedUser(t *testing.T) {
+	svc, db, _ := newLuoguPluginTestService(t)
+	if err := db.AutoMigrate(&model.User{}); err != nil {
+		t.Fatal(err)
+	}
+	code := "grant-for-deleted-user"
+	grant := luoguAuthorizationCode{UserID: 999, LuoguUID: "2245873", ClientKind: "userscript", ClientVersion: "0.1.0", CodeChallenge: luoguChallenge(testLuoguVerifier), State: "state_0123456789abcdef", RiskVersion: LuoguPluginRiskVersion, AcceptedAt: time.Now().UTC()}
+	raw, err := json.Marshal(grant)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.rdb.Set(context.Background(), luoguAuthorizationCodeKey(code), raw, time.Minute).Err(); err != nil {
+		t.Fatal(err)
+	}
+	_, err = svc.Token(context.Background(), &pb.TokenReq{Code: code, Verifier: testLuoguVerifier, State: grant.State, Scope: LuoguPluginScope})
+	if reason := luoguErrorReason(t, err); reason != "USER_NOT_FOUND" {
+		t.Fatalf("deleted user reason = %s", reason)
 	}
 }

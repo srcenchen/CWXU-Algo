@@ -113,6 +113,12 @@ service Spider {
       body: "*"
     };
   }
+  // Requires site.user.sync. This route uses the normal user JWT.
+  rpc AdminListClientSyncAudits (AdminListClientSyncAuditsReq) returns (AdminListClientSyncAuditsRes) {
+    option (google.api.http) = {
+      get: "/v1/core/admin/plugins/sync-audits"
+    };
+  }
   // 公开只读：将洛谷 UID 或用户名规范化为成对身份。
   rpc ResolveLuoguUser (ResolveLuoguUserReq) returns (ResolveLuoguUserRes) {
     option (google.api.http) = {
@@ -441,6 +447,46 @@ message UploadLuoguSyncPageRes {
   int32 processed_pages = 8;
   int32 total_pages = 9;
   int64 next_available_at = 10;
+}
+
+message AdminListClientSyncAuditsReq {
+  int32 page_num = 1;
+  int32 page_size = 2;
+  string keyword = 3;
+  string platform = 4;
+  string status = 5;
+  // Unix 秒；按 started_at 过滤（包含边界）。
+  int64 from = 6;
+  // Unix 秒；按 started_at 过滤（包含边界）。
+  int64 to = 7;
+}
+
+message ClientSyncAuditInfo {
+  string session_id = 1;
+  uint64 authorization_id = 2;
+  int64 user_id = 3;
+  string platform = 4;
+  string oj_uid = 5;
+  string client_kind = 6;
+  string client_version = 7;
+  string status = 8;
+  string completion_reason = 9;
+  int64 started_at = 10;
+  int64 updated_at = 11;
+  int64 terminal_at = 12;
+  int32 processed_pages = 13;
+  int32 remote_count = 14;
+  int64 inserted = 15;
+  int32 restart_count = 16;
+  string error_code = 17;
+  string error_message = 18;
+}
+
+message AdminListClientSyncAuditsRes {
+  repeated ClientSyncAuditInfo list = 1;
+  int64 total = 2;
+  int32 page_num = 3;
+  int32 page_size = 4;
 }
 
 message ResolveLuoguUserReq {

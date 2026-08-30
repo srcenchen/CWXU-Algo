@@ -19,12 +19,15 @@ var _ = binding.EncodeURL
 
 const _ = http.SupportPackageIsVersion1
 
+const OperationLuoguPluginAdminListAuthorizations = "/api.user.v1.plugin.LuoguPlugin/AdminListAuthorizations"
 const OperationLuoguPluginAuthorizeCode = "/api.user.v1.plugin.LuoguPlugin/AuthorizeCode"
 const OperationLuoguPluginListAuthorizations = "/api.user.v1.plugin.LuoguPlugin/ListAuthorizations"
 const OperationLuoguPluginRevoke = "/api.user.v1.plugin.LuoguPlugin/Revoke"
 const OperationLuoguPluginToken = "/api.user.v1.plugin.LuoguPlugin/Token"
 
 type LuoguPluginHTTPServer interface {
+	// AdminListAuthorizations Requires site.user.sync (site administrators bypass permission checks).
+	AdminListAuthorizations(context.Context, *AdminListPluginAuthorizationsReq) (*AdminListPluginAuthorizationsRes, error)
 	// AuthorizeCode Requires the normal GoAlgo JWT. The returned code is single-use and
 	// expires after two minutes.
 	AuthorizeCode(context.Context, *AuthorizeCodeReq) (*AuthorizeCodeRes, error)
@@ -43,6 +46,7 @@ func RegisterLuoguPluginHTTPServer(s *http.Server, srv LuoguPluginHTTPServer) {
 	r.POST("/v1/user/plugin/luogu/authorize-code", _LuoguPlugin_AuthorizeCode0_HTTP_Handler(srv))
 	r.POST("/v1/user/plugin/luogu/token", _LuoguPlugin_Token0_HTTP_Handler(srv))
 	r.GET("/v1/user/plugin/luogu/authorizations", _LuoguPlugin_ListAuthorizations0_HTTP_Handler(srv))
+	r.GET("/v1/user/admin/plugins/authorizations", _LuoguPlugin_AdminListAuthorizations0_HTTP_Handler(srv))
 	r.POST("/v1/user/plugin/luogu/revoke", _LuoguPlugin_Revoke0_HTTP_Handler(srv))
 }
 
@@ -109,6 +113,25 @@ func _LuoguPlugin_ListAuthorizations0_HTTP_Handler(srv LuoguPluginHTTPServer) fu
 	}
 }
 
+func _LuoguPlugin_AdminListAuthorizations0_HTTP_Handler(srv LuoguPluginHTTPServer) func(ctx http.Context) error {
+	return func(ctx http.Context) error {
+		var in AdminListPluginAuthorizationsReq
+		if err := ctx.BindQuery(&in); err != nil {
+			return err
+		}
+		http.SetOperation(ctx, OperationLuoguPluginAdminListAuthorizations)
+		h := ctx.Middleware(func(ctx context.Context, req interface{}) (interface{}, error) {
+			return srv.AdminListAuthorizations(ctx, req.(*AdminListPluginAuthorizationsReq))
+		})
+		out, err := h(ctx, &in)
+		if err != nil {
+			return err
+		}
+		reply := out.(*AdminListPluginAuthorizationsRes)
+		return ctx.Result(200, reply)
+	}
+}
+
 func _LuoguPlugin_Revoke0_HTTP_Handler(srv LuoguPluginHTTPServer) func(ctx http.Context) error {
 	return func(ctx http.Context) error {
 		var in RevokeReq
@@ -132,6 +155,8 @@ func _LuoguPlugin_Revoke0_HTTP_Handler(srv LuoguPluginHTTPServer) func(ctx http.
 }
 
 type LuoguPluginHTTPClient interface {
+	// AdminListAuthorizations Requires site.user.sync (site administrators bypass permission checks).
+	AdminListAuthorizations(ctx context.Context, req *AdminListPluginAuthorizationsReq, opts ...http.CallOption) (rsp *AdminListPluginAuthorizationsRes, err error)
 	// AuthorizeCode Requires the normal GoAlgo JWT. The returned code is single-use and
 	// expires after two minutes.
 	AuthorizeCode(ctx context.Context, req *AuthorizeCodeReq, opts ...http.CallOption) (rsp *AuthorizeCodeRes, err error)
@@ -151,6 +176,20 @@ type LuoguPluginHTTPClientImpl struct {
 
 func NewLuoguPluginHTTPClient(client *http.Client) LuoguPluginHTTPClient {
 	return &LuoguPluginHTTPClientImpl{client}
+}
+
+// AdminListAuthorizations Requires site.user.sync (site administrators bypass permission checks).
+func (c *LuoguPluginHTTPClientImpl) AdminListAuthorizations(ctx context.Context, in *AdminListPluginAuthorizationsReq, opts ...http.CallOption) (*AdminListPluginAuthorizationsRes, error) {
+	var out AdminListPluginAuthorizationsRes
+	pattern := "/v1/user/admin/plugins/authorizations"
+	path := binding.EncodeURL(pattern, in, true)
+	opts = append(opts, http.Operation(OperationLuoguPluginAdminListAuthorizations))
+	opts = append(opts, http.PathTemplate(pattern))
+	err := c.cc.Invoke(ctx, "GET", path, nil, &out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
 }
 
 // AuthorizeCode Requires the normal GoAlgo JWT. The returned code is single-use and

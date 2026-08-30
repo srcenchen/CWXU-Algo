@@ -546,6 +546,298 @@ func (x *ListAuthorizationsRes) GetAuthorizations() []*PluginAuthorizationInfo {
 	return nil
 }
 
+type AdminListPluginAuthorizationsReq struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	PageNum       int32                  `protobuf:"varint,1,opt,name=page_num,json=pageNum,proto3" json:"page_num,omitempty"`
+	PageSize      int32                  `protobuf:"varint,2,opt,name=page_size,json=pageSize,proto3" json:"page_size,omitempty"`
+	Keyword       string                 `protobuf:"bytes,3,opt,name=keyword,proto3" json:"keyword,omitempty"`
+	Status        string                 `protobuf:"bytes,4,opt,name=status,proto3" json:"status,omitempty"`
+	Platform      string                 `protobuf:"bytes,5,opt,name=platform,proto3" json:"platform,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AdminListPluginAuthorizationsReq) Reset() {
+	*x = AdminListPluginAuthorizationsReq{}
+	mi := &file_user_v1_plugin_luogu_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AdminListPluginAuthorizationsReq) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AdminListPluginAuthorizationsReq) ProtoMessage() {}
+
+func (x *AdminListPluginAuthorizationsReq) ProtoReflect() protoreflect.Message {
+	mi := &file_user_v1_plugin_luogu_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AdminListPluginAuthorizationsReq.ProtoReflect.Descriptor instead.
+func (*AdminListPluginAuthorizationsReq) Descriptor() ([]byte, []int) {
+	return file_user_v1_plugin_luogu_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *AdminListPluginAuthorizationsReq) GetPageNum() int32 {
+	if x != nil {
+		return x.PageNum
+	}
+	return 0
+}
+
+func (x *AdminListPluginAuthorizationsReq) GetPageSize() int32 {
+	if x != nil {
+		return x.PageSize
+	}
+	return 0
+}
+
+func (x *AdminListPluginAuthorizationsReq) GetKeyword() string {
+	if x != nil {
+		return x.Keyword
+	}
+	return ""
+}
+
+func (x *AdminListPluginAuthorizationsReq) GetStatus() string {
+	if x != nil {
+		return x.Status
+	}
+	return ""
+}
+
+func (x *AdminListPluginAuthorizationsReq) GetPlatform() string {
+	if x != nil {
+		return x.Platform
+	}
+	return ""
+}
+
+type AdminPluginAuthorizationInfo struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Id            uint64                 `protobuf:"varint,1,opt,name=id,proto3" json:"id,omitempty"`
+	UserId        uint64                 `protobuf:"varint,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	Username      string                 `protobuf:"bytes,3,opt,name=username,proto3" json:"username,omitempty"`
+	Name          string                 `protobuf:"bytes,4,opt,name=name,proto3" json:"name,omitempty"`
+	Provider      string                 `protobuf:"bytes,5,opt,name=provider,proto3" json:"provider,omitempty"`
+	Platform      string                 `protobuf:"bytes,6,opt,name=platform,proto3" json:"platform,omitempty"`
+	OjUid         string                 `protobuf:"bytes,7,opt,name=oj_uid,json=ojUid,proto3" json:"oj_uid,omitempty"`
+	ClientKind    string                 `protobuf:"bytes,8,opt,name=client_kind,json=clientKind,proto3" json:"client_kind,omitempty"`
+	ClientVersion string                 `protobuf:"bytes,9,opt,name=client_version,json=clientVersion,proto3" json:"client_version,omitempty"`
+	AcceptedAt    int64                  `protobuf:"varint,10,opt,name=accepted_at,json=acceptedAt,proto3" json:"accepted_at,omitempty"`
+	ExpiresAt     int64                  `protobuf:"varint,11,opt,name=expires_at,json=expiresAt,proto3" json:"expires_at,omitempty"`
+	LastUsedAt    int64                  `protobuf:"varint,12,opt,name=last_used_at,json=lastUsedAt,proto3" json:"last_used_at,omitempty"`
+	RevokedAt     int64                  `protobuf:"varint,13,opt,name=revoked_at,json=revokedAt,proto3" json:"revoked_at,omitempty"`
+	Status        string                 `protobuf:"bytes,14,opt,name=status,proto3" json:"status,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AdminPluginAuthorizationInfo) Reset() {
+	*x = AdminPluginAuthorizationInfo{}
+	mi := &file_user_v1_plugin_luogu_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AdminPluginAuthorizationInfo) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AdminPluginAuthorizationInfo) ProtoMessage() {}
+
+func (x *AdminPluginAuthorizationInfo) ProtoReflect() protoreflect.Message {
+	mi := &file_user_v1_plugin_luogu_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AdminPluginAuthorizationInfo.ProtoReflect.Descriptor instead.
+func (*AdminPluginAuthorizationInfo) Descriptor() ([]byte, []int) {
+	return file_user_v1_plugin_luogu_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *AdminPluginAuthorizationInfo) GetId() uint64 {
+	if x != nil {
+		return x.Id
+	}
+	return 0
+}
+
+func (x *AdminPluginAuthorizationInfo) GetUserId() uint64 {
+	if x != nil {
+		return x.UserId
+	}
+	return 0
+}
+
+func (x *AdminPluginAuthorizationInfo) GetUsername() string {
+	if x != nil {
+		return x.Username
+	}
+	return ""
+}
+
+func (x *AdminPluginAuthorizationInfo) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *AdminPluginAuthorizationInfo) GetProvider() string {
+	if x != nil {
+		return x.Provider
+	}
+	return ""
+}
+
+func (x *AdminPluginAuthorizationInfo) GetPlatform() string {
+	if x != nil {
+		return x.Platform
+	}
+	return ""
+}
+
+func (x *AdminPluginAuthorizationInfo) GetOjUid() string {
+	if x != nil {
+		return x.OjUid
+	}
+	return ""
+}
+
+func (x *AdminPluginAuthorizationInfo) GetClientKind() string {
+	if x != nil {
+		return x.ClientKind
+	}
+	return ""
+}
+
+func (x *AdminPluginAuthorizationInfo) GetClientVersion() string {
+	if x != nil {
+		return x.ClientVersion
+	}
+	return ""
+}
+
+func (x *AdminPluginAuthorizationInfo) GetAcceptedAt() int64 {
+	if x != nil {
+		return x.AcceptedAt
+	}
+	return 0
+}
+
+func (x *AdminPluginAuthorizationInfo) GetExpiresAt() int64 {
+	if x != nil {
+		return x.ExpiresAt
+	}
+	return 0
+}
+
+func (x *AdminPluginAuthorizationInfo) GetLastUsedAt() int64 {
+	if x != nil {
+		return x.LastUsedAt
+	}
+	return 0
+}
+
+func (x *AdminPluginAuthorizationInfo) GetRevokedAt() int64 {
+	if x != nil {
+		return x.RevokedAt
+	}
+	return 0
+}
+
+func (x *AdminPluginAuthorizationInfo) GetStatus() string {
+	if x != nil {
+		return x.Status
+	}
+	return ""
+}
+
+type AdminListPluginAuthorizationsRes struct {
+	state         protoimpl.MessageState          `protogen:"open.v1"`
+	List          []*AdminPluginAuthorizationInfo `protobuf:"bytes,1,rep,name=list,proto3" json:"list,omitempty"`
+	Total         int64                           `protobuf:"varint,2,opt,name=total,proto3" json:"total,omitempty"`
+	PageNum       int32                           `protobuf:"varint,3,opt,name=page_num,json=pageNum,proto3" json:"page_num,omitempty"`
+	PageSize      int32                           `protobuf:"varint,4,opt,name=page_size,json=pageSize,proto3" json:"page_size,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AdminListPluginAuthorizationsRes) Reset() {
+	*x = AdminListPluginAuthorizationsRes{}
+	mi := &file_user_v1_plugin_luogu_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AdminListPluginAuthorizationsRes) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AdminListPluginAuthorizationsRes) ProtoMessage() {}
+
+func (x *AdminListPluginAuthorizationsRes) ProtoReflect() protoreflect.Message {
+	mi := &file_user_v1_plugin_luogu_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AdminListPluginAuthorizationsRes.ProtoReflect.Descriptor instead.
+func (*AdminListPluginAuthorizationsRes) Descriptor() ([]byte, []int) {
+	return file_user_v1_plugin_luogu_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *AdminListPluginAuthorizationsRes) GetList() []*AdminPluginAuthorizationInfo {
+	if x != nil {
+		return x.List
+	}
+	return nil
+}
+
+func (x *AdminListPluginAuthorizationsRes) GetTotal() int64 {
+	if x != nil {
+		return x.Total
+	}
+	return 0
+}
+
+func (x *AdminListPluginAuthorizationsRes) GetPageNum() int32 {
+	if x != nil {
+		return x.PageNum
+	}
+	return 0
+}
+
+func (x *AdminListPluginAuthorizationsRes) GetPageSize() int32 {
+	if x != nil {
+		return x.PageSize
+	}
+	return 0
+}
+
 type RevokeReq struct {
 	state           protoimpl.MessageState `protogen:"open.v1"`
 	AuthorizationId uint64                 `protobuf:"varint,1,opt,name=authorization_id,json=authorizationId,proto3" json:"authorization_id,omitempty"`
@@ -556,7 +848,7 @@ type RevokeReq struct {
 
 func (x *RevokeReq) Reset() {
 	*x = RevokeReq{}
-	mi := &file_user_v1_plugin_luogu_proto_msgTypes[7]
+	mi := &file_user_v1_plugin_luogu_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -568,7 +860,7 @@ func (x *RevokeReq) String() string {
 func (*RevokeReq) ProtoMessage() {}
 
 func (x *RevokeReq) ProtoReflect() protoreflect.Message {
-	mi := &file_user_v1_plugin_luogu_proto_msgTypes[7]
+	mi := &file_user_v1_plugin_luogu_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -581,7 +873,7 @@ func (x *RevokeReq) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RevokeReq.ProtoReflect.Descriptor instead.
 func (*RevokeReq) Descriptor() ([]byte, []int) {
-	return file_user_v1_plugin_luogu_proto_rawDescGZIP(), []int{7}
+	return file_user_v1_plugin_luogu_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *RevokeReq) GetAuthorizationId() uint64 {
@@ -607,7 +899,7 @@ type RevokeRes struct {
 
 func (x *RevokeRes) Reset() {
 	*x = RevokeRes{}
-	mi := &file_user_v1_plugin_luogu_proto_msgTypes[8]
+	mi := &file_user_v1_plugin_luogu_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -619,7 +911,7 @@ func (x *RevokeRes) String() string {
 func (*RevokeRes) ProtoMessage() {}
 
 func (x *RevokeRes) ProtoReflect() protoreflect.Message {
-	mi := &file_user_v1_plugin_luogu_proto_msgTypes[8]
+	mi := &file_user_v1_plugin_luogu_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -632,7 +924,7 @@ func (x *RevokeRes) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RevokeRes.ProtoReflect.Descriptor instead.
 func (*RevokeRes) Descriptor() ([]byte, []int) {
-	return file_user_v1_plugin_luogu_proto_rawDescGZIP(), []int{8}
+	return file_user_v1_plugin_luogu_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *RevokeRes) GetRevokedCount() uint32 {
@@ -652,7 +944,7 @@ type ValidateLuoguPluginTokenReq struct {
 
 func (x *ValidateLuoguPluginTokenReq) Reset() {
 	*x = ValidateLuoguPluginTokenReq{}
-	mi := &file_user_v1_plugin_luogu_proto_msgTypes[9]
+	mi := &file_user_v1_plugin_luogu_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -664,7 +956,7 @@ func (x *ValidateLuoguPluginTokenReq) String() string {
 func (*ValidateLuoguPluginTokenReq) ProtoMessage() {}
 
 func (x *ValidateLuoguPluginTokenReq) ProtoReflect() protoreflect.Message {
-	mi := &file_user_v1_plugin_luogu_proto_msgTypes[9]
+	mi := &file_user_v1_plugin_luogu_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -677,7 +969,7 @@ func (x *ValidateLuoguPluginTokenReq) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ValidateLuoguPluginTokenReq.ProtoReflect.Descriptor instead.
 func (*ValidateLuoguPluginTokenReq) Descriptor() ([]byte, []int) {
-	return file_user_v1_plugin_luogu_proto_rawDescGZIP(), []int{9}
+	return file_user_v1_plugin_luogu_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *ValidateLuoguPluginTokenReq) GetToken() string {
@@ -710,7 +1002,7 @@ type ValidateLuoguPluginTokenRes struct {
 
 func (x *ValidateLuoguPluginTokenRes) Reset() {
 	*x = ValidateLuoguPluginTokenRes{}
-	mi := &file_user_v1_plugin_luogu_proto_msgTypes[10]
+	mi := &file_user_v1_plugin_luogu_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -722,7 +1014,7 @@ func (x *ValidateLuoguPluginTokenRes) String() string {
 func (*ValidateLuoguPluginTokenRes) ProtoMessage() {}
 
 func (x *ValidateLuoguPluginTokenRes) ProtoReflect() protoreflect.Message {
-	mi := &file_user_v1_plugin_luogu_proto_msgTypes[10]
+	mi := &file_user_v1_plugin_luogu_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -735,7 +1027,7 @@ func (x *ValidateLuoguPluginTokenRes) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ValidateLuoguPluginTokenRes.ProtoReflect.Descriptor instead.
 func (*ValidateLuoguPluginTokenRes) Descriptor() ([]byte, []int) {
-	return file_user_v1_plugin_luogu_proto_rawDescGZIP(), []int{10}
+	return file_user_v1_plugin_luogu_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *ValidateLuoguPluginTokenRes) GetAuthorizationId() uint64 {
@@ -849,7 +1141,39 @@ const file_user_v1_plugin_luogu_proto_rawDesc = "" +
 	"created_at\x18\v \x01(\x03R\tcreatedAt\x12\x14\n" +
 	"\x05scope\x18\f \x01(\tR\x05scope\"l\n" +
 	"\x15ListAuthorizationsRes\x12S\n" +
-	"\x0eauthorizations\x18\x01 \x03(\v2+.api.user.v1.plugin.PluginAuthorizationInfoR\x0eauthorizations\"H\n" +
+	"\x0eauthorizations\x18\x01 \x03(\v2+.api.user.v1.plugin.PluginAuthorizationInfoR\x0eauthorizations\"\xa8\x01\n" +
+	" AdminListPluginAuthorizationsReq\x12\x19\n" +
+	"\bpage_num\x18\x01 \x01(\x05R\apageNum\x12\x1b\n" +
+	"\tpage_size\x18\x02 \x01(\x05R\bpageSize\x12\x18\n" +
+	"\akeyword\x18\x03 \x01(\tR\akeyword\x12\x16\n" +
+	"\x06status\x18\x04 \x01(\tR\x06status\x12\x1a\n" +
+	"\bplatform\x18\x05 \x01(\tR\bplatform\"\xa7\x03\n" +
+	"\x1cAdminPluginAuthorizationInfo\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\x04R\x02id\x12\x17\n" +
+	"\auser_id\x18\x02 \x01(\x04R\x06userId\x12\x1a\n" +
+	"\busername\x18\x03 \x01(\tR\busername\x12\x12\n" +
+	"\x04name\x18\x04 \x01(\tR\x04name\x12\x1a\n" +
+	"\bprovider\x18\x05 \x01(\tR\bprovider\x12\x1a\n" +
+	"\bplatform\x18\x06 \x01(\tR\bplatform\x12\x15\n" +
+	"\x06oj_uid\x18\a \x01(\tR\x05ojUid\x12\x1f\n" +
+	"\vclient_kind\x18\b \x01(\tR\n" +
+	"clientKind\x12%\n" +
+	"\x0eclient_version\x18\t \x01(\tR\rclientVersion\x12\x1f\n" +
+	"\vaccepted_at\x18\n" +
+	" \x01(\x03R\n" +
+	"acceptedAt\x12\x1d\n" +
+	"\n" +
+	"expires_at\x18\v \x01(\x03R\texpiresAt\x12 \n" +
+	"\flast_used_at\x18\f \x01(\x03R\n" +
+	"lastUsedAt\x12\x1d\n" +
+	"\n" +
+	"revoked_at\x18\r \x01(\x03R\trevokedAt\x12\x16\n" +
+	"\x06status\x18\x0e \x01(\tR\x06status\"\xb6\x01\n" +
+	" AdminListPluginAuthorizationsRes\x12D\n" +
+	"\x04list\x18\x01 \x03(\v20.api.user.v1.plugin.AdminPluginAuthorizationInfoR\x04list\x12\x14\n" +
+	"\x05total\x18\x02 \x01(\x03R\x05total\x12\x19\n" +
+	"\bpage_num\x18\x03 \x01(\x05R\apageNum\x12\x1b\n" +
+	"\tpage_size\x18\x04 \x01(\x05R\bpageSize\"H\n" +
 	"\tRevokeReq\x12)\n" +
 	"\x10authorization_id\x18\x01 \x01(\x04R\x0fauthorizationId\x12\x10\n" +
 	"\x03all\x18\x02 \x01(\bR\x03all\"0\n" +
@@ -868,11 +1192,12 @@ const file_user_v1_plugin_luogu_proto_rawDesc = "" +
 	"\frisk_version\x18\x06 \x01(\tR\vriskVersion\x12\x1d\n" +
 	"\n" +
 	"expires_at\x18\a \x01(\x03R\texpiresAt\x12\x14\n" +
-	"\x05scope\x18\b \x01(\tR\x05scope2\x93\x05\n" +
+	"\x05scope\x18\b \x01(\tR\x05scope2\xca\x06\n" +
 	"\vLuoguPlugin\x12\x8c\x01\n" +
 	"\rAuthorizeCode\x12$.api.user.v1.plugin.AuthorizeCodeReq\x1a$.api.user.v1.plugin.AuthorizeCodeRes\"/\x82\xd3\xe4\x93\x02):\x01*\"$/v1/user/plugin/luogu/authorize-code\x12k\n" +
 	"\x05Token\x12\x1c.api.user.v1.plugin.TokenReq\x1a\x1c.api.user.v1.plugin.TokenRes\"&\x82\xd3\xe4\x93\x02 :\x01*\"\x1b/v1/user/plugin/luogu/token\x12\x98\x01\n" +
-	"\x12ListAuthorizations\x12).api.user.v1.plugin.ListAuthorizationsReq\x1a).api.user.v1.plugin.ListAuthorizationsRes\",\x82\xd3\xe4\x93\x02&\x12$/v1/user/plugin/luogu/authorizations\x12o\n" +
+	"\x12ListAuthorizations\x12).api.user.v1.plugin.ListAuthorizationsReq\x1a).api.user.v1.plugin.ListAuthorizationsRes\",\x82\xd3\xe4\x93\x02&\x12$/v1/user/plugin/luogu/authorizations\x12\xb4\x01\n" +
+	"\x17AdminListAuthorizations\x124.api.user.v1.plugin.AdminListPluginAuthorizationsReq\x1a4.api.user.v1.plugin.AdminListPluginAuthorizationsRes\"-\x82\xd3\xe4\x93\x02'\x12%/v1/user/admin/plugins/authorizations\x12o\n" +
 	"\x06Revoke\x12\x1d.api.user.v1.plugin.RevokeReq\x1a\x1d.api.user.v1.plugin.RevokeRes\"'\x82\xd3\xe4\x93\x02!:\x01*\"\x1c/v1/user/plugin/luogu/revoke\x12|\n" +
 	"\x18ValidateLuoguPluginToken\x12/.api.user.v1.plugin.ValidateLuoguPluginTokenReq\x1a/.api.user.v1.plugin.ValidateLuoguPluginTokenResB;\n" +
 	"\x12api.user.v1.pluginP\x01Z#cwxu-algo/api/user/v1/plugin;pluginb\x06proto3"
@@ -889,37 +1214,43 @@ func file_user_v1_plugin_luogu_proto_rawDescGZIP() []byte {
 	return file_user_v1_plugin_luogu_proto_rawDescData
 }
 
-var file_user_v1_plugin_luogu_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
+var file_user_v1_plugin_luogu_proto_msgTypes = make([]protoimpl.MessageInfo, 14)
 var file_user_v1_plugin_luogu_proto_goTypes = []any{
-	(*AuthorizeCodeReq)(nil),            // 0: api.user.v1.plugin.AuthorizeCodeReq
-	(*AuthorizeCodeRes)(nil),            // 1: api.user.v1.plugin.AuthorizeCodeRes
-	(*TokenReq)(nil),                    // 2: api.user.v1.plugin.TokenReq
-	(*TokenRes)(nil),                    // 3: api.user.v1.plugin.TokenRes
-	(*ListAuthorizationsReq)(nil),       // 4: api.user.v1.plugin.ListAuthorizationsReq
-	(*PluginAuthorizationInfo)(nil),     // 5: api.user.v1.plugin.PluginAuthorizationInfo
-	(*ListAuthorizationsRes)(nil),       // 6: api.user.v1.plugin.ListAuthorizationsRes
-	(*RevokeReq)(nil),                   // 7: api.user.v1.plugin.RevokeReq
-	(*RevokeRes)(nil),                   // 8: api.user.v1.plugin.RevokeRes
-	(*ValidateLuoguPluginTokenReq)(nil), // 9: api.user.v1.plugin.ValidateLuoguPluginTokenReq
-	(*ValidateLuoguPluginTokenRes)(nil), // 10: api.user.v1.plugin.ValidateLuoguPluginTokenRes
+	(*AuthorizeCodeReq)(nil),                 // 0: api.user.v1.plugin.AuthorizeCodeReq
+	(*AuthorizeCodeRes)(nil),                 // 1: api.user.v1.plugin.AuthorizeCodeRes
+	(*TokenReq)(nil),                         // 2: api.user.v1.plugin.TokenReq
+	(*TokenRes)(nil),                         // 3: api.user.v1.plugin.TokenRes
+	(*ListAuthorizationsReq)(nil),            // 4: api.user.v1.plugin.ListAuthorizationsReq
+	(*PluginAuthorizationInfo)(nil),          // 5: api.user.v1.plugin.PluginAuthorizationInfo
+	(*ListAuthorizationsRes)(nil),            // 6: api.user.v1.plugin.ListAuthorizationsRes
+	(*AdminListPluginAuthorizationsReq)(nil), // 7: api.user.v1.plugin.AdminListPluginAuthorizationsReq
+	(*AdminPluginAuthorizationInfo)(nil),     // 8: api.user.v1.plugin.AdminPluginAuthorizationInfo
+	(*AdminListPluginAuthorizationsRes)(nil), // 9: api.user.v1.plugin.AdminListPluginAuthorizationsRes
+	(*RevokeReq)(nil),                        // 10: api.user.v1.plugin.RevokeReq
+	(*RevokeRes)(nil),                        // 11: api.user.v1.plugin.RevokeRes
+	(*ValidateLuoguPluginTokenReq)(nil),      // 12: api.user.v1.plugin.ValidateLuoguPluginTokenReq
+	(*ValidateLuoguPluginTokenRes)(nil),      // 13: api.user.v1.plugin.ValidateLuoguPluginTokenRes
 }
 var file_user_v1_plugin_luogu_proto_depIdxs = []int32{
 	5,  // 0: api.user.v1.plugin.ListAuthorizationsRes.authorizations:type_name -> api.user.v1.plugin.PluginAuthorizationInfo
-	0,  // 1: api.user.v1.plugin.LuoguPlugin.AuthorizeCode:input_type -> api.user.v1.plugin.AuthorizeCodeReq
-	2,  // 2: api.user.v1.plugin.LuoguPlugin.Token:input_type -> api.user.v1.plugin.TokenReq
-	4,  // 3: api.user.v1.plugin.LuoguPlugin.ListAuthorizations:input_type -> api.user.v1.plugin.ListAuthorizationsReq
-	7,  // 4: api.user.v1.plugin.LuoguPlugin.Revoke:input_type -> api.user.v1.plugin.RevokeReq
-	9,  // 5: api.user.v1.plugin.LuoguPlugin.ValidateLuoguPluginToken:input_type -> api.user.v1.plugin.ValidateLuoguPluginTokenReq
-	1,  // 6: api.user.v1.plugin.LuoguPlugin.AuthorizeCode:output_type -> api.user.v1.plugin.AuthorizeCodeRes
-	3,  // 7: api.user.v1.plugin.LuoguPlugin.Token:output_type -> api.user.v1.plugin.TokenRes
-	6,  // 8: api.user.v1.plugin.LuoguPlugin.ListAuthorizations:output_type -> api.user.v1.plugin.ListAuthorizationsRes
-	8,  // 9: api.user.v1.plugin.LuoguPlugin.Revoke:output_type -> api.user.v1.plugin.RevokeRes
-	10, // 10: api.user.v1.plugin.LuoguPlugin.ValidateLuoguPluginToken:output_type -> api.user.v1.plugin.ValidateLuoguPluginTokenRes
-	6,  // [6:11] is the sub-list for method output_type
-	1,  // [1:6] is the sub-list for method input_type
-	1,  // [1:1] is the sub-list for extension type_name
-	1,  // [1:1] is the sub-list for extension extendee
-	0,  // [0:1] is the sub-list for field type_name
+	8,  // 1: api.user.v1.plugin.AdminListPluginAuthorizationsRes.list:type_name -> api.user.v1.plugin.AdminPluginAuthorizationInfo
+	0,  // 2: api.user.v1.plugin.LuoguPlugin.AuthorizeCode:input_type -> api.user.v1.plugin.AuthorizeCodeReq
+	2,  // 3: api.user.v1.plugin.LuoguPlugin.Token:input_type -> api.user.v1.plugin.TokenReq
+	4,  // 4: api.user.v1.plugin.LuoguPlugin.ListAuthorizations:input_type -> api.user.v1.plugin.ListAuthorizationsReq
+	7,  // 5: api.user.v1.plugin.LuoguPlugin.AdminListAuthorizations:input_type -> api.user.v1.plugin.AdminListPluginAuthorizationsReq
+	10, // 6: api.user.v1.plugin.LuoguPlugin.Revoke:input_type -> api.user.v1.plugin.RevokeReq
+	12, // 7: api.user.v1.plugin.LuoguPlugin.ValidateLuoguPluginToken:input_type -> api.user.v1.plugin.ValidateLuoguPluginTokenReq
+	1,  // 8: api.user.v1.plugin.LuoguPlugin.AuthorizeCode:output_type -> api.user.v1.plugin.AuthorizeCodeRes
+	3,  // 9: api.user.v1.plugin.LuoguPlugin.Token:output_type -> api.user.v1.plugin.TokenRes
+	6,  // 10: api.user.v1.plugin.LuoguPlugin.ListAuthorizations:output_type -> api.user.v1.plugin.ListAuthorizationsRes
+	9,  // 11: api.user.v1.plugin.LuoguPlugin.AdminListAuthorizations:output_type -> api.user.v1.plugin.AdminListPluginAuthorizationsRes
+	11, // 12: api.user.v1.plugin.LuoguPlugin.Revoke:output_type -> api.user.v1.plugin.RevokeRes
+	13, // 13: api.user.v1.plugin.LuoguPlugin.ValidateLuoguPluginToken:output_type -> api.user.v1.plugin.ValidateLuoguPluginTokenRes
+	8,  // [8:14] is the sub-list for method output_type
+	2,  // [2:8] is the sub-list for method input_type
+	2,  // [2:2] is the sub-list for extension type_name
+	2,  // [2:2] is the sub-list for extension extendee
+	0,  // [0:2] is the sub-list for field type_name
 }
 
 func init() { file_user_v1_plugin_luogu_proto_init() }
@@ -933,7 +1264,7 @@ func file_user_v1_plugin_luogu_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_user_v1_plugin_luogu_proto_rawDesc), len(file_user_v1_plugin_luogu_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   11,
+			NumMessages:   14,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

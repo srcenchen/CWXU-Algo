@@ -14,6 +14,7 @@ import (
 	"time"
 
 	pb "cwxu-algo/api/user/v1/plugin"
+	"cwxu-algo/app/common/rbac"
 	"cwxu-algo/app/common/utils/auth"
 	"cwxu-algo/app/user/internal/data"
 	"cwxu-algo/app/user/internal/data/model"
@@ -195,6 +196,13 @@ func (s *LuoguPluginService) Token(ctx context.Context, req *pb.TokenReq) (*pb.T
 	if grant.RiskVersion != LuoguPluginRiskVersion {
 		return nil, luoguPluginError(http.StatusForbidden, "RISK_REACCEPT_REQUIRED", "风险协议已更新，请重新授权")
 	}
+	var user model.User
+	if err := s.db.WithContext(ctx).Select("id").First(&user, grant.UserID).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, luoguPluginError(http.StatusUnauthorized, "USER_NOT_FOUND", "用户不存在或已删除")
+		}
+		return nil, luoguPluginError(http.StatusInternalServerError, "USER_LOOKUP_FAILED", "用户状态校验失败")
+	}
 
 	deviceToken, err := randomLuoguSecret()
 	if err != nil {
@@ -252,6 +260,103 @@ func (s *LuoguPluginService) ListAuthorizations(ctx context.Context, _ *pb.ListA
 		items = append(items, item)
 	}
 	return &pb.ListAuthorizationsRes{Authorizations: items}, nil
+}
+
+type adminPluginAuthorizationRow struct {
+	model.PluginAuthorization
+	Username string
+	Name     string
+}
+
+func pluginAuthorizationKeywordCondition(dialect string) string {
+	if dialect == "sqlite" {
+		return "LOWER(u.username) LIKE LOWER(?) OR LOWER(u.name) LIKE LOWER(?) OR LOWER(pa.luogu_uid) LIKE LOWER(?) OR LOWER(pa.client_version) LIKE LOWER(?)"
+	}
+	return "u.username ILIKE ? OR u.name ILIKE ? OR pa.luogu_uid ILIKE ? OR pa.client_version ILIKE ?"
+}
+
+func normalizeLuoguAdminPlatform(platform string) (string, error) {
+	switch strings.TrimSpace(platform) {
+	case "":
+		return "", nil
+	case "luogu", "LuoGu":
+		return luoguPluginProvider, nil
+	default:
+		return "", luoguPluginError(http.StatusBadRequest, "INVALID_PLATFORM", "平台无效")
+	}
+}
+
+func (s *LuoguPluginService) AdminListAuthorizations(ctx context.Context, req *pb.AdminListPluginAuthorizationsReq) (*pb.AdminListPluginAuthorizationsRes, error) {
+	if !auth.HasPerm(ctx, rbac.PermSiteUserSync) {
+		return nil, luoguPluginError(http.StatusForbidden, "PLUGIN_AUTHORIZATION_PERMISSION_DENIED", "需要用户同步运维权限")
+	}
+	pageNum, pageSize := int32(1), int32(20)
+	if req != nil {
+		if req.PageNum > 0 {
+			pageNum = req.PageNum
+		}
+		if req.PageSize > 0 {
+			pageSize = req.PageSize
+		}
+	}
+	if pageSize > 100 {
+		pageSize = 100
+	}
+	now := s.now().UTC()
+	q := s.db.WithContext(ctx).Table("plugin_authorizations pa").
+		Joins("JOIN users u ON u.id = pa.user_id")
+	if req != nil {
+		if keyword := strings.TrimSpace(req.Keyword); keyword != "" {
+			like := "%" + keyword + "%"
+			condition := pluginAuthorizationKeywordCondition(s.db.Dialector.Name())
+			q = q.Where(condition, like, like, like, like)
+		}
+		platform, err := normalizeLuoguAdminPlatform(req.Platform)
+		if err != nil {
+			return nil, err
+		}
+		if platform != "" {
+			q = q.Where("pa.provider = ?", platform)
+		}
+		switch strings.TrimSpace(req.Status) {
+		case "active":
+			q = q.Where("pa.revoked_at IS NULL AND pa.expires_at > ?", now)
+		case "expired":
+			q = q.Where("pa.revoked_at IS NULL AND pa.expires_at <= ?", now)
+		case "revoked":
+			q = q.Where("pa.revoked_at IS NOT NULL")
+		case "", "all":
+		default:
+			return nil, luoguPluginError(http.StatusBadRequest, "INVALID_STATUS", "授权状态无效")
+		}
+	}
+	var total int64
+	if err := q.Count(&total).Error; err != nil {
+		return nil, luoguPluginError(http.StatusInternalServerError, "AUTHORIZATION_LIST_FAILED", "加载授权失败")
+	}
+	var rows []adminPluginAuthorizationRow
+	if err := q.Select("pa.*, u.username, u.name").Order("pa.id DESC").Offset(int((pageNum - 1) * pageSize)).Limit(int(pageSize)).Scan(&rows).Error; err != nil {
+		return nil, luoguPluginError(http.StatusInternalServerError, "AUTHORIZATION_LIST_FAILED", "加载授权失败")
+	}
+	items := make([]*pb.AdminPluginAuthorizationInfo, 0, len(rows))
+	for i := range rows {
+		row := &rows[i]
+		status := "active"
+		if row.RevokedAt != nil {
+			status = "revoked"
+		} else if !now.Before(row.ExpiresAt) {
+			status = "expired"
+		}
+		item := &pb.AdminPluginAuthorizationInfo{Id: uint64(row.ID), UserId: uint64(row.UserID), Username: row.Username, Name: row.Name, Provider: luoguPluginProvider, Platform: luoguPluginProvider, OjUid: row.LuoguUID, ClientKind: row.ClientKind, ClientVersion: row.ClientVersion, AcceptedAt: row.AcceptedAt.Unix(), ExpiresAt: row.ExpiresAt.Unix(), Status: status}
+		if row.LastUsedAt != nil {
+			item.LastUsedAt = row.LastUsedAt.Unix()
+		}
+		if row.RevokedAt != nil {
+			item.RevokedAt = row.RevokedAt.Unix()
+		}
+		items = append(items, item)
+	}
+	return &pb.AdminListPluginAuthorizationsRes{List: items, Total: total, PageNum: pageNum, PageSize: pageSize}, nil
 }
 
 func (s *LuoguPluginService) Revoke(ctx context.Context, req *pb.RevokeReq) (*pb.RevokeRes, error) {
