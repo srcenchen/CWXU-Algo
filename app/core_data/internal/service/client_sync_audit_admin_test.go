@@ -86,9 +86,6 @@ func TestAdminListClientSyncAuditsReturnsUsername(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.Exec("CREATE TABLE users (id INTEGER PRIMARY KEY, username TEXT, name TEXT)").Error; err != nil {
-		t.Fatal(err)
-	}
 	if err := db.AutoMigrate(&model.ClientSyncAudit{}); err != nil {
 		t.Fatal(err)
 	}

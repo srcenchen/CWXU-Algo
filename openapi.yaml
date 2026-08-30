@@ -126,10 +126,12 @@ paths:
                     type: string
                 - name: from
                   in: query
+                  description: Unix 秒；按 started_at 过滤（包含边界）。
                   schema:
                     type: string
                 - name: to
                   in: query
+                  description: Unix 秒；按 started_at 过滤（包含边界）。
                   schema:
                     type: string
             responses:
@@ -7889,6 +7891,12 @@ components:
                     items:
                         $ref: '#/components/schemas/api.core.v1.problem.ProblemContributor'
                     description: 审核通过的内容贡献者（按首次通过时间升序；详情 Get 填充，列表可空）
+                contentSource:
+                    type: string
+                contentSourceUrl:
+                    type: string
+                contentLanguage:
+                    type: string
         api.core.v1.problem.ProblemRelatedContest:
             type: object
             properties:
@@ -8641,6 +8649,8 @@ components:
                     type: string
                 errorMessage:
                     type: string
+                username:
+                    type: string
         api.core.v1.spider.GetPlatformUsersRes:
             type: object
             properties:
@@ -8907,6 +8917,10 @@ components:
                 problemPaused:
                     type: boolean
                     description: 题面抓取是否暂停
+                officialStatementEnabled:
+                    type: boolean
+                vjudgeStatementEnabled:
+                    type: boolean
             description: 单个 OJ 的爬虫各模块监控
         api.core.v1.spider.StartLuoguSyncReq:
             type: object
@@ -8971,6 +8985,9 @@ components:
                 module:
                     type: string
                     description: submit/problem；空值兼容 submit
+                source:
+                    type: string
+                    description: module=problem 时可选 official / vjudge；空值仅兼容旧的题面总开关
         api.core.v1.spider.TogglePlatformRes:
             type: object
             properties:
@@ -13246,6 +13263,18 @@ components:
                     type: string
                 ojQojErrMsg:
                     type: string
+                ojVjudgeUsername:
+                    type: string
+                ojVjudgePasswordMasked:
+                    type: string
+                ojVjudgePasswordSet:
+                    type: boolean
+                ojVjudgeStatus:
+                    type: string
+                ojVjudgeStatusAt:
+                    type: string
+                ojVjudgeErrMsg:
+                    type: string
                 agentStatus:
                     type: string
                     description: AI 服务状态
@@ -13426,6 +13455,12 @@ components:
                 ojQojPassword:
                     type: string
                 clearOjQojPassword:
+                    type: boolean
+                ojVjudgeUsername:
+                    type: string
+                ojVjudgePassword:
+                    type: string
+                clearOjVjudgePassword:
                     type: boolean
                 opsNotifyEmails:
                     type: string

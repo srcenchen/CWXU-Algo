@@ -149,20 +149,23 @@ func (s *ProblemService) toInfo(p *model.Problem, userStatus string) *problem.Pr
 		last = p.LastSubmittedAt.Unix()
 	}
 	return &problem.ProblemInfo{
-		Id:              uint32(p.ID),
-		Platform:        p.Platform,
-		ExternalId:      p.ExternalID,
-		Title:           cleanDisplayTitle(p.Title),
-		Url:             p.URL,
-		ContentMd:       p.ContentMD,
-		ProblemType:     p.ProblemType,
-		Tags:            tags,
-		Solutions:       sols,
-		Difficulty:      p.Difficulty,
-		Status:          p.Status,
-		ErrorMsg:        p.ErrorMsg,
-		LastSubmittedAt: last,
-		UserStatus:      userStatus,
+		Id:               uint32(p.ID),
+		Platform:         p.Platform,
+		ExternalId:       p.ExternalID,
+		Title:            cleanDisplayTitle(p.Title),
+		Url:              p.URL,
+		ContentMd:        p.ContentMD,
+		ProblemType:      p.ProblemType,
+		Tags:             tags,
+		Solutions:        sols,
+		Difficulty:       p.Difficulty,
+		Status:           p.Status,
+		ErrorMsg:         p.ErrorMsg,
+		LastSubmittedAt:  last,
+		UserStatus:       userStatus,
+		ContentSource:    p.ContentSource,
+		ContentSourceUrl: p.ContentSourceURL,
+		ContentLanguage:  p.ContentLanguage,
 	}
 }
 

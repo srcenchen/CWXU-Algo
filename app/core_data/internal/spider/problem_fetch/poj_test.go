@@ -238,4 +238,3 @@ func TestFetchPOJ_LiveImage1654(t *testing.T) {
 	}
 	t.Logf("live 1654 title=%s", fc.Title)
 }
-

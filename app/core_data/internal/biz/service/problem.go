@@ -16,6 +16,7 @@ import (
 	data2 "cwxu-algo/app/common/data"
 	"cwxu-algo/app/common/discovery"
 	"cwxu-algo/app/common/event"
+	"cwxu-algo/app/common/sitesettings"
 	"cwxu-algo/app/common/utils/sqllike"
 	"cwxu-algo/app/core_data/internal/data"
 	"cwxu-algo/app/core_data/internal/data/dal"
@@ -866,7 +867,11 @@ func (uc *ProblemUseCase) ProcessFetch(ctx context.Context, ev event.ProblemFetc
 	if err := uc.restorePausedProblemFetch(&p, ev.BypassFetchPause); err != nil {
 		return err
 	}
-	fetched, err := problem_fetch.FetchWithFallbacks(p.Platform, p.ExternalID, url, fallbacks)
+	officialEnabled, vjudgeEnabled := task.ProblemStatementSources(uc.data.RDB, p.Platform)
+	runtime := sitesettings.Load(ctx, uc.data.RDB, nil)
+	fetched, err := problem_fetch.FetchWithSources(ctx, p.Platform, p.ExternalID, url, fallbacks,
+		problem_fetch.StatementSourcePolicy{OfficialEnabled: officialEnabled, VJudgeEnabled: vjudgeEnabled},
+		runtime.OjVJudgeUsername, runtime.OjVJudgePassword)
 	if err != nil {
 		return uc.handleFetchError(&p, err)
 	}
@@ -890,12 +895,18 @@ func (uc *ProblemUseCase) ProcessFetch(ctx context.Context, ev event.ProblemFetc
 		nextStatus = model.ProblemStatusCompleted
 	}
 	updates := map[string]interface{}{
-		"content_md":       fetched.ContentMD,
-		"title":            title,
-		"error_msg":        "",
-		"status":           nextStatus,
-		"fetch_attempts":   0,
-		"fetch_fail_since": nil,
+		"content_md":                  fetched.ContentMD,
+		"content_source":              fetched.Source,
+		"content_source_url":          fetched.SourceURL,
+		"content_source_problem_id":   fetched.SourceProblemID,
+		"content_source_statement_id": fetched.SourceStatementID,
+		"content_language":            fetched.Language,
+		"content_fetched_at":          time.Now(),
+		"title":                       title,
+		"error_msg":                   "",
+		"status":                      nextStatus,
+		"fetch_attempts":              0,
+		"fetch_fail_since":            nil,
 	}
 	// 规范 URL：牛客数字题号始终写题库形态（即使从比赛页抓到）
 	if bank := problem_fetch.NowCoderBankProblemURL(p.ExternalID); bank != "" &&
@@ -1958,7 +1969,11 @@ func (uc *ProblemUseCase) RepairQOJBrandTitles(limit int, refetch bool) (scanned
 		scanned++
 		newTitle := titleFromMarkdownH1(p.ContentMD)
 		if newTitle == "" && refetch {
-			fetched, ferr := problem_fetch.Fetch(spider.QOJ, p.ExternalID, p.URL)
+			runtime := sitesettings.Load(context.Background(), uc.data.RDB, nil)
+			officialEnabled, vjudgeEnabled := task.ProblemStatementSources(uc.data.RDB, p.Platform)
+			fetched, ferr := problem_fetch.FetchWithSources(context.Background(), p.Platform, p.ExternalID, p.URL, nil,
+				problem_fetch.StatementSourcePolicy{OfficialEnabled: officialEnabled, VJudgeEnabled: vjudgeEnabled},
+				runtime.OjVJudgeUsername, runtime.OjVJudgePassword)
 			if ferr != nil {
 				log.Warnf("RepairQOJBrandTitles fetch id=%d ext=%s: %v", p.ID, p.ExternalID, ferr)
 				failed++

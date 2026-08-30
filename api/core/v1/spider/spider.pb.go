@@ -1052,9 +1052,11 @@ type SpiderPlatformStat struct {
 	// 提交同步是否暂停
 	SubmitPaused bool `protobuf:"varint,21,opt,name=submitPaused,proto3" json:"submitPaused,omitempty"`
 	// 题面抓取是否暂停
-	ProblemPaused bool `protobuf:"varint,22,opt,name=problemPaused,proto3" json:"problemPaused,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	ProblemPaused            bool `protobuf:"varint,22,opt,name=problemPaused,proto3" json:"problemPaused,omitempty"`
+	OfficialStatementEnabled bool `protobuf:"varint,23,opt,name=officialStatementEnabled,proto3" json:"officialStatementEnabled,omitempty"`
+	VjudgeStatementEnabled   bool `protobuf:"varint,24,opt,name=vjudgeStatementEnabled,proto3" json:"vjudgeStatementEnabled,omitempty"`
+	unknownFields            protoimpl.UnknownFields
+	sizeCache                protoimpl.SizeCache
 }
 
 func (x *SpiderPlatformStat) Reset() {
@@ -1241,13 +1243,29 @@ func (x *SpiderPlatformStat) GetProblemPaused() bool {
 	return false
 }
 
+func (x *SpiderPlatformStat) GetOfficialStatementEnabled() bool {
+	if x != nil {
+		return x.OfficialStatementEnabled
+	}
+	return false
+}
+
+func (x *SpiderPlatformStat) GetVjudgeStatementEnabled() bool {
+	if x != nil {
+		return x.VjudgeStatementEnabled
+	}
+	return false
+}
+
 type TogglePlatformReq struct {
 	state    protoimpl.MessageState `protogen:"open.v1"`
 	Platform string                 `protobuf:"bytes,1,opt,name=platform,proto3" json:"platform,omitempty"`
 	// true=启用（恢复同步）；false=关闭（暂停同步）
 	Enabled bool `protobuf:"varint,2,opt,name=enabled,proto3" json:"enabled,omitempty"`
 	// submit/problem；空值兼容 submit
-	Module        string `protobuf:"bytes,3,opt,name=module,proto3" json:"module,omitempty"`
+	Module string `protobuf:"bytes,3,opt,name=module,proto3" json:"module,omitempty"`
+	// module=problem 时可选 official / vjudge；空值仅兼容旧的题面总开关
+	Source        string `protobuf:"bytes,4,opt,name=source,proto3" json:"source,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1299,6 +1317,13 @@ func (x *TogglePlatformReq) GetEnabled() bool {
 func (x *TogglePlatformReq) GetModule() string {
 	if x != nil {
 		return x.Module
+	}
+	return ""
+}
+
+func (x *TogglePlatformReq) GetSource() string {
+	if x != nil {
+		return x.Source
 	}
 	return ""
 }
@@ -3281,7 +3306,7 @@ const file_core_v1_spider_spider_proto_rawDesc = "" +
 	"\x04code\x18\x01 \x01(\x03R\x04code\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12D\n" +
 	"\tplatforms\x18\x03 \x03(\v2&.api.core.v1.spider.SpiderPlatformStatR\tplatforms\x12 \n" +
-	"\vcollectedAt\x18\x04 \x01(\x03R\vcollectedAt\"\xfc\x05\n" +
+	"\vcollectedAt\x18\x04 \x01(\x03R\vcollectedAt\"\xf0\x06\n" +
 	"\x12SpiderPlatformStat\x12\x1a\n" +
 	"\bplatform\x18\x01 \x01(\tR\bplatform\x12\x1e\n" +
 	"\n" +
@@ -3313,11 +3338,14 @@ const file_core_v1_spider_spider_proto_rawDesc = "" +
 	"\x06paused\x18\x13 \x01(\bR\x06paused\x12\x1c\n" +
 	"\ttodayRows\x18\x14 \x01(\x03R\ttodayRows\x12\"\n" +
 	"\fsubmitPaused\x18\x15 \x01(\bR\fsubmitPaused\x12$\n" +
-	"\rproblemPaused\x18\x16 \x01(\bR\rproblemPaused\"a\n" +
+	"\rproblemPaused\x18\x16 \x01(\bR\rproblemPaused\x12:\n" +
+	"\x18officialStatementEnabled\x18\x17 \x01(\bR\x18officialStatementEnabled\x126\n" +
+	"\x16vjudgeStatementEnabled\x18\x18 \x01(\bR\x16vjudgeStatementEnabled\"y\n" +
 	"\x11TogglePlatformReq\x12\x1a\n" +
 	"\bplatform\x18\x01 \x01(\tR\bplatform\x12\x18\n" +
 	"\aenabled\x18\x02 \x01(\bR\aenabled\x12\x16\n" +
-	"\x06module\x18\x03 \x01(\tR\x06module\"A\n" +
+	"\x06module\x18\x03 \x01(\tR\x06module\x12\x16\n" +
+	"\x06source\x18\x04 \x01(\tR\x06source\"A\n" +
 	"\x11TogglePlatformRes\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\x03R\x04code\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\"/\n" +

@@ -1,6 +1,7 @@
 package problem_fetch
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -20,6 +21,47 @@ import (
 type FetchedContent struct {
 	Title     string
 	ContentMD string
+	// Source records which upstream supplied the content. It is intentionally
+	// optional so existing platform fetchers remain source-compatible.
+	Source            string
+	SourceURL         string
+	SourceProblemID   string
+	SourceStatementID string
+	Language          string
+}
+
+// StatementSourcePolicy controls which upstreams may supply a statement.
+type StatementSourcePolicy struct {
+	OfficialEnabled bool
+	VJudgeEnabled   bool
+}
+
+// FetchWithSources prefers VJudge and falls back to the existing official
+// fetcher only when both sources are enabled.
+func FetchWithSources(ctx context.Context, platform, externalID, problemURL string, fallbackURLs []string, policy StatementSourcePolicy, vjudgeUsername, vjudgePassword string) (*FetchedContent, error) {
+	if !policy.OfficialEnabled && !policy.VJudgeEnabled {
+		return nil, fmt.Errorf("题面来源均已关闭")
+	}
+	var errs []string
+	if policy.VJudgeEnabled && strings.TrimSpace(vjudgeUsername) != "" && strings.TrimSpace(vjudgePassword) != "" {
+		if fetched, err := FetchVJudge(ctx, platform, externalID, vjudgeUsername, vjudgePassword); err == nil {
+			return fetched, nil
+		} else {
+			errs = append(errs, "VJudge: "+err.Error())
+		}
+	} else if policy.VJudgeEnabled {
+		errs = append(errs, "VJudge: 账号未配置")
+	}
+	if policy.OfficialEnabled {
+		fetched, err := FetchWithFallbacks(platform, externalID, problemURL, fallbackURLs)
+		if err == nil {
+			fetched.Source = "official"
+			fetched.Language = ""
+			return fetched, nil
+		}
+		errs = append(errs, "官方: "+err.Error())
+	}
+	return nil, fmt.Errorf("题面抓取失败: %s", strings.Join(errs, "; "))
 }
 
 // Fetch 按平台爬取题面 Markdown。

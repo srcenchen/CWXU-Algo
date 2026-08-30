@@ -287,6 +287,8 @@ message SpiderPlatformStat {
   bool submitPaused = 21;
   // 题面抓取是否暂停
   bool problemPaused = 22;
+  bool officialStatementEnabled = 23;
+  bool vjudgeStatementEnabled = 24;
 }
 
 message TogglePlatformReq {
@@ -295,6 +297,8 @@ message TogglePlatformReq {
   bool enabled = 2;
   // submit/problem；空值兼容 submit
   string module = 3;
+  // module=problem 时可选 official / vjudge；空值仅兼容旧的题面总开关
+  string source = 4;
 }
 
 message TogglePlatformRes {

@@ -996,6 +996,7 @@ type ValidateLuoguPluginTokenRes struct {
 	RiskVersion     string                 `protobuf:"bytes,6,opt,name=risk_version,json=riskVersion,proto3" json:"risk_version,omitempty"`
 	ExpiresAt       int64                  `protobuf:"varint,7,opt,name=expires_at,json=expiresAt,proto3" json:"expires_at,omitempty"`
 	Scope           string                 `protobuf:"bytes,8,opt,name=scope,proto3" json:"scope,omitempty"`
+	Username        string                 `protobuf:"bytes,9,opt,name=username,proto3" json:"username,omitempty"`
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
 }
@@ -1082,6 +1083,13 @@ func (x *ValidateLuoguPluginTokenRes) GetExpiresAt() int64 {
 func (x *ValidateLuoguPluginTokenRes) GetScope() string {
 	if x != nil {
 		return x.Scope
+	}
+	return ""
+}
+
+func (x *ValidateLuoguPluginTokenRes) GetUsername() string {
+	if x != nil {
+		return x.Username
 	}
 	return ""
 }
@@ -1181,7 +1189,7 @@ const file_user_v1_plugin_luogu_proto_rawDesc = "" +
 	"\rrevoked_count\x18\x01 \x01(\rR\frevokedCount\"I\n" +
 	"\x1bValidateLuoguPluginTokenReq\x12\x14\n" +
 	"\x05token\x18\x01 \x01(\tR\x05token\x12\x14\n" +
-	"\x05scope\x18\x02 \x01(\tR\x05scope\"\x9e\x02\n" +
+	"\x05scope\x18\x02 \x01(\tR\x05scope\"\xba\x02\n" +
 	"\x1bValidateLuoguPluginTokenRes\x12)\n" +
 	"\x10authorization_id\x18\x01 \x01(\x04R\x0fauthorizationId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\x04R\x06userId\x12\x1b\n" +
@@ -1192,7 +1200,8 @@ const file_user_v1_plugin_luogu_proto_rawDesc = "" +
 	"\frisk_version\x18\x06 \x01(\tR\vriskVersion\x12\x1d\n" +
 	"\n" +
 	"expires_at\x18\a \x01(\x03R\texpiresAt\x12\x14\n" +
-	"\x05scope\x18\b \x01(\tR\x05scope2\xca\x06\n" +
+	"\x05scope\x18\b \x01(\tR\x05scope\x12\x1a\n" +
+	"\busername\x18\t \x01(\tR\busername2\xca\x06\n" +
 	"\vLuoguPlugin\x12\x8c\x01\n" +
 	"\rAuthorizeCode\x12$.api.user.v1.plugin.AuthorizeCodeReq\x1a$.api.user.v1.plugin.AuthorizeCodeRes\"/\x82\xd3\xe4\x93\x02):\x01*\"$/v1/user/plugin/luogu/authorize-code\x12k\n" +
 	"\x05Token\x12\x1c.api.user.v1.plugin.TokenReq\x1a\x1c.api.user.v1.plugin.TokenRes\"&\x82\xd3\xe4\x93\x02 :\x01*\"\x1b/v1/user/plugin/luogu/token\x12\x98\x01\n" +

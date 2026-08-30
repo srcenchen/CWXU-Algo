@@ -201,6 +201,9 @@ message ProblemInfo {
   string user_status = 14;
   // 审核通过的内容贡献者（按首次通过时间升序；详情 Get 填充，列表可空）
   repeated ProblemContributor contributors = 15;
+  string content_source = 16;
+  string content_source_url = 17;
+  string content_language = 18;
 }
 
 message ListProblemReq {

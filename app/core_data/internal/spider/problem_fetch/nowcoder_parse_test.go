@@ -100,13 +100,13 @@ func TestParseNowCoderACHHTML_IOAndSamples(t *testing.T) {
 
 func TestNowCoderHeadingKind(t *testing.T) {
 	cases := map[string]string{
-		"输入描述:":   "input_desc",
-		"输入描述：":  "input_desc",
-		"输出描述":    "output_desc",
-		"输入":      "",
-		"输出":      "",
-		"示例1":     "",
-		"题目描述":    "",
+		"输入描述:": "input_desc",
+		"输入描述：": "input_desc",
+		"输出描述":  "output_desc",
+		"输入":    "",
+		"输出":    "",
+		"示例1":   "",
+		"题目描述":  "",
 	}
 	for in, want := range cases {
 		if got := nowcoderHeadingKind(in); got != want {

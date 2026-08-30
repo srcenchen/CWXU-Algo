@@ -49,17 +49,22 @@ type SiteConfig struct {
 	// UpyunScheme http | https；空则从 domain 推断，默认 http
 	UpyunScheme string `gorm:"size:16;column:upyun_scheme;comment:访问协议"`
 	// OJ 爬虫账号（系统级，用于爬取用户提交记录）
-	OjLuoguUsername string `gorm:"size:128;column:oj_luogu_username;comment:洛谷爬虫账号"`
-	OjLuoguPassword string `gorm:"size:512;column:oj_luogu_password;comment:洛谷爬虫密码"`
-	OjQojUsername   string `gorm:"size:128;column:oj_qoj_username;comment:QOJ 爬虫账号"`
-	OjQojPassword   string `gorm:"size:512;column:oj_qoj_password;comment:QOJ 爬虫密码"`
+	OjLuoguUsername  string `gorm:"size:128;column:oj_luogu_username;comment:洛谷爬虫账号"`
+	OjLuoguPassword  string `gorm:"size:512;column:oj_luogu_password;comment:洛谷爬虫密码"`
+	OjQojUsername    string `gorm:"size:128;column:oj_qoj_username;comment:QOJ 爬虫账号"`
+	OjQojPassword    string `gorm:"size:512;column:oj_qoj_password;comment:QOJ 爬虫密码"`
+	OjVJudgeUsername string `gorm:"size:128;column:oj_vjudge_username;comment:VirtualOJ 爬虫账号"`
+	OjVJudgePassword string `gorm:"size:512;column:oj_vjudge_password;comment:VirtualOJ 爬虫密码"`
 	// OJ 登录状态（由爬虫实际登录后回写：ok / fail / unchecked）
-	OjLuoguStatus   string `gorm:"size:16;column:oj_luogu_status;default:unchecked;comment:洛谷登录状态"`
-	OjLuoguStatusAt int64  `gorm:"column:oj_luogu_status_at;default:0;comment:洛谷状态更新时间 unix"`
-	OjLuoguErrMsg   string `gorm:"type:text;column:oj_luogu_err_msg;comment:洛谷最近错误"`
-	OjQojStatus     string `gorm:"size:16;column:oj_qoj_status;default:unchecked;comment:QOJ 登录状态"`
-	OjQojStatusAt   int64  `gorm:"column:oj_qoj_status_at;default:0;comment:QOJ 状态更新时间 unix"`
-	OjQojErrMsg     string `gorm:"type:text;column:oj_qoj_err_msg;comment:QOJ 最近错误"`
+	OjLuoguStatus    string `gorm:"size:16;column:oj_luogu_status;default:unchecked;comment:洛谷登录状态"`
+	OjLuoguStatusAt  int64  `gorm:"column:oj_luogu_status_at;default:0;comment:洛谷状态更新时间 unix"`
+	OjLuoguErrMsg    string `gorm:"type:text;column:oj_luogu_err_msg;comment:洛谷最近错误"`
+	OjQojStatus      string `gorm:"size:16;column:oj_qoj_status;default:unchecked;comment:QOJ 登录状态"`
+	OjQojStatusAt    int64  `gorm:"column:oj_qoj_status_at;default:0;comment:QOJ 状态更新时间 unix"`
+	OjQojErrMsg      string `gorm:"type:text;column:oj_qoj_err_msg;comment:QOJ 最近错误"`
+	OjVJudgeStatus   string `gorm:"size:16;column:oj_vjudge_status;default:unchecked;comment:VirtualOJ 登录状态"`
+	OjVJudgeStatusAt int64  `gorm:"column:oj_vjudge_status_at;default:0;comment:VirtualOJ 状态更新时间 unix"`
+	OjVJudgeErrMsg   string `gorm:"type:text;column:oj_vjudge_err_msg;comment:VirtualOJ 最近错误"`
 	// AI 服务状态（由 agent/core_data 实际调用后回写）
 	AgentStatus       string `gorm:"size:16;column:agent_status;default:unchecked;comment:日报模型状态"`
 	AgentStatusAt     int64  `gorm:"column:agent_status_at;default:0;comment:日报模型状态更新时间 unix"`

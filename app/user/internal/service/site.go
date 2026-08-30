@@ -104,6 +104,10 @@ func rowToRuntime(row *model.SiteConfig) (*sitesettings.Runtime, error) {
 	if err != nil {
 		return nil, err
 	}
+	vjudgePassword, err := read("oj_vjudge_password", row.OjVJudgePassword)
+	if err != nil {
+		return nil, err
+	}
 	payfmSecret, err := read("payfm_secret", row.PayFmSecret)
 	if err != nil {
 		return nil, err
@@ -132,6 +136,8 @@ func rowToRuntime(row *model.SiteConfig) (*sitesettings.Runtime, error) {
 		OjLuoguPassword:           luoguPassword,
 		OjQojUsername:             strings.TrimSpace(row.OjQojUsername),
 		OjQojPassword:             qojPassword,
+		OjVJudgeUsername:          strings.TrimSpace(row.OjVJudgeUsername),
+		OjVJudgePassword:          vjudgePassword,
 		OpsNotifyEmails:           strings.TrimSpace(row.OpsNotifyEmails),
 		DataDiskPath:              strings.TrimSpace(row.DataDiskPath),
 		SpiderConcurrency:         normalizeRuntimeConcurrency(row.SpiderConcurrency),
@@ -200,6 +206,7 @@ func (s *SiteService) GetAdminConfig(ctx context.Context, _ *site.GetAdminConfig
 	smtpSt := sitesettings.GetServiceStatus(ctx, s.data.RDB, sitesettings.ServiceSmtp)
 	lgSt := sitesettings.GetServiceStatus(ctx, s.data.RDB, sitesettings.ServiceLuoGu)
 	qojSt := sitesettings.GetServiceStatus(ctx, s.data.RDB, sitesettings.ServiceQOJ)
+	vjudgeSt := sitesettings.GetServiceStatus(ctx, s.data.RDB, sitesettings.ServiceVJudge)
 	return &site.GetAdminConfigRes{
 		Code:                      0,
 		Message:                   "success",
@@ -245,6 +252,12 @@ func (s *SiteService) GetAdminConfig(ctx context.Context, _ *site.GetAdminConfig
 		OjQojStatus:               qojSt.Status,
 		OjQojStatusAt:             qojSt.At,
 		OjQojErrMsg:               qojSt.ErrMsg,
+		OjVjudgeUsername:          rt.OjVJudgeUsername,
+		OjVjudgePasswordMasked:    sitesettings.MaskSecret(rt.OjVJudgePassword),
+		OjVjudgePasswordSet:       strings.TrimSpace(rt.OjVJudgePassword) != "",
+		OjVjudgeStatus:            vjudgeSt.Status,
+		OjVjudgeStatusAt:          vjudgeSt.At,
+		OjVjudgeErrMsg:            vjudgeSt.ErrMsg,
 		AgentStatus:               agentSt.Status,
 		AgentStatusAt:             agentSt.At,
 		AgentErrMsg:               agentSt.ErrMsg,
@@ -409,6 +422,30 @@ func verifyOjCredentialsBeforeSave(row *model.SiteConfig, req *site.UpdateConfig
 			return "QOJ 账号验证失败：" + err.Error()
 		}
 	}
+	// VirtualOJ / VJudge
+	vjudgeUser := strings.TrimSpace(req.OjVjudgeUsername)
+	if vjudgeUser != "" {
+		if req.ClearOjVjudgePassword {
+			return "VirtualOJ 账号已填写，不能清空密码"
+		}
+		vjudgePass := ""
+		if isRealSecret(req.OjVjudgePassword) {
+			vjudgePass = strings.TrimSpace(req.OjVjudgePassword)
+		} else {
+			var err error
+			vjudgePass, err = readSiteSecret("oj_vjudge_password", row.OjVJudgePassword)
+			if err != nil {
+				return "VirtualOJ 密码读取失败：" + err.Error()
+			}
+		}
+		if strings.TrimSpace(vjudgePass) == "" {
+			return "请填写 VirtualOJ 密码"
+		}
+		if err := ojlogin.VerifyVJudge(context.Background(), vjudgeUser, vjudgePass); err != nil {
+			log.Warnf("oj login verify vjudge: %v", err)
+			return "VirtualOJ 账号验证失败：" + err.Error()
+		}
+	}
 	return ""
 }
 
@@ -538,6 +575,8 @@ func (s *SiteService) VerifyOjCredential(ctx context.Context, req *site.VerifyOj
 			svc = sitesettings.ServiceLuoGu
 		case "QOJ":
 			svc = sitesettings.ServiceQOJ
+		case "VJudge":
+			svc = sitesettings.ServiceVJudge
 		}
 		if svc != "" && s.data != nil && s.data.RDB != nil {
 			sitesettings.SetServiceStatus(ctx, s.data.RDB, svc, status, errMsg)
@@ -580,6 +619,22 @@ func (s *SiteService) VerifyOjCredential(ctx context.Context, req *site.VerifyOj
 			return &site.VerifyOjCredentialRes{Code: 1, Message: "请先填写 QOJ 密码", Ok: false}, nil
 		}
 		if err := ojlogin.VerifyQOJ(username, password); err != nil {
+			report(sitesettings.StatusFail, err.Error())
+			return &site.VerifyOjCredentialRes{Code: 0, Message: "验证失败", Ok: false, ErrorDetail: err.Error()}, nil
+		}
+		report(sitesettings.StatusOK, "")
+		return &site.VerifyOjCredentialRes{Code: 0, Message: "ok", Ok: true}, nil
+	case "VJudge":
+		if username == "" {
+			username = strings.TrimSpace(row.OjVJudgeUsername)
+		}
+		if !isRealSecret(password) {
+			password, err = readSiteSecret("oj_vjudge_password", row.OjVJudgePassword)
+			if err != nil {
+				return &site.VerifyOjCredentialRes{Code: 1, Message: "VirtualOJ 密码读取失败", Ok: false, ErrorDetail: err.Error()}, nil
+			}
+		}
+		if err := ojlogin.VerifyVJudge(ctx, username, password); err != nil {
 			report(sitesettings.StatusFail, err.Error())
 			return &site.VerifyOjCredentialRes{Code: 0, Message: "验证失败", Ok: false, ErrorDetail: err.Error()}, nil
 		}

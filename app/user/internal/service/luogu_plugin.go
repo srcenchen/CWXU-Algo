@@ -431,6 +431,10 @@ func (s *LuoguPluginService) ValidateLuoguPluginToken(ctx context.Context, req *
 		}
 		return nil, luoguPluginError(http.StatusInternalServerError, "TOKEN_VALIDATE_FAILED", "设备授权校验失败")
 	}
+	var user model.User
+	if err := s.db.WithContext(ctx).Select("username").First(&user, row.UserID).Error; err != nil {
+		return nil, luoguPluginError(http.StatusInternalServerError, "TOKEN_VALIDATE_FAILED", "设备授权校验失败")
+	}
 	if row.RevokedAt != nil {
 		return nil, luoguPluginError(http.StatusUnauthorized, "TOKEN_REVOKED", "设备授权已撤销")
 	}
@@ -454,6 +458,6 @@ func (s *LuoguPluginService) ValidateLuoguPluginToken(ctx context.Context, req *
 	return &pb.ValidateLuoguPluginTokenRes{
 		AuthorizationId: uint64(row.ID), UserId: uint64(row.UserID), LuoguUid: row.LuoguUID,
 		ClientKind: row.ClientKind, ClientVersion: row.ClientVersion,
-		RiskVersion: row.RiskVersion, ExpiresAt: row.ExpiresAt.Unix(), Scope: LuoguPluginScope,
+		RiskVersion: row.RiskVersion, ExpiresAt: row.ExpiresAt.Unix(), Scope: LuoguPluginScope, Username: user.Username,
 	}, nil
 }

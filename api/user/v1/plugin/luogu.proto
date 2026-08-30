@@ -164,4 +164,5 @@ message ValidateLuoguPluginTokenRes {
   string risk_version = 6;
   int64 expires_at = 7;
   string scope = 8;
+  string username = 9;
 }

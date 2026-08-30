@@ -17,7 +17,6 @@ import (
 
 	spiderpb "cwxu-algo/api/core/v1/spider"
 	pluginpb "cwxu-algo/api/user/v1/plugin"
-	profilepb "cwxu-algo/api/user/v1/profile"
 	bizservice "cwxu-algo/app/core_data/internal/biz/service"
 	"cwxu-algo/app/core_data/internal/data/dal"
 	"cwxu-algo/app/core_data/internal/data/model"
@@ -58,6 +57,7 @@ type luoguPluginIdentity struct {
 	LuoguUID        string
 	ClientKind      string
 	ClientVersion   string
+	Username        string
 }
 
 type luoguTokenValidator interface {
@@ -122,6 +122,7 @@ func (v *grpcLuoguTokenValidator) ValidateLuoguPluginToken(ctx context.Context, 
 		LuoguUID:        res.LuoguUid,
 		ClientKind:      res.ClientKind,
 		ClientVersion:   res.ClientVersion,
+		Username:        res.Username,
 	}, nil
 }
 
@@ -328,30 +329,22 @@ func (s *SpiderService) StartLuoguSync(ctx context.Context, req *spiderpb.StartL
 		if state.TokenHash != hashLuoguSessionToken(sessionToken) {
 			return nil, kratoserrors.Unauthorized("SESSION_EXPIRED", "同步会话已失效")
 		}
-		s.recordLuoguSyncAuditStart(ctx, state, req.ClientVersion, now)
+		s.recordLuoguSyncAuditStart(ctx, state, req.ClientVersion, identity.Username, now)
 		return luoguStartResponse(state, sessionToken, true), nil
 	}
 	state, err := s.loadLuoguSessionByID(ctx, sessionID)
 	if err != nil {
 		return nil, err
 	}
-	s.recordLuoguSyncAuditStart(ctx, state, req.ClientVersion, now)
+	s.recordLuoguSyncAuditStart(ctx, state, req.ClientVersion, identity.Username, now)
 	return luoguStartResponse(state, sessionToken, false), nil
 }
 
-func (s *SpiderService) recordLuoguSyncAuditStart(ctx context.Context, state *luoguSession, clientVersion string, startedAt time.Time) {
+func (s *SpiderService) recordLuoguSyncAuditStart(ctx context.Context, state *luoguSession, clientVersion, username string, startedAt time.Time) {
 	if state == nil {
 		return
 	}
 	if auditor, ok := s.luoguImporter.(luoguSyncAuditor); ok {
-		username := ""
-		if s.reg != nil {
-			if client, err := userrpc.ProfileClient(&s.reg.Reg); err == nil {
-				if result, err := client.GetByIds(ctx, &profilepb.GetByIdsReq{UserIds: []int64{state.UserID}}); err == nil && len(result.Profiles) > 0 && result.Profiles[0] != nil {
-					username = result.Profiles[0].Username
-				}
-			}
-		}
 		if auditErr := auditor.StartClientSyncAudit(ctx, bizservice.ClientSyncAuditStart{SessionID: state.ID, AuthorizationID: state.AuthorizationID, UserID: state.UserID, Username: username, Platform: "luogu", OJUID: state.LuoguUID, ClientKind: state.ClientKind, ClientVersion: clientVersion, StartedAt: startedAt}); auditErr != nil {
 			log.Warnf("client-sync audit start session=%s: %v", state.ID, auditErr)
 		}
