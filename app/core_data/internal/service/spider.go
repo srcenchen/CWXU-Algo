@@ -1395,7 +1395,7 @@ func (s SpiderService) TogglePlatform(ctx context.Context, req *spider.TogglePla
 			return &spider.TogglePlatformRes{Code: 1, Message: "需要题库运维权限"}, nil
 		}
 		plat := strings.TrimSpace(req.GetPlatform())
-		if !supportsVJudgeStatementSource(plat) {
+		if req.GetSource() == "vjudge" && !supportsVJudgeStatementSource(plat) {
 			return &spider.TogglePlatformRes{Code: 1, Message: "该平台暂不支持 VirtualOJ 题面"}, nil
 		}
 		if _, ok := spiderregistry.Get(plat); !ok {

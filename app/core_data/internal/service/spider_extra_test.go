@@ -23,6 +23,17 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
+func TestSupportsVJudgeStatementSource(t *testing.T) {
+	for _, platform := range []string{"LuoGu", "CodeForces", "AtCoder", "QOJ"} {
+		if !supportsVJudgeStatementSource(platform) {
+			t.Errorf("%s should support VirtualOJ", platform)
+		}
+	}
+	if supportsVJudgeStatementSource("POJ") {
+		t.Fatal("POJ should remain official-only")
+	}
+}
+
 // genTestRSAKeys 生成测试用 RSA 密钥对（PEM）。
 func genTestRSAKeys(t *testing.T) (privPEM, pubPEM string) {
 	t.Helper()
