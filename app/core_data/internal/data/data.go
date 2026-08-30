@@ -135,6 +135,7 @@ func migrateModels(db *gorm.DB) {
 		&model.SpiderRepairState{},
 		&model.ClientSyncPageReceipt{},
 		&model.ClientSyncPostProcessJob{},
+		&model.ClientSyncAudit{},
 		&model.ContestCalendar{},
 		&model.ContestCalendarSub{},
 		&model.ContestCalendarNotifyLog{},
