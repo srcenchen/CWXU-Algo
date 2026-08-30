@@ -1064,6 +1064,9 @@ func (uc *SpiderUseCase) hasProfileRebuildAfterBindingMarker(userID int64, platf
 
 // loadOnePlatform 返回 (是否有数据变更, error)
 func (uc *SpiderUseCase) loadOnePlatform(ctx context.Context, userId int64, plat model.Platform, needAll bool) (bool, error) {
+	// Rating 是平台公开基础数据，独立于提交记录同步、题面抓取和站点
+	// 登录账号；先执行，后续提交链路失败也不能影响 Rating 更新。
+	uc.fetchAndSaveRating(plat)
 	uc.injectOjCredentials(ctx)
 	var repairRequired bool
 	if plat.Platform == spider.QOJ {
@@ -1099,8 +1102,6 @@ func (uc *SpiderUseCase) loadOnePlatform(ctx context.Context, userId int64, plat
 			uc.invalidateAfterContestWrite(userId, true)
 		}
 		if err == nil {
-			// 与提交/比赛一并刷新 rating（未实现 RatingFetcher 的平台自动跳过）
-			uc.fetchAndSaveRating(plat)
 			log.Infof("Spider: %s %s 成功 new_rows=%d", plat.Platform, plat.Username, rows)
 			if (anyChange || uc.hasProfileRebuildAfterBindingMarker(userId, plat.Platform)) && uc.problem != nil {
 				// 异步绑定，避免在 spider worker 内串行 resolve 拖垮队列。
@@ -1127,8 +1128,6 @@ func (uc *SpiderUseCase) loadOnePlatform(ctx context.Context, userId int64, plat
 				plat.Username,
 				err,
 			)
-			// 提交失败仍尝试刷 rating（独立接口，失败不阻断）
-			uc.fetchAndSaveRating(plat)
 			return anyChange, err
 		}
 		log.Errorf(
@@ -1140,12 +1139,10 @@ func (uc *SpiderUseCase) loadOnePlatform(ctx context.Context, userId int64, plat
 			err,
 		)
 		if !needAll || i+1 >= maxRetries {
-			uc.fetchAndSaveRating(plat)
 			return anyChange, err
 		}
 		time.Sleep(3 * time.Second)
 	}
-	uc.fetchAndSaveRating(plat)
 	if lastErr != nil {
 		return anyChange, lastErr
 	}
