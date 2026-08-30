@@ -1051,7 +1051,7 @@ type SpiderPlatformStat struct {
 	TodayRows int64 `protobuf:"varint,20,opt,name=todayRows,proto3" json:"todayRows,omitempty"`
 	// 提交同步是否暂停
 	SubmitPaused bool `protobuf:"varint,21,opt,name=submitPaused,proto3" json:"submitPaused,omitempty"`
-	// 题面抓取是否暂停
+	// 兼容字段：官方和 VirtualOJ 题面来源均关闭时为 true
 	ProblemPaused            bool `protobuf:"varint,22,opt,name=problemPaused,proto3" json:"problemPaused,omitempty"`
 	OfficialStatementEnabled bool `protobuf:"varint,23,opt,name=officialStatementEnabled,proto3" json:"officialStatementEnabled,omitempty"`
 	VjudgeStatementEnabled   bool `protobuf:"varint,24,opt,name=vjudgeStatementEnabled,proto3" json:"vjudgeStatementEnabled,omitempty"`

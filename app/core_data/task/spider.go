@@ -100,9 +100,7 @@ func OjLastErrKey(platform string) string {
 const (
 	// pausedPlatformsKey 站管暂停提交同步的 OJ 集合（SET；不带 TTL）
 	pausedPlatformsKey = "spider:paused_platforms"
-	// problemPausedPlatformsKey 站管暂停题面抓取的 OJ 集合（SET；不带 TTL）
-	problemPausedPlatformsKey = "problem:paused_platforms"
-	problemSourceKey          = "problem:source_policy"
+	problemSourceKey   = "problem:source_policy"
 )
 
 func isPlatformPaused(rdb *redis.Client, key, platform string) bool {
@@ -192,28 +190,6 @@ func IsPlatformPaused(rdb *redis.Client, platform string) bool {
 // SetPlatformPaused 暂停 / 恢复某 OJ 的爬虫同步
 func SetPlatformPaused(rdb *redis.Client, platform string, paused bool) error {
 	return setPlatformPaused(rdb, pausedPlatformsKey, platform, paused)
-}
-
-// IsProblemPlatformPaused 站管是否已暂停某 OJ 的题面抓取
-func IsProblemPlatformPaused(rdb *redis.Client, platform string) bool {
-	return isPlatformPaused(rdb, problemPausedPlatformsKey, platform)
-}
-
-// IsProblemPlatformPausedSafe is the fail-safe pause check used before external problem fetches.
-func IsProblemPlatformPausedSafe(rdb *redis.Client, platform string) (bool, error) {
-	if rdb == nil {
-		return false, fmt.Errorf("problem platform pause: redis unavailable")
-	}
-	paused, err := rdb.SIsMember(context.Background(), problemPausedPlatformsKey, strings.TrimSpace(platform)).Result()
-	if err != nil {
-		return false, fmt.Errorf("problem platform pause: %w", err)
-	}
-	return paused, nil
-}
-
-// SetProblemPlatformPaused 暂停 / 恢复某 OJ 的题面抓取
-func SetProblemPlatformPaused(rdb *redis.Client, platform string, paused bool) error {
-	return setPlatformPaused(rdb, problemPausedPlatformsKey, platform, paused)
 }
 
 // PausedPlatforms 返回已暂停同步的 OJ 集合（站管监控用）

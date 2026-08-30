@@ -27,10 +27,9 @@ const (
 	// problemRetryBaseDelay 重投退避基数：按重试次数指数递增，上限 problemRetryMaxDelay
 	problemRetryBaseDelay = 2 * time.Second
 	problemRetryMaxDelay  = 30 * time.Second
-	// problemPausedRequeueDelay 流水线暂停时拉长等待再重投，避免「取出-sleep-requeue」空转
-	problemPausedRequeueDelay    = 30 * time.Second
-	problemFetchQueue            = "problem_fetch"
-	problemFetchPausedDelayQueue = "problem_fetch.paused.delay"
+	// pipelineRequeueDelay 流水线暂停时拉长等待再重投，避免空转
+	pipelineRequeueDelay = 30 * time.Second
+	problemFetchQueue    = "problem_fetch"
 )
 
 // 进程内解析一次，供 consumer 与 progress 面板共用
@@ -180,66 +179,15 @@ type problemFetchPauseKind uint8
 const (
 	problemFetchPauseNone problemFetchPauseKind = iota
 	problemFetchPauseGlobal
-	problemFetchPausePlatform
 )
 
 func classifyProblemFetchPause(err error) problemFetchPauseKind {
 	switch {
 	case errors.Is(err, errProblemFetchPaused):
 		return problemFetchPauseGlobal
-	case errors.Is(err, errProblemPlatformPaused):
-		return problemFetchPausePlatform
 	default:
 		return problemFetchPauseNone
 	}
-}
-
-type problemFetchPausedBroker interface {
-	QueueDeclare(name string, durable, autoDelete, exclusive, noWait bool, args amqp.Table) (amqp.Queue, error)
-	Publish(exchange, key string, mandatory, immediate bool, msg amqp.Publishing) error
-}
-
-func problemFetchPausedPublishing(d amqp.Delivery) amqp.Publishing {
-	headers := amqp.Table{}
-	for key, value := range d.Headers {
-		headers[key] = value
-	}
-	return amqp.Publishing{
-		ContentType:     d.ContentType,
-		ContentEncoding: d.ContentEncoding,
-		DeliveryMode:    d.DeliveryMode,
-		Priority:        d.Priority,
-		CorrelationId:   d.CorrelationId,
-		ReplyTo:         d.ReplyTo,
-		Expiration:      d.Expiration,
-		MessageId:       d.MessageId,
-		Timestamp:       d.Timestamp,
-		Type:            d.Type,
-		UserId:          d.UserId,
-		AppId:           d.AppId,
-		Headers:         headers,
-		Body:            append([]byte(nil), d.Body...),
-	}
-}
-
-func publishProblemFetchPaused(mq problemFetchPausedBroker, d amqp.Delivery) error {
-	_, err := mq.QueueDeclare(problemFetchPausedDelayQueue, true, false, false, false, amqp.Table{
-		"x-message-ttl":             int32(problemPausedRequeueDelay / time.Millisecond),
-		"x-dead-letter-exchange":    "",
-		"x-dead-letter-routing-key": problemFetchQueue,
-	})
-	if err != nil {
-		return err
-	}
-	return mq.Publish("", problemFetchPausedDelayQueue, false, false, problemFetchPausedPublishing(d))
-}
-
-func settleProblemFetchPaused(mq problemFetchPausedBroker, d amqp.Delivery) error {
-	if err := publishProblemFetchPaused(mq, d); err != nil {
-		_ = d.Nack(false, true)
-		return err
-	}
-	return d.Ack(false)
 }
 
 // ProblemFetchConsumer 消费 problem_fetch：仅爬取
@@ -340,7 +288,7 @@ func (c *ProblemFetchConsumer) consumeOnce() error {
 			// 平台暂停必须由 ProcessFetch 读取题目后按 DB 平台判断，不能信任可能陈旧的消息平台。
 			if problemFetchEventPaused(msg) {
 				log.Warnf("problem_fetch id=%d requeue: fetch paused", msg.ProblemID)
-				sleepOrStop(c.stopCh, problemPausedRequeueDelay)
+				sleepOrStop(c.stopCh, pipelineRequeueDelay)
 				_ = d.Nack(false, true)
 				return
 			}
@@ -352,14 +300,8 @@ func (c *ProblemFetchConsumer) consumeOnce() error {
 				switch classifyProblemFetchPause(err) {
 				case problemFetchPauseGlobal:
 					log.Warnf("RabbitMQ(problem_fetch) id=%d requeue paused: %v", msg.ProblemID, err)
-					sleepOrStop(c.stopCh, problemPausedRequeueDelay)
+					sleepOrStop(c.stopCh, pipelineRequeueDelay)
 					_ = d.Nack(false, true)
-					return
-				case problemFetchPausePlatform:
-					log.Warnf("RabbitMQ(problem_fetch) id=%d delayed republish: %v", msg.ProblemID, err)
-					if settleErr := settleProblemFetchPaused(c.mq, d); settleErr != nil {
-						log.Errorf("RabbitMQ(problem_fetch) id=%d settle paused: %v", msg.ProblemID, settleErr)
-					}
 					return
 				}
 				log.Errorf("RabbitMQ(problem_fetch) id=%d: %v", msg.ProblemID, err)
@@ -481,7 +423,7 @@ func (c *ProblemAnalyzeConsumer) consumeOnce(concurrency int, concurrencySource 
 				}
 				if pipelineControl.IsAnalyzePaused() {
 					log.Warnf("problem_analyze id=%d requeue: AI paused", msg.ProblemID)
-					sleepOrStop(c.stopCh, problemPausedRequeueDelay)
+					sleepOrStop(c.stopCh, pipelineRequeueDelay)
 					_ = d.Nack(false, true)
 					return
 				}
@@ -493,7 +435,7 @@ func (c *ProblemAnalyzeConsumer) consumeOnce(concurrency int, concurrencySource 
 				if err != nil {
 					if strings.Contains(err.Error(), "paused") {
 						log.Warnf("RabbitMQ(problem_analyze) id=%d requeue paused: %v", msg.ProblemID, err)
-						sleepOrStop(c.stopCh, problemPausedRequeueDelay)
+						sleepOrStop(c.stopCh, pipelineRequeueDelay)
 						_ = d.Nack(false, true)
 						return
 					}

@@ -30,6 +30,12 @@ service Problem {
       get: "/v1/core/problem/get"
     };
   }
+  rpc Refetch (RefetchProblemReq) returns (ProblemActionRes) {
+    option (google.api.http) = { post: "/v1/core/problem/refetch" body: "*" };
+  }
+  rpc Reanalyze (ReanalyzeProblemReq) returns (ProblemActionRes) {
+    option (google.api.http) = { post: "/v1/core/problem/reanalyze" body: "*" };
+  }
   // 本题出现过的比赛（contest_problems 反查，全平台）
   rpc RelatedContests (RelatedContestsReq) returns (RelatedContestsRes) {
     option (google.api.http) = {
@@ -204,7 +210,14 @@ message ProblemInfo {
   string content_source = 16;
   string content_source_url = 17;
   string content_language = 18;
+  int64 content_fetched_at = 19;
+  int64 analyzed_at = 20;
+  string analyzed_model = 21;
 }
+
+message RefetchProblemReq { uint32 problem_id = 1; }
+message ReanalyzeProblemReq { uint32 problem_id = 1; }
+message ProblemActionRes { int64 code = 1; string message = 2; int32 remaining = 3; }
 
 message ListProblemReq {
   int64 page = 1;

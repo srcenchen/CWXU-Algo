@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"cwxu-algo/api/core/v1/problem"
 	"cwxu-algo/api/user/v1/profile"
@@ -166,7 +167,17 @@ func (s *ProblemService) toInfo(p *model.Problem, userStatus string) *problem.Pr
 		ContentSource:    p.ContentSource,
 		ContentSourceUrl: p.ContentSourceURL,
 		ContentLanguage:  p.ContentLanguage,
+		ContentFetchedAt: unixTime(p.ContentFetchedAt),
+		AnalyzedAt:       unixTime(p.AnalyzedAt),
+		AnalyzedModel:    p.AnalyzedModel,
 	}
+}
+
+func unixTime(t *time.Time) int64 {
+	if t == nil {
+		return 0
+	}
+	return t.Unix()
 }
 
 func splitCSV(s string) []string {
@@ -307,6 +318,32 @@ func (s *ProblemService) Get(ctx context.Context, req *problem.GetProblemReq) (*
 		Message: "success",
 		Data:    info,
 	}, nil
+}
+
+func (s *ProblemService) Refetch(ctx context.Context, req *problem.RefetchProblemReq) (*problem.ProblemActionRes, error) {
+	uid := auth.GetCurrentUserId(ctx)
+	if uid == 0 {
+		return &problem.ProblemActionRes{Code: 1, Message: "请先登录"}, nil
+	}
+	if !s.uc.UserCanFetchProblem(ctx, uid) {
+		return &problem.ProblemActionRes{Code: 1, Message: "暂无爬取题面权限"}, nil
+	}
+	if err := s.uc.ForceEnqueueFetch(uint(req.GetProblemId()), uint(uid)); err != nil {
+		return &problem.ProblemActionRes{Code: 1, Message: err.Error()}, nil
+	}
+	return &problem.ProblemActionRes{Code: 0, Message: "已开始重新爬取题面"}, nil
+}
+
+func (s *ProblemService) Reanalyze(ctx context.Context, req *problem.ReanalyzeProblemReq) (*problem.ProblemActionRes, error) {
+	uid := auth.GetCurrentUserId(ctx)
+	if uid == 0 {
+		return &problem.ProblemActionRes{Code: 1, Message: "请先登录"}, nil
+	}
+	remaining, err := s.uc.PrepareUserReanalyze(uint(req.GetProblemId()), uint(uid))
+	if err != nil {
+		return &problem.ProblemActionRes{Code: 1, Message: err.Error()}, nil
+	}
+	return &problem.ProblemActionRes{Code: 0, Message: "已开始重新分析", Remaining: int32(remaining)}, nil
 }
 
 func (s *ProblemService) RelatedContests(ctx context.Context, req *problem.RelatedContestsReq) (*problem.RelatedContestsRes, error) {

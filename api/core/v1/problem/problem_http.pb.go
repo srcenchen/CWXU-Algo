@@ -34,6 +34,8 @@ const OperationProblemListTags = "/api.core.v1.problem.Problem/ListTags"
 const OperationProblemMyPendingEdit = "/api.core.v1.problem.Problem/MyPendingEdit"
 const OperationProblemProgress = "/api.core.v1.problem.Problem/Progress"
 const OperationProblemProposeEdit = "/api.core.v1.problem.Problem/ProposeEdit"
+const OperationProblemReanalyze = "/api.core.v1.problem.Problem/Reanalyze"
+const OperationProblemRefetch = "/api.core.v1.problem.Problem/Refetch"
 const OperationProblemRelatedContests = "/api.core.v1.problem.Problem/RelatedContests"
 const OperationProblemRepairQOJTitles = "/api.core.v1.problem.Problem/RepairQOJTitles"
 const OperationProblemResetAll = "/api.core.v1.problem.Problem/ResetAll"
@@ -71,6 +73,8 @@ type ProblemHTTPServer interface {
 	Progress(context.Context, *ProgressReq) (*ProgressRes, error)
 	// ProposeEdit 登录用户：提交标签/题面修改申请（站点管理员审核）
 	ProposeEdit(context.Context, *ProposeProblemEditReq) (*ProposeProblemEditRes, error)
+	Reanalyze(context.Context, *ReanalyzeProblemReq) (*ProblemActionRes, error)
+	Refetch(context.Context, *RefetchProblemReq) (*ProblemActionRes, error)
 	// RelatedContests 本题出现过的比赛（contest_problems 反查，全平台）
 	RelatedContests(context.Context, *RelatedContestsReq) (*RelatedContestsRes, error)
 	// RepairQOJTitles 全量修复 QOJ 题目标题被识别为「QOJ.ac」的脏数据（后台任务）
@@ -98,6 +102,8 @@ func RegisterProblemHTTPServer(s *http.Server, srv ProblemHTTPServer) {
 	r.GET("/v1/core/problem/tags", _Problem_ListTags0_HTTP_Handler(srv))
 	r.GET("/v1/core/problem/hot", _Problem_Hot0_HTTP_Handler(srv))
 	r.GET("/v1/core/problem/get", _Problem_Get1_HTTP_Handler(srv))
+	r.POST("/v1/core/problem/refetch", _Problem_Refetch0_HTTP_Handler(srv))
+	r.POST("/v1/core/problem/reanalyze", _Problem_Reanalyze0_HTTP_Handler(srv))
 	r.GET("/v1/core/problem/related-contests", _Problem_RelatedContests0_HTTP_Handler(srv))
 	r.GET("/v1/core/problem/submissions", _Problem_ListSubmissions0_HTTP_Handler(srv))
 	r.GET("/v1/core/problem/following-status", _Problem_FollowingStatus0_HTTP_Handler(srv))
@@ -193,6 +199,50 @@ func _Problem_Get1_HTTP_Handler(srv ProblemHTTPServer) func(ctx http.Context) er
 			return err
 		}
 		reply := out.(*GetProblemRes)
+		return ctx.Result(200, reply)
+	}
+}
+
+func _Problem_Refetch0_HTTP_Handler(srv ProblemHTTPServer) func(ctx http.Context) error {
+	return func(ctx http.Context) error {
+		var in RefetchProblemReq
+		if err := ctx.Bind(&in); err != nil {
+			return err
+		}
+		if err := ctx.BindQuery(&in); err != nil {
+			return err
+		}
+		http.SetOperation(ctx, OperationProblemRefetch)
+		h := ctx.Middleware(func(ctx context.Context, req interface{}) (interface{}, error) {
+			return srv.Refetch(ctx, req.(*RefetchProblemReq))
+		})
+		out, err := h(ctx, &in)
+		if err != nil {
+			return err
+		}
+		reply := out.(*ProblemActionRes)
+		return ctx.Result(200, reply)
+	}
+}
+
+func _Problem_Reanalyze0_HTTP_Handler(srv ProblemHTTPServer) func(ctx http.Context) error {
+	return func(ctx http.Context) error {
+		var in ReanalyzeProblemReq
+		if err := ctx.Bind(&in); err != nil {
+			return err
+		}
+		if err := ctx.BindQuery(&in); err != nil {
+			return err
+		}
+		http.SetOperation(ctx, OperationProblemReanalyze)
+		h := ctx.Middleware(func(ctx context.Context, req interface{}) (interface{}, error) {
+			return srv.Reanalyze(ctx, req.(*ReanalyzeProblemReq))
+		})
+		out, err := h(ctx, &in)
+		if err != nil {
+			return err
+		}
+		reply := out.(*ProblemActionRes)
 		return ctx.Result(200, reply)
 	}
 }
@@ -664,6 +714,8 @@ type ProblemHTTPClient interface {
 	Progress(ctx context.Context, req *ProgressReq, opts ...http.CallOption) (rsp *ProgressRes, err error)
 	// ProposeEdit 登录用户：提交标签/题面修改申请（站点管理员审核）
 	ProposeEdit(ctx context.Context, req *ProposeProblemEditReq, opts ...http.CallOption) (rsp *ProposeProblemEditRes, err error)
+	Reanalyze(ctx context.Context, req *ReanalyzeProblemReq, opts ...http.CallOption) (rsp *ProblemActionRes, err error)
+	Refetch(ctx context.Context, req *RefetchProblemReq, opts ...http.CallOption) (rsp *ProblemActionRes, err error)
 	// RelatedContests 本题出现过的比赛（contest_problems 反查，全平台）
 	RelatedContests(ctx context.Context, req *RelatedContestsReq, opts ...http.CallOption) (rsp *RelatedContestsRes, err error)
 	// RepairQOJTitles 全量修复 QOJ 题目标题被识别为「QOJ.ac」的脏数据（后台任务）
@@ -890,6 +942,32 @@ func (c *ProblemHTTPClientImpl) ProposeEdit(ctx context.Context, in *ProposeProb
 	pattern := "/v1/core/problem/propose-edit"
 	path := binding.EncodeURL(pattern, in, false)
 	opts = append(opts, http.Operation(OperationProblemProposeEdit))
+	opts = append(opts, http.PathTemplate(pattern))
+	err := c.cc.Invoke(ctx, "POST", path, in, &out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (c *ProblemHTTPClientImpl) Reanalyze(ctx context.Context, in *ReanalyzeProblemReq, opts ...http.CallOption) (*ProblemActionRes, error) {
+	var out ProblemActionRes
+	pattern := "/v1/core/problem/reanalyze"
+	path := binding.EncodeURL(pattern, in, false)
+	opts = append(opts, http.Operation(OperationProblemReanalyze))
+	opts = append(opts, http.PathTemplate(pattern))
+	err := c.cc.Invoke(ctx, "POST", path, in, &out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (c *ProblemHTTPClientImpl) Refetch(ctx context.Context, in *RefetchProblemReq, opts ...http.CallOption) (*ProblemActionRes, error) {
+	var out ProblemActionRes
+	pattern := "/v1/core/problem/refetch"
+	path := binding.EncodeURL(pattern, in, false)
+	opts = append(opts, http.Operation(OperationProblemRefetch))
 	opts = append(opts, http.PathTemplate(pattern))
 	err := c.cc.Invoke(ctx, "POST", path, in, &out, opts...)
 	if err != nil {

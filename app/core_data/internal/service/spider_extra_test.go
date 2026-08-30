@@ -61,14 +61,12 @@ func TestTogglePlatformDispatchesModuleAndReportsRedisFailure(t *testing.T) {
 	admin := spiderExtraAdminToken(t, 1, true)
 
 	r := spiderExtraRequest(server, http.MethodPost, "/v1/core/spider/toggle-platform", admin,
-		`{"platform":"NowCoder","enabled":false,"module":"problem"}`)
+		`{"platform":"NowCoder","enabled":false,"module":"problem","source":"official"}`)
 	var body map[string]interface{}
 	if err := json.Unmarshal(r.Body.Bytes(), &body); err != nil {
 		t.Fatalf("problem toggle invalid json: %v body=%s", err, r.Body.String())
 	}
-	if body["code"] != "0" || !task.IsProblemPlatformPaused(rdb, "NowCoder") {
-		t.Fatalf("problem toggle 未写入题面 SET: body=%s", r.Body.String())
-	}
+	if body["code"] != "0" { t.Fatalf("source toggle failed: body=%s", r.Body.String()) }
 	if task.IsPlatformPaused(rdb, "NowCoder") {
 		t.Fatal("problem toggle 不应暂停提交爬虫")
 	}

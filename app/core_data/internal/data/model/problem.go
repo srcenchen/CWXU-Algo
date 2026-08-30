@@ -125,6 +125,8 @@ type Problem struct {
 	ContentSourceStatementID string        `gorm:"size:64"`
 	ContentLanguage          string        `gorm:"size:16"`
 	ContentFetchedAt         *time.Time    `gorm:"index"`
+	AnalyzedAt               *time.Time    `gorm:"index"`
+	AnalyzedModel            string        `gorm:"size:128"`
 	ProblemType              string        `gorm:"size:128"`
 	Tags                     StringArray   `gorm:"type:jsonb;default:'[]'"`
 	SolutionsMeta            SolutionsMeta `gorm:"type:jsonb;default:'[]'"`

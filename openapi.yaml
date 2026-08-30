@@ -1117,6 +1117,42 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/api.core.v1.problem.ProposeProblemEditRes'
+    /v1/core/problem/reanalyze:
+        post:
+            tags:
+                - Problem
+            operationId: Problem_Reanalyze
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/api.core.v1.problem.ReanalyzeProblemReq'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.core.v1.problem.ProblemActionRes'
+    /v1/core/problem/refetch:
+        post:
+            tags:
+                - Problem
+            operationId: Problem_Refetch
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/api.core.v1.problem.RefetchProblemReq'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.core.v1.problem.ProblemActionRes'
     /v1/core/problem/related-contests:
         get:
             tags:
@@ -7776,6 +7812,16 @@ components:
                     type: string
                 count:
                     type: string
+        api.core.v1.problem.ProblemActionRes:
+            type: object
+            properties:
+                code:
+                    type: string
+                message:
+                    type: string
+                remaining:
+                    type: integer
+                    format: int32
         api.core.v1.problem.ProblemContributor:
             type: object
             properties:
@@ -7897,6 +7943,12 @@ components:
                     type: string
                 contentLanguage:
                     type: string
+                contentFetchedAt:
+                    type: string
+                analyzedAt:
+                    type: string
+                analyzedModel:
+                    type: string
         api.core.v1.problem.ProblemRelatedContest:
             type: object
             properties:
@@ -8017,6 +8069,18 @@ components:
                     type: string
                 concurrency:
                     type: string
+        api.core.v1.problem.ReanalyzeProblemReq:
+            type: object
+            properties:
+                problemId:
+                    type: integer
+                    format: uint32
+        api.core.v1.problem.RefetchProblemReq:
+            type: object
+            properties:
+                problemId:
+                    type: integer
+                    format: uint32
         api.core.v1.problem.RelatedContestsRes:
             type: object
             properties:
@@ -8916,7 +8980,7 @@ components:
                     description: 提交同步是否暂停
                 problemPaused:
                     type: boolean
-                    description: 题面抓取是否暂停
+                    description: 兼容字段：官方和 VirtualOJ 题面来源均关闭时为 true
                 officialStatementEnabled:
                     type: boolean
                 vjudgeStatementEnabled:

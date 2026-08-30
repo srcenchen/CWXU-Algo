@@ -40,6 +40,18 @@ func (uc *ProblemUseCase) userHasAIEligibility(userID uint) bool {
 	return yes
 }
 
+func (uc *ProblemUseCase) UserCanFetchProblem(ctx context.Context, userID uint) bool {
+	if userID == 0 {
+		return false
+	}
+	users, ok := uc.pipelineUserIDs("fetch")
+	if !ok {
+		return false
+	}
+	_, yes := users[int64(userID)]
+	return yes
+}
+
 // problemHasOrgSubmitter 兼容旧调用：等价于 AI 资格（题面 AI 闸门）
 func (uc *ProblemUseCase) problemHasOrgSubmitter(problemID uint) bool {
 	return uc.problemHasAISubmitter(problemID)

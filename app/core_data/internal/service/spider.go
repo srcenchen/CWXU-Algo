@@ -1106,12 +1106,12 @@ func (s SpiderService) GetSpiderMonitor(ctx context.Context, _ *spider.SpiderMon
 			HasContestCalendar: cap.contest,
 			Paused:             submitPaused,
 			SubmitPaused:       submitPaused,
-			ProblemPaused:      task.IsProblemPlatformPaused(s.rdb, cap.platform),
 		}
 		st.OfficialStatementEnabled, st.VjudgeStatementEnabled = task.ProblemStatementSources(s.rdb, cap.platform)
 		if !supportsVJudgeStatementSource(cap.platform) {
 			st.VjudgeStatementEnabled = false
 		}
+		st.ProblemPaused = !st.OfficialStatementEnabled && !st.VjudgeStatementEnabled
 		if s.rdb != nil {
 			// 最近同步（按 OJ 聚合）
 			if v, err := s.rdb.Get(ctx, task.OjLastOKKey(cap.platform)).Int64(); err == nil {
@@ -1418,7 +1418,7 @@ func (s SpiderService) TogglePlatform(ctx context.Context, req *spider.TogglePla
 		if !auth.HasPerm(ctx, rbac.PermSiteProblemOps) {
 			return &spider.TogglePlatformRes{Code: 1, Message: "需要题库运维权限"}, nil
 		}
-		setter = task.SetProblemPlatformPaused
+		return &spider.TogglePlatformRes{Code: 1, Message: "请使用题面来源开关"}, nil
 	default:
 		return &spider.TogglePlatformRes{Code: 1, Message: "module 仅支持 submit/problem"}, nil
 	}

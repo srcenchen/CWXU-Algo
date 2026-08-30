@@ -71,6 +71,16 @@ func (t *ProblemTagger) Ready() bool {
 	return t.client != nil && t.model != ""
 }
 
+func (t *ProblemTagger) ModelName() string {
+	if t == nil {
+		return ""
+	}
+	t.reload(context.Background())
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.model
+}
+
 type aiAnalyzeResult struct {
 	ProblemType        string               `json:"problem_type"`
 	Difficulty         string               `json:"difficulty"`

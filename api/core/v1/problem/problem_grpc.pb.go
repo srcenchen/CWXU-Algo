@@ -23,6 +23,8 @@ const (
 	Problem_ListTags_FullMethodName             = "/api.core.v1.problem.Problem/ListTags"
 	Problem_Hot_FullMethodName                  = "/api.core.v1.problem.Problem/Hot"
 	Problem_Get_FullMethodName                  = "/api.core.v1.problem.Problem/Get"
+	Problem_Refetch_FullMethodName              = "/api.core.v1.problem.Problem/Refetch"
+	Problem_Reanalyze_FullMethodName            = "/api.core.v1.problem.Problem/Reanalyze"
 	Problem_RelatedContests_FullMethodName      = "/api.core.v1.problem.Problem/RelatedContests"
 	Problem_ListSubmissions_FullMethodName      = "/api.core.v1.problem.Problem/ListSubmissions"
 	Problem_FollowingStatus_FullMethodName      = "/api.core.v1.problem.Problem/FollowingStatus"
@@ -56,6 +58,8 @@ type ProblemClient interface {
 	// 全站热题：近 N 天按提交次数 / 做题人数 / AC 次数综合热度排序
 	Hot(ctx context.Context, in *HotProblemReq, opts ...grpc.CallOption) (*HotProblemRes, error)
 	Get(ctx context.Context, in *GetProblemReq, opts ...grpc.CallOption) (*GetProblemRes, error)
+	Refetch(ctx context.Context, in *RefetchProblemReq, opts ...grpc.CallOption) (*ProblemActionRes, error)
+	Reanalyze(ctx context.Context, in *ReanalyzeProblemReq, opts ...grpc.CallOption) (*ProblemActionRes, error)
 	// 本题出现过的比赛（contest_problems 反查，全平台）
 	RelatedContests(ctx context.Context, in *RelatedContestsReq, opts ...grpc.CallOption) (*RelatedContestsRes, error)
 	ListSubmissions(ctx context.Context, in *ListSubmissionsReq, opts ...grpc.CallOption) (*ListSubmissionsRes, error)
@@ -138,6 +142,26 @@ func (c *problemClient) Get(ctx context.Context, in *GetProblemReq, opts ...grpc
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(GetProblemRes)
 	err := c.cc.Invoke(ctx, Problem_Get_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *problemClient) Refetch(ctx context.Context, in *RefetchProblemReq, opts ...grpc.CallOption) (*ProblemActionRes, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ProblemActionRes)
+	err := c.cc.Invoke(ctx, Problem_Refetch_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *problemClient) Reanalyze(ctx context.Context, in *ReanalyzeProblemReq, opts ...grpc.CallOption) (*ProblemActionRes, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ProblemActionRes)
+	err := c.cc.Invoke(ctx, Problem_Reanalyze_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -364,6 +388,8 @@ type ProblemServer interface {
 	// 全站热题：近 N 天按提交次数 / 做题人数 / AC 次数综合热度排序
 	Hot(context.Context, *HotProblemReq) (*HotProblemRes, error)
 	Get(context.Context, *GetProblemReq) (*GetProblemRes, error)
+	Refetch(context.Context, *RefetchProblemReq) (*ProblemActionRes, error)
+	Reanalyze(context.Context, *ReanalyzeProblemReq) (*ProblemActionRes, error)
 	// 本题出现过的比赛（contest_problems 反查，全平台）
 	RelatedContests(context.Context, *RelatedContestsReq) (*RelatedContestsRes, error)
 	ListSubmissions(context.Context, *ListSubmissionsReq) (*ListSubmissionsRes, error)
@@ -423,6 +449,12 @@ func (UnimplementedProblemServer) Hot(context.Context, *HotProblemReq) (*HotProb
 }
 func (UnimplementedProblemServer) Get(context.Context, *GetProblemReq) (*GetProblemRes, error) {
 	return nil, status.Error(codes.Unimplemented, "method Get not implemented")
+}
+func (UnimplementedProblemServer) Refetch(context.Context, *RefetchProblemReq) (*ProblemActionRes, error) {
+	return nil, status.Error(codes.Unimplemented, "method Refetch not implemented")
+}
+func (UnimplementedProblemServer) Reanalyze(context.Context, *ReanalyzeProblemReq) (*ProblemActionRes, error) {
+	return nil, status.Error(codes.Unimplemented, "method Reanalyze not implemented")
 }
 func (UnimplementedProblemServer) RelatedContests(context.Context, *RelatedContestsReq) (*RelatedContestsRes, error) {
 	return nil, status.Error(codes.Unimplemented, "method RelatedContests not implemented")
@@ -576,6 +608,42 @@ func _Problem_Get_Handler(srv interface{}, ctx context.Context, dec func(interfa
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(ProblemServer).Get(ctx, req.(*GetProblemReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Problem_Refetch_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RefetchProblemReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ProblemServer).Refetch(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Problem_Refetch_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ProblemServer).Refetch(ctx, req.(*RefetchProblemReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Problem_Reanalyze_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ReanalyzeProblemReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ProblemServer).Reanalyze(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Problem_Reanalyze_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ProblemServer).Reanalyze(ctx, req.(*ReanalyzeProblemReq))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -980,6 +1048,14 @@ var Problem_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Get",
 			Handler:    _Problem_Get_Handler,
+		},
+		{
+			MethodName: "Refetch",
+			Handler:    _Problem_Refetch_Handler,
+		},
+		{
+			MethodName: "Reanalyze",
+			Handler:    _Problem_Reanalyze_Handler,
 		},
 		{
 			MethodName: "RelatedContests",

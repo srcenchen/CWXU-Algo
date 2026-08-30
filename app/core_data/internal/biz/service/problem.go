@@ -37,9 +37,8 @@ import (
 )
 
 var (
-	errProblemFetchPaused    = errors.New("fetch paused")
-	errProblemPlatformPaused = errors.New("problem platform paused")
-	errSkipProblemBank       = errors.New("submit does not belong in problem bank")
+	errProblemFetchPaused = errors.New("fetch paused")
+	errSkipProblemBank    = errors.New("submit does not belong in problem bank")
 )
 
 type ProblemUseCase struct {
@@ -752,13 +751,6 @@ func (uc *ProblemUseCase) ProcessFetch(ctx context.Context, ev event.ProblemFetc
 	if err := uc.data.DB.First(&p, ev.ProblemID).Error; err != nil {
 		return err
 	}
-	paused, pauseErr := uc.problemPlatformPaused(p.Platform)
-	if pauseErr != nil {
-		return fmt.Errorf("%w: unavailable: %v", errProblemPlatformPaused, pauseErr)
-	}
-	if paused {
-		return fmt.Errorf("%w: %s", errProblemPlatformPaused, strings.TrimSpace(p.Platform))
-	}
 	pipelineControl.TrackStart("fetch", p.ID, p.Platform, p.ExternalID, p.Title)
 	defer pipelineControl.TrackEnd("fetch", p.ID)
 	// 已识别完成且有题面：跳过。无题面的 COMPLETED/TAGGING 必须允许补爬（全平台）。
@@ -981,8 +973,7 @@ func (uc *ProblemUseCase) restorePausedProblemFetch(p *model.Problem, bypassGlob
 	if bypassGlobalPause {
 		globalPaused = false
 	}
-	platformPaused, pauseErr := uc.problemPlatformPaused(p.Platform)
-	if !globalPaused && pauseErr == nil && !platformPaused {
+	if !globalPaused {
 		return nil
 	}
 	if strings.TrimSpace(p.ContentMD) == "" {
@@ -990,7 +981,7 @@ func (uc *ProblemUseCase) restorePausedProblemFetch(p *model.Problem, bypassGlob
 			Where("id = ? AND status = ? AND TRIM(COALESCE(content_md, '')) = ''", p.ID, model.ProblemStatusFetching).
 			Update("status", model.ProblemStatusPending)
 		if res.Error != nil {
-			return fmt.Errorf("%w: %s (restore status: %v)", errProblemPlatformPaused, p.Platform, res.Error)
+			return fmt.Errorf("%w: %s (restore status: %v)", errProblemFetchPaused, p.Platform, res.Error)
 		}
 		if res.RowsAffected > 0 {
 			p.Status = model.ProblemStatusPending
@@ -999,21 +990,7 @@ func (uc *ProblemUseCase) restorePausedProblemFetch(p *model.Problem, bypassGlob
 	if globalPaused {
 		return errProblemFetchPaused
 	}
-	if pauseErr != nil {
-		return fmt.Errorf("%w: unavailable: %v", errProblemPlatformPaused, pauseErr)
-	}
-	return fmt.Errorf("%w: %s", errProblemPlatformPaused, strings.TrimSpace(p.Platform))
-}
-
-func (uc *ProblemUseCase) isProblemPlatformPaused(platform string) bool {
-	return uc != nil && uc.data != nil && task.IsProblemPlatformPaused(uc.data.RDB, platform)
-}
-
-func (uc *ProblemUseCase) problemPlatformPaused(platform string) (bool, error) {
-	if uc == nil || uc.data == nil {
-		return false, fmt.Errorf("redis unavailable")
-	}
-	return task.IsProblemPlatformPausedSafe(uc.data.RDB, platform)
+	return errProblemFetchPaused
 }
 
 // ForceEnqueueFetchOnly 强制入队题面爬取，忽略用户资格，且不触发 AI 分析。
@@ -1254,6 +1231,62 @@ func (uc *ProblemUseCase) enqueueAnalyzeForUser(problemID uint, actorUID uint) e
 	return nil
 }
 
+func (uc *ProblemUseCase) PrepareUserReanalyze(problemID, actorUID uint) (int, error) {
+	if uc == nil || uc.data == nil || uc.data.DB == nil || uc.mq == nil {
+		return 0, fmt.Errorf("分析服务不可用")
+	}
+	if actorUID == 0 || !uc.userHasAIEligibility(actorUID) {
+		return 0, fmt.Errorf("暂无题目分析权限")
+	}
+	if uc.data == nil || uc.data.RDB == nil {
+		return 0, fmt.Errorf("AI 配额服务不可用")
+	}
+	var p model.Problem
+	if err := uc.data.DB.First(&p, problemID).Error; err != nil {
+		return 0, err
+	}
+	if strings.TrimSpace(p.ContentMD) == "" {
+		return 0, fmt.Errorf("题面尚未准备好")
+	}
+	if err := uc.declareProblemQueue("problem_analyze"); err != nil {
+		return 0, err
+	}
+	quotaClient, err := userrpc.SubscriptionClient(uc.reg)
+	if err != nil {
+		return 0, fmt.Errorf("AI 配额服务不可用")
+	}
+	q, err := quotaClient.GetAiAnalyzeQuota(context.Background(), &subscription.GetAiAnalyzeQuotaReq{UserId: int64(actorUID)})
+	if err != nil || q == nil {
+		return 0, fmt.Errorf("AI 配额读取失败")
+	}
+	monthKey := aiAnalyzeMonthKey(int64(actorUID), time.Now())
+	used, _ := uc.data.RDB.Get(context.Background(), monthKey).Int64()
+	if !q.GetUnlimited() && !aiQuotaAllows(used, int64(q.GetQuotaPerMonth())) {
+		return 0, fmt.Errorf("本月 AI 分析次数已用完")
+	}
+	if !q.GetUnlimited() {
+		if used, err = uc.data.RDB.Incr(context.Background(), monthKey).Result(); err != nil {
+			return 0, fmt.Errorf("AI 配额扣减失败")
+		}
+		if used == 1 {
+			_ = uc.data.RDB.Expire(context.Background(), monthKey, aiAnalyzeMonthKeyTTL()).Err()
+		}
+	}
+	if err := uc.data.DB.Model(&p).Updates(map[string]interface{}{"status": model.ProblemStatusTagging, "error_msg": ""}).Error; err != nil {
+		return 0, err
+	}
+	body, _ := json.Marshal(event.ProblemAnalyzeEvent{ProblemID: problemID, Force: true})
+	uc.mq.PublishAsync("", "problem_analyze", false, false, amqp.Publishing{ContentType: "application/json", Body: body, DeliveryMode: amqp.Persistent, Priority: mqPriorityUser})
+	return maxInt(0, int(q.GetQuotaPerMonth())-int(used)), nil
+}
+
+func maxInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}
+
 // CreateManualProblem 用户自主加题（无需审核）。platform=Manual。
 // 有题面无标签且 actor 有 AI 资格时入分析队列。
 func (uc *ProblemUseCase) CreateManualProblem(actorUID uint, title, contentMD, sourceURL string, tags []string) (*model.Problem, error) {
@@ -1449,20 +1482,20 @@ func (uc *ProblemUseCase) ProcessAnalyze(ctx context.Context, ev event.ProblemAn
 	pipelineControl.TrackStart("analyze", p.ID, p.Platform, p.ExternalID, p.Title)
 	defer pipelineControl.TrackEnd("analyze", p.ID)
 	// 已识别完成：跳过
-	if p.Status == model.ProblemStatusCompleted {
+	if p.Status == model.ProblemStatusCompleted && !ev.Force {
 		log.Debugf("ProcessAnalyze skip completed id=%d", p.ID)
 		return nil
 	}
-	if p.Status == model.ProblemStatusSkipped {
+	if p.Status == model.ProblemStatusSkipped && !ev.Force {
 		log.Debugf("ProcessAnalyze skip skipped id=%d", p.ID)
 		return nil
 	}
-	if p.Status == model.ProblemStatusFailedPerm {
+	if p.Status == model.ProblemStatusFailedPerm && !ev.Force {
 		log.Debugf("ProcessAnalyze skip failed_perm id=%d", p.ID)
 		return nil
 	}
 	// 标签已有（人工填写或历史分析）：跳过 AI，避免覆盖；标签为空仍继续分析
-	if len(nonEmptyTags(p.Tags)) > 0 {
+	if len(nonEmptyTags(p.Tags)) > 0 && !ev.Force {
 		if strings.TrimSpace(p.ContentMD) != "" {
 			log.Infof("ProcessAnalyze skip tags-already-set id=%d tags=%v", p.ID, p.Tags)
 			_ = uc.data.DB.Model(&p).Updates(map[string]interface{}{
@@ -1537,6 +1570,8 @@ func (uc *ProblemUseCase) ProcessAnalyze(ctx context.Context, ev event.ProblemAn
 		"solutions_meta": model.SolutionsMeta(result.SuggestedSolutions),
 		"status":         model.ProblemStatusCompleted,
 		"error_msg":      "",
+		"analyzed_at":    time.Now(),
+		"analyzed_model": uc.tagger.ModelName(),
 	}
 	// AI 顺手优化排版后的题面
 	if strings.TrimSpace(result.ContentMD) != "" {
