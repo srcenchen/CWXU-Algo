@@ -1108,8 +1108,9 @@ func (s SpiderService) GetSpiderMonitor(ctx context.Context, _ *spider.SpiderMon
 			SubmitPaused:       submitPaused,
 			ProblemPaused:      task.IsProblemPlatformPaused(s.rdb, cap.platform),
 		}
-		if supportsVJudgeStatementSource(cap.platform) {
-			st.OfficialStatementEnabled, st.VjudgeStatementEnabled = task.ProblemStatementSources(s.rdb, cap.platform)
+		st.OfficialStatementEnabled, st.VjudgeStatementEnabled = task.ProblemStatementSources(s.rdb, cap.platform)
+		if !supportsVJudgeStatementSource(cap.platform) {
+			st.VjudgeStatementEnabled = false
 		}
 		if s.rdb != nil {
 			// 最近同步（按 OJ 聚合）
@@ -1391,17 +1392,18 @@ func (s SpiderService) TogglePlatform(ctx context.Context, req *spider.TogglePla
 	}
 	var setter func(*redis.Client, string, bool) error
 	if module == "problem" && strings.TrimSpace(req.GetSource()) != "" {
+		source := strings.ToLower(strings.TrimSpace(req.GetSource()))
 		if !auth.HasPerm(ctx, rbac.PermSiteProblemOps) {
 			return &spider.TogglePlatformRes{Code: 1, Message: "需要题库运维权限"}, nil
 		}
 		plat := strings.TrimSpace(req.GetPlatform())
-		if req.GetSource() == "vjudge" && !supportsVJudgeStatementSource(plat) {
+		if source == "vjudge" && !supportsVJudgeStatementSource(plat) {
 			return &spider.TogglePlatformRes{Code: 1, Message: "该平台暂不支持 VirtualOJ 题面"}, nil
 		}
 		if _, ok := spiderregistry.Get(plat); !ok {
 			return &spider.TogglePlatformRes{Code: 1, Message: "不支持的平台: " + plat}, nil
 		}
-		if err := task.SetProblemStatementSource(s.rdb, plat, req.GetSource(), req.GetEnabled()); err != nil {
+		if err := task.SetProblemStatementSource(s.rdb, plat, source, req.GetEnabled()); err != nil {
 			return &spider.TogglePlatformRes{Code: 1, Message: "操作失败"}, nil
 		}
 		return &spider.TogglePlatformRes{Code: 0, Message: "已更新题面来源"}, nil
