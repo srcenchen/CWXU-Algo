@@ -6,15 +6,15 @@ import (
 )
 
 type SubmitLog struct {
-	ID       uint  `gorm:"comment:ID"`
-	// (platform, submit_id) 复合唯一：不同 OJ 的数字提交号会撞（如 CF 123 与洛谷 123）
-	Platform   string    `gorm:"comment:平台;uniqueIndex:idx_submit_plat_sid,priority:1"`
-	UserID     int64     `gorm:"comment:用户ID;index;index:idx_submit_user_time,priority:1;index:idx_submit_user_isac_time,priority:1"`
-	SubmitID   string    `gorm:"comment:提交ID;uniqueIndex:idx_submit_plat_sid,priority:2"`
-	Contest    string    `gorm:"comment:比赛名称"`
-	Problem    string    `gorm:"comment:问题"`
-	Lang       string    `gorm:"comment:语言"`
-	Status     string    `gorm:"size:64;comment:状态;index:idx_submit_status_time,priority:1"`
+	ID uint `gorm:"comment:ID"`
+	// (platform, submit_id, user_id) 复合唯一：同一个 OJ 账号可绑定给多个站内用户。
+	Platform string `gorm:"comment:平台;index:idx_submit_plat_sid,priority:1;uniqueIndex:idx_submit_plat_sid_user,priority:1"`
+	UserID   int64  `gorm:"comment:用户ID;index;uniqueIndex:idx_submit_plat_sid_user,priority:3;index:idx_submit_user_time,priority:1;index:idx_submit_user_isac_time,priority:1"`
+	SubmitID string `gorm:"comment:提交ID;index:idx_submit_plat_sid,priority:2;uniqueIndex:idx_submit_plat_sid_user,priority:2"`
+	Contest  string `gorm:"comment:比赛名称"`
+	Problem  string `gorm:"comment:问题"`
+	Lang     string `gorm:"comment:语言"`
+	Status   string `gorm:"size:64;comment:状态;index:idx_submit_status_time,priority:1"`
 	// IsAC 写入时由 status 归一化；统计读路径只扫 is_ac，避免 UPPER(BTRIM(status)) 全表表达式
 	IsAC       bool      `gorm:"column:is_ac;default:false;index;index:idx_submit_user_isac_time,priority:2;comment:是否AC"`
 	Time       time.Time `gorm:"comment:提交时间;index;index:idx_submit_user_time,priority:2;index:idx_submit_status_time,priority:2;index:idx_submit_user_isac_time,priority:3"`

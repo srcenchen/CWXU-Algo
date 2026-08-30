@@ -260,7 +260,7 @@ func TestRebuildUserTagAbilityTruncatesFirstACAndUsesFallbacks(t *testing.T) {
 	addUserTagSubmit(t, db, 3, "LUOGU", "first-ac", "AC", &p.ID, "P1002", now.Add(25*time.Minute))
 	addUserTagSubmit(t, db, 3, "LUOGU", "after-ac", "WA", &p.ID, "P1002", now.Add(26*time.Minute))
 	// Dirty duplicate must not create another attempt.
-	if err := db.Exec("DROP INDEX idx_submit_plat_sid").Error; err != nil {
+	if err := db.Exec("DROP INDEX idx_submit_plat_sid_user").Error; err != nil {
 		t.Fatal(err)
 	}
 	addUserTagSubmit(t, db, 3, "luogu", "00", "WA", &p.ID, "P1002", now.Add(time.Hour))
@@ -456,7 +456,7 @@ func TestRebuildUserTagAbilityCanonicalDuplicateDoesNotIncreaseCompleteLuoguAtte
 	}
 	addUserTagACKey(t, db, 33, fmt.Sprintf("p:%d", p.ID), "Luogu", now)
 	addUserTagSubmit(t, db, 33, "Luogu", "same", "WA", &p.ID, "P1900", now)
-	if err := db.Exec("DROP INDEX idx_submit_plat_sid").Error; err != nil {
+	if err := db.Exec("DROP INDEX idx_submit_plat_sid_user").Error; err != nil {
 		t.Fatal(err)
 	}
 	addUserTagSubmit(t, db, 33, " luogu ", "same", "WA", &p.ID, "P1900", now.Add(time.Minute))
@@ -878,7 +878,7 @@ func TestLoadAbilityEvidenceCanonicalBoundDuplicateDoesNotCreateBacklog(t *testi
 		t.Fatal(err)
 	}
 	addUserTagSubmit(t, db, 96, "Luogu", "duplicate", "AC", &target.ID, "P2001", now)
-	if err := db.Exec("DROP INDEX idx_submit_plat_sid").Error; err != nil {
+	if err := db.Exec("DROP INDEX idx_submit_plat_sid_user").Error; err != nil {
 		t.Fatal(err)
 	}
 	addUserTagSubmit(t, db, 96, " LUOGU ", "duplicate", "WA", &foreign.ID, "P9999", now.Add(time.Minute))

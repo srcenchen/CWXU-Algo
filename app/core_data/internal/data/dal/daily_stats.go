@@ -2,6 +2,7 @@ package dal
 
 import (
 	"context"
+	"strconv"
 	"strings"
 	"time"
 
@@ -97,10 +98,10 @@ func ApplyDailyDeltas(ctx context.Context, db *gorm.DB, deltas []DailyDelta) err
 		CreateInBatches(&rows, batch).Error
 }
 
-// FilterNewSubmitLogs 入库前去重（submit_logs (platform, submit_id) 唯一约束为真相）：
-//  1) 本批内按 (platform, submit_id) 去重
-//  2) 去掉 submit_logs 已有（防全量重爬对 daily/user_ac 双计）
-//  3) 力扣 lc-prob：同一用户同一 titleSlug **同一自然日**已有则跳过
+// FilterNewSubmitLogs 入库前去重（submit_logs (platform, submit_id, user_id) 唯一约束为真相）：
+//  1. 本批内按 (platform, submit_id, user_id) 去重
+//  2. 去掉 submit_logs 已有（防全量重爬对 daily/user_ac 双计）
+//  3. 力扣 lc-prob：同一用户同一 titleSlug **同一自然日**已有则跳过
 //     （隔日重刷仍入库 → 动态可见 + 今日 AC；同日多次 AC 仍只留一条）
 //
 // 注意：daily_user_stats 是累加语义；必须只对「将新插入」的行 ApplyDaily。
@@ -116,14 +117,20 @@ func FilterNewSubmitLogs(ctx context.Context, db *gorm.DB, logs []model.SubmitLo
 		return nil, nil
 	}
 
-	// 按平台分组查已有 submit_id，避免跨平台撞号误判为已入库
-	byPlat := make(map[string][]string, 2)
+	// 按用户和平台分组查已有 submit_id，允许同一 OJ 账号被多个用户绑定
+	type submitOwner struct {
+		platform string
+		userID   int64
+	}
+	byOwner := make(map[submitOwner][]string, 2)
 	for i := range logs {
-		byPlat[logs[i].Platform] = append(byPlat[logs[i].Platform], logs[i].SubmitID)
+		owner := submitOwner{platform: logs[i].Platform, userID: logs[i].UserID}
+		byOwner[owner] = append(byOwner[owner], logs[i].SubmitID)
 	}
 	const chunk = 500
 	exist := make(map[string]struct{}, len(logs)/2)
-	for plat, ids := range byPlat {
+	for owner, ids := range byOwner {
+		plat := owner.platform
 		for i := 0; i < len(ids); i += chunk {
 			j := i + chunk
 			if j > len(ids) {
@@ -132,7 +139,7 @@ func FilterNewSubmitLogs(ctx context.Context, db *gorm.DB, logs []model.SubmitLo
 			part := ids[i:j]
 			var found []string
 			if err := db.WithContext(ctx).Model(&model.SubmitLog{}).
-				Where("platform = ? AND submit_id IN ?", plat, part).
+				Where("platform = ? AND user_id = ? AND submit_id IN ?", plat, owner.userID, part).
 				Pluck("submit_id", &found).Error; err != nil {
 				return nil, err
 			}
@@ -328,7 +335,7 @@ func PruneLeetCodeProbDuplicates(ctx context.Context, db *gorm.DB, userID int64)
 	return res.RowsAffected, res.Error
 }
 
-// dedupeSubmitLogsBySubmitID 本批内按 (platform, submit_id) 去重，保留首次出现
+// dedupeSubmitLogsBySubmitID 本批内按 (platform, submit_id, user_id) 去重，保留首次出现
 func dedupeSubmitLogsBySubmitID(logs []model.SubmitLog) []model.SubmitLog {
 	if len(logs) <= 1 {
 		return logs
@@ -340,7 +347,7 @@ func dedupeSubmitLogsBySubmitID(logs []model.SubmitLog) []model.SubmitLog {
 		if id == "" {
 			continue
 		}
-		key := logs[i].Platform + "\x00" + id
+		key := logs[i].Platform + "\x00" + strconv.FormatInt(logs[i].UserID, 10) + "\x00" + id
 		if _, ok := seen[key]; ok {
 			continue
 		}
@@ -474,6 +481,3 @@ func DeletePlatformDailyStats(ctx context.Context, db *gorm.DB, userID int64, pl
 		Where("user_id = ? AND platform = ?", userID, platform).
 		Delete(&model.DailyUserStat{}).Error
 }
-
-
-

@@ -130,7 +130,7 @@ func TestProblemAbilityEvidenceFiltersAndCapsSequences(t *testing.T) {
 	// dropping the current uniqueness index to cover pre-migration dirty data.
 	addProblemAbilityLog(t, db, 1, "LuoGu", "pending", "PENDING", &luogu.ID, now)
 	addProblemAbilityLog(t, db, 1, "LuoGu", "same", "WA", &luogu.ID, now.Add(time.Minute))
-	if err := db.Exec("DROP INDEX idx_submit_plat_sid").Error; err != nil {
+	if err := db.Exec("DROP INDEX idx_submit_plat_sid_user").Error; err != nil {
 		t.Fatal(err)
 	}
 	addProblemAbilityLog(t, db, 1, "LuoGu", "same", "WA", &luogu.ID, now.Add(2*time.Minute))
@@ -486,7 +486,7 @@ func TestProblemAbilityEvidenceDuplicateUnboundDoesNotRevokeBoundCoverage(t *tes
 	}
 	addProblemAbilityLog(t, db, 61, "LuoGu", "duplicate", "AC", &p.ID, now)
 	foreign := createProblemAbilityTestProblem(t, db, "Codeforces", "1900B", "medium")
-	if err := db.Exec("DROP INDEX idx_submit_plat_sid").Error; err != nil {
+	if err := db.Exec("DROP INDEX idx_submit_plat_sid_user").Error; err != nil {
 		t.Fatal(err)
 	}
 	// Historical dirty data can carry an unbound duplicate of the same real

@@ -151,7 +151,7 @@ func TestImportSubmitLogsIsIdempotentAndKeepsAggregates(t *testing.T) {
 	}
 }
 
-func TestSubmitOwnerConflict(t *testing.T) {
+func TestSubmitIDCanBeImportedByMultipleUsers(t *testing.T) {
 	uc, db, rdb := newSubmitImporterForTest(t)
 	ctx := context.Background()
 	if err := rdb.Set(ctx, task.GenerationKey(7, "LuoGu"), 1, time.Hour).Err(); err != nil {
@@ -161,9 +161,13 @@ func TestSubmitOwnerConflict(t *testing.T) {
 	if err := db.Create(&existing).Error; err != nil {
 		t.Fatal(err)
 	}
-	_, err := uc.ImportSubmitLogs(ctx, 7, "LuoGu", 1, []model.SubmitLog{{SubmitID: "42", Status: "AC", Time: time.Now()}})
-	if err == nil || kratoserrors.FromError(err).Reason != "SUBMIT_OWNER_CONFLICT" {
-		t.Fatalf("err=%v reason=%q", err, kratoserrors.FromError(err).Reason)
+	result, err := uc.ImportSubmitLogs(ctx, 7, "LuoGu", 1, []model.SubmitLog{{SubmitID: "42", Status: "AC", Time: time.Now()}})
+	if err != nil || result.Inserted != 1 {
+		t.Fatalf("result=%+v err=%v", result, err)
+	}
+	var copied model.SubmitLog
+	if err := db.First(&copied, "user_id = ? AND platform = ? AND submit_id = ?", 7, "LuoGu", "42").Error; err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -196,11 +200,11 @@ func TestSubmitOwnerClaimRaceDoesNotPolluteLoserAggregates(t *testing.T) {
 	result, err := uc.ImportSubmitLogs(ctx, 7, "LuoGu", 1, []model.SubmitLog{{
 		SubmitID: "42", ExternalID: "P1001", Status: "AC", Time: time.Now(),
 	}})
-	if luoguReason := kratoserrors.Reason(err); luoguReason != "SUBMIT_OWNER_CONFLICT" {
-		t.Fatalf("result=%+v err=%v reason=%q", result, err, luoguReason)
+	if err != nil {
+		t.Fatalf("result=%+v err=%v", result, err)
 	}
-	if result.Inserted != 0 {
-		t.Fatalf("loser reported inserted=%d", result.Inserted)
+	if result.Inserted != 1 {
+		t.Fatalf("imported=%d", result.Inserted)
 	}
 
 	var dailyCount int64
@@ -211,8 +215,8 @@ func TestSubmitOwnerClaimRaceDoesNotPolluteLoserAggregates(t *testing.T) {
 	if err := db.Model(&model.UserACProblem{}).Where("user_id = ?", 7).Count(&acCount).Error; err != nil {
 		t.Fatal(err)
 	}
-	if dailyCount != 0 || acCount != 0 {
-		t.Fatalf("loser aggregates polluted: daily=%d ac=%d", dailyCount, acCount)
+	if dailyCount != 1 || acCount != 1 {
+		t.Fatalf("loser aggregates missing: daily=%d ac=%d", dailyCount, acCount)
 	}
 }
 

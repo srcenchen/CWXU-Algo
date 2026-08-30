@@ -386,23 +386,12 @@ func (uc *SpiderUseCase) importSubmitLogs(ctx context.Context, userId int64, pla
 		return result, nil
 	}
 
-	// The database unique key is global per platform. Never silently treat a
-	// different user's row as an idempotent retry.
+	// submit_logs 允许同一平台提交被多个站内用户分别保存；FilterNewSubmitLogs
+	// 会按当前用户去重，重复绑定不会阻断本次同步。
 	ids := make([]string, 0, len(tmp))
 	for i := range tmp {
 		if tmp[i].SubmitID != "" {
 			ids = append(ids, tmp[i].SubmitID)
-		}
-	}
-	if len(ids) > 0 {
-		var ownerConflicts int64
-		if err := uc.data.DB.WithContext(ctx).Model(&model.SubmitLog{}).
-			Where("platform = ? AND submit_id IN ? AND user_id <> ?", platform, ids, userId).
-			Count(&ownerConflicts).Error; err != nil {
-			return result, err
-		}
-		if ownerConflicts > 0 {
-			return result, kratoserrors.Conflict("SUBMIT_OWNER_CONFLICT", "提交记录已属于其他用户")
 		}
 	}
 
@@ -464,13 +453,6 @@ func (uc *SpiderUseCase) importSubmitLogs(ctx context.Context, userId int64, pla
 			return nil
 		})
 		if err != nil {
-			conflict, conflictErr := hasSubmitOwnerConflict(ctx, uc.data.DB, platform, ids, userId)
-			if conflictErr != nil {
-				return result, conflictErr
-			}
-			if conflict {
-				return result, kratoserrors.Conflict("SUBMIT_OWNER_CONFLICT", "提交记录已属于其他用户")
-			}
 			return result, err
 		}
 		inserted = int64(len(neu))

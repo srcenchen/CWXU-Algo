@@ -181,8 +181,8 @@ func migrateModels(db *gorm.DB) {
 	// 废弃：预聚合去重改以 submit_logs.submit_id 为准，不再维护账本表
 	_ = db.Exec(`DROP TABLE IF EXISTS counted_submit_ids`).Error
 	ensureSubmitLogPerf(db)
-	// 唯一键 (platform, submit_id)：先建复合唯一，再丢弃旧单列唯一（跨平台撞号）
-	migrateSubmitIDPlatformUnique(db)
+	// 唯一键 (platform, submit_id, user_id)：允许同一 OJ 账号被多个用户绑定
+	migrateSubmitIDPlatformUserUnique(db)
 	// 一次性：submit_id 误带「平台:」前缀（如 LuoGu:123）→ 纯数字/原站 id
 	migrateStripPlatformPrefixSubmitIDs(db)
 	// 空表兜底回填（清洗任务会覆盖重建；新环境无历史时有用）
@@ -348,39 +348,60 @@ SET comment_count = (
 	_ = db.Create(&schemaPatch{Key: key, AppliedAt: time.Now()}).Error
 }
 
-// migrateSubmitIDPlatformUnique 唯一键从单列 submit_id 迁到 (platform, submit_id)。
-// 旧单列唯一保证无重复，先建复合唯一必成功；随后按 pg_constraint / pg_indexes
-// 实际名字防御性删除旧单列唯一约束/索引（gorm 历史版本命名不一）。
-func migrateSubmitIDPlatformUnique(db *gorm.DB) {
+// migrateSubmitIDPlatformUserUnique 唯一键迁到 (platform, submit_id, user_id)，
+// 允许同一 OJ 账号被多个站内用户绑定，同时保留同一用户的导入幂等性。
+func migrateSubmitIDPlatformUserUnique(db *gorm.DB) {
 	if db == nil || !db.Migrator().HasTable(&model.SubmitLog{}) {
 		return
 	}
-	const key = "submit_id_platform_unique_v1"
+	const key = "submit_id_platform_user_unique_v2"
 	var n int64
 	_ = db.Model(&schemaPatch{}).Where("key = ?", key).Count(&n).Error
 	if n > 0 {
 		return
 	}
-	// 1) 复合唯一索引（AutoMigrate 也会建；IF NOT EXISTS 幂等兜底）
+	// 1) 新复合唯一索引（AutoMigrate 也会建；IF NOT EXISTS 幂等兜底）
 	if err := db.Exec(`
-		CREATE UNIQUE INDEX IF NOT EXISTS idx_submit_plat_sid
-		ON submit_logs (platform, submit_id)
+		CREATE UNIQUE INDEX IF NOT EXISTS idx_submit_plat_sid_user
+		ON submit_logs (platform, submit_id, user_id)
 	`).Error; err != nil {
-		log.Warnf("database: create (platform, submit_id) unique index: %v", err)
+		log.Warnf("database: create (platform, submit_id, user_id) unique index: %v", err)
 		return
 	}
-	// 2) 查旧单列唯一约束（如 submit_logs_submit_id_key / uni_submit_logs_submit_id）
+	// 旧版本用同名索引承载唯一约束；先删除它，才能把同名索引降级为普通索引。
+	var oldIndexDef string
+	if err := db.Raw(`
+		SELECT indexdef FROM pg_indexes
+		WHERE tablename = 'submit_logs' AND indexname = 'idx_submit_plat_sid'
+	`).Scan(&oldIndexDef).Error; err != nil {
+		log.Warnf("database: inspect old submit lookup index: %v", err)
+		return
+	}
+	if strings.Contains(strings.ToUpper(oldIndexDef), "CREATE UNIQUE INDEX") {
+		if err := db.Exec(`DROP INDEX IF EXISTS "idx_submit_plat_sid"`).Error; err != nil {
+			log.Warnf("database: drop old unique submit lookup index: %v", err)
+			return
+		}
+	}
+	if err := db.Exec(`
+		CREATE INDEX IF NOT EXISTS idx_submit_plat_sid
+		ON submit_logs (platform, submit_id)
+	`).Error; err != nil {
+		log.Warnf("database: create (platform, submit_id) lookup index: %v", err)
+		return
+	}
+	// 2) 删除旧的 (platform, submit_id) 唯一约束/索引。
 	var conNames []string
 	_ = db.Raw(`
 		SELECT c.conname
 		FROM pg_constraint c
 		WHERE c.conrelid = 'submit_logs'::regclass
 		  AND c.contype = 'u'
-		  AND array_length(c.conkey, 1) = 1
+		  AND array_length(c.conkey, 1) = 2
 		  AND (
 			SELECT a.attname FROM pg_attribute a
 			WHERE a.attrelid = c.conrelid AND a.attnum = c.conkey[1]
-		  ) = 'submit_id'
+		  ) = 'platform'
 	`).Scan(&conNames).Error
 	for _, name := range conNames {
 		if err := db.Exec(`ALTER TABLE submit_logs DROP CONSTRAINT IF EXISTS ` + pgQuoteIdent(name)).Error; err != nil {
@@ -394,9 +415,9 @@ func migrateSubmitIDPlatformUnique(db *gorm.DB) {
 	_ = db.Raw(`
 		SELECT indexname FROM pg_indexes
 		WHERE tablename = 'submit_logs'
-		  AND indexname <> 'idx_submit_plat_sid'
+		  AND indexname NOT IN ('idx_submit_plat_sid', 'idx_submit_plat_sid_user')
 		  AND indexdef LIKE 'CREATE UNIQUE INDEX%'
-		  AND indexdef LIKE '%(submit_id)%'
+		  AND indexdef LIKE '%(platform, submit_id)%'
 	`).Scan(&idxNames).Error
 	for _, name := range idxNames {
 		if err := db.Exec(`DROP INDEX IF EXISTS ` + pgQuoteIdent(name)).Error; err != nil {
@@ -406,7 +427,7 @@ func migrateSubmitIDPlatformUnique(db *gorm.DB) {
 		log.Infof("database: dropped submit_logs unique index %s", name)
 	}
 	_ = db.Create(&schemaPatch{Key: key, AppliedAt: time.Now()}).Error
-	log.Infof("database: submit_logs unique key migrated to (platform, submit_id)")
+	log.Infof("database: submit_logs unique key migrated to (platform, submit_id, user_id)")
 }
 
 // pgQuoteIdent 双引号安全包裹标识符（名字来自系统目录，防御性转义）
