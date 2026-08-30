@@ -796,7 +796,6 @@ func (s *ProblemService) RetryFailed(ctx context.Context, req *problem.RetryFail
 	}
 	if s.uc != nil {
 		s.uc.ResumeAnalyze()
-		s.uc.ResumeFetch()
 	}
 	if ok, running := s.uc.TryStartAdminOp("retry-failed"); !ok {
 		return &problem.RetryFailedRes{Code: 1, Message: "已有任务在执行：" + running + "，请稍后再试"}, nil

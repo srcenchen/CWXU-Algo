@@ -171,6 +171,10 @@ func problemFetchConsumerPaused() bool {
 	return pipelineControl.IsFetchPaused()
 }
 
+func problemFetchEventPaused(ev event.ProblemFetchEvent) bool {
+	return problemFetchConsumerPaused() && !ev.BypassFetchPause
+}
+
 type problemFetchPauseKind uint8
 
 const (
@@ -334,7 +338,7 @@ func (c *ProblemFetchConsumer) consumeOnce() error {
 				return
 			}
 			// 平台暂停必须由 ProcessFetch 读取题目后按 DB 平台判断，不能信任可能陈旧的消息平台。
-			if problemFetchConsumerPaused() {
+			if problemFetchEventPaused(msg) {
 				log.Warnf("problem_fetch id=%d requeue: fetch paused", msg.ProblemID)
 				sleepOrStop(c.stopCh, problemPausedRequeueDelay)
 				_ = d.Nack(false, true)

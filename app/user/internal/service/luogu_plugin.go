@@ -305,6 +305,13 @@ func (s *LuoguPluginService) AdminListAuthorizations(ctx context.Context, req *p
 	now := s.now().UTC()
 	q := s.db.WithContext(ctx).Table("plugin_authorizations pa").
 		Joins("JOIN users u ON u.id = pa.user_id")
+	// Keep historical authorizations intact, but expose only the newest grant for
+	// each user/account/client combination in the management list.
+	latest := s.db.WithContext(ctx).Table("plugin_authorizations").
+		Select("MAX(id)").
+		Where("provider = ?", luoguPluginProvider).
+		Group("user_id, provider, luogu_uid, client_kind")
+	q = q.Where("pa.id IN (?)", latest)
 	if req != nil {
 		if keyword := strings.TrimSpace(req.Keyword); keyword != "" {
 			like := "%" + keyword + "%"

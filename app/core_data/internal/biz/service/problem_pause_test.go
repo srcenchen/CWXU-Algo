@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -15,6 +16,50 @@ import (
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
+
+func TestProcessFetchGlobalPauseBlocksForceWithoutBypass(t *testing.T) {
+	wasPaused := pipelineControl.IsFetchPaused()
+	pipelineControl.SetFetchPaused(true)
+	t.Cleanup(func() { pipelineControl.SetFetchPaused(wasPaused) })
+
+	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AutoMigrate(&model.Problem{}); err != nil {
+		t.Fatal(err)
+	}
+	uc := &ProblemUseCase{data: &data.Data{DB: db}}
+	err = uc.ProcessFetch(context.Background(), event.ProblemFetchEvent{ProblemID: 999, Force: true})
+	if !errors.Is(err, errProblemFetchPaused) {
+		t.Fatalf("普通/内部 Force 任务在全局暂停时应被阻止，got %v", err)
+	}
+}
+
+func TestProcessFetchBypassGlobalPauseReachesProblemLookup(t *testing.T) {
+	wasPaused := pipelineControl.IsFetchPaused()
+	pipelineControl.SetFetchPaused(true)
+	t.Cleanup(func() { pipelineControl.SetFetchPaused(wasPaused) })
+
+	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AutoMigrate(&model.Problem{}); err != nil {
+		t.Fatal(err)
+	}
+	uc := &ProblemUseCase{data: &data.Data{DB: db}}
+	err = uc.ProcessFetch(context.Background(), event.ProblemFetchEvent{
+		ProblemID:        999,
+		BypassFetchPause: true,
+	})
+	if errors.Is(err, errProblemFetchPaused) {
+		t.Fatalf("主动补爬应绕过全局暂停，got %v", err)
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		t.Fatalf("绕过暂停后应继续读取题目，got %v", err)
+	}
+}
 
 func TestProcessFetchRejectsPausedProblemPlatformAfterDatabaseRead(t *testing.T) {
 	mr := miniredis.RunT(t)
@@ -119,7 +164,7 @@ func TestRestorePausedProblemFetchReturnsPendingForEmptyContent(t *testing.T) {
 	}
 
 	uc := &ProblemUseCase{data: &data.Data{DB: db, RDB: rdb}}
-	err = uc.restorePausedProblemFetch(&p)
+	err = uc.restorePausedProblemFetch(&p, false)
 	if err == nil || !strings.Contains(strings.ToLower(err.Error()), "paused") {
 		t.Fatalf("暂停竞态应返回 paused 错误，got %v", err)
 	}
@@ -158,7 +203,7 @@ func TestRestorePausedProblemFetchDoesNotOverwriteConcurrentCompletion(t *testin
 	}
 
 	uc := &ProblemUseCase{data: &data.Data{DB: db, RDB: rdb}}
-	err = uc.restorePausedProblemFetch(&p)
+	err = uc.restorePausedProblemFetch(&p, false)
 	if err == nil || !strings.Contains(strings.ToLower(err.Error()), "paused") {
 		t.Fatalf("暂停竞态应返回 paused 错误，got %v", err)
 	}
@@ -188,7 +233,7 @@ func TestRestorePausedProblemFetchRestoresPendingWhenGlobalPauseStartsBeforeFetc
 	}
 
 	uc := &ProblemUseCase{data: &data.Data{DB: db}}
-	err = uc.restorePausedProblemFetch(&p)
+	err = uc.restorePausedProblemFetch(&p, false)
 	if err == nil || !strings.Contains(strings.ToLower(err.Error()), "paused") {
 		t.Fatalf("外抓前出现全局暂停应返回 paused，got %v", err)
 	}
@@ -198,6 +243,39 @@ func TestRestorePausedProblemFetchRestoresPendingWhenGlobalPauseStartsBeforeFetc
 	}
 	if got.Status != model.ProblemStatusPending {
 		t.Fatalf("全局暂停竞态应恢复 PENDING，got %s", got.Status)
+	}
+}
+
+func TestRestorePausedProblemFetchBypassesGlobalPause(t *testing.T) {
+	wasPaused := pipelineControl.IsFetchPaused()
+	pipelineControl.SetFetchPaused(true)
+	t.Cleanup(func() { pipelineControl.SetFetchPaused(wasPaused) })
+
+	mr := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	t.Cleanup(func() { _ = rdb.Close() })
+	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AutoMigrate(&model.Problem{}); err != nil {
+		t.Fatal(err)
+	}
+	p := model.Problem{Platform: "AtCoder", ExternalID: "abc", Status: model.ProblemStatusFetching}
+	if err := db.Create(&p).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	uc := &ProblemUseCase{data: &data.Data{DB: db, RDB: rdb}}
+	if err := uc.restorePausedProblemFetch(&p, true); err != nil {
+		t.Fatalf("主动补爬的暂停竞态应绕过全局暂停，got %v", err)
+	}
+	var got model.Problem
+	if err := db.First(&got, p.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != model.ProblemStatusFetching {
+		t.Fatalf("绕过全局暂停时不应恢复 FETCHING，got %s", got.Status)
 	}
 }
 

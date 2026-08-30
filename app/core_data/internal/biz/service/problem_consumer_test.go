@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"cwxu-algo/app/common/event"
 	"cwxu-algo/app/common/sitesettings"
 	"github.com/alicebob/miniredis/v2"
 	"github.com/redis/go-redis/v9"
@@ -19,6 +20,19 @@ func TestProblemFetchConsumerEarlyPauseIgnoresMessagePlatform(t *testing.T) {
 
 	if problemFetchConsumerPaused() {
 		t.Fatal("全局爬取未暂停时 consumer 不应提前拦截消息，平台暂停交给 ProcessFetch 按 DB 平台判断")
+	}
+}
+
+func TestProblemFetchConsumerPauseHonorsExplicitBypass(t *testing.T) {
+	wasPaused := pipelineControl.IsFetchPaused()
+	pipelineControl.SetFetchPaused(true)
+	t.Cleanup(func() { pipelineControl.SetFetchPaused(wasPaused) })
+
+	if !problemFetchEventPaused(event.ProblemFetchEvent{}) {
+		t.Fatal("普通题面任务在全局暂停时应被 consumer 提前拦截")
+	}
+	if problemFetchEventPaused(event.ProblemFetchEvent{BypassFetchPause: true}) {
+		t.Fatal("主动补爬任务应绕过 consumer 的全局暂停拦截")
 	}
 }
 

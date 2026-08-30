@@ -431,6 +431,28 @@ func TestAdminPluginAuthorizationPostgresKeywordUsesILike(t *testing.T) {
 	}
 }
 
+func TestAdminListPluginAuthorizationsShowsOnlyLatestAuthorizationPerAccount(t *testing.T) {
+	svc, db, _ := newLuoguPluginTestService(t)
+	now := time.Now().UTC()
+	if err := db.Create(&model.User{ID: 75, Username: "dedupe-user", Email: "dedupe@example.test", Password: "x"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	rows := []model.PluginAuthorization{
+		{UserID: 75, Provider: "luogu", ClientKind: "userscript", ClientVersion: "0.1.0", LuoguUID: "123", TokenHash: "sha256:old", RiskVersion: LuoguPluginRiskVersion, AcceptedAt: now.Add(-time.Hour), ExpiresAt: now.Add(time.Hour)},
+		{UserID: 75, Provider: "luogu", ClientKind: "userscript", ClientVersion: "0.1.3", LuoguUID: "123", TokenHash: "sha256:new", RiskVersion: LuoguPluginRiskVersion, AcceptedAt: now, ExpiresAt: now.Add(2 * time.Hour)},
+	}
+	if err := db.Create(&rows).Error; err != nil {
+		t.Fatal(err)
+	}
+	res, err := svc.AdminListAuthorizations(ctxWithBearer(adminTokenWithPermissions(t, 75, false, rbac.PermSiteUserSync)), &pb.AdminListPluginAuthorizationsReq{PageNum: 1, PageSize: 20})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Total != 1 || len(res.List) != 1 || res.List[0].ClientVersion != "0.1.3" {
+		t.Fatalf("expected latest authorization only, got %+v", res)
+	}
+}
+
 func TestLuoguPluginTokenRejectsGrantForDeletedUser(t *testing.T) {
 	svc, db, _ := newLuoguPluginTestService(t)
 	if err := db.AutoMigrate(&model.User{}); err != nil {

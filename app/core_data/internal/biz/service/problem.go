@@ -738,10 +738,10 @@ func (uc *ProblemUseCase) nowcoderContestFetchURLs(externalID string, problemID 
 	return out
 }
 
-// ProcessFetch 仅爬取题面；成功后状态 TAGGING 并投递 AI 队列
-// Force=true 时忽略用户爬取资格；SkipAnalyze=true 时爬取成功后不入 AI。
+// ProcessFetch 仅爬取题面；成功后状态 TAGGING 并投递 AI 队列。
+// Force=true 时忽略用户爬取资格；BypassFetchPause=true 时忽略全局暂停；SkipAnalyze=true 时爬取成功后不入 AI。
 func (uc *ProblemUseCase) ProcessFetch(ctx context.Context, ev event.ProblemFetchEvent) error {
-	if pipelineControl.IsFetchPaused() {
+	if pipelineControl.IsFetchPaused() && !ev.BypassFetchPause {
 		return errProblemFetchPaused
 	}
 	var p model.Problem
@@ -863,7 +863,7 @@ func (uc *ProblemUseCase) ProcessFetch(ctx context.Context, ev event.ProblemFetc
 			}
 		}
 	}
-	if err := uc.restorePausedProblemFetch(&p); err != nil {
+	if err := uc.restorePausedProblemFetch(&p, ev.BypassFetchPause); err != nil {
 		return err
 	}
 	fetched, err := problem_fetch.FetchWithFallbacks(p.Platform, p.ExternalID, url, fallbacks)
@@ -931,8 +931,11 @@ func (uc *ProblemUseCase) ProcessFetch(ctx context.Context, ev event.ProblemFetc
 
 // restorePausedProblemFetch closes the pause race after FETCHING is claimed.
 // Only the still-empty FETCHING row may be restored; a concurrent success must win.
-func (uc *ProblemUseCase) restorePausedProblemFetch(p *model.Problem) error {
+func (uc *ProblemUseCase) restorePausedProblemFetch(p *model.Problem, bypassGlobalPause bool) error {
 	globalPaused := pipelineControl.IsFetchPaused()
+	if bypassGlobalPause {
+		globalPaused = false
+	}
 	platformPaused, pauseErr := uc.problemPlatformPaused(p.Platform)
 	if !globalPaused && pauseErr == nil && !platformPaused {
 		return nil
@@ -1017,7 +1020,7 @@ func contentLooksBroken(md string) bool {
 	return false
 }
 
-// ForceEnqueueFetch 强制题面爬取（忽略爬取资格）。
+// ForceEnqueueFetch 强制题面爬取（忽略爬取资格与全局暂停；平台级暂停仍有效）。
 // 用户主动路径：HTTP 不阻塞 MQ；最高优先级异步入队 + 后台直爬兜底。
 // 无论 status（含 TAGGING/COMPLETED），只要 contentMd 空都允许补爬。
 // 题面存在但明显损坏时：清空后重爬。
@@ -1087,13 +1090,14 @@ func (uc *ProblemUseCase) ForceEnqueueFetch(problemID uint, actorUID uint) error
 // 全平台通用；HTTP 路径禁止同步等 confirm。
 func (uc *ProblemUseCase) scheduleUserPriorityFetch(id uint, platform, externalID, url string, skipAnalyze bool, actorUID uint) {
 	ev := event.ProblemFetchEvent{
-		ProblemID:   id,
-		Platform:    platform,
-		ExternalID:  externalID,
-		URL:         url,
-		Force:       true,
-		SkipAnalyze: skipAnalyze,
-		ActorUserID: actorUID,
+		ProblemID:        id,
+		Platform:         platform,
+		ExternalID:       externalID,
+		URL:              url,
+		Force:            true,
+		BypassFetchPause: true,
+		SkipAnalyze:      skipAnalyze,
+		ActorUserID:      actorUID,
 	}
 	// 牛客比赛页候选（与 enqueueFetchPrio 对齐）
 	if strings.EqualFold(strings.TrimSpace(platform), spider.NowCoder) {
@@ -1123,13 +1127,14 @@ func (uc *ProblemUseCase) scheduleUserPriorityFetch(id uint, platform, externalI
 
 func (uc *ProblemUseCase) enqueueFetchForced(id uint, platform, externalID, url string, skipAnalyze bool, actorUID uint) error {
 	return uc.enqueueFetchForcedPrio(event.ProblemFetchEvent{
-		ProblemID:   id,
-		Platform:    platform,
-		ExternalID:  externalID,
-		URL:         url,
-		Force:       true,
-		SkipAnalyze: skipAnalyze,
-		ActorUserID: actorUID,
+		ProblemID:        id,
+		Platform:         platform,
+		ExternalID:       externalID,
+		URL:              url,
+		Force:            true,
+		BypassFetchPause: true,
+		SkipAnalyze:      skipAnalyze,
+		ActorUserID:      actorUID,
 	}, mqPriorityUser)
 }
 
@@ -2027,7 +2032,6 @@ func (uc *ProblemUseCase) ClearRecentFailed() (cleared int64, err error) {
 // 仅近 6 月有提交 + 有流水线资格用户提交的题才会真正入队（避免公共域假入队后立刻 Ack）
 func (uc *ProblemUseCase) RetryFailed(limit int, includePermanent bool) (scanned, enqueued, blacklisted int64, err error) {
 	pipelineControl.SetAnalyzePaused(false)
-	pipelineControl.SetFetchPaused(false)
 
 	// 解除误标：WAF/登录墙/DOM 类不应进黑名单（历史曾标 FAILED_PERM）
 	// 注意：暂无访问权限是真永久（题库页不可访），不在此解除；有 contest 路径时另开再爬
