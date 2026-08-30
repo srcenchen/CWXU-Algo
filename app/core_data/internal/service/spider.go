@@ -160,13 +160,13 @@ func (s *SpiderService) AdminListClientSyncAudits(ctx context.Context, req *spid
 		return nil, errors.InternalServer("SYNC_AUDIT_LIST_FAILED", "加载同步日志失败")
 	}
 	var rows []model.ClientSyncAudit
-	if err := q.Order("started_at DESC").Offset(int((pageNum - 1) * pageSize)).Limit(int(pageSize)).Find(&rows).Error; err != nil {
+	if err := q.Order("client_version DESC, started_at DESC").Offset(int((pageNum - 1) * pageSize)).Limit(int(pageSize)).Find(&rows).Error; err != nil {
 		return nil, errors.InternalServer("SYNC_AUDIT_LIST_FAILED", "加载同步日志失败")
 	}
 	items := make([]*spider.ClientSyncAuditInfo, 0, len(rows))
 	for i := range rows {
 		r := &rows[i]
-		item := &spider.ClientSyncAuditInfo{SessionId: r.SessionID, AuthorizationId: r.AuthorizationID, UserId: r.UserID, Platform: "luogu", OjUid: r.OJUID, ClientKind: r.ClientKind, ClientVersion: r.ClientVersion, Status: r.Status, CompletionReason: r.CompletionReason, StartedAt: r.StartedAt.Unix(), UpdatedAt: r.UpdatedAt.Unix(), ProcessedPages: r.ProcessedPages, RemoteCount: r.RemoteCount, Inserted: r.Inserted, RestartCount: r.RestartCount, ErrorCode: r.ErrorCode, ErrorMessage: r.ErrorMessage}
+		item := &spider.ClientSyncAuditInfo{SessionId: r.SessionID, AuthorizationId: r.AuthorizationID, UserId: r.UserID, Username: r.Username, Platform: "luogu", OjUid: r.OJUID, ClientKind: r.ClientKind, ClientVersion: r.ClientVersion, Status: r.Status, CompletionReason: r.CompletionReason, StartedAt: r.StartedAt.Unix(), UpdatedAt: r.UpdatedAt.Unix(), ProcessedPages: r.ProcessedPages, RemoteCount: r.RemoteCount, Inserted: r.Inserted, RestartCount: r.RestartCount, ErrorCode: r.ErrorCode, ErrorMessage: r.ErrorMessage}
 		if r.TerminalAt != nil {
 			item.TerminalAt = r.TerminalAt.Unix()
 		}

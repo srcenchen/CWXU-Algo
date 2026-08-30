@@ -57,6 +57,9 @@ func TestAdminListClientSyncAuditsRequiresPermissionAndFiltersBeforePagination(t
 	if err := db.Create(&rows).Error; err != nil {
 		t.Fatal(err)
 	}
+	if err := db.Exec("INSERT INTO users (id, username, name) VALUES (42, 'user42', 'User 42'), (43, 'user43', 'User 43')").Error; err != nil {
+		t.Fatal(err)
+	}
 	svc := &SpiderService{db: db}
 	if _, err := svc.AdminListClientSyncAudits(context.Background(), &spiderpb.AdminListClientSyncAuditsReq{}); errors.Reason(err) != "SYNC_AUDIT_PERMISSION_DENIED" {
 		t.Fatalf("ordinary reason = %s", errors.Reason(err))
@@ -78,9 +81,35 @@ func TestAdminListClientSyncAuditsRequiresPermissionAndFiltersBeforePagination(t
 	}
 }
 
+func TestAdminListClientSyncAuditsReturnsUsername(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Exec("CREATE TABLE users (id INTEGER PRIMARY KEY, username TEXT, name TEXT)").Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AutoMigrate(&model.ClientSyncAudit{}); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	if err := db.Create(&model.ClientSyncAudit{SessionID: "username-session", UserID: 42, Username: "alice", Platform: "luogu", OJUID: "1", ClientKind: "userscript", ClientVersion: "0.1.6", Status: "completed", StartedAt: now, UpdatedAt: now}).Error; err != nil {
+		t.Fatal(err)
+	}
+	svc := &SpiderService{db: db}
+	ctx := luoguHeaderContext("Authorization", "Bearer "+coreTokenWithPermissions(t, 9, rbac.PermSiteUserSync))
+	res, err := svc.AdminListClientSyncAudits(ctx, &spiderpb.AdminListClientSyncAuditsReq{})
+	if err != nil || len(res.List) != 1 || res.List[0].Username != "alice" {
+		t.Fatalf("username = %+v, err=%v", res, err)
+	}
+}
+
 func TestAdminListClientSyncAuditsNormalizesLuoguAliasAndRejectsInvalidPlatform(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
 	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Exec("CREATE TABLE users (id INTEGER PRIMARY KEY, username TEXT, name TEXT)").Error; err != nil {
 		t.Fatal(err)
 	}
 	if err := db.AutoMigrate(&model.ClientSyncAudit{}); err != nil {

@@ -18,6 +18,7 @@ type ClientSyncAuditStart struct {
 	SessionID                                  string
 	AuthorizationID                            uint64
 	UserID                                     int64
+	Username                                   string
 	Platform, OJUID, ClientKind, ClientVersion string
 	StartedAt                                  time.Time
 }
@@ -33,7 +34,7 @@ func (uc *SpiderUseCase) StartClientSyncAudit(ctx context.Context, start ClientS
 	if uc == nil || uc.data == nil || uc.data.DB == nil || strings.TrimSpace(start.SessionID) == "" {
 		return nil
 	}
-	row := model.ClientSyncAudit{SessionID: start.SessionID, AuthorizationID: start.AuthorizationID, UserID: start.UserID, Platform: start.Platform, OJUID: start.OJUID, ClientKind: start.ClientKind, ClientVersion: start.ClientVersion, Status: "running", StartedAt: start.StartedAt.UTC(), UpdatedAt: start.StartedAt.UTC(), RemoteCount: -1}
+	row := model.ClientSyncAudit{SessionID: start.SessionID, AuthorizationID: start.AuthorizationID, UserID: start.UserID, Username: start.Username, Platform: start.Platform, OJUID: start.OJUID, ClientKind: start.ClientKind, ClientVersion: start.ClientVersion, Status: "running", StartedAt: start.StartedAt.UTC(), UpdatedAt: start.StartedAt.UTC(), RemoteCount: -1}
 	return uc.data.DB.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&row).Error
 }
 

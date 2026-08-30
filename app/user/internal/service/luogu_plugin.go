@@ -342,7 +342,7 @@ func (s *LuoguPluginService) AdminListAuthorizations(ctx context.Context, req *p
 		return nil, luoguPluginError(http.StatusInternalServerError, "AUTHORIZATION_LIST_FAILED", "加载授权失败")
 	}
 	var rows []adminPluginAuthorizationRow
-	if err := q.Select("pa.*, u.username, u.name").Order("pa.id DESC").Offset(int((pageNum - 1) * pageSize)).Limit(int(pageSize)).Scan(&rows).Error; err != nil {
+	if err := q.Select("pa.*, u.username, u.name").Order("pa.client_version DESC, pa.id DESC").Offset(int((pageNum - 1) * pageSize)).Limit(int(pageSize)).Scan(&rows).Error; err != nil {
 		return nil, luoguPluginError(http.StatusInternalServerError, "AUTHORIZATION_LIST_FAILED", "加载授权失败")
 	}
 	items := make([]*pb.AdminPluginAuthorizationInfo, 0, len(rows))

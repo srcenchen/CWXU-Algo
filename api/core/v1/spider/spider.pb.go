@@ -2658,14 +2658,16 @@ func (x *UploadLuoguSyncPageRes) GetNextAvailableAt() int64 {
 }
 
 type AdminListClientSyncAuditsReq struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	PageNum       int32                  `protobuf:"varint,1,opt,name=page_num,json=pageNum,proto3" json:"page_num,omitempty"`
-	PageSize      int32                  `protobuf:"varint,2,opt,name=page_size,json=pageSize,proto3" json:"page_size,omitempty"`
-	Keyword       string                 `protobuf:"bytes,3,opt,name=keyword,proto3" json:"keyword,omitempty"`
-	Platform      string                 `protobuf:"bytes,4,opt,name=platform,proto3" json:"platform,omitempty"`
-	Status        string                 `protobuf:"bytes,5,opt,name=status,proto3" json:"status,omitempty"`
-	From          int64                  `protobuf:"varint,6,opt,name=from,proto3" json:"from,omitempty"`
-	To            int64                  `protobuf:"varint,7,opt,name=to,proto3" json:"to,omitempty"`
+	state    protoimpl.MessageState `protogen:"open.v1"`
+	PageNum  int32                  `protobuf:"varint,1,opt,name=page_num,json=pageNum,proto3" json:"page_num,omitempty"`
+	PageSize int32                  `protobuf:"varint,2,opt,name=page_size,json=pageSize,proto3" json:"page_size,omitempty"`
+	Keyword  string                 `protobuf:"bytes,3,opt,name=keyword,proto3" json:"keyword,omitempty"`
+	Platform string                 `protobuf:"bytes,4,opt,name=platform,proto3" json:"platform,omitempty"`
+	Status   string                 `protobuf:"bytes,5,opt,name=status,proto3" json:"status,omitempty"`
+	// Unix 秒；按 started_at 过滤（包含边界）。
+	From int64 `protobuf:"varint,6,opt,name=from,proto3" json:"from,omitempty"`
+	// Unix 秒；按 started_at 过滤（包含边界）。
+	To            int64 `protobuf:"varint,7,opt,name=to,proto3" json:"to,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2769,6 +2771,7 @@ type ClientSyncAuditInfo struct {
 	RestartCount     int32                  `protobuf:"varint,16,opt,name=restart_count,json=restartCount,proto3" json:"restart_count,omitempty"`
 	ErrorCode        string                 `protobuf:"bytes,17,opt,name=error_code,json=errorCode,proto3" json:"error_code,omitempty"`
 	ErrorMessage     string                 `protobuf:"bytes,18,opt,name=error_message,json=errorMessage,proto3" json:"error_message,omitempty"`
+	Username         string                 `protobuf:"bytes,19,opt,name=username,proto3" json:"username,omitempty"`
 	unknownFields    protoimpl.UnknownFields
 	sizeCache        protoimpl.SizeCache
 }
@@ -2925,6 +2928,13 @@ func (x *ClientSyncAuditInfo) GetErrorCode() string {
 func (x *ClientSyncAuditInfo) GetErrorMessage() string {
 	if x != nil {
 		return x.ErrorMessage
+	}
+	return ""
+}
+
+func (x *ClientSyncAuditInfo) GetUsername() string {
+	if x != nil {
+		return x.Username
 	}
 	return ""
 }
@@ -3430,7 +3440,7 @@ const file_core_v1_spider_spider_proto_rawDesc = "" +
 	"\bplatform\x18\x04 \x01(\tR\bplatform\x12\x16\n" +
 	"\x06status\x18\x05 \x01(\tR\x06status\x12\x12\n" +
 	"\x04from\x18\x06 \x01(\x03R\x04from\x12\x0e\n" +
-	"\x02to\x18\a \x01(\x03R\x02to\"\xe8\x04\n" +
+	"\x02to\x18\a \x01(\x03R\x02to\"\x84\x05\n" +
 	"\x13ClientSyncAuditInfo\x12\x1d\n" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\x12)\n" +
@@ -3456,7 +3466,8 @@ const file_core_v1_spider_spider_proto_rawDesc = "" +
 	"\rrestart_count\x18\x10 \x01(\x05R\frestartCount\x12\x1d\n" +
 	"\n" +
 	"error_code\x18\x11 \x01(\tR\terrorCode\x12#\n" +
-	"\rerror_message\x18\x12 \x01(\tR\ferrorMessage\"\xa9\x01\n" +
+	"\rerror_message\x18\x12 \x01(\tR\ferrorMessage\x12\x1a\n" +
+	"\busername\x18\x13 \x01(\tR\busername\"\xa9\x01\n" +
 	"\x1cAdminListClientSyncAuditsRes\x12;\n" +
 	"\x04list\x18\x01 \x03(\v2'.api.core.v1.spider.ClientSyncAuditInfoR\x04list\x12\x14\n" +
 	"\x05total\x18\x02 \x01(\x03R\x05total\x12\x19\n" +

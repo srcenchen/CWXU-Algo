@@ -8,6 +8,7 @@ type ClientSyncAudit struct {
 	SessionID        string     `gorm:"primaryKey;size:64"`
 	AuthorizationID  uint64     `gorm:"not null;index"`
 	UserID           int64      `gorm:"not null;index"`
+	Username         string     `gorm:"size:64;not null;default:''"`
 	Platform         string     `gorm:"size:32;not null;index"`
 	OJUID            string     `gorm:"size:64;not null;index"`
 	ClientKind       string     `gorm:"size:32;not null"`

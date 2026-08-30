@@ -480,6 +480,7 @@ message ClientSyncAuditInfo {
   int32 restart_count = 16;
   string error_code = 17;
   string error_message = 18;
+  string username = 19;
 }
 
 message AdminListClientSyncAuditsRes {
