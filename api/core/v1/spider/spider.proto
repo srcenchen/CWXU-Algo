@@ -285,10 +285,8 @@ message SpiderPlatformStat {
   int64 todayRows = 20;
   // 提交同步是否暂停
   bool submitPaused = 21;
-  // 兼容字段：官方和 VirtualOJ 题面来源均关闭时为 true
   bool problemPaused = 22;
   bool officialStatementEnabled = 23;
-  bool vjudgeStatementEnabled = 24;
 }
 
 message TogglePlatformReq {
@@ -297,7 +295,7 @@ message TogglePlatformReq {
   bool enabled = 2;
   // submit/problem；空值兼容 submit
   string module = 3;
-  // module=problem 时可选 official / vjudge；空值仅兼容旧的题面总开关
+  // module=submit 时控制提交记录同步；module=problem 保留兼容字段但不再支持来源切换
   string source = 4;
 }
 

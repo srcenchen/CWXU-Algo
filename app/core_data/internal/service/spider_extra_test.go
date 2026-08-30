@@ -23,17 +23,6 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-func TestSupportsVJudgeStatementSource(t *testing.T) {
-	for _, platform := range []string{"LuoGu", "CodeForces", "AtCoder", "QOJ"} {
-		if !supportsVJudgeStatementSource(platform) {
-			t.Errorf("%s should support VirtualOJ", platform)
-		}
-	}
-	if supportsVJudgeStatementSource("POJ") {
-		t.Fatal("POJ should remain official-only")
-	}
-}
-
 // genTestRSAKeys 生成测试用 RSA 密钥对（PEM）。
 func genTestRSAKeys(t *testing.T) (privPEM, pubPEM string) {
 	t.Helper()
@@ -60,19 +49,10 @@ func TestTogglePlatformDispatchesModuleAndReportsRedisFailure(t *testing.T) {
 	spider.RegisterSpiderHTTPServer(server, &SpiderService{rdb: rdb})
 	admin := spiderExtraAdminToken(t, 1, true)
 
-	r := spiderExtraRequest(server, http.MethodPost, "/v1/core/spider/toggle-platform", admin,
-		`{"platform":"NowCoder","enabled":false,"module":"problem","source":"official"}`)
-	var body map[string]interface{}
-	if err := json.Unmarshal(r.Body.Bytes(), &body); err != nil {
-		t.Fatalf("problem toggle invalid json: %v body=%s", err, r.Body.String())
-	}
-	if body["code"] != "0" { t.Fatalf("source toggle failed: body=%s", r.Body.String()) }
-	if task.IsPlatformPaused(rdb, "NowCoder") {
-		t.Fatal("problem toggle 不应暂停提交爬虫")
-	}
-
-	r = spiderExtraRequest(server, http.MethodPost, "/v1/core/spider/toggle-platform", admin,
+	var r = spiderExtraRequest(server, http.MethodPost, "/v1/core/spider/toggle-platform", admin,
 		`{"platform":"LuoGu","enabled":true,"module":"submit"}`)
+	var body map[string]interface{}
+
 	if err := json.Unmarshal(r.Body.Bytes(), &body); err != nil {
 		t.Fatalf("luogu no-account toggle invalid json: %v", err)
 	}

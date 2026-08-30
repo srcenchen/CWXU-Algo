@@ -15,7 +15,6 @@ import (
 const (
 	ServiceLuoGu   = "oj_luogu"
 	ServiceQOJ     = "oj_qoj"
-	ServiceVJudge  = "oj_vjudge"
 	ServiceAgent   = "agent"
 	ServiceAiAnaly = "ai_analyze"
 	ServiceSmtp    = "smtp"
@@ -73,7 +72,7 @@ func GetServiceStatus(ctx context.Context, rdb *redis.Client, service string) Se
 // GetAllServiceStatus 返回所有关注服务的最近状态。
 func GetAllServiceStatus(ctx context.Context, rdb *redis.Client) map[string]ServiceStatus {
 	out := map[string]ServiceStatus{}
-	for _, svc := range []string{ServiceLuoGu, ServiceQOJ, ServiceVJudge, ServiceAgent, ServiceAiAnaly, ServiceSmtp} {
+	for _, svc := range []string{ServiceLuoGu, ServiceQOJ, ServiceAgent, ServiceAiAnaly, ServiceSmtp} {
 		out[svc] = GetServiceStatus(ctx, rdb, svc)
 	}
 	return out
@@ -81,5 +80,5 @@ func GetAllServiceStatus(ctx context.Context, rdb *redis.Client) map[string]Serv
 
 // AllServiceNames 健康端点用到的服务清单（顺序稳定）。
 func AllServiceNames() []string {
-	return []string{ServiceLuoGu, ServiceQOJ, ServiceVJudge, ServiceAgent, ServiceAiAnaly, ServiceSmtp}
+	return []string{ServiceLuoGu, ServiceQOJ, ServiceAgent, ServiceAiAnaly, ServiceSmtp}
 }

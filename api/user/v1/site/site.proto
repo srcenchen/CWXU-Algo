@@ -122,12 +122,6 @@ message GetAdminConfigRes {
   string oj_qoj_status = 37;
   int64 oj_qoj_status_at = 38;
    string oj_qoj_err_msg = 39;
-   string oj_vjudge_username = 64;
-   string oj_vjudge_password_masked = 65;
-   bool oj_vjudge_password_set = 66;
-   string oj_vjudge_status = 67;
-   int64 oj_vjudge_status_at = 68;
-   string oj_vjudge_err_msg = 69;
   // AI 服务状态
   string agent_status = 40;
   int64 agent_status_at = 41;
@@ -205,9 +199,6 @@ message UpdateConfigReq {
   string oj_qoj_username = 30;
   string oj_qoj_password = 31;
    bool clear_oj_qoj_password = 32;
-   string oj_vjudge_username = 48;
-   string oj_vjudge_password = 49;
-   bool clear_oj_vjudge_password = 50;
   // 运维告警邮件收件人；始终覆盖保存（可清空）
   string ops_notify_emails = 33;
   // 运维磁盘统计目录（数据盘挂载点；空=默认 /data，未挂载回退 /）

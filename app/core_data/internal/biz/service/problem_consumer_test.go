@@ -11,18 +11,6 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-func TestProblemStatementPolicyDisabledSkipsFetch(t *testing.T) {
-	if statementSourcesDisabled(true, false) {
-		t.Fatal("official-only policy must allow fetching")
-	}
-	if !statementSourcesDisabled(false, false) {
-		t.Fatal("both disabled policy must block fetching")
-	}
-	if statementSourcesDisabled(false, true) {
-		t.Fatal("VJudge-only policy must allow fetching")
-	}
-}
-
 func TestProblemFetchConsumerEarlyPauseIgnoresMessagePlatform(t *testing.T) {
 	pipelineControl.SetFetchPaused(false)
 	t.Cleanup(func() { pipelineControl.SetFetchPaused(false) })

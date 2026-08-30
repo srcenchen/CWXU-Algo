@@ -125,10 +125,6 @@ func buildSectionUpdatesWith(row *model.SiteConfig, req *site.UpdateConfigReq, e
 		if err := applySecret("oj_qoj_password", req.OjQojPassword, req.ClearOjQojPassword); err != nil {
 			return nil, err
 		}
-		updates["oj_vjudge_username"] = strings.TrimSpace(req.OjVjudgeUsername)
-		if err := applySecret("oj_vjudge_password", req.OjVjudgePassword, req.ClearOjVjudgePassword); err != nil {
-			return nil, err
-		}
 	}
 	if isSection(section, "payment") {
 		updates["payfm_api_base"] = strings.TrimSpace(req.PayfmApiBase)

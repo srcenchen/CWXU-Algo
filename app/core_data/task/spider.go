@@ -100,7 +100,6 @@ func OjLastErrKey(platform string) string {
 const (
 	// pausedPlatformsKey 站管暂停提交同步的 OJ 集合（SET；不带 TTL）
 	pausedPlatformsKey = "spider:paused_platforms"
-	problemSourceKey   = "problem:source_policy"
 )
 
 func isPlatformPaused(rdb *redis.Client, key, platform string) bool {
@@ -113,53 +112,6 @@ func isPlatformPaused(rdb *redis.Client, key, platform string) bool {
 		return false
 	}
 	return ok
-}
-
-// ProblemStatementSources returns the source policy. Missing fields preserve
-// the historical behavior: official enabled, VJudge disabled.
-func ProblemStatementSources(rdb *redis.Client, platform string) (official, vjudge bool) {
-	official, vjudge = true, false
-	if rdb == nil || strings.TrimSpace(platform) == "" {
-		return
-	}
-	values, err := rdb.HGetAll(context.Background(), problemSourceKey).Result()
-	if err != nil {
-		return
-	}
-	if raw, ok := values[strings.TrimSpace(platform)]; ok {
-		var p struct {
-			Official *bool `json:"official"`
-			VJudge   *bool `json:"vjudge"`
-		}
-		if json.Unmarshal([]byte(raw), &p) == nil {
-			if p.Official != nil {
-				official = *p.Official
-			}
-			if p.VJudge != nil {
-				vjudge = *p.VJudge
-			}
-		}
-	}
-	return
-}
-
-func SetProblemStatementSource(rdb *redis.Client, platform, source string, enabled bool) error {
-	if rdb == nil {
-		return fmt.Errorf("statement source: redis unavailable")
-	}
-	platform = strings.TrimSpace(platform)
-	source = strings.ToLower(strings.TrimSpace(source))
-	if platform == "" || (source != "official" && source != "vjudge") {
-		return fmt.Errorf("statement source 参数错误")
-	}
-	official, vjudge := ProblemStatementSources(rdb, platform)
-	if source == "official" {
-		official = enabled
-	} else {
-		vjudge = enabled
-	}
-	b, _ := json.Marshal(map[string]bool{"official": official, "vjudge": vjudge})
-	return rdb.HSet(context.Background(), problemSourceKey, platform, b).Err()
 }
 
 func setPlatformPaused(rdb *redis.Client, key, platform string, paused bool) error {

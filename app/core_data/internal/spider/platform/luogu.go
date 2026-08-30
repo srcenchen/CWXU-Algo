@@ -483,7 +483,7 @@ func (lg *NewLuoGu) Name() string {
 	return spider.LuoGu
 }
 
-// FetchRating 经官方 JSON API 取当前 Elo（需登录会话）。
+// FetchRating 经公开 JSON API 取当前 Elo，不依赖站点爬虫登录账号。
 // 洛谷前端已不再在用户页注入 _feInjection；rating 字段也已弃用，以 eloValue / elo.rating 为准。
 // 未参加过 rated 比赛时 eloValue 为 null → hasRating=false。
 func (lg *NewLuoGu) FetchRating(username string) (int, bool, error) {
@@ -491,10 +491,9 @@ func (lg *NewLuoGu) FetchRating(username string) (int, bool, error) {
 	if username == "" {
 		return 0, false, fmt.Errorf("luogu username 为空")
 	}
-	client, err := lg.getClient()
-	if err != nil {
-		return 0, false, err
-	}
+	// Rating 是公开基础数据，必须与提交记录登录态解耦，避免站点账号
+	// 缺失或登录验证码影响所有用户的 Rating 更新。
+	client := ojhttp.Client
 	// 绑定字段为用户编号（uid）；也兼容用户名搜索
 	uid, err := lg.resolveUID(client, username)
 	if err != nil {

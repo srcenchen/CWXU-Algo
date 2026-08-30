@@ -8984,10 +8984,7 @@ components:
                     description: 提交同步是否暂停
                 problemPaused:
                     type: boolean
-                    description: 兼容字段：官方和 VirtualOJ 题面来源均关闭时为 true
                 officialStatementEnabled:
-                    type: boolean
-                vjudgeStatementEnabled:
                     type: boolean
             description: 单个 OJ 的爬虫各模块监控
         api.core.v1.spider.StartLuoguSyncReq:
@@ -9055,7 +9052,7 @@ components:
                     description: submit/problem；空值兼容 submit
                 source:
                     type: string
-                    description: module=problem 时可选 official / vjudge；空值仅兼容旧的题面总开关
+                    description: module=submit 时控制提交记录同步；module=problem 保留兼容字段但不再支持来源切换
         api.core.v1.spider.TogglePlatformRes:
             type: object
             properties:
@@ -13331,18 +13328,6 @@ components:
                     type: string
                 ojQojErrMsg:
                     type: string
-                ojVjudgeUsername:
-                    type: string
-                ojVjudgePasswordMasked:
-                    type: string
-                ojVjudgePasswordSet:
-                    type: boolean
-                ojVjudgeStatus:
-                    type: string
-                ojVjudgeStatusAt:
-                    type: string
-                ojVjudgeErrMsg:
-                    type: string
                 agentStatus:
                     type: string
                     description: AI 服务状态
@@ -13523,12 +13508,6 @@ components:
                 ojQojPassword:
                     type: string
                 clearOjQojPassword:
-                    type: boolean
-                ojVjudgeUsername:
-                    type: string
-                ojVjudgePassword:
-                    type: string
-                clearOjVjudgePassword:
                     type: boolean
                 opsNotifyEmails:
                     type: string

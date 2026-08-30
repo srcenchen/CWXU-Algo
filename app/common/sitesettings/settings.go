@@ -50,17 +50,12 @@ type Runtime struct {
 	OjLuoguPassword   string `json:"ojLuoguPassword"`
 	OjQojUsername     string `json:"ojQojUsername"`
 	OjQojPassword     string `json:"ojQojPassword"`
-	OjVJudgeUsername  string `json:"ojVJudgeUsername"`
-	OjVJudgePassword  string `json:"ojVJudgePassword"`
 	OjLuoguStatus     string `json:"ojLuoguStatus"`
 	OjLuoguStatusAt   int64  `json:"ojLuoguStatusAt"`
 	OjLuoguErrMsg     string `json:"ojLuoguErrMsg"`
 	OjQojStatus       string `json:"ojQojStatus"`
 	OjQojStatusAt     int64  `json:"ojQojStatusAt"`
 	OjQojErrMsg       string `json:"ojQojErrMsg"`
-	OjVJudgeStatus    string `json:"ojVJudgeStatus"`
-	OjVJudgeStatusAt  int64  `json:"ojVJudgeStatusAt"`
-	OjVJudgeErrMsg    string `json:"ojVJudgeErrMsg"`
 	AgentStatus       string `json:"agentStatus"`
 	AgentStatusAt     int64  `json:"agentStatusAt"`
 	AgentErrMsg       string `json:"agentErrMsg"`
@@ -108,17 +103,12 @@ type Row struct {
 	OjLuoguPassword           string `gorm:"column:oj_luogu_password"`
 	OjQojUsername             string `gorm:"column:oj_qoj_username"`
 	OjQojPassword             string `gorm:"column:oj_qoj_password"`
-	OjVJudgeUsername          string `gorm:"column:oj_vjudge_username"`
-	OjVJudgePassword          string `gorm:"column:oj_vjudge_password"`
 	OjLuoguStatus             string `gorm:"column:oj_luogu_status"`
 	OjLuoguStatusAt           int64  `gorm:"column:oj_luogu_status_at"`
 	OjLuoguErrMsg             string `gorm:"column:oj_luogu_err_msg"`
 	OjQojStatus               string `gorm:"column:oj_qoj_status"`
 	OjQojStatusAt             int64  `gorm:"column:oj_qoj_status_at"`
 	OjQojErrMsg               string `gorm:"column:oj_qoj_err_msg"`
-	OjVJudgeStatus            string `gorm:"column:oj_vjudge_status"`
-	OjVJudgeStatusAt          int64  `gorm:"column:oj_vjudge_status_at"`
-	OjVJudgeErrMsg            string `gorm:"column:oj_vjudge_err_msg"`
 	AgentStatus               string `gorm:"column:agent_status"`
 	AgentStatusAt             int64  `gorm:"column:agent_status_at"`
 	AgentErrMsg               string `gorm:"column:agent_err_msg"`
@@ -157,8 +147,8 @@ func (r *Row) ToRuntimeChecked() (*Runtime, error) {
 	secrets := map[string]string{
 		"smtp_password": r.SMTPPassword, "agent_secret": r.AgentSecret,
 		"ai_analyze_secret": r.AiAnalyzeSecret, "oj_luogu_password": r.OjLuoguPassword,
-		"oj_qoj_password": r.OjQojPassword, "oj_vjudge_password": r.OjVJudgePassword,
-		"payfm_secret": r.PayFmSecret, "upyun_password": r.UpyunPassword,
+		"oj_qoj_password": r.OjQojPassword,
+		"payfm_secret":    r.PayFmSecret, "upyun_password": r.UpyunPassword,
 	}
 	for column, value := range secrets {
 		if legacysecret.IsEncrypted(value) {
@@ -189,17 +179,12 @@ func (r *Row) ToRuntimeChecked() (*Runtime, error) {
 		OjLuoguPassword:           r.OjLuoguPassword,
 		OjQojUsername:             strings.TrimSpace(r.OjQojUsername),
 		OjQojPassword:             r.OjQojPassword,
-		OjVJudgeUsername:          strings.TrimSpace(r.OjVJudgeUsername),
-		OjVJudgePassword:          r.OjVJudgePassword,
 		OjLuoguStatus:             r.OjLuoguStatus,
 		OjLuoguStatusAt:           r.OjLuoguStatusAt,
 		OjLuoguErrMsg:             r.OjLuoguErrMsg,
 		OjQojStatus:               r.OjQojStatus,
 		OjQojStatusAt:             r.OjQojStatusAt,
 		OjQojErrMsg:               r.OjQojErrMsg,
-		OjVJudgeStatus:            r.OjVJudgeStatus,
-		OjVJudgeStatusAt:          r.OjVJudgeStatusAt,
-		OjVJudgeErrMsg:            r.OjVJudgeErrMsg,
 		AgentStatus:               r.AgentStatus,
 		AgentStatusAt:             r.AgentStatusAt,
 		AgentErrMsg:               r.AgentErrMsg,
@@ -314,9 +299,6 @@ func (rt *Runtime) worthCaching() bool {
 		return true
 	}
 	if strings.TrimSpace(rt.OjLuoguUsername) != "" || strings.TrimSpace(rt.OjQojUsername) != "" {
-		return true
-	}
-	if strings.TrimSpace(rt.OjVJudgeUsername) != "" {
 		return true
 	}
 	if strings.TrimSpace(rt.PayFmApiBase) != "" {
@@ -454,8 +436,6 @@ func UpdateOjStatus(ctx context.Context, rdb *redis.Client, db *gorm.DB, platfor
 		service = ServiceLuoGu
 	case "QOJ":
 		service = ServiceQOJ
-	case "VJudge":
-		service = ServiceVJudge
 	}
 	if service != "" {
 		SetServiceStatus(ctx, rdb, service, status, errMsg)
@@ -474,10 +454,6 @@ func UpdateOjStatus(ctx context.Context, rdb *redis.Client, db *gorm.DB, platfor
 		updates["oj_qoj_status"] = status
 		updates["oj_qoj_status_at"] = now
 		updates["oj_qoj_err_msg"] = errMsg
-	case "VJudge":
-		updates["oj_vjudge_status"] = status
-		updates["oj_vjudge_status_at"] = now
-		updates["oj_vjudge_err_msg"] = errMsg
 	default:
 		return
 	}

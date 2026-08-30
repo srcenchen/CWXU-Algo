@@ -16,7 +16,6 @@ import (
 	data2 "cwxu-algo/app/common/data"
 	"cwxu-algo/app/common/discovery"
 	"cwxu-algo/app/common/event"
-	"cwxu-algo/app/common/sitesettings"
 	"cwxu-algo/app/common/utils/sqllike"
 	"cwxu-algo/app/core_data/internal/data"
 	"cwxu-algo/app/core_data/internal/data/dal"
@@ -528,9 +527,6 @@ func (uc *ProblemUseCase) enqueueFetchPrio(id uint, platform, externalID, url st
 	if uc.mq == nil {
 		return fmt.Errorf("mq not ready")
 	}
-	if uc.statementSourcesDisabled(platform) {
-		return nil
-	}
 	// 牛客：附带比赛页候选；有比赛映射时 Force，以便 FAILED_PERM 也能再爬
 	force := false
 	var fallbacks []string
@@ -755,9 +751,6 @@ func (uc *ProblemUseCase) ProcessFetch(ctx context.Context, ev event.ProblemFetc
 	defer pipelineControl.TrackEnd("fetch", p.ID)
 	// 已识别完成且有题面：跳过。无题面的 COMPLETED/TAGGING 必须允许补爬（全平台）。
 	hasContent := strings.TrimSpace(p.ContentMD) != ""
-	if !hasContent && uc.statementSourcesDisabled(p.Platform) {
-		return uc.deferDisabledStatementFetch(&p)
-	}
 	if p.Status == model.ProblemStatusCompleted && hasContent && !ev.ForceRefetch {
 		return nil
 	}
@@ -867,14 +860,7 @@ func (uc *ProblemUseCase) ProcessFetch(ctx context.Context, ev event.ProblemFetc
 	}
 	// Source switches can change while a task is being claimed. Recheck after
 	// the FETCHING transition immediately before any external request.
-	if uc.statementSourcesDisabled(p.Platform) {
-		return uc.deferDisabledStatementFetch(&p)
-	}
-	officialEnabled, vjudgeEnabled := task.ProblemStatementSources(uc.data.RDB, p.Platform)
-	runtime := sitesettings.Load(ctx, uc.data.RDB, nil)
-	fetched, err := problem_fetch.FetchWithSources(ctx, p.Platform, p.ExternalID, url, fallbacks,
-		problem_fetch.StatementSourcePolicy{OfficialEnabled: officialEnabled, VJudgeEnabled: vjudgeEnabled},
-		runtime.OjVJudgeUsername, runtime.OjVJudgePassword)
+	fetched, err := problem_fetch.FetchWithFallbacks(p.Platform, p.ExternalID, url, fallbacks)
 	if err != nil {
 		return uc.handleFetchError(&p, err)
 	}
@@ -941,29 +927,6 @@ func (uc *ProblemUseCase) ProcessFetch(ctx context.Context, ev event.ProblemFetc
 	}
 	// 分析暂停时仍入队（暂停不清队列，恢复后继续）；高优先级延续当前已出队的爬取任务
 	return uc.enqueueAnalyzePrio(p.ID, mqPriorityIncremental)
-}
-
-func statementSourcesDisabled(official, vjudge bool) bool {
-	return !official && !vjudge
-}
-
-func (uc *ProblemUseCase) statementSourcesDisabled(platform string) bool {
-	if uc == nil || uc.data == nil {
-		return false
-	}
-	official, vjudge := task.ProblemStatementSources(uc.data.RDB, platform)
-	return statementSourcesDisabled(official, vjudge)
-}
-
-// deferDisabledStatementFetch makes a queued task harmless while preserving
-// its pending state so enabling a source can fetch it later.
-func (uc *ProblemUseCase) deferDisabledStatementFetch(p *model.Problem) error {
-	if p == nil || uc == nil || uc.data == nil || uc.data.DB == nil {
-		return nil
-	}
-	return uc.data.DB.Model(&model.Problem{}).
-		Where("id = ? AND TRIM(COALESCE(content_md, '')) = ''", p.ID).
-		Updates(map[string]interface{}{"status": model.ProblemStatusPending, "error_msg": "题面来源已关闭"}).Error
 }
 
 // restorePausedProblemFetch closes the pause race after FETCHING is claimed.
@@ -2055,11 +2018,7 @@ func (uc *ProblemUseCase) RepairQOJBrandTitles(limit int, refetch bool) (scanned
 		scanned++
 		newTitle := titleFromMarkdownH1(p.ContentMD)
 		if newTitle == "" && refetch {
-			runtime := sitesettings.Load(context.Background(), uc.data.RDB, nil)
-			officialEnabled, vjudgeEnabled := task.ProblemStatementSources(uc.data.RDB, p.Platform)
-			fetched, ferr := problem_fetch.FetchWithSources(context.Background(), p.Platform, p.ExternalID, p.URL, nil,
-				problem_fetch.StatementSourcePolicy{OfficialEnabled: officialEnabled, VJudgeEnabled: vjudgeEnabled},
-				runtime.OjVJudgeUsername, runtime.OjVJudgePassword)
+			fetched, ferr := problem_fetch.FetchWithFallbacks(p.Platform, p.ExternalID, p.URL, nil)
 			if ferr != nil {
 				log.Warnf("RepairQOJBrandTitles fetch id=%d ext=%s: %v", p.ID, p.ExternalID, ferr)
 				failed++

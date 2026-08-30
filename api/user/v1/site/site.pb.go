@@ -234,18 +234,12 @@ type GetAdminConfigRes struct {
 	OjQojPasswordMasked   string `protobuf:"bytes,32,opt,name=oj_qoj_password_masked,json=ojQojPasswordMasked,proto3" json:"oj_qoj_password_masked,omitempty"`
 	OjQojPasswordSet      bool   `protobuf:"varint,33,opt,name=oj_qoj_password_set,json=ojQojPasswordSet,proto3" json:"oj_qoj_password_set,omitempty"`
 	// OJ 登录状态（ok / fail / unchecked）+ 时间戳 + 错误
-	OjLuoguStatus          string `protobuf:"bytes,34,opt,name=oj_luogu_status,json=ojLuoguStatus,proto3" json:"oj_luogu_status,omitempty"`
-	OjLuoguStatusAt        int64  `protobuf:"varint,35,opt,name=oj_luogu_status_at,json=ojLuoguStatusAt,proto3" json:"oj_luogu_status_at,omitempty"`
-	OjLuoguErrMsg          string `protobuf:"bytes,36,opt,name=oj_luogu_err_msg,json=ojLuoguErrMsg,proto3" json:"oj_luogu_err_msg,omitempty"`
-	OjQojStatus            string `protobuf:"bytes,37,opt,name=oj_qoj_status,json=ojQojStatus,proto3" json:"oj_qoj_status,omitempty"`
-	OjQojStatusAt          int64  `protobuf:"varint,38,opt,name=oj_qoj_status_at,json=ojQojStatusAt,proto3" json:"oj_qoj_status_at,omitempty"`
-	OjQojErrMsg            string `protobuf:"bytes,39,opt,name=oj_qoj_err_msg,json=ojQojErrMsg,proto3" json:"oj_qoj_err_msg,omitempty"`
-	OjVjudgeUsername       string `protobuf:"bytes,64,opt,name=oj_vjudge_username,json=ojVjudgeUsername,proto3" json:"oj_vjudge_username,omitempty"`
-	OjVjudgePasswordMasked string `protobuf:"bytes,65,opt,name=oj_vjudge_password_masked,json=ojVjudgePasswordMasked,proto3" json:"oj_vjudge_password_masked,omitempty"`
-	OjVjudgePasswordSet    bool   `protobuf:"varint,66,opt,name=oj_vjudge_password_set,json=ojVjudgePasswordSet,proto3" json:"oj_vjudge_password_set,omitempty"`
-	OjVjudgeStatus         string `protobuf:"bytes,67,opt,name=oj_vjudge_status,json=ojVjudgeStatus,proto3" json:"oj_vjudge_status,omitempty"`
-	OjVjudgeStatusAt       int64  `protobuf:"varint,68,opt,name=oj_vjudge_status_at,json=ojVjudgeStatusAt,proto3" json:"oj_vjudge_status_at,omitempty"`
-	OjVjudgeErrMsg         string `protobuf:"bytes,69,opt,name=oj_vjudge_err_msg,json=ojVjudgeErrMsg,proto3" json:"oj_vjudge_err_msg,omitempty"`
+	OjLuoguStatus   string `protobuf:"bytes,34,opt,name=oj_luogu_status,json=ojLuoguStatus,proto3" json:"oj_luogu_status,omitempty"`
+	OjLuoguStatusAt int64  `protobuf:"varint,35,opt,name=oj_luogu_status_at,json=ojLuoguStatusAt,proto3" json:"oj_luogu_status_at,omitempty"`
+	OjLuoguErrMsg   string `protobuf:"bytes,36,opt,name=oj_luogu_err_msg,json=ojLuoguErrMsg,proto3" json:"oj_luogu_err_msg,omitempty"`
+	OjQojStatus     string `protobuf:"bytes,37,opt,name=oj_qoj_status,json=ojQojStatus,proto3" json:"oj_qoj_status,omitempty"`
+	OjQojStatusAt   int64  `protobuf:"varint,38,opt,name=oj_qoj_status_at,json=ojQojStatusAt,proto3" json:"oj_qoj_status_at,omitempty"`
+	OjQojErrMsg     string `protobuf:"bytes,39,opt,name=oj_qoj_err_msg,json=ojQojErrMsg,proto3" json:"oj_qoj_err_msg,omitempty"`
 	// AI 服务状态
 	AgentStatus       string `protobuf:"bytes,40,opt,name=agent_status,json=agentStatus,proto3" json:"agent_status,omitempty"`
 	AgentStatusAt     int64  `protobuf:"varint,41,opt,name=agent_status_at,json=agentStatusAt,proto3" json:"agent_status_at,omitempty"`
@@ -586,48 +580,6 @@ func (x *GetAdminConfigRes) GetOjQojErrMsg() string {
 	return ""
 }
 
-func (x *GetAdminConfigRes) GetOjVjudgeUsername() string {
-	if x != nil {
-		return x.OjVjudgeUsername
-	}
-	return ""
-}
-
-func (x *GetAdminConfigRes) GetOjVjudgePasswordMasked() string {
-	if x != nil {
-		return x.OjVjudgePasswordMasked
-	}
-	return ""
-}
-
-func (x *GetAdminConfigRes) GetOjVjudgePasswordSet() bool {
-	if x != nil {
-		return x.OjVjudgePasswordSet
-	}
-	return false
-}
-
-func (x *GetAdminConfigRes) GetOjVjudgeStatus() string {
-	if x != nil {
-		return x.OjVjudgeStatus
-	}
-	return ""
-}
-
-func (x *GetAdminConfigRes) GetOjVjudgeStatusAt() int64 {
-	if x != nil {
-		return x.OjVjudgeStatusAt
-	}
-	return 0
-}
-
-func (x *GetAdminConfigRes) GetOjVjudgeErrMsg() string {
-	if x != nil {
-		return x.OjVjudgeErrMsg
-	}
-	return ""
-}
-
 func (x *GetAdminConfigRes) GetAgentStatus() string {
 	if x != nil {
 		return x.AgentStatus
@@ -833,15 +785,12 @@ type UpdateConfigReq struct {
 	UpyunDomain        string `protobuf:"bytes,25,opt,name=upyun_domain,json=upyunDomain,proto3" json:"upyun_domain,omitempty"`
 	UpyunScheme        string `protobuf:"bytes,26,opt,name=upyun_scheme,json=upyunScheme,proto3" json:"upyun_scheme,omitempty"`
 	// OJ 爬虫账号
-	OjLuoguUsername       string `protobuf:"bytes,27,opt,name=oj_luogu_username,json=ojLuoguUsername,proto3" json:"oj_luogu_username,omitempty"`
-	OjLuoguPassword       string `protobuf:"bytes,28,opt,name=oj_luogu_password,json=ojLuoguPassword,proto3" json:"oj_luogu_password,omitempty"`
-	ClearOjLuoguPassword  bool   `protobuf:"varint,29,opt,name=clear_oj_luogu_password,json=clearOjLuoguPassword,proto3" json:"clear_oj_luogu_password,omitempty"`
-	OjQojUsername         string `protobuf:"bytes,30,opt,name=oj_qoj_username,json=ojQojUsername,proto3" json:"oj_qoj_username,omitempty"`
-	OjQojPassword         string `protobuf:"bytes,31,opt,name=oj_qoj_password,json=ojQojPassword,proto3" json:"oj_qoj_password,omitempty"`
-	ClearOjQojPassword    bool   `protobuf:"varint,32,opt,name=clear_oj_qoj_password,json=clearOjQojPassword,proto3" json:"clear_oj_qoj_password,omitempty"`
-	OjVjudgeUsername      string `protobuf:"bytes,48,opt,name=oj_vjudge_username,json=ojVjudgeUsername,proto3" json:"oj_vjudge_username,omitempty"`
-	OjVjudgePassword      string `protobuf:"bytes,49,opt,name=oj_vjudge_password,json=ojVjudgePassword,proto3" json:"oj_vjudge_password,omitempty"`
-	ClearOjVjudgePassword bool   `protobuf:"varint,50,opt,name=clear_oj_vjudge_password,json=clearOjVjudgePassword,proto3" json:"clear_oj_vjudge_password,omitempty"`
+	OjLuoguUsername      string `protobuf:"bytes,27,opt,name=oj_luogu_username,json=ojLuoguUsername,proto3" json:"oj_luogu_username,omitempty"`
+	OjLuoguPassword      string `protobuf:"bytes,28,opt,name=oj_luogu_password,json=ojLuoguPassword,proto3" json:"oj_luogu_password,omitempty"`
+	ClearOjLuoguPassword bool   `protobuf:"varint,29,opt,name=clear_oj_luogu_password,json=clearOjLuoguPassword,proto3" json:"clear_oj_luogu_password,omitempty"`
+	OjQojUsername        string `protobuf:"bytes,30,opt,name=oj_qoj_username,json=ojQojUsername,proto3" json:"oj_qoj_username,omitempty"`
+	OjQojPassword        string `protobuf:"bytes,31,opt,name=oj_qoj_password,json=ojQojPassword,proto3" json:"oj_qoj_password,omitempty"`
+	ClearOjQojPassword   bool   `protobuf:"varint,32,opt,name=clear_oj_qoj_password,json=clearOjQojPassword,proto3" json:"clear_oj_qoj_password,omitempty"`
 	// 运维告警邮件收件人；始终覆盖保存（可清空）
 	OpsNotifyEmails string `protobuf:"bytes,33,opt,name=ops_notify_emails,json=opsNotifyEmails,proto3" json:"ops_notify_emails,omitempty"`
 	// 运维磁盘统计目录（数据盘挂载点；空=默认 /data，未挂载回退 /）
@@ -1118,27 +1067,6 @@ func (x *UpdateConfigReq) GetOjQojPassword() string {
 func (x *UpdateConfigReq) GetClearOjQojPassword() bool {
 	if x != nil {
 		return x.ClearOjQojPassword
-	}
-	return false
-}
-
-func (x *UpdateConfigReq) GetOjVjudgeUsername() string {
-	if x != nil {
-		return x.OjVjudgeUsername
-	}
-	return ""
-}
-
-func (x *UpdateConfigReq) GetOjVjudgePassword() string {
-	if x != nil {
-		return x.OjVjudgePassword
-	}
-	return ""
-}
-
-func (x *UpdateConfigReq) GetClearOjVjudgePassword() bool {
-	if x != nil {
-		return x.ClearOjVjudgePassword
 	}
 	return false
 }
@@ -2311,7 +2239,7 @@ const file_user_v1_site_site_proto_rawDesc = "" +
 	"\n" +
 	"footer_icp\x18\x06 \x01(\tR\tfooterIcp\x12)\n" +
 	"\x10payfm_configured\x18\a \x01(\bR\x0fpayfmConfigured\"\x13\n" +
-	"\x11GetAdminConfigReq\"\xa8\x16\n" +
+	"\x11GetAdminConfigReq\"\x86\x14\n" +
 	"\x11GetAdminConfigRes\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\x03R\x04code\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12\x1d\n" +
@@ -2355,13 +2283,7 @@ const file_user_v1_site_site_proto_rawDesc = "" +
 	"\x10oj_luogu_err_msg\x18$ \x01(\tR\rojLuoguErrMsg\x12\"\n" +
 	"\roj_qoj_status\x18% \x01(\tR\vojQojStatus\x12'\n" +
 	"\x10oj_qoj_status_at\x18& \x01(\x03R\rojQojStatusAt\x12#\n" +
-	"\x0eoj_qoj_err_msg\x18' \x01(\tR\vojQojErrMsg\x12,\n" +
-	"\x12oj_vjudge_username\x18@ \x01(\tR\x10ojVjudgeUsername\x129\n" +
-	"\x19oj_vjudge_password_masked\x18A \x01(\tR\x16ojVjudgePasswordMasked\x123\n" +
-	"\x16oj_vjudge_password_set\x18B \x01(\bR\x13ojVjudgePasswordSet\x12(\n" +
-	"\x10oj_vjudge_status\x18C \x01(\tR\x0eojVjudgeStatus\x12-\n" +
-	"\x13oj_vjudge_status_at\x18D \x01(\x03R\x10ojVjudgeStatusAt\x12)\n" +
-	"\x11oj_vjudge_err_msg\x18E \x01(\tR\x0eojVjudgeErrMsg\x12!\n" +
+	"\x0eoj_qoj_err_msg\x18' \x01(\tR\vojQojErrMsg\x12!\n" +
 	"\fagent_status\x18( \x01(\tR\vagentStatus\x12&\n" +
 	"\x0fagent_status_at\x18) \x01(\x03R\ragentStatusAt\x12\"\n" +
 	"\ragent_err_msg\x18* \x01(\tR\vagentErrMsg\x12*\n" +
@@ -2388,7 +2310,7 @@ const file_user_v1_site_site_proto_rawDesc = "" +
 	"backupTime\x12#\n" +
 	"\rbackup_prefix\x18= \x01(\tR\fbackupPrefix\x12-\n" +
 	"\x12spider_concurrency\x18> \x01(\x05R\x11spiderConcurrency\x12>\n" +
-	"\x1bproblem_analyze_concurrency\x18? \x01(\x05R\x19problemAnalyzeConcurrency\"\x87\x10\n" +
+	"\x1bproblem_analyze_concurrency\x18? \x01(\x05R\x19problemAnalyzeConcurrency\"\xf2\x0e\n" +
 	"\x0fUpdateConfigReq\x12\x1d\n" +
 	"\n" +
 	"site_title\x18\x01 \x01(\tR\tsiteTitle\x12\x1b\n" +
@@ -2425,10 +2347,7 @@ const file_user_v1_site_site_proto_rawDesc = "" +
 	"\x17clear_oj_luogu_password\x18\x1d \x01(\bR\x14clearOjLuoguPassword\x12&\n" +
 	"\x0foj_qoj_username\x18\x1e \x01(\tR\rojQojUsername\x12&\n" +
 	"\x0foj_qoj_password\x18\x1f \x01(\tR\rojQojPassword\x121\n" +
-	"\x15clear_oj_qoj_password\x18  \x01(\bR\x12clearOjQojPassword\x12,\n" +
-	"\x12oj_vjudge_username\x180 \x01(\tR\x10ojVjudgeUsername\x12,\n" +
-	"\x12oj_vjudge_password\x181 \x01(\tR\x10ojVjudgePassword\x127\n" +
-	"\x18clear_oj_vjudge_password\x182 \x01(\bR\x15clearOjVjudgePassword\x12*\n" +
+	"\x15clear_oj_qoj_password\x18  \x01(\bR\x12clearOjQojPassword\x12*\n" +
 	"\x11ops_notify_emails\x18! \x01(\tR\x0fopsNotifyEmails\x12$\n" +
 	"\x0edata_disk_path\x18\" \x01(\tR\fdataDiskPath\x12$\n" +
 	"\x0epayfm_api_base\x18# \x01(\tR\fpayfmApiBase\x12*\n" +

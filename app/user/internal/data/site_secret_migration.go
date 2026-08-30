@@ -36,7 +36,7 @@ func migrateLegacySiteSecrets(db *gorm.DB, decrypt legacySecretDecryptor) error 
 		values := map[string]string{
 			"smtp_password": row.SMTPPassword, "agent_secret": row.AgentSecret,
 			"ai_analyze_secret": row.AiAnalyzeSecret, "upyun_password": row.UpyunPassword,
-			"oj_luogu_password": row.OjLuoguPassword, "oj_qoj_password": row.OjQojPassword, "oj_vjudge_password": row.OjVJudgePassword,
+			"oj_luogu_password": row.OjLuoguPassword, "oj_qoj_password": row.OjQojPassword,
 			"payfm_secret": row.PayFmSecret,
 		}
 		updates := make(map[string]interface{})
