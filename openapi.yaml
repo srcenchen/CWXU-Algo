@@ -7949,6 +7949,10 @@ components:
                     type: string
                 analyzedModel:
                     type: string
+                canRefetch:
+                    type: boolean
+                canReanalyze:
+                    type: boolean
         api.core.v1.problem.ProblemRelatedContest:
             type: object
             properties:

@@ -184,6 +184,8 @@ type ProblemInfo struct {
 	ContentFetchedAt int64                 `protobuf:"varint,19,opt,name=content_fetched_at,json=contentFetchedAt,proto3" json:"content_fetched_at,omitempty"`
 	AnalyzedAt       int64                 `protobuf:"varint,20,opt,name=analyzed_at,json=analyzedAt,proto3" json:"analyzed_at,omitempty"`
 	AnalyzedModel    string                `protobuf:"bytes,21,opt,name=analyzed_model,json=analyzedModel,proto3" json:"analyzed_model,omitempty"`
+	CanRefetch       bool                  `protobuf:"varint,22,opt,name=can_refetch,json=canRefetch,proto3" json:"can_refetch,omitempty"`
+	CanReanalyze     bool                  `protobuf:"varint,23,opt,name=can_reanalyze,json=canReanalyze,proto3" json:"can_reanalyze,omitempty"`
 	unknownFields    protoimpl.UnknownFields
 	sizeCache        protoimpl.SizeCache
 }
@@ -363,6 +365,20 @@ func (x *ProblemInfo) GetAnalyzedModel() string {
 		return x.AnalyzedModel
 	}
 	return ""
+}
+
+func (x *ProblemInfo) GetCanRefetch() bool {
+	if x != nil {
+		return x.CanRefetch
+	}
+	return false
+}
+
+func (x *ProblemInfo) GetCanReanalyze() bool {
+	if x != nil {
+		return x.CanReanalyze
+	}
+	return false
 }
 
 type RefetchProblemReq struct {
@@ -4720,7 +4736,7 @@ const file_core_v1_problem_problem_proto_rawDesc = "" +
 	"\auser_id\x18\x01 \x01(\rR\x06userId\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x1a\n" +
 	"\busername\x18\x03 \x01(\tR\busername\x12\x16\n" +
-	"\x06avatar\x18\x04 \x01(\tR\x06avatar\"\xfe\x05\n" +
+	"\x06avatar\x18\x04 \x01(\tR\x06avatar\"\xc4\x06\n" +
 	"\vProblemInfo\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\rR\x02id\x12\x1a\n" +
 	"\bplatform\x18\x02 \x01(\tR\bplatform\x12\x1f\n" +
@@ -4749,7 +4765,10 @@ const file_core_v1_problem_problem_proto_rawDesc = "" +
 	"\x12content_fetched_at\x18\x13 \x01(\x03R\x10contentFetchedAt\x12\x1f\n" +
 	"\vanalyzed_at\x18\x14 \x01(\x03R\n" +
 	"analyzedAt\x12%\n" +
-	"\x0eanalyzed_model\x18\x15 \x01(\tR\ranalyzedModel\"2\n" +
+	"\x0eanalyzed_model\x18\x15 \x01(\tR\ranalyzedModel\x12\x1f\n" +
+	"\vcan_refetch\x18\x16 \x01(\bR\n" +
+	"canRefetch\x12#\n" +
+	"\rcan_reanalyze\x18\x17 \x01(\bR\fcanReanalyze\"2\n" +
 	"\x11RefetchProblemReq\x12\x1d\n" +
 	"\n" +
 	"problem_id\x18\x01 \x01(\rR\tproblemId\"4\n" +

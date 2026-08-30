@@ -213,6 +213,8 @@ message ProblemInfo {
   int64 content_fetched_at = 19;
   int64 analyzed_at = 20;
   string analyzed_model = 21;
+  bool can_refetch = 22;
+  bool can_reanalyze = 23;
 }
 
 message RefetchProblemReq { uint32 problem_id = 1; }

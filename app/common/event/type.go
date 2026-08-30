@@ -28,7 +28,8 @@ type ProblemFetchEvent struct {
 	// FallbackURLs 额外候选（如 NowCoder 比赛页 /acm/contest/{id}/{A}），题库页无权限时回退
 	FallbackURLs []string `json:"fallback_urls,omitempty"`
 	// Force 忽略用户题面爬取资格闸门（题单加题等主动场景）
-	Force bool `json:"force,omitempty"`
+	Force        bool `json:"force,omitempty"`
+	ForceRefetch bool `json:"force_refetch,omitempty"`
 	// BypassFetchPause 允许主动/管理员补爬绕过运维页的全局题面暂停开关。
 	// 与 Force 分开：部分内部任务使用 Force 仅绕过用户资格，仍应服从全局暂停。
 	BypassFetchPause bool `json:"bypass_fetch_pause,omitempty"`

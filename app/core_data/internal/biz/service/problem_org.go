@@ -52,6 +52,11 @@ func (uc *ProblemUseCase) UserCanFetchProblem(ctx context.Context, userID uint) 
 	return yes
 }
 
+// UserCanReanalyzeProblem reports the effective AI permission for a viewer.
+func (uc *ProblemUseCase) UserCanReanalyzeProblem(userID uint) bool {
+	return uc.userHasAIEligibility(userID)
+}
+
 // problemHasOrgSubmitter 兼容旧调用：等价于 AI 资格（题面 AI 闸门）
 func (uc *ProblemUseCase) problemHasOrgSubmitter(problemID uint) bool {
 	return uc.problemHasAISubmitter(problemID)

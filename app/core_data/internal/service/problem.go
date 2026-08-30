@@ -312,6 +312,10 @@ func (s *ProblemService) Get(ctx context.Context, req *problem.GetProblemReq) (*
 		return &problem.GetProblemRes{Code: 1, Message: "题目不存在"}, nil
 	}
 	info := s.toInfo(p, "")
+	if uid := auth.GetCurrentUserId(ctx); uid > 0 {
+		info.CanRefetch = s.uc.UserCanFetchProblem(ctx, uint(uid))
+		info.CanReanalyze = s.uc.UserCanReanalyzeProblem(uint(uid))
+	}
 	s.attachContributors(ctx, info)
 	return &problem.GetProblemRes{
 		Code:    0,
@@ -328,7 +332,7 @@ func (s *ProblemService) Refetch(ctx context.Context, req *problem.RefetchProble
 	if !s.uc.UserCanFetchProblem(ctx, uid) {
 		return &problem.ProblemActionRes{Code: 1, Message: "暂无爬取题面权限"}, nil
 	}
-	if err := s.uc.ForceEnqueueFetch(uint(req.GetProblemId()), uint(uid)); err != nil {
+	if err := s.uc.ForceEnqueueRefetch(uint(req.GetProblemId()), uint(uid)); err != nil {
 		return &problem.ProblemActionRes{Code: 1, Message: err.Error()}, nil
 	}
 	return &problem.ProblemActionRes{Code: 0, Message: "已开始重新爬取题面"}, nil

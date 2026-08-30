@@ -758,7 +758,7 @@ func (uc *ProblemUseCase) ProcessFetch(ctx context.Context, ev event.ProblemFetc
 	if !hasContent && uc.statementSourcesDisabled(p.Platform) {
 		return uc.deferDisabledStatementFetch(&p)
 	}
-	if p.Status == model.ProblemStatusCompleted && hasContent {
+	if p.Status == model.ProblemStatusCompleted && hasContent && !ev.ForceRefetch {
 		return nil
 	}
 	// 无爬取资格用户近窗提交：不爬题面（旧消息防御；前端显示「题面准备中」）
@@ -775,7 +775,7 @@ func (uc *ProblemUseCase) ProcessFetch(ctx context.Context, ev event.ProblemFetc
 	}
 	// 已有题面：不再爬取；入 AI（主动路径按 actor，否则窗口 + submitter 闸门）
 	// 注意：不得因 status=TAGGING 且 content 空而跳过爬取
-	if hasContent {
+	if hasContent && !ev.ForceRefetch {
 		if p.Status != model.ProblemStatusCompleted {
 			_ = uc.data.DB.Model(&p).Update("status", model.ProblemStatusTagging).Error
 			if !ev.SkipAnalyze {
@@ -999,6 +999,18 @@ func (uc *ProblemUseCase) ForceEnqueueFetchOnly(problemID uint) error {
 	return uc.ForceEnqueueFetch(problemID, 0)
 }
 
+func (uc *ProblemUseCase) ForceEnqueueRefetch(problemID uint, actorUID uint) error {
+	if uc == nil || problemID == 0 {
+		return nil
+	}
+	var p model.Problem
+	if err := uc.data.DB.First(&p, problemID).Error; err != nil {
+		return err
+	}
+	uc.scheduleUserPriorityFetchWithMode(p.ID, p.Platform, p.ExternalID, p.URL, true, actorUID, true)
+	return nil
+}
+
 // ContentLooksBroken 历史坏题面（HTML→MD 粘连章节标题等），用户主动加题时应强制重爬。
 // 全平台通用启发式：章节名与正文粘连、页头 Editorial 残留。
 func ContentLooksBroken(md string) bool {
@@ -1111,6 +1123,10 @@ func (uc *ProblemUseCase) ForceEnqueueFetch(problemID uint, actorUID uint) error
 // scheduleUserPriorityFetch 用户主动补爬：MQ 最高优先级异步入队 + 后台直爬。
 // 全平台通用；HTTP 路径禁止同步等 confirm。
 func (uc *ProblemUseCase) scheduleUserPriorityFetch(id uint, platform, externalID, url string, skipAnalyze bool, actorUID uint) {
+	uc.scheduleUserPriorityFetchWithMode(id, platform, externalID, url, skipAnalyze, actorUID, false)
+}
+
+func (uc *ProblemUseCase) scheduleUserPriorityFetchWithMode(id uint, platform, externalID, url string, skipAnalyze bool, actorUID uint, forceRefetch bool) {
 	ev := event.ProblemFetchEvent{
 		ProblemID:        id,
 		Platform:         platform,
@@ -1120,6 +1136,7 @@ func (uc *ProblemUseCase) scheduleUserPriorityFetch(id uint, platform, externalI
 		BypassFetchPause: true,
 		SkipAnalyze:      skipAnalyze,
 		ActorUserID:      actorUID,
+		ForceRefetch:     forceRefetch,
 	}
 	// 牛客比赛页候选（与 enqueueFetchPrio 对齐）
 	if strings.EqualFold(strings.TrimSpace(platform), spider.NowCoder) {
