@@ -1091,6 +1091,8 @@ func (s SpiderService) GetSpiderMonitor(ctx context.Context, _ *spider.SpiderMon
 	for _, cap := range ojCaps {
 		today := opsmetrics.ReadSpiderPlatformToday(ctx, s.rdb, cap.platform)
 		submitPaused := task.IsPlatformPaused(s.rdb, cap.platform)
+		problemPaused := task.IsProblemPaused(s.rdb, cap.platform)
+		proxyEnabled := task.IsProxyEnabled(s.rdb, cap.platform)
 		st := &spider.SpiderPlatformStat{
 			Platform:           cap.platform,
 			BoundUsers:         boundBy[cap.platform],
@@ -1108,7 +1110,8 @@ func (s SpiderService) GetSpiderMonitor(ctx context.Context, _ *spider.SpiderMon
 			SubmitPaused:       submitPaused,
 		}
 		st.OfficialStatementEnabled = true
-		st.ProblemPaused = false
+		st.ProblemPaused = problemPaused
+		st.ProxyEnabled = proxyEnabled
 		if s.rdb != nil {
 			// 最近同步（按 OJ 聚合）
 			if v, err := s.rdb.Get(ctx, task.OjLastOKKey(cap.platform)).Int64(); err == nil {
@@ -1398,7 +1401,15 @@ func (s SpiderService) TogglePlatform(ctx context.Context, req *spider.TogglePla
 		if !auth.HasPerm(ctx, rbac.PermSiteProblemOps) {
 			return &spider.TogglePlatformRes{Code: 1, Message: "需要题库运维权限"}, nil
 		}
-		return &spider.TogglePlatformRes{Code: 1, Message: "题面同步不支持暂停"}, nil
+		setter = task.SetProblemPaused
+	case "proxy":
+		if !auth.HasPerm(ctx, rbac.PermSiteSpiderOps) {
+			return &spider.TogglePlatformRes{Code: 1, Message: "需要爬虫运维权限"}, nil
+		}
+		if err := task.SetProxyEnabled(s.rdb, strings.TrimSpace(req.GetPlatform()), req.GetEnabled()); err != nil {
+			return &spider.TogglePlatformRes{Code: 1, Message: "操作失败"}, nil
+		}
+		return &spider.TogglePlatformRes{Code: 0, Message: "代理设置已更新"}, nil
 	default:
 		return &spider.TogglePlatformRes{Code: 1, Message: "module 仅支持 submit/problem"}, nil
 	}

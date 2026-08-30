@@ -56,6 +56,8 @@ type Runtime struct {
 	OjQojStatus       string `json:"ojQojStatus"`
 	OjQojStatusAt     int64  `json:"ojQojStatusAt"`
 	OjQojErrMsg       string `json:"ojQojErrMsg"`
+	OjProxyBaseURL    string `json:"ojProxyBaseUrl"`
+	OjProxySecret     string `json:"ojProxySecret"`
 	AgentStatus       string `json:"agentStatus"`
 	AgentStatusAt     int64  `json:"agentStatusAt"`
 	AgentErrMsg       string `json:"agentErrMsg"`
@@ -109,6 +111,8 @@ type Row struct {
 	OjQojStatus               string `gorm:"column:oj_qoj_status"`
 	OjQojStatusAt             int64  `gorm:"column:oj_qoj_status_at"`
 	OjQojErrMsg               string `gorm:"column:oj_qoj_err_msg"`
+	OjProxyBaseURL            string `gorm:"column:oj_proxy_base_url"`
+	OjProxySecret             string `gorm:"column:oj_proxy_secret"`
 	AgentStatus               string `gorm:"column:agent_status"`
 	AgentStatusAt             int64  `gorm:"column:agent_status_at"`
 	AgentErrMsg               string `gorm:"column:agent_err_msg"`
@@ -148,6 +152,7 @@ func (r *Row) ToRuntimeChecked() (*Runtime, error) {
 		"smtp_password": r.SMTPPassword, "agent_secret": r.AgentSecret,
 		"ai_analyze_secret": r.AiAnalyzeSecret, "oj_luogu_password": r.OjLuoguPassword,
 		"oj_qoj_password": r.OjQojPassword,
+		"oj_proxy_secret": r.OjProxySecret,
 		"payfm_secret":    r.PayFmSecret, "upyun_password": r.UpyunPassword,
 	}
 	for column, value := range secrets {
@@ -179,6 +184,8 @@ func (r *Row) ToRuntimeChecked() (*Runtime, error) {
 		OjLuoguPassword:           r.OjLuoguPassword,
 		OjQojUsername:             strings.TrimSpace(r.OjQojUsername),
 		OjQojPassword:             r.OjQojPassword,
+		OjProxyBaseURL:            strings.TrimSpace(r.OjProxyBaseURL),
+		OjProxySecret:             r.OjProxySecret,
 		OjLuoguStatus:             r.OjLuoguStatus,
 		OjLuoguStatusAt:           r.OjLuoguStatusAt,
 		OjLuoguErrMsg:             r.OjLuoguErrMsg,

@@ -155,6 +155,9 @@ message GetAdminConfigRes {
   string backup_prefix = 61;
   int32 spider_concurrency = 62;
   int32 problem_analyze_concurrency = 63;
+  string oj_proxy_base_url = 64;
+  string oj_proxy_secret_masked = 65;
+  bool oj_proxy_secret_set = 66;
 }
 
 message UpdateConfigReq {
@@ -221,6 +224,9 @@ message UpdateConfigReq {
   string backup_prefix = 45;
   int32 spider_concurrency = 46;
   int32 problem_analyze_concurrency = 47;
+  string oj_proxy_base_url = 48;
+  string oj_proxy_secret = 49;
+  bool clear_oj_proxy_secret = 50;
 }
 
 message UpdateConfigRes {

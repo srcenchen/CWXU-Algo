@@ -8986,6 +8986,8 @@ components:
                     type: boolean
                 officialStatementEnabled:
                     type: boolean
+                proxyEnabled:
+                    type: boolean
             description: 单个 OJ 的爬虫各模块监控
         api.core.v1.spider.StartLuoguSyncReq:
             type: object
@@ -13387,6 +13389,12 @@ components:
                 problemAnalyzeConcurrency:
                     type: integer
                     format: int32
+                ojProxyBaseUrl:
+                    type: string
+                ojProxySecretMasked:
+                    type: string
+                ojProxySecretSet:
+                    type: boolean
         api.user.v1.site.GetConfigRes:
             type: object
             properties:
@@ -13548,6 +13556,12 @@ components:
                 problemAnalyzeConcurrency:
                     type: integer
                     format: int32
+                ojProxyBaseUrl:
+                    type: string
+                ojProxySecret:
+                    type: string
+                clearOjProxySecret:
+                    type: boolean
         api.user.v1.site.UpdateConfigRes:
             type: object
             properties:

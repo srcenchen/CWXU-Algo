@@ -100,6 +100,8 @@ func OjLastErrKey(platform string) string {
 const (
 	// pausedPlatformsKey 站管暂停提交同步的 OJ 集合（SET；不带 TTL）
 	pausedPlatformsKey = "spider:paused_platforms"
+	pausedProblemKey   = "spider:paused_problem_platforms"
+	proxyPlatformsKey  = "spider:proxy_platforms"
 )
 
 func isPlatformPaused(rdb *redis.Client, key, platform string) bool {
@@ -142,6 +144,22 @@ func IsPlatformPaused(rdb *redis.Client, platform string) bool {
 // SetPlatformPaused 暂停 / 恢复某 OJ 的爬虫同步
 func SetPlatformPaused(rdb *redis.Client, platform string, paused bool) error {
 	return setPlatformPaused(rdb, pausedPlatformsKey, platform, paused)
+}
+
+func IsProblemPaused(rdb *redis.Client, platform string) bool {
+	return isPlatformPaused(rdb, pausedProblemKey, platform)
+}
+
+func SetProblemPaused(rdb *redis.Client, platform string, paused bool) error {
+	return setPlatformPaused(rdb, pausedProblemKey, platform, paused)
+}
+
+func IsProxyEnabled(rdb *redis.Client, platform string) bool {
+	return isPlatformPaused(rdb, proxyPlatformsKey, platform)
+}
+
+func SetProxyEnabled(rdb *redis.Client, platform string, enabled bool) error {
+	return setPlatformPaused(rdb, proxyPlatformsKey, platform, !enabled)
 }
 
 // PausedPlatforms 返回已暂停同步的 OJ 集合（站管监控用）

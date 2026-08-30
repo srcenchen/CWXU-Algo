@@ -1053,6 +1053,7 @@ type SpiderPlatformStat struct {
 	SubmitPaused             bool `protobuf:"varint,21,opt,name=submitPaused,proto3" json:"submitPaused,omitempty"`
 	ProblemPaused            bool `protobuf:"varint,22,opt,name=problemPaused,proto3" json:"problemPaused,omitempty"`
 	OfficialStatementEnabled bool `protobuf:"varint,23,opt,name=officialStatementEnabled,proto3" json:"officialStatementEnabled,omitempty"`
+	ProxyEnabled             bool `protobuf:"varint,25,opt,name=proxyEnabled,proto3" json:"proxyEnabled,omitempty"`
 	unknownFields            protoimpl.UnknownFields
 	sizeCache                protoimpl.SizeCache
 }
@@ -1244,6 +1245,13 @@ func (x *SpiderPlatformStat) GetProblemPaused() bool {
 func (x *SpiderPlatformStat) GetOfficialStatementEnabled() bool {
 	if x != nil {
 		return x.OfficialStatementEnabled
+	}
+	return false
+}
+
+func (x *SpiderPlatformStat) GetProxyEnabled() bool {
+	if x != nil {
+		return x.ProxyEnabled
 	}
 	return false
 }
@@ -3297,7 +3305,7 @@ const file_core_v1_spider_spider_proto_rawDesc = "" +
 	"\x04code\x18\x01 \x01(\x03R\x04code\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12D\n" +
 	"\tplatforms\x18\x03 \x03(\v2&.api.core.v1.spider.SpiderPlatformStatR\tplatforms\x12 \n" +
-	"\vcollectedAt\x18\x04 \x01(\x03R\vcollectedAt\"\xb8\x06\n" +
+	"\vcollectedAt\x18\x04 \x01(\x03R\vcollectedAt\"\xdc\x06\n" +
 	"\x12SpiderPlatformStat\x12\x1a\n" +
 	"\bplatform\x18\x01 \x01(\tR\bplatform\x12\x1e\n" +
 	"\n" +
@@ -3330,7 +3338,8 @@ const file_core_v1_spider_spider_proto_rawDesc = "" +
 	"\ttodayRows\x18\x14 \x01(\x03R\ttodayRows\x12\"\n" +
 	"\fsubmitPaused\x18\x15 \x01(\bR\fsubmitPaused\x12$\n" +
 	"\rproblemPaused\x18\x16 \x01(\bR\rproblemPaused\x12:\n" +
-	"\x18officialStatementEnabled\x18\x17 \x01(\bR\x18officialStatementEnabled\"y\n" +
+	"\x18officialStatementEnabled\x18\x17 \x01(\bR\x18officialStatementEnabled\x12\"\n" +
+	"\fproxyEnabled\x18\x19 \x01(\bR\fproxyEnabled\"y\n" +
 	"\x11TogglePlatformReq\x12\x1a\n" +
 	"\bplatform\x18\x01 \x01(\tR\bplatform\x12\x18\n" +
 	"\aenabled\x18\x02 \x01(\bR\aenabled\x12\x16\n" +

@@ -53,6 +53,8 @@ type SiteConfig struct {
 	OjLuoguPassword string `gorm:"size:512;column:oj_luogu_password;comment:洛谷爬虫密码"`
 	OjQojUsername   string `gorm:"size:128;column:oj_qoj_username;comment:QOJ 爬虫账号"`
 	OjQojPassword   string `gorm:"size:512;column:oj_qoj_password;comment:QOJ 爬虫密码"`
+	OjProxyBaseURL  string `gorm:"size:512;column:oj_proxy_base_url;comment:OJ 代理地址"`
+	OjProxySecret   string `gorm:"size:512;column:oj_proxy_secret;comment:OJ 代理密钥"`
 	// OJ 登录状态（由爬虫实际登录后回写：ok / fail / unchecked）
 	OjLuoguStatus   string `gorm:"size:16;column:oj_luogu_status;default:unchecked;comment:洛谷登录状态"`
 	OjLuoguStatusAt int64  `gorm:"column:oj_luogu_status_at;default:0;comment:洛谷状态更新时间 unix"`

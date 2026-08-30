@@ -104,6 +104,10 @@ func rowToRuntime(row *model.SiteConfig) (*sitesettings.Runtime, error) {
 	if err != nil {
 		return nil, err
 	}
+	proxySecret, err := read("oj_proxy_secret", row.OjProxySecret)
+	if err != nil {
+		return nil, err
+	}
 	payfmSecret, err := read("payfm_secret", row.PayFmSecret)
 	if err != nil {
 		return nil, err
@@ -132,6 +136,8 @@ func rowToRuntime(row *model.SiteConfig) (*sitesettings.Runtime, error) {
 		OjLuoguPassword:           luoguPassword,
 		OjQojUsername:             strings.TrimSpace(row.OjQojUsername),
 		OjQojPassword:             qojPassword,
+		OjProxyBaseURL:            strings.TrimSpace(row.OjProxyBaseURL),
+		OjProxySecret:             proxySecret,
 		OpsNotifyEmails:           strings.TrimSpace(row.OpsNotifyEmails),
 		DataDiskPath:              strings.TrimSpace(row.DataDiskPath),
 		SpiderConcurrency:         normalizeRuntimeConcurrency(row.SpiderConcurrency),
@@ -239,6 +245,9 @@ func (s *SiteService) GetAdminConfig(ctx context.Context, _ *site.GetAdminConfig
 		OjQojUsername:             strings.TrimSpace(row.OjQojUsername),
 		OjQojPasswordMasked:       sitesettings.MaskSecret(rt.OjQojPassword),
 		OjQojPasswordSet:          strings.TrimSpace(rt.OjQojPassword) != "",
+		OjProxyBaseUrl:            strings.TrimSpace(rt.OjProxyBaseURL),
+		OjProxySecretMasked:       sitesettings.MaskSecret(rt.OjProxySecret),
+		OjProxySecretSet:          strings.TrimSpace(rt.OjProxySecret) != "",
 		OjLuoguStatus:             lgSt.Status,
 		OjLuoguStatusAt:           lgSt.At,
 		OjLuoguErrMsg:             lgSt.ErrMsg,
