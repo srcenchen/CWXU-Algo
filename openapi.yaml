@@ -7572,6 +7572,11 @@ components:
                     type: string
                 latestOutput:
                     type: string
+                state:
+                    type: string
+                    description: running | finished，finished 任务在 Redis 中保留 1 小时供诊断
+                endedAt:
+                    type: string
         api.core.v1.problem.AdminUpdateProblemReq:
             type: object
             properties:
@@ -8078,6 +8083,16 @@ components:
                     type: string
                 inProgressPageSize:
                     type: string
+                conversations:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/api.core.v1.problem.ActiveJob'
+                    description: AI 任务对话记录：运行中及结束后 1 小时内可查看
+                recentCompleted:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/api.core.v1.problem.FailedProblem'
+                    description: 最近成功完成的题目，固定最多 100 条
         api.core.v1.problem.ProposeProblemEditReq:
             type: object
             properties:

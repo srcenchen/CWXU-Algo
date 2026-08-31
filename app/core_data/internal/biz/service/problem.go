@@ -70,6 +70,9 @@ func NewProblemUseCase(data *data.Data, mq *event.RabbitMQ, tagger *ProblemTagge
 		r = &reg.Reg
 	}
 	uc := &ProblemUseCase{data: data, mq: mq, tagger: tagger, reg: r, profileTask: profileTask, abilityStats: abilityStats}
+	if data != nil {
+		pipelineControl.ConfigureRedis(data.RDB)
+	}
 	if data != nil && data.DB != nil && data.DB.Dialector.Name() == "postgres" {
 		go uc.runAbilityMaintenanceRecovery()
 	}
@@ -2857,6 +2860,8 @@ type ProgressSnapshot struct {
 	FetchPaused        bool
 	AnalyzePaused      bool
 	ActiveJobs         []ActiveJob
+	Conversations      []ActiveJob
+	RecentCompleted    []model.Problem
 	Queues             []struct {
 		Name        string
 		Messages    int64
@@ -2898,6 +2903,7 @@ func (uc *ProblemUseCase) Progress(page, pageSize, inProgressPage, inProgressPag
 				cached.FetchPaused = pipelineControl.IsFetchPaused()
 				cached.AnalyzePaused = pipelineControl.IsAnalyzePaused()
 				cached.ActiveJobs = pipelineControl.SnapshotActive()
+				cached.Conversations = pipelineControl.SnapshotConversations()
 				return cached, nil
 			}
 		}
@@ -2982,7 +2988,11 @@ func (uc *ProblemUseCase) Progress(page, pageSize, inProgressPage, inProgressPag
 	snap.FetchPaused = pipelineControl.IsFetchPaused()
 	snap.AnalyzePaused = pipelineControl.IsAnalyzePaused()
 	snap.ActiveJobs = pipelineControl.SnapshotActive()
+	snap.Conversations = pipelineControl.SnapshotConversations()
 	snap.Queues = uc.queueStats()
+	_ = uc.data.DB.Model(&model.Problem{}).
+		Where("status = ?", model.ProblemStatusCompleted).
+		Order("updated_at DESC, id DESC").Limit(100).Find(&snap.RecentCompleted).Error
 
 	if uc.data != nil && uc.data.RDB != nil {
 		// 缓存不含瞬时 ActiveJobs（读侧会覆盖）；计数/失败列表吃 15s 即可

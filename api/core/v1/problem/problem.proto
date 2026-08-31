@@ -445,6 +445,9 @@ message ActiveJob {
   string stage = 5; // fetch | analyze
   int64 started_at = 6;
   string latest_output = 7;
+  // running | finished，finished 任务在 Redis 中保留 1 小时供诊断
+  string state = 8;
+  int64 ended_at = 9;
 }
 
 message QueueStatus {
@@ -474,6 +477,10 @@ message ProgressRes {
   int64 in_progress_total = 17;
   int64 in_progress_page = 18;
   int64 in_progress_page_size = 19;
+  // AI 任务对话记录：运行中及结束后 1 小时内可查看
+  repeated ActiveJob conversations = 20;
+  // 最近成功完成的题目，固定最多 100 条
+  repeated FailedProblem recent_completed = 21;
 }
 
 message BackfillReq {

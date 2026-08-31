@@ -629,6 +629,8 @@ func (s *ProblemService) Progress(ctx context.Context, req *problem.ProgressReq)
 			Stage:        j.Stage,
 			StartedAt:    j.StartedAt.Unix(),
 			LatestOutput: j.LatestOutput,
+			State:        j.State,
+			EndedAt:      j.EndedAt.Unix(),
 		})
 	}
 	qs := make([]*problem.QueueStatus, 0, len(snap.Queues))
@@ -660,7 +662,21 @@ func (s *ProblemService) Progress(ctx context.Context, req *problem.ProgressReq)
 		InProgressTotal:       snap.InProgressTotal,
 		InProgressPage:        snap.InProgressPage,
 		InProgressPageSize:    snap.InProgressPageSize,
+		Conversations:         activeJobsToProto(snap.Conversations),
+		RecentCompleted:       toFailedProto(snap.RecentCompleted),
 	}, nil
+}
+
+func activeJobsToProto(list []biz.ActiveJob) []*problem.ActiveJob {
+	out := make([]*problem.ActiveJob, 0, len(list))
+	for _, j := range list {
+		out = append(out, &problem.ActiveJob{
+			ProblemId: uint32(j.ProblemID), Platform: j.Platform, ExternalId: j.ExternalID,
+			Title: j.Title, Stage: j.Stage, StartedAt: j.StartedAt.Unix(), LatestOutput: j.LatestOutput,
+			State: j.State, EndedAt: j.EndedAt.Unix(),
+		})
+	}
+	return out
 }
 
 func (s *ProblemService) Backfill(ctx context.Context, req *problem.BackfillReq) (*problem.BackfillRes, error) {
