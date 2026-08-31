@@ -18,6 +18,33 @@ import (
 
 type NewCodeforces struct{}
 
+const cfGymContestIDMin = 100000
+
+func isCFGymContestID(id int) bool {
+	return id >= cfGymContestIDMin
+}
+
+func canonicalCFContestID(id int) int {
+	if isCFGymContestID(id) {
+		return -id
+	}
+	return id
+}
+
+func cfContestURL(id int) string {
+	if id < 0 {
+		return "https://codeforces.com/gym/" + strconv.Itoa(-id)
+	}
+	return "https://codeforces.com/contest/" + strconv.Itoa(id)
+}
+
+func cfPositiveContestID(id int) int {
+	if id < 0 {
+		return -id
+	}
+	return id
+}
+
 type CFResponse struct {
 	Status string   `json:"status"`
 	Result []cfJson `json:"result"`
@@ -91,7 +118,7 @@ func (p NewCodeforces) FetchSubmitLog(ctx context.Context, userId int64, usernam
 			UserID:   userId,
 			Platform: spider.CodeForces,
 			SubmitID: strconv.Itoa(sub.ID),
-			Contest:  strconv.Itoa(sub.ContestID),
+			Contest:  strconv.Itoa(canonicalCFContestID(sub.ContestID)),
 			Problem:  fmt.Sprintf("%s-%s", sub.Problem.Index, sub.Problem.Name),
 			Lang:     sub.ProgrammingLanguage,
 			// CF 评测中可能省略 verdict → 空串；归一化后写入，避免 UI 显示空白
@@ -205,10 +232,11 @@ func (p NewCodeforces) FetchContestLog(userId int64, username string, needAll bo
 		if r.ContestID <= 0 {
 			continue
 		}
-		d := merged[r.ContestID]
+		cid := canonicalCFContestID(r.ContestID)
+		d := merged[cid]
 		if d == nil {
 			d = &draft{}
-			merged[r.ContestID] = d
+			merged[cid] = d
 		}
 		d.rank = r.Rank
 		d.name = strings.TrimSpace(r.ContestName)
@@ -275,7 +303,7 @@ func (p NewCodeforces) FetchContestLog(userId int64, username string, needAll bo
 			t = time.Unix(d.timeUnix, 0).In(shZone)
 		}
 		if name == "" {
-			if m, ok := meta[cid]; ok {
+			if m, ok := meta[cfPositiveContestID(cid)]; ok {
 				name = strings.TrimSpace(m.Name)
 				if t.IsZero() && m.StartTimeSeconds > 0 {
 					t = time.Unix(m.StartTimeSeconds, 0).In(shZone)
@@ -286,12 +314,16 @@ func (p NewCodeforces) FetchContestLog(userId int64, username string, needAll bo
 			name = fmt.Sprintf("Codeforces Contest %d", cid)
 		}
 		idStr := strconv.Itoa(cid)
+		contestID := idStr
+		if cid < 0 {
+			contestID = strconv.Itoa(-cid)
+		}
 		out = append(out, model.ContestLog{
 			Platform:    spider.CodeForces,
 			UserID:      userId,
-			ContestId:   idStr,
+			ContestId:   contestID,
 			ContestName: name,
-			ContestUrl:  "https://codeforces.com/contest/" + idStr,
+			ContestUrl:  cfContestURL(cid),
 			Rank:        d.rank,
 			AcCount:     d.ac,
 			TotalCount:  0,
@@ -349,9 +381,10 @@ func fetchCFContestACFromStatus(username string, needAll bool) (map[int]int, map
 		if pt != "CONTESTANT" && pt != "OUT_OF_COMPETITION" {
 			continue
 		}
-		if t, ok := participateTime[s.ContestID]; !ok || (s.CreationTimeSeconds > 0 && s.CreationTimeSeconds < t) {
+		cid := canonicalCFContestID(s.ContestID)
+		if t, ok := participateTime[cid]; !ok || (s.CreationTimeSeconds > 0 && s.CreationTimeSeconds < t) {
 			if s.CreationTimeSeconds > 0 {
-				participateTime[s.ContestID] = s.CreationTimeSeconds
+				participateTime[cid] = s.CreationTimeSeconds
 			}
 		}
 		if !strings.EqualFold(strings.TrimSpace(s.Verdict), "OK") {
@@ -361,10 +394,10 @@ func fetchCFContestACFromStatus(username string, needAll bool) (map[int]int, map
 		if idx == "" {
 			continue
 		}
-		set := acProblems[s.ContestID]
+		set := acProblems[cid]
 		if set == nil {
 			set = map[string]struct{}{}
-			acProblems[s.ContestID] = set
+			acProblems[cid] = set
 		}
 		set[idx] = struct{}{}
 	}
@@ -402,10 +435,10 @@ func (p NewCodeforces) FetchContestDetails(userId int64, username string, needAl
 
 	// contestId -> index -> agg
 	type agg struct {
-		attempts  int
-		ac        bool
-		firstAC   int64
-		label     string
+		attempts int
+		ac       bool
+		firstAC  int64
+		label    string
 	}
 	byContest := map[int]map[string]*agg{}
 
@@ -428,10 +461,11 @@ func (p NewCodeforces) FetchContestDetails(userId int64, username string, needAl
 		if idx == "" {
 			continue
 		}
-		m := byContest[s.ContestID]
+		cid := canonicalCFContestID(s.ContestID)
+		m := byContest[cid]
 		if m == nil {
 			m = map[string]*agg{}
-			byContest[s.ContestID] = m
+			byContest[cid] = m
 		}
 		a := m[idx]
 		if a == nil {
@@ -462,12 +496,18 @@ func (p NewCodeforces) FetchContestDetails(userId int64, username string, needAl
 	out := make([]spider.ContestProblemCell, 0, 64)
 	for cid, m := range byContest {
 		cidStr := strconv.Itoa(cid)
-		start := startBy[cid]
+		if cid < 0 {
+			cidStr = strconv.Itoa(-cid)
+		}
+		start := startBy[cfPositiveContestID(cid)]
 		for idx, a := range m {
 			if a.attempts == 0 && !a.ac {
 				continue
 			}
 			ext := cidStr + idx
+			if cid < 0 {
+				ext = "gym" + ext
+			}
 			cell := spider.ContestProblemCell{
 				ContestID:  cidStr,
 				Label:      a.label,

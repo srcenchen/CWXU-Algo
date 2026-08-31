@@ -83,6 +83,9 @@ func listCFContestProblems(contestID string) ([]ContestProblemSpec, error) {
 		isGym = true
 		cid = cid[3:]
 	}
+	if n, err := strconv.Atoi(cid); err == nil && n >= 100000 {
+		isGym = true
+	}
 	// 1) API contest.standings
 	if specs, err := listCFContestProblemsAPI(cid, isGym); err == nil && len(specs) > 0 {
 		return specs, nil
@@ -589,4 +592,3 @@ func labelSortKey(label string) int {
 	}
 	return n
 }
-

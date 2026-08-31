@@ -18,6 +18,21 @@ func TestCFFetchContestLog_EmptyUsername(t *testing.T) {
 	}
 }
 
+func TestCFContestIDSegment(t *testing.T) {
+	if !isCFGymContestID(106501) || isCFGymContestID(2261) {
+		t.Fatal("contest id segment classification is incorrect")
+	}
+	if got := canonicalCFContestID(106501); got != -106501 {
+		t.Fatalf("gym id=%d want -106501", got)
+	}
+	if got := canonicalCFContestID(2261); got != 2261 {
+		t.Fatalf("regular id=%d want 2261", got)
+	}
+	if got := cfContestURL(-106501); got != "https://codeforces.com/gym/106501" {
+		t.Fatalf("gym url=%s", got)
+	}
+}
+
 func TestCFFetchContestLog_LiveTourist(t *testing.T) {
 	logs, err := NewCodeforces{}.FetchContestLog(1, "tourist", false)
 	if err != nil {
