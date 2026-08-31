@@ -2053,6 +2053,110 @@ func (x *VerifyOjCredentialRes) GetErrorDetail() string {
 	return ""
 }
 
+type TestOjProxyReq struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	BaseUrl       string                 `protobuf:"bytes,1,opt,name=base_url,json=baseUrl,proto3" json:"base_url,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TestOjProxyReq) Reset() {
+	*x = TestOjProxyReq{}
+	mi := &file_user_v1_site_site_proto_msgTypes[17]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TestOjProxyReq) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TestOjProxyReq) ProtoMessage() {}
+
+func (x *TestOjProxyReq) ProtoReflect() protoreflect.Message {
+	mi := &file_user_v1_site_site_proto_msgTypes[17]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TestOjProxyReq.ProtoReflect.Descriptor instead.
+func (*TestOjProxyReq) Descriptor() ([]byte, []int) {
+	return file_user_v1_site_site_proto_rawDescGZIP(), []int{17}
+}
+
+func (x *TestOjProxyReq) GetBaseUrl() string {
+	if x != nil {
+		return x.BaseUrl
+	}
+	return ""
+}
+
+type TestOjProxyRes struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Code          int64                  `protobuf:"varint,1,opt,name=code,proto3" json:"code,omitempty"`
+	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	Ok            bool                   `protobuf:"varint,3,opt,name=ok,proto3" json:"ok,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TestOjProxyRes) Reset() {
+	*x = TestOjProxyRes{}
+	mi := &file_user_v1_site_site_proto_msgTypes[18]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TestOjProxyRes) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TestOjProxyRes) ProtoMessage() {}
+
+func (x *TestOjProxyRes) ProtoReflect() protoreflect.Message {
+	mi := &file_user_v1_site_site_proto_msgTypes[18]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TestOjProxyRes.ProtoReflect.Descriptor instead.
+func (*TestOjProxyRes) Descriptor() ([]byte, []int) {
+	return file_user_v1_site_site_proto_rawDescGZIP(), []int{18}
+}
+
+func (x *TestOjProxyRes) GetCode() int64 {
+	if x != nil {
+		return x.Code
+	}
+	return 0
+}
+
+func (x *TestOjProxyRes) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
+func (x *TestOjProxyRes) GetOk() bool {
+	if x != nil {
+		return x.Ok
+	}
+	return false
+}
+
 type GetAccessStatsRes struct {
 	state     protoimpl.MessageState `protogen:"open.v1"`
 	Code      int64                  `protobuf:"varint,1,opt,name=code,proto3" json:"code,omitempty"`
@@ -2096,7 +2200,7 @@ type GetAccessStatsRes struct {
 
 func (x *GetAccessStatsRes) Reset() {
 	*x = GetAccessStatsRes{}
-	mi := &file_user_v1_site_site_proto_msgTypes[17]
+	mi := &file_user_v1_site_site_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2108,7 +2212,7 @@ func (x *GetAccessStatsRes) String() string {
 func (*GetAccessStatsRes) ProtoMessage() {}
 
 func (x *GetAccessStatsRes) ProtoReflect() protoreflect.Message {
-	mi := &file_user_v1_site_site_proto_msgTypes[17]
+	mi := &file_user_v1_site_site_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2121,7 +2225,7 @@ func (x *GetAccessStatsRes) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetAccessStatsRes.ProtoReflect.Descriptor instead.
 func (*GetAccessStatsRes) Descriptor() ([]byte, []int) {
-	return file_user_v1_site_site_proto_rawDescGZIP(), []int{17}
+	return file_user_v1_site_site_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *GetAccessStatsRes) GetCode() int64 {
@@ -2480,7 +2584,13 @@ const file_user_v1_site_site_proto_rawDesc = "" +
 	"\x04code\x18\x01 \x01(\x03R\x04code\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12\x0e\n" +
 	"\x02ok\x18\x03 \x01(\bR\x02ok\x12!\n" +
-	"\ferror_detail\x18\x04 \x01(\tR\verrorDetail\"\xa9\a\n" +
+	"\ferror_detail\x18\x04 \x01(\tR\verrorDetail\"+\n" +
+	"\x0eTestOjProxyReq\x12\x19\n" +
+	"\bbase_url\x18\x01 \x01(\tR\abaseUrl\"N\n" +
+	"\x0eTestOjProxyRes\x12\x12\n" +
+	"\x04code\x18\x01 \x01(\x03R\x04code\x12\x18\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\x12\x0e\n" +
+	"\x02ok\x18\x03 \x01(\bR\x02ok\"\xa9\a\n" +
 	"\x11GetAccessStatsRes\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\x03R\x04code\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x125\n" +
@@ -2506,7 +2616,7 @@ const file_user_v1_site_site_proto_rawDesc = "" +
 	"\x15spider_enqueued_today\x18\x12 \x01(\x03R\x13spiderEnqueuedToday\x12&\n" +
 	"\x0fspider_ok_today\x18\x13 \x01(\x03R\rspiderOkToday\x12*\n" +
 	"\x11spider_fail_today\x18\x14 \x01(\x03R\x0fspiderFailToday\x12*\n" +
-	"\x11spider_rows_today\x18\x15 \x01(\x03R\x0fspiderRowsToday2\xd9\x06\n" +
+	"\x11spider_rows_today\x18\x15 \x01(\x03R\x0fspiderRowsToday2\xd1\a\n" +
 	"\x04Site\x12i\n" +
 	"\tGetConfig\x12\x1e.api.user.v1.site.GetConfigReq\x1a\x1e.api.user.v1.site.GetConfigRes\"\x1c\x82\xd3\xe4\x93\x02\x16\x12\x14/v1/user/site/config\x12~\n" +
 	"\x0eGetAdminConfig\x12#.api.user.v1.site.GetAdminConfigReq\x1a#.api.user.v1.site.GetAdminConfigRes\"\"\x82\xd3\xe4\x93\x02\x1c\x12\x1a/v1/user/site/admin-config\x12u\n" +
@@ -2514,7 +2624,8 @@ const file_user_v1_site_site_proto_rawDesc = "" +
 	"\tTestEmail\x12\x1e.api.user.v1.site.TestEmailReq\x1a\x1e.api.user.v1.site.TestEmailRes\"#\x82\xd3\xe4\x93\x02\x1d:\x01*\"\x18/v1/user/site/test-email\x12p\n" +
 	"\tVisitPing\x12\x1e.api.user.v1.site.VisitPingReq\x1a\x1e.api.user.v1.site.VisitPingRes\"#\x82\xd3\xe4\x93\x02\x1d:\x01*\"\x18/v1/user/site/visit-ping\x12~\n" +
 	"\x0eGetAccessStats\x12#.api.user.v1.site.GetAccessStatsReq\x1a#.api.user.v1.site.GetAccessStatsRes\"\"\x82\xd3\xe4\x93\x02\x1c\x12\x1a/v1/user/site/access-stats\x12\x8a\x01\n" +
-	"\x12VerifyOjCredential\x12'.api.user.v1.site.VerifyOjCredentialReq\x1a'.api.user.v1.site.VerifyOjCredentialRes\"\"\x82\xd3\xe4\x93\x02\x1c:\x01*\"\x17/v1/user/site/verify-ojB5\n" +
+	"\x12VerifyOjCredential\x12'.api.user.v1.site.VerifyOjCredentialReq\x1a'.api.user.v1.site.VerifyOjCredentialRes\"\"\x82\xd3\xe4\x93\x02\x1c:\x01*\"\x17/v1/user/site/verify-oj\x12v\n" +
+	"\vTestOjProxy\x12 .api.user.v1.site.TestOjProxyReq\x1a .api.user.v1.site.TestOjProxyRes\"#\x82\xd3\xe4\x93\x02\x1d:\x01*\"\x18/v1/user/site/test-proxyB5\n" +
 	"\x10api.user.v1.siteP\x01Z\x1fcwxu-algo/api/user/v1/site;siteb\x06proto3"
 
 var (
@@ -2529,7 +2640,7 @@ func file_user_v1_site_site_proto_rawDescGZIP() []byte {
 	return file_user_v1_site_site_proto_rawDescData
 }
 
-var file_user_v1_site_site_proto_msgTypes = make([]protoimpl.MessageInfo, 18)
+var file_user_v1_site_site_proto_msgTypes = make([]protoimpl.MessageInfo, 20)
 var file_user_v1_site_site_proto_goTypes = []any{
 	(*GetConfigReq)(nil),          // 0: api.user.v1.site.GetConfigReq
 	(*GetConfigRes)(nil),          // 1: api.user.v1.site.GetConfigRes
@@ -2548,7 +2659,9 @@ var file_user_v1_site_site_proto_goTypes = []any{
 	(*AccessIpItem)(nil),          // 14: api.user.v1.site.AccessIpItem
 	(*VerifyOjCredentialReq)(nil), // 15: api.user.v1.site.VerifyOjCredentialReq
 	(*VerifyOjCredentialRes)(nil), // 16: api.user.v1.site.VerifyOjCredentialRes
-	(*GetAccessStatsRes)(nil),     // 17: api.user.v1.site.GetAccessStatsRes
+	(*TestOjProxyReq)(nil),        // 17: api.user.v1.site.TestOjProxyReq
+	(*TestOjProxyRes)(nil),        // 18: api.user.v1.site.TestOjProxyRes
+	(*GetAccessStatsRes)(nil),     // 19: api.user.v1.site.GetAccessStatsRes
 }
 var file_user_v1_site_site_proto_depIdxs = []int32{
 	11, // 0: api.user.v1.site.GetAccessStatsRes.today:type_name -> api.user.v1.site.AccessDayStat
@@ -2564,15 +2677,17 @@ var file_user_v1_site_site_proto_depIdxs = []int32{
 	8,  // 10: api.user.v1.site.Site.VisitPing:input_type -> api.user.v1.site.VisitPingReq
 	10, // 11: api.user.v1.site.Site.GetAccessStats:input_type -> api.user.v1.site.GetAccessStatsReq
 	15, // 12: api.user.v1.site.Site.VerifyOjCredential:input_type -> api.user.v1.site.VerifyOjCredentialReq
-	1,  // 13: api.user.v1.site.Site.GetConfig:output_type -> api.user.v1.site.GetConfigRes
-	3,  // 14: api.user.v1.site.Site.GetAdminConfig:output_type -> api.user.v1.site.GetAdminConfigRes
-	5,  // 15: api.user.v1.site.Site.UpdateConfig:output_type -> api.user.v1.site.UpdateConfigRes
-	7,  // 16: api.user.v1.site.Site.TestEmail:output_type -> api.user.v1.site.TestEmailRes
-	9,  // 17: api.user.v1.site.Site.VisitPing:output_type -> api.user.v1.site.VisitPingRes
-	17, // 18: api.user.v1.site.Site.GetAccessStats:output_type -> api.user.v1.site.GetAccessStatsRes
-	16, // 19: api.user.v1.site.Site.VerifyOjCredential:output_type -> api.user.v1.site.VerifyOjCredentialRes
-	13, // [13:20] is the sub-list for method output_type
-	6,  // [6:13] is the sub-list for method input_type
+	17, // 13: api.user.v1.site.Site.TestOjProxy:input_type -> api.user.v1.site.TestOjProxyReq
+	1,  // 14: api.user.v1.site.Site.GetConfig:output_type -> api.user.v1.site.GetConfigRes
+	3,  // 15: api.user.v1.site.Site.GetAdminConfig:output_type -> api.user.v1.site.GetAdminConfigRes
+	5,  // 16: api.user.v1.site.Site.UpdateConfig:output_type -> api.user.v1.site.UpdateConfigRes
+	7,  // 17: api.user.v1.site.Site.TestEmail:output_type -> api.user.v1.site.TestEmailRes
+	9,  // 18: api.user.v1.site.Site.VisitPing:output_type -> api.user.v1.site.VisitPingRes
+	19, // 19: api.user.v1.site.Site.GetAccessStats:output_type -> api.user.v1.site.GetAccessStatsRes
+	16, // 20: api.user.v1.site.Site.VerifyOjCredential:output_type -> api.user.v1.site.VerifyOjCredentialRes
+	18, // 21: api.user.v1.site.Site.TestOjProxy:output_type -> api.user.v1.site.TestOjProxyRes
+	14, // [14:22] is the sub-list for method output_type
+	6,  // [6:14] is the sub-list for method input_type
 	6,  // [6:6] is the sub-list for extension type_name
 	6,  // [6:6] is the sub-list for extension extendee
 	0,  // [0:6] is the sub-list for field type_name
@@ -2589,7 +2704,7 @@ func file_user_v1_site_site_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_user_v1_site_site_proto_rawDesc), len(file_user_v1_site_site_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   18,
+			NumMessages:   20,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

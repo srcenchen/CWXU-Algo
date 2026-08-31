@@ -3,6 +3,8 @@ package service
 import (
 	"context"
 	"fmt"
+	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -597,6 +599,27 @@ func (s *SiteService) VerifyOjCredential(ctx context.Context, req *site.VerifyOj
 	default:
 		return &site.VerifyOjCredentialRes{Code: 1, Message: "不支持的平台: " + plat}, nil
 	}
+}
+
+func (s *SiteService) TestOjProxy(ctx context.Context, req *site.TestOjProxyReq) (*site.TestOjProxyRes, error) {
+	if !auth.HasPerm(ctx, rbac.PermSiteConfigWrite) {
+		return &site.TestOjProxyRes{Code: 1, Message: "需要修改站点配置权限"}, nil
+	}
+	base := strings.TrimRight(strings.TrimSpace(req.GetBaseUrl()), "/")
+	u, err := url.Parse(base)
+	if err != nil || u.Scheme != "https" || u.Host == "" {
+		return &site.TestOjProxyRes{Code: 1, Message: "代理地址必须是 HTTPS 地址"}, nil
+	}
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Get(base)
+	if err != nil {
+		return &site.TestOjProxyRes{Code: 0, Message: "代理连接失败: " + err.Error()}, nil
+	}
+	resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 500 {
+		return &site.TestOjProxyRes{Code: 0, Message: fmt.Sprintf("代理返回状态码 %d", resp.StatusCode)}, nil
+	}
+	return &site.TestOjProxyRes{Code: 0, Message: "代理连接正常", Ok: true}, nil
 }
 
 func (s *SiteService) GetAccessStats(ctx context.Context, req *site.GetAccessStatsReq) (*site.GetAccessStatsRes, error) {

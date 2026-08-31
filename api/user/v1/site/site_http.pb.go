@@ -23,6 +23,7 @@ const OperationSiteGetAccessStats = "/api.user.v1.site.Site/GetAccessStats"
 const OperationSiteGetAdminConfig = "/api.user.v1.site.Site/GetAdminConfig"
 const OperationSiteGetConfig = "/api.user.v1.site.Site/GetConfig"
 const OperationSiteTestEmail = "/api.user.v1.site.Site/TestEmail"
+const OperationSiteTestOjProxy = "/api.user.v1.site.Site/TestOjProxy"
 const OperationSiteUpdateConfig = "/api.user.v1.site.Site/UpdateConfig"
 const OperationSiteVerifyOjCredential = "/api.user.v1.site.Site/VerifyOjCredential"
 const OperationSiteVisitPing = "/api.user.v1.site.Site/VisitPing"
@@ -36,6 +37,7 @@ type SiteHTTPServer interface {
 	GetConfig(context.Context, *GetConfigReq) (*GetConfigRes, error)
 	// TestEmail 管理员：发送测试邮件
 	TestEmail(context.Context, *TestEmailReq) (*TestEmailRes, error)
+	TestOjProxy(context.Context, *TestOjProxyReq) (*TestOjProxyRes, error)
 	// UpdateConfig 管理员：更新站点配置（品牌 / SMTP / AI）
 	UpdateConfig(context.Context, *UpdateConfigReq) (*UpdateConfigRes, error)
 	// VerifyOjCredential 管理员：异步校验 OJ 爬虫账号是否可登录
@@ -53,6 +55,7 @@ func RegisterSiteHTTPServer(s *http.Server, srv SiteHTTPServer) {
 	r.POST("/v1/user/site/visit-ping", _Site_VisitPing0_HTTP_Handler(srv))
 	r.GET("/v1/user/site/access-stats", _Site_GetAccessStats0_HTTP_Handler(srv))
 	r.POST("/v1/user/site/verify-oj", _Site_VerifyOjCredential0_HTTP_Handler(srv))
+	r.POST("/v1/user/site/test-proxy", _Site_TestOjProxy0_HTTP_Handler(srv))
 }
 
 func _Site_GetConfig0_HTTP_Handler(srv SiteHTTPServer) func(ctx http.Context) error {
@@ -200,6 +203,28 @@ func _Site_VerifyOjCredential0_HTTP_Handler(srv SiteHTTPServer) func(ctx http.Co
 	}
 }
 
+func _Site_TestOjProxy0_HTTP_Handler(srv SiteHTTPServer) func(ctx http.Context) error {
+	return func(ctx http.Context) error {
+		var in TestOjProxyReq
+		if err := ctx.Bind(&in); err != nil {
+			return err
+		}
+		if err := ctx.BindQuery(&in); err != nil {
+			return err
+		}
+		http.SetOperation(ctx, OperationSiteTestOjProxy)
+		h := ctx.Middleware(func(ctx context.Context, req interface{}) (interface{}, error) {
+			return srv.TestOjProxy(ctx, req.(*TestOjProxyReq))
+		})
+		out, err := h(ctx, &in)
+		if err != nil {
+			return err
+		}
+		reply := out.(*TestOjProxyRes)
+		return ctx.Result(200, reply)
+	}
+}
+
 type SiteHTTPClient interface {
 	// GetAccessStats 站点访问概览（仅站点管理员）
 	GetAccessStats(ctx context.Context, req *GetAccessStatsReq, opts ...http.CallOption) (rsp *GetAccessStatsRes, err error)
@@ -209,6 +234,7 @@ type SiteHTTPClient interface {
 	GetConfig(ctx context.Context, req *GetConfigReq, opts ...http.CallOption) (rsp *GetConfigRes, err error)
 	// TestEmail 管理员：发送测试邮件
 	TestEmail(ctx context.Context, req *TestEmailReq, opts ...http.CallOption) (rsp *TestEmailRes, err error)
+	TestOjProxy(ctx context.Context, req *TestOjProxyReq, opts ...http.CallOption) (rsp *TestOjProxyRes, err error)
 	// UpdateConfig 管理员：更新站点配置（品牌 / SMTP / AI）
 	UpdateConfig(ctx context.Context, req *UpdateConfigReq, opts ...http.CallOption) (rsp *UpdateConfigRes, err error)
 	// VerifyOjCredential 管理员：异步校验 OJ 爬虫账号是否可登录
@@ -273,6 +299,19 @@ func (c *SiteHTTPClientImpl) TestEmail(ctx context.Context, in *TestEmailReq, op
 	pattern := "/v1/user/site/test-email"
 	path := binding.EncodeURL(pattern, in, false)
 	opts = append(opts, http.Operation(OperationSiteTestEmail))
+	opts = append(opts, http.PathTemplate(pattern))
+	err := c.cc.Invoke(ctx, "POST", path, in, &out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (c *SiteHTTPClientImpl) TestOjProxy(ctx context.Context, in *TestOjProxyReq, opts ...http.CallOption) (*TestOjProxyRes, error) {
+	var out TestOjProxyRes
+	pattern := "/v1/user/site/test-proxy"
+	path := binding.EncodeURL(pattern, in, false)
+	opts = append(opts, http.Operation(OperationSiteTestOjProxy))
 	opts = append(opts, http.PathTemplate(pattern))
 	err := c.cc.Invoke(ctx, "POST", path, in, &out, opts...)
 	if err != nil {

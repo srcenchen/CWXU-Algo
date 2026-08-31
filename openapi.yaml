@@ -5441,6 +5441,24 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/api.user.v1.site.TestEmailRes'
+    /v1/user/site/test-proxy:
+        post:
+            tags:
+                - Site
+            operationId: Site_TestOjProxy
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/api.user.v1.site.TestOjProxyReq'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.user.v1.site.TestOjProxyRes'
     /v1/user/site/verify-oj:
         post:
             tags:
@@ -13438,6 +13456,20 @@ components:
                 message:
                     type: string
                 success:
+                    type: boolean
+        api.user.v1.site.TestOjProxyReq:
+            type: object
+            properties:
+                baseUrl:
+                    type: string
+        api.user.v1.site.TestOjProxyRes:
+            type: object
+            properties:
+                code:
+                    type: string
+                message:
+                    type: string
+                ok:
                     type: boolean
         api.user.v1.site.UpdateConfigReq:
             type: object

@@ -53,6 +53,12 @@ service Site {
       body: "*"
     };
   }
+  rpc TestOjProxy (TestOjProxyReq) returns (TestOjProxyRes) {
+    option (google.api.http) = {
+      post: "/v1/user/site/test-proxy"
+      body: "*"
+    };
+  }
 }
 
 message GetConfigReq {}
@@ -331,6 +337,16 @@ message VerifyOjCredentialRes {
   string message = 2;
   bool ok = 3;
   string error_detail = 4;
+}
+
+message TestOjProxyReq {
+  string base_url = 1;
+}
+
+message TestOjProxyRes {
+  int64 code = 1;
+  string message = 2;
+  bool ok = 3;
 }
 
 message GetAccessStatsRes {

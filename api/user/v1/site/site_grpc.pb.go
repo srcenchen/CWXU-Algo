@@ -26,6 +26,7 @@ const (
 	Site_VisitPing_FullMethodName          = "/api.user.v1.site.Site/VisitPing"
 	Site_GetAccessStats_FullMethodName     = "/api.user.v1.site.Site/GetAccessStats"
 	Site_VerifyOjCredential_FullMethodName = "/api.user.v1.site.Site/VerifyOjCredential"
+	Site_TestOjProxy_FullMethodName        = "/api.user.v1.site.Site/TestOjProxy"
 )
 
 // SiteClient is the client API for Site service.
@@ -46,6 +47,7 @@ type SiteClient interface {
 	GetAccessStats(ctx context.Context, in *GetAccessStatsReq, opts ...grpc.CallOption) (*GetAccessStatsRes, error)
 	// 管理员：异步校验 OJ 爬虫账号是否可登录
 	VerifyOjCredential(ctx context.Context, in *VerifyOjCredentialReq, opts ...grpc.CallOption) (*VerifyOjCredentialRes, error)
+	TestOjProxy(ctx context.Context, in *TestOjProxyReq, opts ...grpc.CallOption) (*TestOjProxyRes, error)
 }
 
 type siteClient struct {
@@ -126,6 +128,16 @@ func (c *siteClient) VerifyOjCredential(ctx context.Context, in *VerifyOjCredent
 	return out, nil
 }
 
+func (c *siteClient) TestOjProxy(ctx context.Context, in *TestOjProxyReq, opts ...grpc.CallOption) (*TestOjProxyRes, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(TestOjProxyRes)
+	err := c.cc.Invoke(ctx, Site_TestOjProxy_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // SiteServer is the server API for Site service.
 // All implementations must embed UnimplementedSiteServer
 // for forward compatibility.
@@ -144,6 +156,7 @@ type SiteServer interface {
 	GetAccessStats(context.Context, *GetAccessStatsReq) (*GetAccessStatsRes, error)
 	// 管理员：异步校验 OJ 爬虫账号是否可登录
 	VerifyOjCredential(context.Context, *VerifyOjCredentialReq) (*VerifyOjCredentialRes, error)
+	TestOjProxy(context.Context, *TestOjProxyReq) (*TestOjProxyRes, error)
 	mustEmbedUnimplementedSiteServer()
 }
 
@@ -174,6 +187,9 @@ func (UnimplementedSiteServer) GetAccessStats(context.Context, *GetAccessStatsRe
 }
 func (UnimplementedSiteServer) VerifyOjCredential(context.Context, *VerifyOjCredentialReq) (*VerifyOjCredentialRes, error) {
 	return nil, status.Error(codes.Unimplemented, "method VerifyOjCredential not implemented")
+}
+func (UnimplementedSiteServer) TestOjProxy(context.Context, *TestOjProxyReq) (*TestOjProxyRes, error) {
+	return nil, status.Error(codes.Unimplemented, "method TestOjProxy not implemented")
 }
 func (UnimplementedSiteServer) mustEmbedUnimplementedSiteServer() {}
 func (UnimplementedSiteServer) testEmbeddedByValue()              {}
@@ -322,6 +338,24 @@ func _Site_VerifyOjCredential_Handler(srv interface{}, ctx context.Context, dec 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Site_TestOjProxy_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(TestOjProxyReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SiteServer).TestOjProxy(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Site_TestOjProxy_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SiteServer).TestOjProxy(ctx, req.(*TestOjProxyReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Site_ServiceDesc is the grpc.ServiceDesc for Site service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -356,6 +390,10 @@ var Site_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "VerifyOjCredential",
 			Handler:    _Site_VerifyOjCredential_Handler,
+		},
+		{
+			MethodName: "TestOjProxy",
+			Handler:    _Site_TestOjProxy_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
