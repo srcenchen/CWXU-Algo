@@ -1,6 +1,7 @@
 package problem_fetch
 
 import (
+	"cwxu-algo/app/common/utils/ojhttp"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -157,7 +158,7 @@ func httpGet(rawURL string) (*http.Response, error) {
 	}
 	setBrowserHeaders(req, "")
 	client := &http.Client{Timeout: 30 * time.Second}
-	return client.Do(req)
+	return ojhttp.DoWithClient(client, req)
 }
 
 // 牛客 WAF：无 Cookie 会返回阿里云滑块页；先访问对应站点首页拿 Cookie 再抓题面
@@ -250,7 +251,7 @@ func (s *nowcoderSession) get(rawURL, referer string) (*http.Response, error) {
 		return nil, err
 	}
 	setBrowserHeadersWithProfile(req, referer, s.profile)
-	return s.client.Do(req)
+	return ojhttp.DoWithClient(s.client, req)
 }
 
 // warmup 模拟真人进站：首页 →（主站）题库列表，拿 Cookie
@@ -711,7 +712,7 @@ func fetchLuoGu(externalID, problemURL string) (*FetchedContent, error) {
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
 	req.Header.Set("X-Requested-With", "XMLHttpRequest")
 	client := &http.Client{Timeout: 30 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := ojhttp.DoWithClient(client, req)
 	if err != nil {
 		return nil, err
 	}
@@ -1603,7 +1604,7 @@ func fetchLeetCode(externalID, problemURL string) (*FetchedContent, error) {
 	req.Header.Set("Referer", "https://leetcode.cn/problems/"+slug+"/")
 	req.Header.Set("Origin", "https://leetcode.cn")
 	client := &http.Client{Timeout: 30 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := ojhttp.DoWithClient(client, req)
 	if err != nil {
 		return nil, fmt.Errorf("leetcode question 请求失败: %w", err)
 	}

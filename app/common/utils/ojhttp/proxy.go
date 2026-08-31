@@ -47,8 +47,17 @@ func proxyTarget(raw string) (string, error) {
 }
 
 func Do(req *http.Request) (*http.Response, error) {
+	return DoWithClient(Client, req)
+}
+
+// DoWithClient preserves a caller's CookieJar/Transport while applying the
+// platform proxy URL rewrite.
+func DoWithClient(client *http.Client, req *http.Request) (*http.Response, error) {
 	if req == nil {
 		return nil, fmt.Errorf("nil request")
+	}
+	if client == nil {
+		client = Client
 	}
 	target, err := proxyTarget(req.URL.String())
 	if err != nil {
@@ -66,5 +75,13 @@ func Do(req *http.Request) (*http.Response, error) {
 		req = clone
 	}
 	EnsureHeaders(req)
-	return Client.Do(req)
+	return client.Do(req)
+}
+
+func GetWithClient(client *http.Client, rawURL string) (*http.Response, error) {
+	req, err := http.NewRequest(http.MethodGet, rawURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	return DoWithClient(client, req)
 }

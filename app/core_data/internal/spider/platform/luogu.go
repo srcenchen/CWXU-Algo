@@ -128,7 +128,7 @@ func (lg *NewLuoGu) ocrImage(client *http.Client, url string, img []byte) (strin
 		return "", err
 	}
 	req.Header.Set("Content-Type", w.FormDataContentType())
-	resp, err := client.Do(req)
+	resp, err := ojhttp.DoWithClient(client, req)
 	if err != nil {
 		return "", err
 	}
@@ -193,7 +193,7 @@ func (lg *NewLuoGu) login(username, password string) (*http.Client, error) {
 			time.Sleep(luoguLoginBaseDelay << (attempt - 2))
 		}
 		// 1. 拉验证码（cookie 在这里生成）
-		resp, err := client.Get(captchaURL)
+		resp, err := ojhttp.GetWithClient(client, captchaURL)
 		if err != nil {
 			return nil, err
 		}
@@ -279,7 +279,7 @@ func (lg *NewLuoGu) isSessionValid(client *http.Client) bool {
 	}
 	// 用实际抓取入口探测：有效会话会返回含 _feInjection 的记录列表页；
 	// 未登录时会被 302 到 /auth/login，最终页面不含 _feInjection。
-	resp, err := client.Get(lg.recordListBaseURL(1) + "1")
+	resp, err := ojhttp.GetWithClient(client, lg.recordListBaseURL(1)+"1")
 	if err != nil {
 		return false
 	}
@@ -407,7 +407,7 @@ func (lg *NewLuoGu) fetchSubmitLogComplete(ctx context.Context, userId int64, us
 			}
 			time.Sleep(300 * time.Millisecond)
 			req, _ := http.NewRequestWithContext(ctx, "GET", baseUrl+fmt.Sprint(i), nil)
-			resp, err := client.Do(req)
+			resp, err := ojhttp.DoWithClient(client, req)
 			if err != nil {
 				return nil, false, err
 			}
@@ -601,7 +601,7 @@ func (lg *NewLuoGu) resolveUIDFromEndpoint(client *http.Client, username, endpoi
 	if n, err := strconv.ParseInt(username, 10, 64); err == nil && n > 0 {
 		return n, nil
 	}
-	resp, err := client.Get(endpoint + url.QueryEscape(username))
+	resp, err := ojhttp.GetWithClient(client, endpoint+url.QueryEscape(username))
 	if err != nil {
 		return 0, fmt.Errorf("luogu search 失败: %w", err)
 	}

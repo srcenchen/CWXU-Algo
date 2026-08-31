@@ -2,6 +2,7 @@ package platform
 
 import (
 	"context"
+	"cwxu-algo/app/common/utils/ojhttp"
 	"fmt"
 	"io"
 	"net"
@@ -192,7 +193,7 @@ func cfWarmSession(ctx context.Context, client *http.Client, base string) {
 	req.Header.Set("Sec-Fetch-Dest", "document")
 	req.Header.Set("Sec-Fetch-Mode", "navigate")
 	req.Header.Del("Origin")
-	resp, err := client.Do(req)
+	resp, err := ojhttp.DoWithClient(client, req)
 	if err != nil {
 		return
 	}
@@ -236,7 +237,7 @@ func cfGetJSON(ctx context.Context, pathAndQuery string) (body []byte, usedBase 
 				return nil, base, reqErr
 			}
 			cfApplyBrowserHeaders(req, base)
-			resp, doErr := client.Do(req)
+			resp, doErr := ojhttp.DoWithClient(client, req)
 			if doErr != nil {
 				lastErr = fmt.Errorf("发起http请求失败: %w", doErr)
 				// 网络错误：换 base 前稍等

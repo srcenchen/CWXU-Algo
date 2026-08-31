@@ -154,7 +154,7 @@ func (q *NewQOJ) doLogin(
 	}
 	setBrowserHeaders(getReq)
 
-	getResp, err := client.Do(getReq)
+	getResp, err := ojhttp.DoWithClient(client, getReq)
 	if err != nil {
 		return false, "", fmt.Errorf("GET login page failed: %w", err)
 	}
@@ -196,7 +196,7 @@ func (q *NewQOJ) doLogin(
 	postReq.Header.Set("Origin", "https://qoj.ac")
 	postReq.Header.Set("Referer", "https://qoj.ac/login")
 
-	postResp, err := client.Do(postReq)
+	postResp, err := ojhttp.DoWithClient(client, postReq)
 	if err != nil {
 		return false, "", fmt.Errorf("POST login failed: %w", err)
 	}
@@ -245,7 +245,7 @@ func (q *NewQOJ) isSessionValid(client *http.Client) bool {
 	}
 	setBrowserHeaders(req)
 
-	resp, err := client.Do(req)
+	resp, err := ojhttp.DoWithClient(client, req)
 	if err != nil {
 		return false
 	}
