@@ -1523,6 +1523,20 @@ func fetchQOJ(externalID, problemURL string) (*FetchedContent, error) {
 	if err != nil {
 		return nil, err
 	}
+	return parseQOJDocument(doc, externalID)
+}
+
+// ParseQOJHTML parses a QOJ problem page fetched by an authenticated client.
+// QOJ protects some problem pages even when the public page is otherwise readable.
+func ParseQOJHTML(html string, externalID string) (*FetchedContent, error) {
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
+	if err != nil {
+		return nil, err
+	}
+	return parseQOJDocument(doc, externalID)
+}
+
+func parseQOJDocument(doc *goquery.Document, externalID string) (*FetchedContent, error) {
 	title := extractQOJTitle(doc, externalID)
 	// 题面优先取 UOJ 系正文区，避免导航/页脚噪声
 	contentSel := doc.Find(".problem-content, #problem-content, .uoj-content article, article").First()

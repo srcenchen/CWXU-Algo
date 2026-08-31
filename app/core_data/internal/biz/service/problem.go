@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"sort"
 	"strings"
 	"sync"
@@ -868,7 +869,30 @@ func (uc *ProblemUseCase) ProcessFetch(ctx context.Context, ev event.ProblemFetc
 	}
 	// Source switches can change while a task is being claimed. Recheck after
 	// the FETCHING transition immediately before any external request.
-	fetched, err := problem_fetch.FetchWithFallbacks(p.Platform, p.ExternalID, url, fallbacks)
+	var fetched *problem_fetch.FetchedContent
+	var err error
+	if p.Platform == spider.QOJ {
+		// QOJ problem pages can require the configured crawler session, while
+		// the generic fetcher intentionally uses an unauthenticated client.
+		if provider, ok := spider.Get(spider.QOJ); ok {
+			if qoj, ok := provider.(interface {
+				FetchProblemHTML(context.Context, string) (string, int, error)
+			}); ok {
+				var body string
+				var status int
+				body, status, err = qoj.FetchProblemHTML(context.Background(), url)
+				if err == nil && status != http.StatusOK {
+					err = fmt.Errorf("QOJ status %d", status)
+				}
+				if err == nil {
+					fetched, err = problem_fetch.ParseQOJHTML(body, p.ExternalID)
+				}
+			}
+		}
+	}
+	if fetched == nil && err == nil {
+		fetched, err = problem_fetch.FetchWithFallbacks(p.Platform, p.ExternalID, url, fallbacks)
+	}
 	if err != nil {
 		return uc.handleFetchError(&p, err)
 	}

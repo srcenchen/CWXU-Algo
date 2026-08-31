@@ -59,3 +59,29 @@ func TestNormalizeQOJTitle(t *testing.T) {
 		t.Fatalf("got %q", got)
 	}
 }
+
+func TestParseQOJHTML_ExcludesPageChromeFromProblemContent(t *testing.T) {
+	html := `<html><head><title>Falling - Problem - QOJ.ac</title></head><body>
+<nav>QOJ.ac Problems Submissions</nav>
+<main class="uoj-content">
+  <h1 class="page-header">#18718. Falling</h1>
+  <div class="problem-content">
+    <h2>题目描述</h2><p>给定一个整数 n。</p>
+    <h2>输入</h2><pre>3</pre>
+    <h2>输出</h2><pre>2</pre>
+  </div>
+</main><footer>footer noise</footer></body></html>`
+	got, err := ParseQOJHTML(html, "18718")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Title != "#18718. Falling" {
+		t.Fatalf("title = %q", got.Title)
+	}
+	if strings.Contains(got.ContentMD, "QOJ.ac") || strings.Contains(got.ContentMD, "footer noise") {
+		t.Fatalf("page chrome leaked into content: %q", got.ContentMD)
+	}
+	if !strings.Contains(got.ContentMD, "给定一个整数 n") || !strings.Contains(got.ContentMD, "3") {
+		t.Fatalf("problem body missing: %q", got.ContentMD)
+	}
+}

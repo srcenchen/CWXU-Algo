@@ -338,6 +338,34 @@ func (q *NewQOJ) FetchSubmitLogComplete(ctx context.Context, userId int64, usern
 	return fetchQOJSubmitLogs(ctx, client, baseUrl, userId, needAll, qojProductionMaxPages, func() { time.Sleep(500 * time.Millisecond) })
 }
 
+// FetchProblemHTML fetches a problem page with the configured QOJ session.
+// Problem pages and submission pages share the same login/session requirement.
+func (q *NewQOJ) FetchProblemHTML(ctx context.Context, problemURL string) (string, int, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	client, err := q.getClient()
+	if err != nil {
+		return "", 0, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, problemURL, nil)
+	if err != nil {
+		return "", 0, err
+	}
+	setBrowserHeaders(req)
+	req.Header.Set("Referer", "https://qoj.ac/")
+	resp, err := ojhttp.DoWithClient(client, req)
+	if err != nil {
+		return "", 0, err
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", resp.StatusCode, err
+	}
+	return string(body), resp.StatusCode, nil
+}
+
 func fetchQOJSubmitLogs(ctx context.Context, client *http.Client, baseURL string, userID int64, needAll bool, maxPages int, pause func()) ([]model.SubmitLog, bool, error) {
 	var res []model.SubmitLog
 	seen := make(map[string]struct{})

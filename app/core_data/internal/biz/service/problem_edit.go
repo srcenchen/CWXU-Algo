@@ -778,6 +778,26 @@ func (uc *ProblemUseCase) beginUserProfileInvalidations(ctx context.Context, use
 	return tokens, nil
 }
 
+func beginGlobalProfileInvalidationWithRetry(ctx context.Context, rdb *redis.Client, intentID string) (ProfileInvalidationToken, error) {
+	var lastErr error
+	for attempt := 0; attempt < 20; attempt++ {
+		token, err := beginGlobalProfileInvalidationForIntent(ctx, rdb, intentID)
+		if err == nil {
+			return token, nil
+		}
+		lastErr = err
+		if !strings.Contains(err.Error(), "profile invalidation intent changed") && !strings.Contains(err.Error(), "already in progress") {
+			return ProfileInvalidationToken{}, err
+		}
+		select {
+		case <-ctx.Done():
+			return ProfileInvalidationToken{}, ctx.Err()
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+	return ProfileInvalidationToken{}, lastErr
+}
+
 func (uc *ProblemUseCase) finishUserProfileInvalidations(ctx context.Context, tokens []userProfileInvalidationToken) error {
 	var errs []error
 	for _, item := range tokens {
@@ -844,7 +864,7 @@ func (uc *ProblemUseCase) applyProblemFactUpdatesWithPending(ctx context.Context
 	tagsChanged = tagsChanged || pending.TagsChanged
 	difficultyChanged = difficultyChanged || pending.DifficultyChanged
 	var userIDs []int64
-	globalToken, err := beginGlobalProfileInvalidationForIntent(ctx, uc.data.RDB, pending.OperationID)
+	globalToken, err := beginGlobalProfileInvalidationWithRetry(ctx, uc.data.RDB, pending.OperationID)
 	if err != nil {
 		return err
 	}
