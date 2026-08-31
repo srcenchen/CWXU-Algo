@@ -204,8 +204,38 @@ func TestProcessAnalyzeRecoversDirtyCompletedFactsBeforeSkip(t *testing.T) {
 	if err := db.First(&after, p.ID).Error; err != nil {
 		t.Fatal(err)
 	}
-	if refresher.calls != 1 || strings.HasPrefix(after.ErrorMsg, problemFactsDirtyPrefix) || len(pub.snapshot()) != 1 {
+	if refresher.calls != 0 || strings.HasPrefix(after.ErrorMsg, problemFactsDirtyPrefix) || len(pub.snapshot()) != 0 {
 		t.Fatalf("dirty completed recovery calls=%d problem=%+v events=%+v", refresher.calls, after, pub.snapshot())
+	}
+}
+
+func TestProcessAnalyzeClearsCommittedDirtyMarkerWithoutProfileFence(t *testing.T) {
+	db := problemFactsTestDB(t)
+	p := model.Problem{
+		Platform: "Codeforces", ExternalID: "dirty-no-fence", Title: "A",
+		Tags: model.StringArray{"dp"}, Status: model.ProblemStatusCompleted,
+		ErrorMsg: problemFactsDirtyPrefix + "tags",
+	}
+	if err := db.Create(&p).Error; err != nil {
+		t.Fatal(err)
+	}
+	_, rdb := profileTestRedis(t)
+	if err := rdb.Set(context.Background(), profileGlobalGenerationKey, "1", time.Hour).Err(); err != nil {
+		t.Fatal(err)
+	}
+	if err := rdb.Set(context.Background(), profileGlobalGenerationKey+":current_intent", "foreign-intent", time.Hour).Err(); err != nil {
+		t.Fatal(err)
+	}
+	uc := &ProblemUseCase{data: &data.Data{DB: db, RDB: rdb}}
+	if err := uc.ProcessAnalyze(context.Background(), event.ProblemAnalyzeEvent{ProblemID: p.ID}); err != nil {
+		t.Fatalf("committed dirty marker must not block analysis queue: %v", err)
+	}
+	var after model.Problem
+	if err := db.First(&after, p.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if after.ErrorMsg != "" || after.Status != model.ProblemStatusCompleted {
+		t.Fatalf("dirty marker was not cleared: %+v", after)
 	}
 }
 

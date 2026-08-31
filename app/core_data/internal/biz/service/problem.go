@@ -1486,12 +1486,14 @@ func (uc *ProblemUseCase) ProcessAnalyze(ctx context.Context, ev event.ProblemAn
 	if !ev.Force && p.Status == model.ProblemStatusCompleted {
 		dirtyTags, dirtyDifficulty := problemFactsDirtyFlags(p.ErrorMsg)
 		if dirtyTags || dirtyDifficulty {
-			updates := map[string]interface{}{"status": model.ProblemStatusCompleted, "error_msg": ""}
-			if err := uc.applyProblemFactUpdates(ctx, &p, updates, []string(p.Tags), dirtyTags, dirtyDifficulty); err != nil {
+			// The authoritative facts are already committed. Clear only the stale
+			// marker here; profile rebuilding is derived work and has its own queue.
+			if err := uc.data.DB.WithContext(ctx).Model(&model.Problem{}).
+				Where("id = ? AND status = ?", p.ID, model.ProblemStatusCompleted).
+				Updates(map[string]interface{}{"error_msg": ""}).Error; err != nil {
 				return err
 			}
 			uc.BumpProblemDetailVer(p.ID)
-			uc.progressMoveStatus(p.Status, model.ProblemStatusCompleted)
 			return nil
 		}
 	}
