@@ -731,15 +731,20 @@ func fetchLuoGu(externalID, problemURL string) (*FetchedContent, error) {
 	if err != nil {
 		return nil, err
 	}
-	title := strings.TrimSpace(doc.Find("h1").First().Text())
-	text := strings.TrimSpace(doc.Find("#app").Text())
-	if text == "" {
-		text = strings.TrimSpace(doc.Text())
+	article := doc.Find("#app article").First()
+	if article.Length() == 0 {
+		article = doc.Find("article").First()
 	}
-	if text == "" {
+	if article.Length() == 0 {
 		return nil, fmt.Errorf("洛谷未找到题面")
 	}
-	return &FetchedContent{Title: title, ContentMD: collapseBlankLines(text)}, nil
+	title := strings.TrimSpace(article.Find("h1").First().Text())
+	article.Find("script,style,noscript").Remove()
+	content := selectionToMD(article)
+	if strings.TrimSpace(content) == "" {
+		return nil, fmt.Errorf("洛谷题面内容为空")
+	}
+	return &FetchedContent{Title: title, ContentMD: collapseBlankLines(content)}, nil
 }
 
 func parseLuoGuJSON(body []byte) (*FetchedContent, error) {
