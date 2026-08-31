@@ -744,6 +744,11 @@ func fetchLuoGu(externalID, problemURL string) (*FetchedContent, error) {
 		} `json:"data"`
 	}
 	contextJSON := strings.TrimSpace(doc.Find("#lentille-context").First().Text())
+	if contextJSON == "" {
+		if match := regexp.MustCompile(`(?is)<script[^>]+id=["']lentille-context["'][^>]*>(.*?)</script>`).FindStringSubmatch(string(body)); len(match) > 1 {
+			contextJSON = strings.TrimSpace(match[1])
+		}
+	}
 	if contextJSON != "" && json.Unmarshal([]byte(contextJSON), &contextContent) == nil {
 		name := strings.TrimSpace(contextContent.Data.Problem.Name)
 		description := cleanLuoGuStatement(contextContent.Data.Problem.Contenu.Description)
