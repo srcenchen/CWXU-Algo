@@ -6,6 +6,13 @@ import (
 	"strings"
 )
 
+type ReportRenderMode string
+
+const (
+	ReportRenderAttachment ReportRenderMode = "attachment"
+	ReportRenderEmail      ReportRenderMode = "email"
+)
+
 // RenderRuleTemplateHTML 非 AI：规则文案参数 + 统一模板。
 // mode: full | compact
 func RenderRuleTemplateHTML(data *TrainingReportData, brand string, mode ...string) string {
@@ -13,7 +20,7 @@ func RenderRuleTemplateHTML(data *TrainingReportData, brand string, mode ...stri
 		return ""
 	}
 	delta := data.TotalSubmits - data.PrevTotalSubmits
-	return renderTemplateHTML(data, brand, mode, RuleReportComment(data, delta))
+	return renderTemplateHTML(data, brand, mode, RuleReportComment(data, delta), ReportRenderAttachment)
 }
 
 // RenderTemplateHTMLWithComment AI 模式：LLM 文案参数 + 统一模板。
@@ -22,10 +29,15 @@ func RenderTemplateHTMLWithComment(data *TrainingReportData, brand string, comme
 	if data == nil {
 		return ""
 	}
-	return renderTemplateHTML(data, brand, mode, comment)
+	return renderTemplateHTML(data, brand, mode, comment, ReportRenderAttachment)
 }
 
-func renderTemplateHTML(data *TrainingReportData, brand string, mode []string, comment AIReportComment) string {
+func RenderTrainingReportVariants(data *TrainingReportData, brand string, comment AIReportComment, detailMode string) (attachment, email string) {
+	mode := []string{detailMode}
+	return renderTemplateHTML(data, brand, mode, comment, ReportRenderAttachment), renderTemplateHTML(data, brand, mode, comment, ReportRenderEmail)
+}
+
+func renderTemplateHTML(data *TrainingReportData, brand string, mode []string, comment AIReportComment, renderMode ReportRenderMode) string {
 	if brand == "" {
 		brand = "GoAlgo"
 	}
@@ -121,7 +133,11 @@ func renderTemplateHTML(data *TrainingReportData, brand string, mode []string, c
 			}
 			acSeries = append(acSeries, ac)
 		}
-		b.WriteString(LineChartSVG(labels, [][]int64{subSeries, acSeries}, []string{"提交", "AC"}, []string{"#171717", "#f97316"}))
+		if renderMode == ReportRenderEmail {
+			b.WriteString(EmailBarChart(labels, [][]int64{subSeries, acSeries}, []string{"提交", "AC"}, []string{"#171717", "#f97316"}))
+		} else {
+			b.WriteString(LineChartSVG(labels, [][]int64{subSeries, acSeries}, []string{"提交", "AC"}, []string{"#171717", "#f97316"}))
+		}
 	}
 	sectionEnd(&b)
 
@@ -332,30 +348,12 @@ func renderTemplateHTML(data *TrainingReportData, brand string, mode []string, c
 		evalTitle = "6. 综合维度评价"
 	}
 	sectionStart(&b, evalTitle)
-	if strings.TrimSpace(comment.Headline) != "" {
-		fmt.Fprintf(&b, `<div style="margin:0 0 8px;font-size:15px;font-weight:600;color:#0a0a0a;">%s</div>`, html.EscapeString(comment.Headline))
-	}
-	if len(comment.Highlights) > 0 {
-		b.WriteString(`<p style="margin:6px 0 2px;font-size:12px;color:#737373;">亮点</p><ul style="margin:4px 0 0;padding-left:18px;font-size:13px;color:#0a0a0a;">`)
-		for _, h := range comment.Highlights {
-			fmt.Fprintf(&b, `<li style="margin-bottom:4px;">%s</li>`, html.EscapeString(h))
-		}
-		b.WriteString(`</ul>`)
-	}
-	if len(comment.Issues) > 0 {
-		b.WriteString(`<p style="margin:8px 0 2px;font-size:12px;color:#737373;">问题</p><ul style="margin:4px 0 0;padding-left:18px;font-size:13px;color:#0a0a0a;">`)
-		for _, it := range comment.Issues {
-			fmt.Fprintf(&b, `<li style="margin-bottom:4px;">%s</li>`, html.EscapeString(it))
-		}
-		b.WriteString(`</ul>`)
-	}
-	if len(comment.Suggestions) > 0 {
-		b.WriteString(`<p style="margin:8px 0 2px;font-size:12px;color:#737373;">建议</p><ul style="margin:4px 0 0;padding-left:18px;font-size:13px;color:#0a0a0a;">`)
-		for _, s := range comment.Suggestions {
-			fmt.Fprintf(&b, `<li style="margin-bottom:4px;">%s</li>`, html.EscapeString(s))
-		}
-		b.WriteString(`</ul>`)
-	}
+	commentText(&b, "总体判断", comment.Headline)
+	commentList(&b, "趋势变化", comment.TrendChanges)
+	commentList(&b, "亮点", comment.Highlights)
+	commentList(&b, "问题", comment.Issues)
+	commentList(&b, "分维度分析", comment.DimensionAnalysis)
+	commentList(&b, "可执行建议", comment.Suggestions)
 	sectionEnd(&b)
 
 	// Footer
@@ -364,6 +362,24 @@ func renderTemplateHTML(data *TrainingReportData, brand string, mode []string, c
 
 	b.WriteString(`</table></td></tr></table></body></html>`)
 	return b.String()
+}
+
+func commentText(b *strings.Builder, title, text string) {
+	if strings.TrimSpace(text) == "" {
+		return
+	}
+	fmt.Fprintf(b, `<p style="margin:8px 0 3px;font-size:12px;font-weight:600;color:#737373;">%s</p><div style="font-size:14px;color:#0a0a0a;line-height:1.7;">%s</div>`, html.EscapeString(title), html.EscapeString(text))
+}
+
+func commentList(b *strings.Builder, title string, items []string) {
+	if len(items) == 0 {
+		return
+	}
+	fmt.Fprintf(b, `<p style="margin:10px 0 3px;font-size:12px;font-weight:600;color:#737373;">%s</p><ul style="margin:4px 0 0;padding-left:18px;font-size:13px;color:#0a0a0a;line-height:1.7;">`, html.EscapeString(title))
+	for _, item := range items {
+		fmt.Fprintf(b, `<li style="margin-bottom:4px;">%s</li>`, html.EscapeString(item))
+	}
+	b.WriteString(`</ul>`)
 }
 
 func sectionStart(b *strings.Builder, title string) {
@@ -478,8 +494,8 @@ func trainingReportSystemPromptStrict(mode string) string {
 【输出格式 — 违反即失败】
 1. 只输出一个 JSON 对象，不要 Markdown、不要代码围栏、不要任何其它文字。
 2. JSON 结构：
-{"headline":"一句话总评（含合适的 emoji，80 字内）","highlights":["亮点1","亮点2"],"issues":["问题1"],"suggestions":["建议1","建议2"]}
-3. highlights/issues/suggestions 各 0-5 条，单条 100 字内；没有就留空数组。
+{"headline":"总体判断（含合适的 emoji，80 字内）","trendChanges":["趋势变化"],"highlights":["亮点"],"issues":["问题"],"dimensionAnalysis":["分维度分析"],"suggestions":["可执行建议"]}
+3. 五个数组各 0-5 条，单条 100 字内；没有真实数据支撑就留空数组，不写空洞套话。
 
 【铁律 — 防幻觉】
 - 所有数字（提交次数、AC 数、排名、成员数、日期、环比）由系统渲染，你不得在文案中编造或改动任何数字。
@@ -492,8 +508,13 @@ func trainingReportSystemPromptStrict(mode string) string {
 - orgSubmitSample 提交动态；recentBlogs 博客；contests 比赛；dailyTrend 日走势
 - totalSubmits 对比 prevTotalSubmits 即环比
 
-【点评维度】
-活跃度（有提交占比/环比）、AC 率与榜首、团队知识点、做题广度、比赛表现、博客沉淀、不活跃跟进建议。
+【六段内容】
+- 总体判断：一句话概括本期状态。
+- 趋势变化：只比较数据中明确给出的本期与上期、日走势。
+- 亮点：指出有证据的成员、质量或覆盖表现。
+- 问题：指出有数据支撑的风险；数据为空时不要硬写问题。
+- 分维度分析：按实际有数据的活跃度、AC 质量、知识点、做题、比赛、博客展开；空维度直接跳过。
+- 可执行建议：给出负责人可以落实的动作、对象和节奏，避免「继续努力」等套话。
 %s`, depth)
 }
 

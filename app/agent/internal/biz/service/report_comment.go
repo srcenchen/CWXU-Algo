@@ -13,10 +13,14 @@ import (
 type AIReportComment struct {
 	// Headline 一句话总评（含 emoji）
 	Headline string `json:"headline"`
+	// TrendChanges 趋势变化（0-5 条）
+	TrendChanges []string `json:"trendChanges,omitempty"`
 	// Highlights 亮点（0-5 条）
 	Highlights []string `json:"highlights,omitempty"`
 	// Issues 问题/风险（0-5 条）
 	Issues []string `json:"issues,omitempty"`
+	// DimensionAnalysis 分维度分析（0-5 条）
+	DimensionAnalysis []string `json:"dimensionAnalysis,omitempty"`
 	// Suggestions 建议（0-5 条）
 	Suggestions []string `json:"suggestions,omitempty"`
 }
@@ -44,11 +48,13 @@ func ParseAIReportComment(raw string) (AIReportComment, error) {
 	}
 
 	c.Headline = truncateRunes(strings.TrimSpace(c.Headline), aiHeadlineMaxRunes)
+	c.TrendChanges = normalizeCommentList(c.TrendChanges)
 	c.Highlights = normalizeCommentList(c.Highlights)
 	c.Issues = normalizeCommentList(c.Issues)
+	c.DimensionAnalysis = normalizeCommentList(c.DimensionAnalysis)
 	c.Suggestions = normalizeCommentList(c.Suggestions)
 
-	if c.Headline == "" && len(c.Highlights) == 0 && len(c.Issues) == 0 && len(c.Suggestions) == 0 {
+	if c.Headline == "" && len(c.TrendChanges) == 0 && len(c.Highlights) == 0 && len(c.Issues) == 0 && len(c.DimensionAnalysis) == 0 && len(c.Suggestions) == 0 {
 		return c, fmt.Errorf("评论参数为空")
 	}
 	return c, nil
@@ -108,22 +114,43 @@ func RuleDailyComment(data *DailyReportData) AIReportComment {
 
 // RuleReportComment 规则模式：训练报告/周报评论参数（与 LLM 输出同构）
 func RuleReportComment(data *TrainingReportData, delta int64) AIReportComment {
-	emoji, lines, advice := ruleComprehensiveEval(data, delta)
-	c := AIReportComment{}
-	if len(lines) > 0 {
-		c.Headline = emoji + " " + strings.TrimPrefix(lines[0], "· ")
+	c := AIReportComment{Headline: "本区间暂无可分析的训练数据"}
+	if data == nil {
+		return c
 	}
-	for _, l := range lines[1:] {
-		item := strings.TrimPrefix(l, "· ")
-		if strings.Contains(item, "上升") || strings.Contains(item, "稳定") || strings.Contains(item, "已剔除教练") {
-			continue
+	if data.TotalSubmits > 0 {
+		activeRatio := 0.0
+		if data.MemberCount > 0 {
+			activeRatio = float64(data.ActiveMembers) / float64(data.MemberCount) * 100
 		}
-		if strings.Contains(item, "环比") || strings.Contains(item, "AC 率") || strings.Contains(item, "活跃度") {
-			c.Highlights = append(c.Highlights, item)
-			continue
+		acRate := float64(data.TotalAC) / float64(data.TotalSubmits) * 100
+		c.Headline = fmt.Sprintf("训练保持推进，活跃率 %.0f%%、AC 率 %.1f%%", activeRatio, acRate)
+		switch {
+		case delta > 0:
+			c.TrendChanges = append(c.TrendChanges, fmt.Sprintf("提交量较上期增加 %d 次，训练节奏回升", delta))
+		case delta < 0:
+			c.TrendChanges = append(c.TrendChanges, fmt.Sprintf("提交量较上期减少 %d 次，需要关注节奏变化", -delta))
+		default:
+			c.TrendChanges = append(c.TrendChanges, "提交量与上期持平，整体节奏稳定")
 		}
-		c.Issues = append(c.Issues, item)
+		if len(data.ActiveRanking) > 0 {
+			top := data.ActiveRanking[0]
+			c.Highlights = append(c.Highlights, fmt.Sprintf("%s 以 %d 次提交、%d 次 AC 领跑", top.Name, top.Submits, top.AC))
+		}
+		c.DimensionAnalysis = append(c.DimensionAnalysis,
+			fmt.Sprintf("活跃度：%d/%d 名成员有提交", data.ActiveMembers, data.MemberCount),
+			fmt.Sprintf("训练质量：共 %d 次 AC，整体 AC 率 %.1f%%", data.TotalAC, acRate),
+		)
 	}
-	c.Suggestions = advice
+	if len(data.InactiveMembers) > 0 {
+		c.Issues = append(c.Issues, fmt.Sprintf("%d 名成员本区间未提交，参与覆盖仍需提升", len(data.InactiveMembers)))
+		c.Suggestions = append(c.Suggestions, "为未参与成员安排一次明确日期和题单的补训，并在训练后逐人确认完成情况")
+	}
+	if data.TotalSubmits == 0 && data.MemberCount > 0 {
+		c.Issues = append(c.Issues, "本区间没有提交记录，训练节奏已经中断")
+		c.Suggestions = append(c.Suggestions, "确定下一次统一训练时间，从一组基础题恢复提交节奏")
+	} else if data.TotalSubmits > 0 {
+		c.Suggestions = append(c.Suggestions, "按本期高频标签安排一组巩固题，并复盘未通过提交以改善 AC 质量")
+	}
 	return c
 }
