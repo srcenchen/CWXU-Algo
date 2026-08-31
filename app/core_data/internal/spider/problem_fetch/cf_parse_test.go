@@ -38,3 +38,10 @@ func TestParseCodeforcesProblemHTMLPreservesSamplesAndImages(t *testing.T) {
 		t.Fatalf("image URL was not preserved:\n%s", got.ContentMD)
 	}
 }
+
+func TestResolveCFURLPreservesAbsoluteImageHost(t *testing.T) {
+	got := resolveCFURL("https://codeforces.com/gym/106671/problem/A", "https://espresso.codeforces.com/example.png")
+	if got != "https://espresso.codeforces.com/example.png" {
+		t.Fatalf("absolute image URL changed: %q", got)
+	}
+}

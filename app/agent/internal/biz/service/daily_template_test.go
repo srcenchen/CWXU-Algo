@@ -34,6 +34,11 @@ func TestRenderDailyRuleHTML_HasLayout(t *testing.T) {
 			t.Errorf("daily trend fallback table missing %q", want)
 		}
 	}
+	for _, forbidden := range []string{"<svg", "<polyline", "<rect", "<canvas", ".png"} {
+		if strings.Contains(strings.ToLower(html), forbidden) {
+			t.Errorf("daily email contains unsupported chart output %q", forbidden)
+		}
+	}
 }
 
 func TestSanitizeDailyHTML(t *testing.T) {

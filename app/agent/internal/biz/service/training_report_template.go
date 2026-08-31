@@ -353,30 +353,17 @@ func renderTemplateHTML(data *TrainingReportData, brand string, mode []string, c
 		evalTitle = "6. 综合维度评价"
 	}
 	sectionStart(&b, evalTitle)
+	b.WriteString(`<p style="margin:6px 0 2px;font-size:12px;color:#737373;">总体判断</p>`)
 	if strings.TrimSpace(comment.Headline) != "" {
 		fmt.Fprintf(&b, `<div style="margin:0 0 8px;font-size:15px;font-weight:600;color:#0a0a0a;">%s</div>`, html.EscapeString(comment.Headline))
+	} else {
+		b.WriteString(`<p style="margin:4px 0 0;font-size:13px;color:#737373;">暂无</p>`)
 	}
-	if len(comment.Highlights) > 0 {
-		b.WriteString(`<p style="margin:6px 0 2px;font-size:12px;color:#737373;">亮点</p><ul style="margin:4px 0 0;padding-left:18px;font-size:13px;color:#0a0a0a;">`)
-		for _, h := range comment.Highlights {
-			fmt.Fprintf(&b, `<li style="margin-bottom:4px;">%s</li>`, html.EscapeString(h))
-		}
-		b.WriteString(`</ul>`)
-	}
-	if len(comment.Issues) > 0 {
-		b.WriteString(`<p style="margin:8px 0 2px;font-size:12px;color:#737373;">问题</p><ul style="margin:4px 0 0;padding-left:18px;font-size:13px;color:#0a0a0a;">`)
-		for _, it := range comment.Issues {
-			fmt.Fprintf(&b, `<li style="margin-bottom:4px;">%s</li>`, html.EscapeString(it))
-		}
-		b.WriteString(`</ul>`)
-	}
-	if len(comment.Suggestions) > 0 {
-		b.WriteString(`<p style="margin:8px 0 2px;font-size:12px;color:#737373;">建议</p><ul style="margin:4px 0 0;padding-left:18px;font-size:13px;color:#0a0a0a;">`)
-		for _, s := range comment.Suggestions {
-			fmt.Fprintf(&b, `<li style="margin-bottom:4px;">%s</li>`, html.EscapeString(s))
-		}
-		b.WriteString(`</ul>`)
-	}
+	renderCommentList(&b, "趋势变化", comment.TrendChanges)
+	renderCommentList(&b, "亮点", comment.Highlights)
+	renderCommentList(&b, "问题", comment.Issues)
+	renderCommentList(&b, "分维度分析", comment.DimensionAnalysis)
+	renderCommentList(&b, "可执行建议", comment.Suggestions)
 	sectionEnd(&b)
 
 	// Footer
@@ -406,6 +393,19 @@ func sectionEnd(b *strings.Builder) {
 
 func emptyRow(b *strings.Builder, msg string) {
 	fmt.Fprintf(b, `<p style="margin:0;font-size:13px;color:#737373;">%s</p>`, html.EscapeString(msg))
+}
+
+func renderCommentList(b *strings.Builder, title string, items []string) {
+	fmt.Fprintf(b, `<p style="margin:8px 0 2px;font-size:12px;color:#737373;">%s</p>`, html.EscapeString(title))
+	if len(items) == 0 {
+		b.WriteString(`<p style="margin:4px 0 0;font-size:13px;color:#737373;">暂无</p>`)
+		return
+	}
+	b.WriteString(`<ul style="margin:4px 0 0;padding-left:18px;font-size:13px;color:#0a0a0a;">`)
+	for _, item := range items {
+		fmt.Fprintf(b, `<li style="margin-bottom:4px;">%s</li>`, html.EscapeString(item))
+	}
+	b.WriteString(`</ul>`)
 }
 
 func nameLink(name, username string, userID int64, profileURL string) string {
@@ -505,9 +505,10 @@ func trainingReportSystemPromptStrict(mode string) string {
 
 【输出格式 — 违反即失败】
 1. 只输出一个 JSON 对象，不要 Markdown、不要代码围栏、不要任何其它文字。
-2. JSON 结构：
-{"headline":"一句话总评（含合适的 emoji，80 字内）","highlights":["亮点1","亮点2"],"issues":["问题1"],"suggestions":["建议1","建议2"]}
-3. highlights/issues/suggestions 各 0-5 条，单条 100 字内；没有就留空数组。
+2. JSON 必须包含以下六段结构：总体判断 headline、趋势变化 trendChanges、亮点 highlights、问题 issues、分维度分析 dimensionAnalysis、可执行建议 suggestions。
+3. JSON 结构：
+{"headline":"一句话总体判断（含合适的 emoji，80 字内）","trendChanges":["趋势变化1"],"highlights":["亮点1","亮点2"],"issues":["问题1"],"dimensionAnalysis":["分维度分析1"],"suggestions":["可执行建议1","可执行建议2"]}
+4. trendChanges/highlights/issues/dimensionAnalysis/suggestions 各 0-5 条，单条 100 字内；没有就留空数组，不得省略字段。
 
 【铁律 — 防幻觉】
 - 所有数字（提交次数、AC 数、排名、成员数、日期、环比）由系统渲染，你不得在文案中编造或改动任何数字。
@@ -537,6 +538,7 @@ func trainingReportUserPrompt(data *TrainingReportData, mode string) string {
 	return fmt.Sprintf(`请根据以下真实数据，输出 %s 的评价文案参数 JSON（结构见系统提示）。
 【禁止】前言、Markdown、代码围栏；只输出 JSON 对象。
 【数字铁律】数据里的数字由系统渲染，你的文案不得编造或改动任何数字。
+【六段结构】必须包含总体判断 headline、趋势变化 trendChanges、亮点 highlights、问题 issues、分维度分析 dimensionAnalysis、可执行建议 suggestions；数组无内容时输出 []，不得省略字段。
 
 范围 %s %s~%s org=%d 提交%d(上期%d) AC%d 活跃%d/%d
 

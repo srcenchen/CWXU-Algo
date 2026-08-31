@@ -7,7 +7,7 @@ import (
 )
 
 func TestParseAIReportComment_Valid(t *testing.T) {
-	raw := `{"headline":"状态不错 🚀","highlights":["昨日提交 5 次","标签 DP 有进步"],"issues":[],"suggestions":["今天做 1 题","复盘错题"]}`
+	raw := `{"headline":"状态不错 🚀","trendChanges":["提交节奏回升"],"highlights":["昨日提交 5 次","标签 DP 有进步"],"issues":[],"dimensionAnalysis":["活跃度稳定"],"suggestions":["今天做 1 题","复盘错题"]}`
 	c, err := ParseAIReportComment(raw)
 	if err != nil {
 		t.Fatalf("want ok: %v", err)
@@ -15,7 +15,7 @@ func TestParseAIReportComment_Valid(t *testing.T) {
 	if c.Headline != "状态不错 🚀" {
 		t.Fatalf("headline=%q", c.Headline)
 	}
-	if len(c.Highlights) != 2 || len(c.Suggestions) != 2 || len(c.Issues) != 0 {
+	if len(c.TrendChanges) != 1 || len(c.Highlights) != 2 || len(c.Issues) != 0 || len(c.DimensionAnalysis) != 1 || len(c.Suggestions) != 2 {
 		t.Fatalf("lists wrong: %+v", c)
 	}
 }
@@ -36,7 +36,7 @@ func TestParseAIReportComment_RejectsInvalid(t *testing.T) {
 		"",
 		"没有 JSON",
 		"```html\n<table>…</table>\n```",
-		`{"headline":"","highlights":[],"issues":[],"suggestions":[]}`,
+		`{"headline":"","trendChanges":[],"highlights":[],"issues":[],"dimensionAnalysis":[],"suggestions":[]}`,
 	}
 	for _, raw := range cases {
 		if _, err := ParseAIReportComment(raw); err == nil {
@@ -75,7 +75,7 @@ func TestRenderDailyHTMLWithComment_UsesEmailSafeChartAndComment(t *testing.T) {
 		Suggestions: []string{"多做中等题"},
 	}
 	html := RenderDailyHTMLWithComment(data, "GoAlgo", comment)
-	if strings.Contains(html, "<svg") || strings.Contains(html, "<polyline") || strings.Contains(html, "<rect") {
+	if strings.Contains(html, "<svg") || strings.Contains(html, "<polyline") || strings.Contains(html, "<rect") || strings.Contains(html, "<canvas") || strings.Contains(strings.ToLower(html), ".png") {
 		t.Fatal("email chart must not contain SVG tags")
 	}
 	if !strings.Contains(html, "data-chart=\"bar\"") || !strings.Contains(html, "提交") || !strings.Contains(html, "AC") {
@@ -92,7 +92,7 @@ func TestRenderDailyHTMLWithComment_UsesEmailSafeChartAndComment(t *testing.T) {
 	}
 }
 
-func TestRenderTemplateHTMLWithComment_UsesEmailSafeChartAndComment(t *testing.T) {
+func TestRenderTrainingReportVariants_SplitsAttachmentAndEmailCharts(t *testing.T) {
 	data := &TrainingReportData{
 		OrgID:            1,
 		ScopeLabel:       "整组织",
@@ -108,26 +108,36 @@ func TestRenderTemplateHTMLWithComment_UsesEmailSafeChartAndComment(t *testing.T
 		ActiveMembers:    3,
 	}
 	comment := AIReportComment{
-		Headline:    "整体活跃上升 🔥",
-		Highlights:  []string{"提交环比 +12"},
-		Issues:      []string{"有 7 名成员未提交"},
-		Suggestions: []string{"组织统一训练日"},
+		Headline:          "整体活跃上升 🔥",
+		TrendChanges:      []string{"提交节奏回升"},
+		Highlights:        []string{"训练质量改善"},
+		Issues:            []string{"部分成员未提交"},
+		DimensionAnalysis: []string{"活跃度覆盖仍有提升空间"},
+		Suggestions:       []string{"组织统一训练日"},
 	}
-	html := RenderTemplateHTMLWithComment(data, "GoAlgo", comment, DetailModeCompact)
-	if strings.Contains(html, "<svg") || strings.Contains(html, "<polyline") || strings.Contains(html, "<rect") {
+	attachment, email := RenderTrainingReportVariants(data, "GoAlgo", comment, DetailModeCompact)
+	if !strings.Contains(attachment, "<svg") || !strings.Contains(attachment, "<polyline") {
+		t.Fatal("attachment must contain the SVG line chart")
+	}
+	if strings.Contains(email, "<svg") || strings.Contains(email, "<polyline") || strings.Contains(email, "<rect") || strings.Contains(email, "<canvas") || strings.Contains(strings.ToLower(email), ".png") {
 		t.Fatal("email chart must not contain SVG tags")
 	}
-	if !strings.Contains(html, "data-chart=\"bar\"") || !strings.Contains(html, "提交") || !strings.Contains(html, "AC") {
+	if !strings.Contains(email, "data-chart=\"bar\"") || !strings.Contains(email, "提交") || !strings.Contains(email, "AC") {
 		t.Fatal("missing email-safe chart")
 	}
-	if !strings.Contains(html, "整体活跃上升 🔥") {
-		t.Fatal("missing headline")
+	for _, output := range []string{attachment, email} {
+		for _, want := range []string{"总体判断", "趋势变化", "亮点", "问题", "分维度分析", "可执行建议", "整体活跃上升 🔥", "42"} {
+			if !strings.Contains(output, want) {
+				t.Errorf("report missing %q", want)
+			}
+		}
 	}
-	if !strings.Contains(html, "有 7 名成员未提交") {
-		t.Fatal("missing issue")
-	}
-	if !strings.Contains(html, "42") {
-		t.Fatal("missing data-driven number")
+}
+
+func TestRenderTemplateHTMLWithComment_DefaultsToAttachment(t *testing.T) {
+	html := RenderTemplateHTMLWithComment(fixtureTrainingData(), "GoAlgo", AIReportComment{Headline: "总体稳定"}, DetailModeCompact)
+	if !strings.Contains(html, "<svg") || !strings.Contains(html, "<polyline") {
+		t.Fatal("default render must remain the downloadable attachment variant")
 	}
 }
 

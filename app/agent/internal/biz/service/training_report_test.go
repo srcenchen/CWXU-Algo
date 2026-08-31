@@ -806,7 +806,7 @@ func TestRenderRuleTemplate_CompactAndFull(t *testing.T) {
 
 func TestRenderRuleTemplate_TrendUsesChartOnly(t *testing.T) {
 	html := RenderRuleTemplateHTML(fixtureTrainingData(), "GoAlgo", DetailModeCompact)
-	for _, want := range []string{`data-chart="bar"`, `data-series="提交"`, `data-series="AC"`} {
+	for _, want := range []string{`<svg`, `<polyline`, `data-series="提交"`, `data-series="AC"`} {
 		if !strings.Contains(html, want) {
 			t.Errorf("missing trend chart marker %q", want)
 		}
@@ -828,8 +828,10 @@ func TestTrainingReportPrompts_Dimensions(t *testing.T) {
 		t.Fatal("compact system")
 	}
 	up := trainingReportUserPrompt(fixtureTrainingData(), DetailModeFull)
-	if !strings.Contains(up, "详版") || !strings.Contains(up, "activeRanking") {
-		t.Fatal("user prompt")
+	for _, want := range []string{"详版", "activeRanking", "trendChanges", "dimensionAnalysis", "总体判断", "趋势变化", "分维度分析", "可执行建议"} {
+		if !strings.Contains(up, want) {
+			t.Fatalf("user prompt missing %q", want)
+		}
 	}
 }
 
