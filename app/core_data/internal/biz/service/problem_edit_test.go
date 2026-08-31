@@ -75,6 +75,15 @@ func TestProblemAnalyzeSystemPromptPrioritizesSpeed(t *testing.T) {
 	}
 }
 
+func TestProblemAnalyzeFullPromptIncludesSystemAndUserMessages(t *testing.T) {
+	prompt := problemAnalyzeFullPrompt("标题", "题面")
+	for _, want := range []string{"[system]", "优先快速完成", "[user]", "标题", "题面"} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("full prompt missing %q", want)
+		}
+	}
+}
+
 func TestCreateManualProblemPersistsTagInvertedIndex(t *testing.T) {
 	db := problemFactsTestDB(t)
 	uc := &ProblemUseCase{data: &data.Data{DB: db}}

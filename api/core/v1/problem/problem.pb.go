@@ -2376,11 +2376,12 @@ type ActiveJob struct {
 	StartedAt    int64                  `protobuf:"varint,6,opt,name=started_at,json=startedAt,proto3" json:"started_at,omitempty"`
 	LatestOutput string                 `protobuf:"bytes,7,opt,name=latest_output,json=latestOutput,proto3" json:"latest_output,omitempty"`
 	// running | finished，finished 任务在 Redis 中保留 1 小时供诊断
-	State         string `protobuf:"bytes,8,opt,name=state,proto3" json:"state,omitempty"`
-	EndedAt       int64  `protobuf:"varint,9,opt,name=ended_at,json=endedAt,proto3" json:"ended_at,omitempty"`
-	Prompt        string `protobuf:"bytes,10,opt,name=prompt,proto3" json:"prompt,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	State           string `protobuf:"bytes,8,opt,name=state,proto3" json:"state,omitempty"`
+	EndedAt         int64  `protobuf:"varint,9,opt,name=ended_at,json=endedAt,proto3" json:"ended_at,omitempty"`
+	Prompt          string `protobuf:"bytes,10,opt,name=prompt,proto3" json:"prompt,omitempty"`
+	ReasoningOutput string `protobuf:"bytes,11,opt,name=reasoning_output,json=reasoningOutput,proto3" json:"reasoning_output,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *ActiveJob) Reset() {
@@ -2479,6 +2480,13 @@ func (x *ActiveJob) GetEndedAt() int64 {
 func (x *ActiveJob) GetPrompt() string {
 	if x != nil {
 		return x.Prompt
+	}
+	return ""
+}
+
+func (x *ActiveJob) GetReasoningOutput() string {
+	if x != nil {
+		return x.ReasoningOutput
 	}
 	return ""
 }
@@ -5065,7 +5073,7 @@ const file_core_v1_problem_problem_proto_rawDesc = "" +
 	"\n" +
 	"updated_at\x18\x06 \x01(\x03R\tupdatedAt\x12\x16\n" +
 	"\x06status\x18\a \x01(\tR\x06status\x12%\n" +
-	"\x0efetch_attempts\x18\b \x01(\x05R\rfetchAttempts\"\xa0\x02\n" +
+	"\x0efetch_attempts\x18\b \x01(\x05R\rfetchAttempts\"\xcb\x02\n" +
 	"\tActiveJob\x12\x1d\n" +
 	"\n" +
 	"problem_id\x18\x01 \x01(\rR\tproblemId\x12\x1a\n" +
@@ -5080,7 +5088,8 @@ const file_core_v1_problem_problem_proto_rawDesc = "" +
 	"\x05state\x18\b \x01(\tR\x05state\x12\x19\n" +
 	"\bended_at\x18\t \x01(\x03R\aendedAt\x12\x16\n" +
 	"\x06prompt\x18\n" +
-	" \x01(\tR\x06prompt\"}\n" +
+	" \x01(\tR\x06prompt\x12)\n" +
+	"\x10reasoning_output\x18\v \x01(\tR\x0freasoningOutput\"}\n" +
 	"\vQueueStatus\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1a\n" +
 	"\bmessages\x18\x02 \x01(\x03R\bmessages\x12\x1c\n" +

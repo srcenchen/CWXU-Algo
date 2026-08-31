@@ -24,7 +24,7 @@ func TestRenderDailyRuleHTML_HasLayout(t *testing.T) {
 			t.Fatalf("missing %q", want)
 		}
 	}
-	for _, want := range []string{`data-series="提交"`, `data-series="AC"`, `data-axis="y"`, `overflow-x:auto`, `min-width:760px`, "提交时间", "题目标签", "难度", "21:36", "DP、贪心", "1200"} {
+	for _, want := range []string{`data-chart="bar"`, `data-series="提交"`, `data-series="AC"`, `overflow-x:auto`, `min-width:760px`, "提交时间", "题目标签", "难度", "21:36", "DP、贪心", "1200"} {
 		if !strings.Contains(html, want) {
 			t.Errorf("missing daily chart/detail %q", want)
 		}

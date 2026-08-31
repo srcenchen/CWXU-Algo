@@ -121,7 +121,7 @@ func renderTemplateHTML(data *TrainingReportData, brand string, mode []string, c
 			}
 			acSeries = append(acSeries, ac)
 		}
-		b.WriteString(LineChartSVG(labels, [][]int64{subSeries, acSeries}, []string{"提交", "AC"}, []string{"#171717", "#f97316"}))
+		b.WriteString(EmailBarChart(labels, [][]int64{subSeries, acSeries}, []string{"提交", "AC"}, []string{"#171717", "#f97316"}))
 	}
 	sectionEnd(&b)
 
@@ -251,26 +251,31 @@ func renderTemplateHTML(data *TrainingReportData, brand string, mode []string, c
 	}
 	sectionEnd(&b)
 
-	// 5 比赛（compact 周报不展示：组织流无组织级比赛数据，个人参赛史不适合进组织周报）
+	// 5 比赛（compact 周报不展示；详版只使用可核验的组织榜数据）
 	if !compact {
 		sectionStart(&b, "5. 比赛表现")
-		if len(data.Contests) == 0 {
-			emptyRow(&b, "区间内未匹配到比赛记录。")
+		if len(data.ContestRankings) == 0 {
+			emptyRow(&b, "区间内暂无可核验的组织比赛成绩。")
 			fmt.Fprintf(&b, `<p style="margin:8px 0 0;font-size:12px;"><a href="%s" style="color:#171717;">打开主站比赛页核对 →</a></p>`, moreContest)
 		} else {
 			b.WriteString(`<table width="100%" cellpadding="6" cellspacing="0" border="0" style="border-collapse:collapse;font-size:12px;">`)
-			b.WriteString(`<tr style="background:#f5f5f5;"><th align="left" style="border-bottom:1px solid #e5e5e5;">比赛</th><th align="left" style="border-bottom:1px solid #e5e5e5;">平台</th><th align="right" style="border-bottom:1px solid #e5e5e5;">过题</th><th align="left" style="border-bottom:1px solid #e5e5e5;">日期</th></tr>`)
+			b.WriteString(`<tr style="background:#f5f5f5;"><th align="left" style="border-bottom:1px solid #e5e5e5;">比赛</th><th align="left" style="border-bottom:1px solid #e5e5e5;">平台</th><th align="right" style="border-bottom:1px solid #e5e5e5;">榜单人数</th><th align="right" style="border-bottom:1px solid #e5e5e5;">组织最佳</th><th align="left" style="border-bottom:1px solid #e5e5e5;">日期</th></tr>`)
 			n := 0
-			for _, c := range data.Contests {
+			for _, snap := range data.ContestRankings {
 				if n >= contestN {
 					break
 				}
-				name := html.EscapeString(c.ContestName)
-				if c.ID > 0 {
-					name = fmt.Sprintf(`<a href="%s/contest/%d" style="color:#171717;text-decoration:none;">%s</a>`, SiteBaseURL, c.ID, name)
+				bestAC, bestTotal := int32(0), int32(0)
+				for _, row := range snap.Top {
+					if row.ACCount > bestAC {
+						bestAC = row.ACCount
+					}
+					if row.TotalCount > bestTotal {
+						bestTotal = row.TotalCount
+					}
 				}
-				fmt.Fprintf(&b, `<tr><td style="border-bottom:1px solid #e5e5e5;">%s</td><td style="border-bottom:1px solid #e5e5e5;">%s</td><td align="right" style="border-bottom:1px solid #e5e5e5;">%d/%d</td><td style="border-bottom:1px solid #e5e5e5;">%s</td></tr>`,
-					name, html.EscapeString(c.Platform), c.ACCount, c.TotalCount, html.EscapeString(c.Time))
+				fmt.Fprintf(&b, `<tr><td style="border-bottom:1px solid #e5e5e5;">%s</td><td style="border-bottom:1px solid #e5e5e5;">%s</td><td align="right" style="border-bottom:1px solid #e5e5e5;">%d</td><td align="right" style="border-bottom:1px solid #e5e5e5;">%s</td><td style="border-bottom:1px solid #e5e5e5;">%s</td></tr>`,
+					html.EscapeString(snap.ContestName), html.EscapeString(snap.Platform), len(snap.Top), contestSolvedDisplay(bestAC, bestTotal), html.EscapeString(snap.Time))
 				n++
 			}
 			b.WriteString(`</table>`)
@@ -282,9 +287,9 @@ func renderTemplateHTML(data *TrainingReportData, brand string, mode []string, c
 					break
 				}
 				fmt.Fprintf(&b, `<p style="margin:12px 0 6px;font-size:13px;font-weight:600;">%s · 组织榜（%d人）</p>`,
-					html.EscapeString(snap.ContestName), snap.Total)
+					html.EscapeString(snap.ContestName), len(snap.Top))
 				b.WriteString(`<table width="100%" cellpadding="6" cellspacing="0" border="0" style="border-collapse:collapse;font-size:12px;">`)
-				b.WriteString(`<tr style="background:#f5f5f5;"><th align="left" style="border-bottom:1px solid #e5e5e5;">#</th><th align="left" style="border-bottom:1px solid #e5e5e5;">成员</th><th align="right" style="border-bottom:1px solid #e5e5e5;">过题</th><th align="right" style="border-bottom:1px solid #e5e5e5;">分</th></tr>`)
+				b.WriteString(`<tr style="background:#f5f5f5;"><th align="left" style="border-bottom:1px solid #e5e5e5;">#</th><th align="left" style="border-bottom:1px solid #e5e5e5;">成员</th><th align="right" style="border-bottom:1px solid #e5e5e5;">过题</th></tr>`)
 				rowN := 10
 				if compact {
 					rowN = 5
@@ -293,8 +298,8 @@ func renderTemplateHTML(data *TrainingReportData, brand string, mode []string, c
 					if j >= rowN {
 						break
 					}
-					fmt.Fprintf(&b, `<tr><td style="border-bottom:1px solid #e5e5e5;">%d</td><td style="border-bottom:1px solid #e5e5e5;">%s</td><td align="right" style="border-bottom:1px solid #e5e5e5;">%d/%d</td><td align="right" style="border-bottom:1px solid #e5e5e5;">%d</td></tr>`,
-						r.Rank, html.EscapeString(r.Name), r.ACCount, r.TotalCount, r.Score)
+					fmt.Fprintf(&b, `<tr><td style="border-bottom:1px solid #e5e5e5;">%d</td><td style="border-bottom:1px solid #e5e5e5;">%s</td><td align="right" style="border-bottom:1px solid #e5e5e5;">%s</td></tr>`,
+						r.Rank, html.EscapeString(r.Name), contestSolvedDisplay(r.ACCount, r.TotalCount))
 				}
 				b.WriteString(`</table>`)
 			}
@@ -366,6 +371,13 @@ func renderTemplateHTML(data *TrainingReportData, brand string, mode []string, c
 	return b.String()
 }
 
+func contestSolvedDisplay(ac, total int32) string {
+	if total > 0 {
+		return fmt.Sprintf("%d/%d", ac, total)
+	}
+	return fmt.Sprintf("%d", ac)
+}
+
 func sectionStart(b *strings.Builder, title string) {
 	b.WriteString(`<tr><td style="padding:4px 14px 12px;background:#ffffff;">`)
 	b.WriteString(`<div style="background:#ffffff;border:1px solid #e5e5e5;border-radius:10px;padding:14px 12px;">`)
@@ -430,7 +442,7 @@ func ruleComprehensiveEval(data *TrainingReportData, delta int64) (emoji string,
 	lines = append(lines, fmt.Sprintf("· 做题/动态：概览 %d 题，动态抽样 %d 条",
 		len(data.ProblemOverview), len(data.OrgSubmitSample)))
 	lines = append(lines, fmt.Sprintf("· 比赛：%d 场，重点榜 %d 场",
-		len(data.Contests), len(data.ContestRankings)))
+		len(data.ContestRankings), len(data.ContestRankings)))
 	lines = append(lines, fmt.Sprintf("· 博客：%d 篇", len(data.RecentBlogs)))
 	lines = append(lines, fmt.Sprintf("· 排行：有提交 %d 人（已剔除教练），不活跃 %d 人",
 		data.ActiveMembers, len(data.InactiveMembers)))
@@ -489,7 +501,7 @@ func trainingReportSystemPromptStrict(mode string) string {
 【数据说明】
 - activeRanking：活跃榜（已剔除教练与 0 提交）
 - inactiveMembers：不活跃成员；teamTags 团队标签；problemOverview 做题概览
-- orgSubmitSample 提交动态；recentBlogs 博客；contests 比赛；dailyTrend 日走势
+- orgSubmitSample 提交动态；recentBlogs 博客；contestRankings 组织比赛榜；dailyTrend 日走势
 - totalSubmits 对比 prevTotalSubmits 即环比
 
 【点评维度】

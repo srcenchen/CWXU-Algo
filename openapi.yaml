@@ -7579,6 +7579,8 @@ components:
                     type: string
                 prompt:
                     type: string
+                reasoningOutput:
+                    type: string
         api.core.v1.problem.AdminUpdateProblemReq:
             type: object
             properties:

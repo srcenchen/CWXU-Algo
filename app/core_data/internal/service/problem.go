@@ -622,16 +622,17 @@ func (s *ProblemService) Progress(ctx context.Context, req *problem.ProgressReq)
 			t = j.ExternalID
 		}
 		jobs = append(jobs, &problem.ActiveJob{
-			ProblemId:    uint32(j.ProblemID),
-			Platform:     j.Platform,
-			ExternalId:   j.ExternalID,
-			Title:        t,
-			Stage:        j.Stage,
-			StartedAt:    j.StartedAt.Unix(),
-			Prompt:       j.Prompt,
-			LatestOutput: j.LatestOutput,
-			State:        j.State,
-			EndedAt:      j.EndedAt.Unix(),
+			ProblemId:       uint32(j.ProblemID),
+			Platform:        j.Platform,
+			ExternalId:      j.ExternalID,
+			Title:           t,
+			Stage:           j.Stage,
+			StartedAt:       j.StartedAt.Unix(),
+			Prompt:          j.Prompt,
+			ReasoningOutput: j.ReasoningOutput,
+			LatestOutput:    j.LatestOutput,
+			State:           j.State,
+			EndedAt:         j.EndedAt.Unix(),
 		})
 	}
 	qs := make([]*problem.QueueStatus, 0, len(snap.Queues))
@@ -673,7 +674,7 @@ func activeJobsToProto(list []biz.ActiveJob) []*problem.ActiveJob {
 	for _, j := range list {
 		out = append(out, &problem.ActiveJob{
 			ProblemId: uint32(j.ProblemID), Platform: j.Platform, ExternalId: j.ExternalID,
-			Title: j.Title, Stage: j.Stage, StartedAt: j.StartedAt.Unix(), Prompt: j.Prompt, LatestOutput: j.LatestOutput,
+			Title: j.Title, Stage: j.Stage, StartedAt: j.StartedAt.Unix(), Prompt: j.Prompt, ReasoningOutput: j.ReasoningOutput, LatestOutput: j.LatestOutput,
 			State: j.State, EndedAt: j.EndedAt.Unix(),
 		})
 	}

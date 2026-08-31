@@ -9,6 +9,8 @@ import (
 	coredata "cwxu-algo/app/core_data/internal/data"
 	"cwxu-algo/app/core_data/internal/data/model"
 
+	"github.com/alicebob/miniredis/v2"
+	"github.com/redis/go-redis/v9"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
@@ -36,6 +38,25 @@ func refetchTestUseCase(t *testing.T, status string) (*ProblemUseCase, model.Pro
 	return &ProblemUseCase{data: &coredata.Data{DB: db}}, p
 }
 
+func TestMarkProblemAnalysisQueuedInvalidatesDetailCache(t *testing.T) {
+	uc, p := refetchTestUseCase(t, model.ProblemStatusCompleted)
+	mr := miniredis.RunT(t)
+	uc.data.RDB = redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	if err := uc.markProblemAnalysisQueued(&p); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := mr.Get(problemDetailVerKey(p.ID)); got != "1" {
+		t.Fatalf("detail cache version = %q, want 1", got)
+	}
+	var saved model.Problem
+	if err := uc.data.DB.First(&saved, p.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if saved.Status != model.ProblemStatusTagging || saved.ErrorMsg != "" {
+		t.Fatalf("status=%q error=%q", saved.Status, saved.ErrorMsg)
+	}
+}
+
 func TestForceEnqueueRefetchRejectsPermanentFailure(t *testing.T) {
 	uc, p := refetchTestUseCase(t, model.ProblemStatusFailedPerm)
 	err := uc.ForceEnqueueRefetch(p.ID, 1)
@@ -57,5 +78,24 @@ func TestProcessFetchKeepsPermanentFailureForForcedMessage(t *testing.T) {
 	}
 	if got.Status != model.ProblemStatusFailedPerm || got.ErrorMsg != p.ErrorMsg {
 		t.Fatalf("status=%q error=%q, want permanent failure unchanged", got.Status, got.ErrorMsg)
+	}
+}
+
+func TestShouldFetchProblemContentOnlyWhenMissingOrBroken(t *testing.T) {
+	tests := []struct {
+		name string
+		md   string
+		want bool
+	}{
+		{name: "missing", md: " \n ", want: true},
+		{name: "broken", md: "### Problem StatementYou are given", want: true},
+		{name: "normal", md: "### Problem Statement\nYou are given", want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := shouldFetchProblemContent(tt.md); got != tt.want {
+				t.Fatalf("shouldFetchProblemContent(%q)=%v, want %v", tt.md, got, tt.want)
+			}
+		})
 	}
 }

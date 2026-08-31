@@ -8,6 +8,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 
 	"github.com/redis/go-redis/v9"
 )
@@ -22,25 +23,34 @@ const (
 )
 
 type ActiveJob struct {
-	ProblemID    uint      `json:"problem_id"`
-	Platform     string    `json:"platform"`
-	ExternalID   string    `json:"external_id"`
-	Title        string    `json:"title"`
-	Stage        string    `json:"stage"` // fetch | analyze
-	StartedAt    time.Time `json:"started_at"`
-	Prompt       string    `json:"prompt,omitempty"`
-	LatestOutput string    `json:"latest_output,omitempty"`
-	State        string    `json:"state"`
-	EndedAt      time.Time `json:"ended_at,omitempty"`
+	ProblemID       uint      `json:"problem_id"`
+	Platform        string    `json:"platform"`
+	ExternalID      string    `json:"external_id"`
+	Title           string    `json:"title"`
+	Stage           string    `json:"stage"` // fetch | analyze
+	StartedAt       time.Time `json:"started_at"`
+	Prompt          string    `json:"prompt,omitempty"`
+	ReasoningOutput string    `json:"reasoning_output,omitempty"`
+	LatestOutput    string    `json:"latest_output,omitempty"`
+	State           string    `json:"state"`
+	EndedAt         time.Time `json:"ended_at,omitempty"`
+}
+
+func (p *PipelineControl) TrackReasoning(stage string, id uint, output string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if job := p.active[fmt.Sprintf("%s:%d", stage, id)]; job != nil {
+		output = sanitizePipelineText(output, 12000, false)
+		job.ReasoningOutput = output
+		p.persistJob(job)
+	}
 }
 
 func (p *PipelineControl) TrackOutput(stage string, id uint, output string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if job := p.active[fmt.Sprintf("%s:%d", stage, id)]; job != nil {
-		if len(output) > 12000 {
-			output = output[len(output)-12000:]
-		}
+		output = sanitizePipelineText(output, 12000, false)
 		job.LatestOutput = output
 		p.persistJob(job)
 	}
@@ -50,12 +60,30 @@ func (p *PipelineControl) TrackPrompt(stage string, id uint, prompt string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if job := p.active[fmt.Sprintf("%s:%d", stage, id)]; job != nil {
-		if len(prompt) > 24000 {
-			prompt = prompt[:24000] + "\n...(truncated)"
-		}
+		prompt = sanitizePipelineText(prompt, 24000, true)
 		job.Prompt = prompt
 		p.persistJob(job)
 	}
+}
+
+func sanitizePipelineText(value string, maxBytes int, keepPrefix bool) string {
+	value = string([]rune(value))
+	if len(value) <= maxBytes {
+		return value
+	}
+	if keepPrefix {
+		value = value[:maxBytes]
+	} else {
+		value = value[len(value)-maxBytes:]
+	}
+	for !utf8.ValidString(value) {
+		if keepPrefix {
+			value = value[:len(value)-1]
+		} else {
+			value = value[1:]
+		}
+	}
+	return value
 }
 
 type PipelineControl struct {
@@ -181,6 +209,9 @@ func (p *PipelineControl) SnapshotConversations() []ActiveJob {
 		}
 		var job ActiveJob
 		if s, ok := value.(string); ok && json.Unmarshal([]byte(s), &job) == nil {
+			job.Prompt = sanitizePipelineText(job.Prompt, 24000, true)
+			job.ReasoningOutput = sanitizePipelineText(job.ReasoningOutput, 12000, false)
+			job.LatestOutput = sanitizePipelineText(job.LatestOutput, 12000, false)
 			out = append(out, job)
 		}
 	}
@@ -197,7 +228,11 @@ func (p *PipelineControl) SnapshotActive() []ActiveJob {
 	out := make([]ActiveJob, 0, len(p.active))
 	for _, j := range p.active {
 		if j != nil {
-			out = append(out, *j)
+			job := *j
+			job.Prompt = sanitizePipelineText(job.Prompt, 24000, true)
+			job.ReasoningOutput = sanitizePipelineText(job.ReasoningOutput, 12000, false)
+			job.LatestOutput = sanitizePipelineText(job.LatestOutput, 12000, false)
+			out = append(out, job)
 		}
 	}
 	sort.Slice(out, func(i, j int) bool {

@@ -2,6 +2,7 @@ package openaiclient
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
@@ -50,6 +51,12 @@ func StreamCompletion(ctx context.Context, client *openai.Client, params openai.
 }
 
 func StreamCompletionWithCallback(ctx context.Context, client *openai.Client, params openai.ChatCompletionNewParams, onChunk func(string)) (string, error) {
+	return StreamCompletionWithCallbacks(ctx, client, params, nil, onChunk)
+}
+
+// StreamCompletionWithCallbacks exposes compatible providers' raw reasoning
+// extension separately from the final assistant content.
+func StreamCompletionWithCallbacks(ctx context.Context, client *openai.Client, params openai.ChatCompletionNewParams, onReasoning, onContent func(string)) (string, error) {
 	if client == nil {
 		return "", fmt.Errorf("openai client 未配置")
 	}
@@ -58,8 +65,16 @@ func StreamCompletionWithCallback(ctx context.Context, client *openai.Client, pa
 
 	acc := openai.ChatCompletionAccumulator{}
 	for stream.Next() {
-		if onChunk != nil && len(stream.Current().Choices) > 0 {
-			onChunk(stream.Current().Choices[0].Delta.Content)
+		if len(stream.Current().Choices) > 0 {
+			delta := stream.Current().Choices[0].Delta
+			if onReasoning != nil {
+				if reasoning := reasoningDelta(delta.RawJSON()); reasoning != "" {
+					onReasoning(reasoning)
+				}
+			}
+			if onContent != nil && delta.Content != "" {
+				onContent(delta.Content)
+			}
 		}
 		if !acc.AddChunk(stream.Current()) {
 			return "", fmt.Errorf("AI stream chunk 累积失败")
@@ -72,4 +87,46 @@ func StreamCompletionWithCallback(ctx context.Context, client *openai.Client, pa
 		return "", fmt.Errorf("AI 返回空 choices")
 	}
 	return acc.Choices[0].Message.Content, nil
+}
+
+func reasoningDelta(raw string) string {
+	var fields map[string]json.RawMessage
+	if json.Unmarshal([]byte(raw), &fields) != nil {
+		return ""
+	}
+	for _, key := range []string{"reasoning_content", "reasoning", "reasoning_text"} {
+		if value, ok := fields[key]; ok {
+			if text := reasoningText(value); text != "" {
+				return text
+			}
+		}
+	}
+	return ""
+}
+
+func reasoningText(raw json.RawMessage) string {
+	var text string
+	if json.Unmarshal(raw, &text) == nil {
+		return text
+	}
+	var object map[string]json.RawMessage
+	if json.Unmarshal(raw, &object) == nil {
+		for _, key := range []string{"text", "content"} {
+			if value, ok := object[key]; ok {
+				if part := reasoningText(value); part != "" {
+					return part
+				}
+			}
+		}
+		return ""
+	}
+	var items []json.RawMessage
+	if json.Unmarshal(raw, &items) == nil {
+		var out strings.Builder
+		for _, item := range items {
+			out.WriteString(reasoningText(item))
+		}
+		return out.String()
+	}
+	return ""
 }

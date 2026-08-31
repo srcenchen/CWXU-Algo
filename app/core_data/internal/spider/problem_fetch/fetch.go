@@ -368,15 +368,20 @@ func fetchCodeforces(externalID, problemURL string) (*FetchedContent, error) {
 	if strings.Contains(html, "Just a moment") || strings.Contains(html, "cf-browser-verification") {
 		return nil, fmt.Errorf("CF 被 Cloudflare 拦截，请稍后重试或换网络")
 	}
+	return parseCodeforcesProblemHTML(html, problemURL)
+}
+
+func parseCodeforcesProblemHTML(html, problemURL string) (*FetchedContent, error) {
 	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
 	if err != nil {
 		return nil, err
 	}
-	stmt := doc.Find("div.problem-statement").First()
+	stmt := doc.Find("div.problem-statement").FilterFunction(func(_ int, s *goquery.Selection) bool {
+		return s.Find("div.header").Length() > 0
+	}).First()
 	if stmt.Length() == 0 {
 		return nil, fmt.Errorf("CF 未找到题面")
 	}
-
 	title := strings.TrimSpace(stmt.Find("div.header div.title").First().Text())
 	if title == "" {
 		title = strings.TrimSpace(doc.Find("div.title").First().Text())
@@ -385,25 +390,25 @@ func fetchCodeforces(externalID, problemURL string) (*FetchedContent, error) {
 		title = strings.TrimSpace(title[i+2:])
 	}
 
-	// 按语义块转 Markdown，避免整段 Text 粘连
+	// Convert images before generic text conversion, which otherwise drops img nodes.
+	stmt.Find("img").Each(func(_ int, img *goquery.Selection) {
+		src, _ := img.Attr("src")
+		alt, _ := img.Attr("alt")
+		src = resolveCFURL(problemURL, src)
+		if src == "" {
+			img.ReplaceWithHtml("")
+			return
+		}
+		if strings.TrimSpace(alt) == "" {
+			alt = "image"
+		}
+		img.ReplaceWithHtml("![" + alt + "](" + src + ")")
+	})
+
 	var b strings.Builder
 	b.WriteString("# ")
 	b.WriteString(title)
 	b.WriteString("\n\n")
-
-	// 时间/内存限制
-	if tl := strings.TrimSpace(stmt.Find("div.time-limit").Text()); tl != "" {
-		b.WriteString("**")
-		b.WriteString(normalizeSpace(tl))
-		b.WriteString("**\n\n")
-	}
-	if ml := strings.TrimSpace(stmt.Find("div.memory-limit").Text()); ml != "" {
-		b.WriteString("**")
-		b.WriteString(normalizeSpace(ml))
-		b.WriteString("**\n\n")
-	}
-
-	// 去掉 header（含 title/limits），保留正文结构
 	clone := stmt.Clone()
 	clone.Find("div.header").Remove()
 	clone.Children().Each(func(_ int, s *goquery.Selection) {
@@ -413,51 +418,64 @@ func fetchCodeforces(externalID, problemURL string) (*FetchedContent, error) {
 		case class == "input-specification":
 			b.WriteString("## 输入\n\n")
 			b.WriteString(selectionToMD(s))
-			b.WriteString("\n\n")
 		case class == "output-specification":
-			b.WriteString("## 输出\n\n")
+			b.WriteString("\n\n## 输出\n\n")
 			b.WriteString(selectionToMD(s))
-			b.WriteString("\n\n")
 		case class == "sample-tests":
-			b.WriteString("## 样例\n\n")
+			b.WriteString("\n\n## 样例\n\n")
 			s.Find("div.sample-test").Each(func(i int, sample *goquery.Selection) {
-				b.WriteString(fmt.Sprintf("### 样例 %d\n\n", i+1))
-				in := sample.Find("div.input pre").First()
-				out := sample.Find("div.output pre").First()
-				if in.Length() > 0 {
-					b.WriteString("**输入**\n\n```\n")
-					b.WriteString(strings.TrimRight(in.Text(), "\n"))
-					b.WriteString("\n```\n\n")
+				inputs := sample.Find(".input pre")
+				outputs := sample.Find(".output pre")
+				if inputs.Length() == 0 || outputs.Length() == 0 {
+					pres := sample.Find("pre")
+					if inputs.Length() == 0 {
+						inputs = pres.FilterFunction(func(i int, _ *goquery.Selection) bool { return i%2 == 0 })
+					}
+					if outputs.Length() == 0 {
+						outputs = pres.FilterFunction(func(i int, _ *goquery.Selection) bool { return i%2 == 1 })
+					}
 				}
-				if out.Length() > 0 {
-					b.WriteString("**输出**\n\n```\n")
-					b.WriteString(strings.TrimRight(out.Text(), "\n"))
-					b.WriteString("\n```\n\n")
+				count := inputs.Length()
+				if outputs.Length() > count {
+					count = outputs.Length()
+				}
+				for j := 0; j < count; j++ {
+					b.WriteString(fmt.Sprintf("### 样例 %d\n\n", i+j+1))
+					if j < inputs.Length() {
+						b.WriteString("**输入**\n\n```\n" + strings.TrimRight(inputs.Eq(j).Text(), "\n") + "\n```\n\n")
+					}
+					if j < outputs.Length() {
+						b.WriteString("**输出**\n\n```\n" + strings.TrimRight(outputs.Eq(j).Text(), "\n") + "\n```\n\n")
+					}
 				}
 			})
 		case class == "note":
-			b.WriteString("## 说明\n\n")
+			b.WriteString("\n\n## 说明\n\n")
 			b.WriteString(selectionToMD(s))
-			b.WriteString("\n\n")
 		default:
-			// 主描述段落
-			txt := selectionToMD(s)
-			if strings.TrimSpace(txt) != "" {
-				b.WriteString(txt)
-				b.WriteString("\n\n")
+			if text := selectionToMD(s); strings.TrimSpace(text) != "" {
+				b.WriteString("\n\n" + text)
 			}
 		}
 	})
-
-	md := strings.TrimSpace(b.String())
-	if md == "" || len(md) < 10 {
-		// fallback
-		md = "# " + title + "\n\n" + selectionToMD(clone)
-	}
-	// 清理 CF 公式 $$$...$$$ → $...$
-	md = strings.ReplaceAll(md, "$$$", "$")
-	md = collapseBlankLines(md)
+	md := strings.ReplaceAll(collapseBlankLines(strings.TrimSpace(b.String())), "$$$", "$")
 	return &FetchedContent{Title: title, ContentMD: md}, nil
+}
+
+func resolveCFURL(base, raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || strings.HasPrefix(strings.ToLower(raw), "data:") {
+		return raw
+	}
+	baseURL, err := url.Parse(base)
+	if err != nil {
+		return raw
+	}
+	ref, err := url.Parse(raw)
+	if err != nil {
+		return raw
+	}
+	return baseURL.ResolveReference(ref).String()
 }
 
 func selectionToMD(s *goquery.Selection) string {

@@ -449,6 +449,7 @@ message ActiveJob {
   string state = 8;
   int64 ended_at = 9;
   string prompt = 10;
+  string reasoning_output = 11;
 }
 
 message QueueStatus {

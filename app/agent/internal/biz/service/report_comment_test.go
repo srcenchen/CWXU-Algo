@@ -60,7 +60,7 @@ func TestParseAIReportComment_Truncates(t *testing.T) {
 	}
 }
 
-func TestRenderDailyHTMLWithComment_HasSVGAndComment(t *testing.T) {
+func TestRenderDailyHTMLWithComment_UsesEmailSafeChartAndComment(t *testing.T) {
 	data := &DailyReportData{
 		Name:           "测试",
 		Yesterday:      "2026-08-07",
@@ -75,8 +75,11 @@ func TestRenderDailyHTMLWithComment_HasSVGAndComment(t *testing.T) {
 		Suggestions: []string{"多做中等题"},
 	}
 	html := RenderDailyHTMLWithComment(data, "GoAlgo", comment)
-	if !strings.Contains(html, "<svg") {
-		t.Fatal("missing svg chart")
+	if strings.Contains(html, "<svg") || strings.Contains(html, "<polyline") || strings.Contains(html, "<rect") {
+		t.Fatal("email chart must not contain SVG tags")
+	}
+	if !strings.Contains(html, "data-chart=\"bar\"") || !strings.Contains(html, "提交") || !strings.Contains(html, "AC") {
+		t.Fatal("missing email-safe chart")
 	}
 	if !strings.Contains(html, "状态不错 🚀") {
 		t.Fatal("missing headline")
@@ -89,7 +92,7 @@ func TestRenderDailyHTMLWithComment_HasSVGAndComment(t *testing.T) {
 	}
 }
 
-func TestRenderTemplateHTMLWithComment_HasSVGAndComment(t *testing.T) {
+func TestRenderTemplateHTMLWithComment_UsesEmailSafeChartAndComment(t *testing.T) {
 	data := &TrainingReportData{
 		OrgID:            1,
 		ScopeLabel:       "整组织",
@@ -111,8 +114,11 @@ func TestRenderTemplateHTMLWithComment_HasSVGAndComment(t *testing.T) {
 		Suggestions: []string{"组织统一训练日"},
 	}
 	html := RenderTemplateHTMLWithComment(data, "GoAlgo", comment, DetailModeCompact)
-	if !strings.Contains(html, "<svg") {
-		t.Fatal("missing svg chart")
+	if strings.Contains(html, "<svg") || strings.Contains(html, "<polyline") || strings.Contains(html, "<rect") {
+		t.Fatal("email chart must not contain SVG tags")
+	}
+	if !strings.Contains(html, "data-chart=\"bar\"") || !strings.Contains(html, "提交") || !strings.Contains(html, "AC") {
+		t.Fatal("missing email-safe chart")
 	}
 	if !strings.Contains(html, "整体活跃上升 🔥") {
 		t.Fatal("missing headline")
@@ -125,41 +131,42 @@ func TestRenderTemplateHTMLWithComment_HasSVGAndComment(t *testing.T) {
 	}
 }
 
-func TestBarChartSVG_OutputsSVG(t *testing.T) {
-	svg := BarChartSVG([]string{"08-01", "08-02"}, []int64{1, 5}, "#171717")
-	if !strings.HasPrefix(svg, "<svg") || !strings.Contains(svg, "viewBox") {
-		t.Fatal("bad svg: " + svg)
+func TestEmailBarChart_UsesTables(t *testing.T) {
+	chart := EmailBarChart([]string{"08-01", "08-02"}, [][]int64{{1, 5}}, []string{"提交"}, []string{"#171717"})
+	if !strings.Contains(chart, `data-chart="bar"`) || !strings.Contains(chart, "08-01") || !strings.Contains(chart, "width:100%") {
+		t.Fatal("bad email chart: " + chart)
+	}
+	if strings.Contains(chart, "<svg") || strings.Contains(chart, "<rect") {
+		t.Fatal("chart contains unsupported drawing tags")
 	}
 }
 
-func TestLineChartSVG_HasYAxisAndHandlesSinglePoint(t *testing.T) {
-	svg := LineChartSVG(
+func TestEmailBarChart_HandlesSinglePointAndMissingValues(t *testing.T) {
+	chart := EmailBarChart(
 		[]string{"08-15"},
-		[][]int64{{3}, {2}},
+		[][]int64{{3}, {2, 4}},
 		[]string{"提交", "AC"},
 		[]string{"#171717", "#f97316"},
 	)
-	for _, want := range []string{`data-axis="y"`, `data-series="提交"`, `data-series="AC"`, ">0</text>"} {
-		if !strings.Contains(svg, want) {
-			t.Errorf("missing %q in %s", want, svg)
+	for _, want := range []string{`data-series="提交"`, `data-series="AC"`, "08-15", ">3<", ">2<"} {
+		if !strings.Contains(chart, want) {
+			t.Errorf("missing %q in %s", want, chart)
 		}
 	}
-	if strings.Contains(svg, "NaN") || strings.Contains(svg, "Inf") {
-		t.Fatalf("invalid single-point coordinates: %s", svg)
+	if strings.Contains(chart, "NaN") || strings.Contains(chart, "Inf") {
+		t.Fatalf("invalid chart: %s", chart)
 	}
 }
 
-func TestLineChartSVG_KeepsEdgeLabelsInsidePlot(t *testing.T) {
-	svg := LineChartSVG(
+func TestEmailBarChart_EscapesLabels(t *testing.T) {
+	chart := EmailBarChart(
 		[]string{"08-09", "08-15"},
-		[][]int64{{12, 7}, {5, 4}},
+		[][]int64{{12, 7}},
 		[]string{"提交", "AC"},
 		[]string{"#171717", "#f97316"},
 	)
-	for _, want := range []string{`data-point-edge="first" cx="38.0"`, `data-point-edge="last" cx="532.0"`, `data-value-label="top"`, `y="22.0" text-anchor="middle"`} {
-		if !strings.Contains(svg, want) {
-			t.Errorf("missing safe chart geometry %q in %s", want, svg)
-		}
+	if !strings.Contains(chart, "08-09") || strings.Contains(chart, "<svg") {
+		t.Fatalf("unexpected chart: %s", chart)
 	}
 }
 

@@ -73,7 +73,6 @@ type ContestRankRow struct {
 	Rank       int64  `json:"rank"`
 	UserID     int64  `json:"userId"`
 	Name       string `json:"name"`
-	Score      int32  `json:"score"`
 	ACCount    int32  `json:"acCount"`
 	TotalCount int32  `json:"totalCount"`
 }
@@ -83,6 +82,7 @@ type ContestRankSnap struct {
 	ContestID   string           `json:"contestId"`
 	ContestName string           `json:"contestName"`
 	Platform    string           `json:"platform"`
+	Time        string           `json:"time,omitempty"`
 	Total       int64            `json:"total"`
 	Top         []ContestRankRow `json:"top"`
 }
@@ -556,6 +556,9 @@ func (uc *SummaryUseCase) LoadTrainingReportData(ctx context.Context, orgID, gro
 	data.ProblemOverview = aggregateProblemOverview(data.OrgSubmitSample, 25)
 	data.Contests = uc.fetchOrgContests(elevated, start, end, 20, memberIDs)
 	data.ContestRankings = uc.fetchContestRankSnaps(elevated, data.Contests, 4, 15, coachSet)
+	// Contests are arbitrary representative member rows used only to locate a
+	// contest. They are not organization facts and must not enter templates or AI prompts.
+	data.Contests = nil
 	data.RecentBlogs = uc.fetchOrgBlogBriefs(elevated, orgID, 12)
 
 	return data, nil
@@ -971,6 +974,7 @@ func (uc *SummaryUseCase) fetchContestRankSnaps(ctx context.Context, contests []
 			ContestID:   c.ContestID,
 			ContestName: c.ContestName,
 			Platform:    c.Platform,
+			Time:        c.Time,
 			Total:       res.GetTotal(),
 		}
 		if ct := res.GetContest(); ct != nil {
@@ -990,8 +994,11 @@ func (uc *SummaryUseCase) fetchContestRankSnaps(ctx context.Context, contests []
 			}
 			snap.Top = append(snap.Top, ContestRankRow{
 				Rank: r.Rank, UserID: r.UserId, Name: r.Name,
-				Score: r.Score, ACCount: r.AcCount, TotalCount: r.TotalCount,
+				ACCount: r.AcCount, TotalCount: r.TotalCount,
 			})
+		}
+		if len(snap.Top) == 0 {
+			continue
 		}
 		out = append(out, snap)
 		if len(out) >= maxContests {

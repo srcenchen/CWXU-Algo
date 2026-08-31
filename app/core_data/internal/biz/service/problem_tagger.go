@@ -95,39 +95,15 @@ func problemAnalyzePrompt(title, content string) string {
 func problemAnalyzeSystemPrompt() string {
 	return `优先快速完成，不做冗长推理。
 题型、难度、算法标签和建议解法根据题面大致判断即可，不要求绝对精准；完整翻译不得省略。
-`
+` + problemAnalyzeSystemPromptBody()
 }
 
-func (t *ProblemTagger) Analyze(ctx context.Context, title, contentMD string) (res *aiAnalyzeResult, err error) {
-	return t.analyze(ctx, title, contentMD, nil)
+func problemAnalyzeFullPrompt(title, content string) string {
+	return "[system]\n" + problemAnalyzeSystemPrompt() + "\n\n[user]\n" + problemAnalyzePrompt(title, content)
 }
 
-func (t *ProblemTagger) AnalyzeWithProgress(ctx context.Context, title, contentMD string, onChunk func(string)) (res *aiAnalyzeResult, err error) {
-	return t.analyze(ctx, title, contentMD, onChunk)
-}
-
-func (t *ProblemTagger) analyze(ctx context.Context, title, contentMD string, onChunk func(string)) (res *aiAnalyzeResult, err error) {
-	defer func() {
-		if err != nil {
-			sitesettings.SetServiceStatus(ctx, t.rdb, sitesettings.ServiceAiAnaly, sitesettings.StatusFail, err.Error())
-		} else if res != nil {
-			sitesettings.SetServiceStatus(ctx, t.rdb, sitesettings.ServiceAiAnaly, sitesettings.StatusOK, "")
-		}
-	}()
-	t.reload(ctx)
-	t.mu.Lock()
-	client := t.client
-	modelID := t.model
-	t.mu.Unlock()
-	if client == nil || modelID == "" {
-		return nil, fmt.Errorf("题库 AI 未配置（请在站点设置中填写）")
-	}
-	// 节约 token：截断超长题面（翻译+排版需要更多上下文）
-	content := contentMD
-	if len(content) > 18000 {
-		content = content[:18000] + "\n...(truncated)"
-	}
-	system := problemAnalyzeSystemPrompt() + `你是算法题目标签分析器与题面「全文中文译者」。先完整翻译/中文化题面，再做轻量标签分析。
+func problemAnalyzeSystemPromptBody() string {
+	return `你是算法题目标签分析器与题面「全文中文译者」。先完整翻译/中文化题面，再做轻量标签分析。
 仅输出 JSON，不要 markdown 代码块，不要解释过程。
 
 【绝对最高优先级：全文中文】
@@ -161,6 +137,42 @@ func (t *ProblemTagger) analyze(ctx context.Context, title, contentMD string, on
 - suggested_solutions: 1~2 个，含 name, time_complexity, space_complexity, brief_explanation（中文，各一两句）
 - content_md: 完整中文 Markdown 题面（必填，全文中文）
 禁止分析用户代码；不要输出除 JSON 外的任何文字。`
+}
+
+func (t *ProblemTagger) Analyze(ctx context.Context, title, contentMD string) (res *aiAnalyzeResult, err error) {
+	return t.analyze(ctx, title, contentMD, nil, nil)
+}
+
+func (t *ProblemTagger) AnalyzeWithProgress(ctx context.Context, title, contentMD string, onChunk func(string)) (res *aiAnalyzeResult, err error) {
+	return t.analyze(ctx, title, contentMD, nil, onChunk)
+}
+
+func (t *ProblemTagger) AnalyzeWithReasoningProgress(ctx context.Context, title, contentMD string, onReasoning, onContent func(string)) (res *aiAnalyzeResult, err error) {
+	return t.analyze(ctx, title, contentMD, onReasoning, onContent)
+}
+
+func (t *ProblemTagger) analyze(ctx context.Context, title, contentMD string, onReasoning, onContent func(string)) (res *aiAnalyzeResult, err error) {
+	defer func() {
+		if err != nil {
+			sitesettings.SetServiceStatus(ctx, t.rdb, sitesettings.ServiceAiAnaly, sitesettings.StatusFail, err.Error())
+		} else if res != nil {
+			sitesettings.SetServiceStatus(ctx, t.rdb, sitesettings.ServiceAiAnaly, sitesettings.StatusOK, "")
+		}
+	}()
+	t.reload(ctx)
+	t.mu.Lock()
+	client := t.client
+	modelID := t.model
+	t.mu.Unlock()
+	if client == nil || modelID == "" {
+		return nil, fmt.Errorf("题库 AI 未配置（请在站点设置中填写）")
+	}
+	// 节约 token：截断超长题面（翻译+排版需要更多上下文）
+	content := contentMD
+	if len(content) > 18000 {
+		content = content[:18000] + "\n...(truncated)"
+	}
+	system := problemAnalyzeSystemPrompt()
 	user := problemAnalyzePrompt(title, content)
 
 	params := openai.ChatCompletionNewParams{
@@ -175,11 +187,11 @@ func (t *ProblemTagger) analyze(ctx context.Context, title, contentMD string, on
 		},
 	}
 
-	contentStr, err := openaiclient.StreamCompletionWithCallback(ctx, client, params, onChunk)
+	contentStr, err := openaiclient.StreamCompletionWithCallbacks(ctx, client, params, onReasoning, onContent)
 	if err != nil {
 		// 部分兼容网关不支持 response_format，降级重试
 		params.ResponseFormat = openai.ChatCompletionNewParamsResponseFormatUnion{}
-		contentStr, err = openaiclient.StreamCompletionWithCallback(ctx, client, params, onChunk)
+		contentStr, err = openaiclient.StreamCompletionWithCallbacks(ctx, client, params, onReasoning, onContent)
 		if err != nil {
 			return nil, fmt.Errorf("openai chat completion stream: %w", err)
 		}

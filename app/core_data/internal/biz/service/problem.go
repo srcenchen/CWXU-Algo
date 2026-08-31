@@ -1058,6 +1058,10 @@ func contentLooksBroken(md string) bool {
 	return false
 }
 
+func shouldFetchProblemContent(md string) bool {
+	return strings.TrimSpace(md) == "" || contentLooksBroken(md)
+}
+
 // ForceEnqueueFetch 强制题面爬取（忽略爬取资格与全局暂停；平台级暂停仍有效）。
 // 用户主动路径：HTTP 不阻塞 MQ；最高优先级异步入队 + 后台直爬兜底。
 // 无论 status（含 TAGGING/COMPLETED），只要 contentMd 空都允许补爬。
@@ -1294,7 +1298,7 @@ func (uc *ProblemUseCase) PrepareUserReanalyze(problemID, actorUID uint) (int, e
 		}
 	}
 	previousStatus, previousError := p.Status, p.ErrorMsg
-	if err := uc.data.DB.Model(&p).Updates(map[string]interface{}{"status": model.ProblemStatusTagging, "error_msg": ""}).Error; err != nil {
+	if err := uc.markProblemAnalysisQueued(&p); err != nil {
 		return 0, err
 	}
 	body, _ := json.Marshal(event.ProblemAnalyzeEvent{ProblemID: problemID, Force: true})
@@ -1306,9 +1310,23 @@ func (uc *ProblemUseCase) PrepareUserReanalyze(problemID, actorUID uint) (int, e
 		_ = uc.data.DB.Model(&p).Updates(map[string]interface{}{
 			"status": previousStatus, "error_msg": previousError,
 		}).Error
+		uc.BumpProblemDetailVer(p.ID)
 		return 0, fmt.Errorf("重新分析入队失败: %w", err)
 	}
 	return maxInt(0, int(q.GetQuotaPerMonth())-int(used)), nil
+}
+
+func (uc *ProblemUseCase) markProblemAnalysisQueued(p *model.Problem) error {
+	if p == nil || p.ID == 0 {
+		return fmt.Errorf("题目不存在")
+	}
+	if err := uc.data.DB.Model(p).Updates(map[string]interface{}{
+		"status": model.ProblemStatusTagging, "error_msg": "",
+	}).Error; err != nil {
+		return err
+	}
+	uc.BumpProblemDetailVer(p.ID)
+	return nil
 }
 
 func maxInt(a, b int) int {
@@ -1432,12 +1450,21 @@ func (uc *ProblemUseCase) UpsertProblemFromParsedForUser(parsed *ParsedProblem, 
 			existing.URL = parsed.URL
 		}
 	}
-	// 牛客比赛 URL 加题：先写 contest_problems，再 ForceEnqueueFetch
+	// 牛客比赛 URL 加题：先写 contest_problems，再按题面状态处理
 	// （scheduleUserPriorityFetch 会从映射取比赛页作主 URL）
 	uc.ensureContestProblemMapping(parsed, existing.ID)
 	if !parsed.SkipFetch {
-		if err := uc.ForceEnqueueFetch(existing.ID, actorUID); err != nil {
-			log.Warnf("ForceEnqueueFetch id=%d: %v", existing.ID, err)
+		needFetch := shouldFetchProblemContent(existing.ContentMD)
+		if needFetch {
+			if err := uc.ForceEnqueueFetch(existing.ID, actorUID); err != nil {
+				log.Warnf("ForceEnqueueFetch id=%d: %v", existing.ID, err)
+			}
+		} else if actorUID > 0 && len(nonEmptyTags(existing.Tags)) == 0 {
+			go func(id, uid uint) {
+				if err := uc.enqueueAnalyzeForUser(id, uid); err != nil {
+					log.Warnf("enqueueAnalyzeForUser id=%d: %v", id, err)
+				}
+			}(existing.ID, actorUID)
 		}
 	}
 	return &existing, nil
@@ -1579,11 +1606,23 @@ func (uc *ProblemUseCase) ProcessAnalyze(ctx context.Context, ev event.ProblemAn
 
 	_ = uc.data.DB.Model(&p).Update("status", model.ProblemStatusTagging).Error
 	log.Infof("ProcessAnalyze start id=%d platform=%s ext=%s last=%v", p.ID, p.Platform, p.ExternalID, p.LastSubmittedAt)
-	pipelineControl.TrackPrompt("analyze", p.ID, problemAnalyzePrompt(p.Title, p.ContentMD))
+	pipelineControl.TrackPrompt("analyze", p.ID, problemAnalyzeFullPrompt(p.Title, p.ContentMD))
 
 	var result *aiAnalyzeResult
 	var aerr error
 	if progressTagger, ok := any(uc.tagger).(interface {
+		AnalyzeWithReasoningProgress(context.Context, string, string, func(string), func(string)) (*aiAnalyzeResult, error)
+	}); ok {
+		var reasoning strings.Builder
+		var output strings.Builder
+		result, aerr = progressTagger.AnalyzeWithReasoningProgress(ctx, p.Title, p.ContentMD, func(chunk string) {
+			reasoning.WriteString(chunk)
+			pipelineControl.TrackReasoning("analyze", p.ID, reasoning.String())
+		}, func(chunk string) {
+			output.WriteString(chunk)
+			pipelineControl.TrackOutput("analyze", p.ID, output.String())
+		})
+	} else if progressTagger, ok := any(uc.tagger).(interface {
 		AnalyzeWithProgress(context.Context, string, string, func(string)) (*aiAnalyzeResult, error)
 	}); ok {
 		var output strings.Builder

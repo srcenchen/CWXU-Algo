@@ -772,7 +772,10 @@ func TestDetailModeFromSource(t *testing.T) {
 
 func TestRenderRuleTemplate_CompactAndFull(t *testing.T) {
 	data := fixtureTrainingData()
-	data.Contests = []ContestBrief{{ContestName: "CF Round", Platform: "codeforces", ACCount: 3, TotalCount: 6, Time: "2026-07-10"}}
+	data.ContestRankings = []ContestRankSnap{{
+		ContestName: "CF Round", Platform: "codeforces", Time: "2026-07-10",
+		Top: []ContestRankRow{{Rank: 1, Name: "Alice", ACCount: 3, TotalCount: 6}},
+	}}
 	data.RecentBlogs = []BlogBrief{{Title: "DP 笔记", Author: "Bob", Summary: "区间 DP"}}
 	full := RenderRuleTemplateHTML(data, "GoAlgo", DetailModeFull)
 	compact := RenderRuleTemplateHTML(data, "GoAlgo", DetailModeCompact)
@@ -803,7 +806,7 @@ func TestRenderRuleTemplate_CompactAndFull(t *testing.T) {
 
 func TestRenderRuleTemplate_TrendUsesChartOnly(t *testing.T) {
 	html := RenderRuleTemplateHTML(fixtureTrainingData(), "GoAlgo", DetailModeCompact)
-	for _, want := range []string{`data-axis="y"`, `data-series="提交"`, `data-series="AC"`} {
+	for _, want := range []string{`data-chart="bar"`, `data-series="提交"`, `data-series="AC"`} {
 		if !strings.Contains(html, want) {
 			t.Errorf("missing trend chart marker %q", want)
 		}
@@ -827,6 +830,39 @@ func TestTrainingReportPrompts_Dimensions(t *testing.T) {
 	up := trainingReportUserPrompt(fixtureTrainingData(), DetailModeFull)
 	if !strings.Contains(up, "详版") || !strings.Contains(up, "activeRanking") {
 		t.Fatal("user prompt")
+	}
+}
+
+func TestTrainingReportContestSectionUsesOrganizationRankingFacts(t *testing.T) {
+	data := fixtureTrainingData()
+	data.Contests = []ContestBrief{{
+		ContestID: "159", ContestName: "牛客周赛 Round 159", Platform: "NowCoder",
+		ACCount: 0, TotalCount: 6, Time: "2026-08-30",
+	}}
+	data.ContestRankings = []ContestRankSnap{{
+		ContestID: "159", ContestName: "牛客周赛 Round 159", Platform: "NowCoder", Time: "2026-08-30",
+		Top: []ContestRankRow{{Rank: 38, Name: "张万里", ACCount: 6, TotalCount: 6}},
+	}}
+	html := RenderRuleTemplateHTML(data, "GoAlgo", DetailModeFull)
+	if strings.Contains(html, ">0/6<") {
+		t.Fatal("contest overview used an arbitrary member's 0/6 result")
+	}
+	for _, want := range []string{"组织最佳", ">6/6<", "榜单人数", ">1<"} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("contest section missing %q", want)
+		}
+	}
+	if strings.Contains(html, ">分</th>") {
+		t.Fatal("contest ranking exposed an unsupported score column")
+	}
+}
+
+func TestContestSolvedDisplayOmitsUnknownTotal(t *testing.T) {
+	if got := contestSolvedDisplay(5, 0); got != "5" {
+		t.Fatalf("display=%q, want 5", got)
+	}
+	if got := contestSolvedDisplay(6, 6); got != "6/6" {
+		t.Fatalf("display=%q, want 6/6", got)
 	}
 }
 
