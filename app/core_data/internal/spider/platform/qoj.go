@@ -353,7 +353,7 @@ func fetchQOJSubmitLogs(ctx context.Context, client *http.Client, baseURL string
 		setBrowserHeaders(req)
 		req.Header.Set("Referer", "https://qoj.ac/")
 
-		resp, err := client.Do(req)
+		resp, err := ojhttp.DoWithClient(client, req)
 		if err != nil {
 			return nil, false, err
 		}

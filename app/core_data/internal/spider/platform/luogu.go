@@ -151,11 +151,12 @@ func (lg *NewLuoGu) doLogin(
 		`{"username":"%s","password":"%s","captcha":"%s"}`,
 		username, password, captcha,
 	)
-	resp, err := client.Post(
-		url,
-		"application/json",
-		bytes.NewReader([]byte(payload)),
-	)
+	req, err := http.NewRequest("POST", url, bytes.NewReader([]byte(payload)))
+	if err != nil {
+		return false, "", err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := ojhttp.DoWithClient(client, req)
 	if err != nil {
 		return false, "", err
 	}
