@@ -90,6 +90,14 @@ type aiAnalyzeResult struct {
 }
 
 func (t *ProblemTagger) Analyze(ctx context.Context, title, contentMD string) (res *aiAnalyzeResult, err error) {
+	return t.analyze(ctx, title, contentMD, nil)
+}
+
+func (t *ProblemTagger) AnalyzeWithProgress(ctx context.Context, title, contentMD string, onChunk func(string)) (res *aiAnalyzeResult, err error) {
+	return t.analyze(ctx, title, contentMD, onChunk)
+}
+
+func (t *ProblemTagger) analyze(ctx context.Context, title, contentMD string, onChunk func(string)) (res *aiAnalyzeResult, err error) {
 	defer func() {
 		if err != nil {
 			sitesettings.SetServiceStatus(ctx, t.rdb, sitesettings.ServiceAiAnaly, sitesettings.StatusFail, err.Error())
@@ -158,11 +166,11 @@ func (t *ProblemTagger) Analyze(ctx context.Context, title, contentMD string) (r
 		},
 	}
 
-	contentStr, err := openaiclient.StreamCompletion(ctx, client, params)
+	contentStr, err := openaiclient.StreamCompletionWithCallback(ctx, client, params, onChunk)
 	if err != nil {
 		// 部分兼容网关不支持 response_format，降级重试
 		params.ResponseFormat = openai.ChatCompletionNewParamsResponseFormatUnion{}
-		contentStr, err = openaiclient.StreamCompletion(ctx, client, params)
+		contentStr, err = openaiclient.StreamCompletionWithCallback(ctx, client, params, onChunk)
 		if err != nil {
 			return nil, fmt.Errorf("openai chat completion stream: %w", err)
 		}

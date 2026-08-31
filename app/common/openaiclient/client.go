@@ -43,6 +43,10 @@ func NewClient(secret, base string, timeout time.Duration) *openai.Client {
 
 // StreamCompletion 流式拉取完整 assistant content，避免网关 ~60s 非流式切断。
 func StreamCompletion(ctx context.Context, client *openai.Client, params openai.ChatCompletionNewParams) (string, error) {
+	return StreamCompletionWithCallback(ctx, client, params, nil)
+}
+
+func StreamCompletionWithCallback(ctx context.Context, client *openai.Client, params openai.ChatCompletionNewParams, onChunk func(string)) (string, error) {
 	if client == nil {
 		return "", fmt.Errorf("openai client 未配置")
 	}
@@ -51,6 +55,9 @@ func StreamCompletion(ctx context.Context, client *openai.Client, params openai.
 
 	acc := openai.ChatCompletionAccumulator{}
 	for stream.Next() {
+		if onChunk != nil && len(stream.Current().Choices) > 0 {
+			onChunk(stream.Current().Choices[0].Delta.Content)
+		}
 		if !acc.AddChunk(stream.Current()) {
 			return "", fmt.Errorf("AI stream chunk 累积失败")
 		}

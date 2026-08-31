@@ -12,12 +12,24 @@ import (
 var pipelineControl = &PipelineControl{}
 
 type ActiveJob struct {
-	ProblemID  uint      `json:"problem_id"`
-	Platform   string    `json:"platform"`
-	ExternalID string    `json:"external_id"`
-	Title      string    `json:"title"`
-	Stage      string    `json:"stage"` // fetch | analyze
-	StartedAt  time.Time `json:"started_at"`
+	ProblemID    uint      `json:"problem_id"`
+	Platform     string    `json:"platform"`
+	ExternalID   string    `json:"external_id"`
+	Title        string    `json:"title"`
+	Stage        string    `json:"stage"` // fetch | analyze
+	StartedAt    time.Time `json:"started_at"`
+	LatestOutput string    `json:"latest_output,omitempty"`
+}
+
+func (p *PipelineControl) TrackOutput(stage string, id uint, output string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if job := p.active[fmt.Sprintf("%s:%d", stage, id)]; job != nil {
+		if len(output) > 1200 {
+			output = output[len(output)-1200:]
+		}
+		job.LatestOutput = output
+	}
 }
 
 type PipelineControl struct {

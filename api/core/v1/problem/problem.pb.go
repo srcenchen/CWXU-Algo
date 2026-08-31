@@ -2358,6 +2358,7 @@ type ActiveJob struct {
 	Title         string                 `protobuf:"bytes,4,opt,name=title,proto3" json:"title,omitempty"`
 	Stage         string                 `protobuf:"bytes,5,opt,name=stage,proto3" json:"stage,omitempty"` // fetch | analyze
 	StartedAt     int64                  `protobuf:"varint,6,opt,name=started_at,json=startedAt,proto3" json:"started_at,omitempty"`
+	LatestOutput  string                 `protobuf:"bytes,7,opt,name=latest_output,json=latestOutput,proto3" json:"latest_output,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2432,6 +2433,13 @@ func (x *ActiveJob) GetStartedAt() int64 {
 		return x.StartedAt
 	}
 	return 0
+}
+
+func (x *ActiveJob) GetLatestOutput() string {
+	if x != nil {
+		return x.LatestOutput
+	}
+	return ""
 }
 
 type QueueStatus struct {
@@ -4972,7 +4980,7 @@ const file_core_v1_problem_problem_proto_rawDesc = "" +
 	"\n" +
 	"updated_at\x18\x06 \x01(\x03R\tupdatedAt\x12\x16\n" +
 	"\x06status\x18\a \x01(\tR\x06status\x12%\n" +
-	"\x0efetch_attempts\x18\b \x01(\x05R\rfetchAttempts\"\xb2\x01\n" +
+	"\x0efetch_attempts\x18\b \x01(\x05R\rfetchAttempts\"\xd7\x01\n" +
 	"\tActiveJob\x12\x1d\n" +
 	"\n" +
 	"problem_id\x18\x01 \x01(\rR\tproblemId\x12\x1a\n" +
@@ -4982,7 +4990,8 @@ const file_core_v1_problem_problem_proto_rawDesc = "" +
 	"\x05title\x18\x04 \x01(\tR\x05title\x12\x14\n" +
 	"\x05stage\x18\x05 \x01(\tR\x05stage\x12\x1d\n" +
 	"\n" +
-	"started_at\x18\x06 \x01(\x03R\tstartedAt\"}\n" +
+	"started_at\x18\x06 \x01(\x03R\tstartedAt\x12#\n" +
+	"\rlatest_output\x18\a \x01(\tR\flatestOutput\"}\n" +
 	"\vQueueStatus\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1a\n" +
 	"\bmessages\x18\x02 \x01(\x03R\bmessages\x12\x1c\n" +

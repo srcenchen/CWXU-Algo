@@ -442,6 +442,7 @@ message ActiveJob {
   string title = 4;
   string stage = 5; // fetch | analyze
   int64 started_at = 6;
+  string latest_output = 7;
 }
 
 message QueueStatus {

@@ -1575,7 +1575,19 @@ func (uc *ProblemUseCase) ProcessAnalyze(ctx context.Context, ev event.ProblemAn
 	_ = uc.data.DB.Model(&p).Update("status", model.ProblemStatusTagging).Error
 	log.Infof("ProcessAnalyze start id=%d platform=%s ext=%s last=%v", p.ID, p.Platform, p.ExternalID, p.LastSubmittedAt)
 
-	result, aerr := uc.tagger.Analyze(ctx, p.Title, p.ContentMD)
+	var result *aiAnalyzeResult
+	var aerr error
+	if progressTagger, ok := any(uc.tagger).(interface {
+		AnalyzeWithProgress(context.Context, string, string, func(string)) (*aiAnalyzeResult, error)
+	}); ok {
+		var output strings.Builder
+		result, aerr = progressTagger.AnalyzeWithProgress(ctx, p.Title, p.ContentMD, func(chunk string) {
+			output.WriteString(chunk)
+			pipelineControl.TrackOutput("analyze", p.ID, output.String())
+		})
+	} else {
+		result, aerr = uc.tagger.Analyze(ctx, p.Title, p.ContentMD)
+	}
 	if aerr != nil {
 		log.Errorf("AI tag problem %d: %v", p.ID, aerr)
 		_ = uc.data.DB.Model(&p).Updates(map[string]interface{}{

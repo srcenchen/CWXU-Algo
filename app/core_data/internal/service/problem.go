@@ -620,12 +620,13 @@ func (s *ProblemService) Progress(ctx context.Context, req *problem.ProgressReq)
 			t = j.ExternalID
 		}
 		jobs = append(jobs, &problem.ActiveJob{
-			ProblemId:  uint32(j.ProblemID),
-			Platform:   j.Platform,
-			ExternalId: j.ExternalID,
-			Title:      t,
-			Stage:      j.Stage,
-			StartedAt:  j.StartedAt.Unix(),
+			ProblemId:    uint32(j.ProblemID),
+			Platform:     j.Platform,
+			ExternalId:   j.ExternalID,
+			Title:        t,
+			Stage:        j.Stage,
+			StartedAt:    j.StartedAt.Unix(),
+			LatestOutput: j.LatestOutput,
 		})
 	}
 	qs := make([]*problem.QueueStatus, 0, len(snap.Queues))
