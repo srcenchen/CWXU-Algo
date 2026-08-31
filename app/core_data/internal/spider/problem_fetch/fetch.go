@@ -731,6 +731,26 @@ func fetchLuoGu(externalID, problemURL string) (*FetchedContent, error) {
 	if err != nil {
 		return nil, err
 	}
+	// 洛谷新版页面把服务端题面放在 lentille-context JSON 中；优先读
+	// contenu.description，避免依赖前端脚本或把页面壳当成正文。
+	var contextContent struct {
+		Data struct {
+			Problem struct {
+				Name    string `json:"name"`
+				Contenu struct {
+					Description string `json:"description"`
+				} `json:"contenu"`
+			} `json:"problem"`
+		} `json:"data"`
+	}
+	contextJSON := strings.TrimSpace(doc.Find("#lentille-context").First().Text())
+	if contextJSON != "" && json.Unmarshal([]byte(contextJSON), &contextContent) == nil {
+		name := strings.TrimSpace(contextContent.Data.Problem.Name)
+		description := cleanLuoGuStatement(contextContent.Data.Problem.Contenu.Description)
+		if description != "" {
+			return &FetchedContent{Title: name, ContentMD: description}, nil
+		}
+	}
 	article := doc.Find("#app article").First()
 	if article.Length() == 0 {
 		article = doc.Find("article").First()
