@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"cwxu-algo/app/common/event"
+	"cwxu-algo/app/common/openaiclient"
 	"cwxu-algo/app/common/sitesettings"
 	"cwxu-algo/app/common/utils/mqconsume"
 	"cwxu-algo/app/core_data/internal/loadgate"
@@ -469,7 +470,7 @@ func (c *ProblemAnalyzeConsumer) consumeOnce(concurrency int, concurrencySource 
 				}
 				// 流式 AI：整体上限 10 分钟，避免 worker 永久占用；过载先退避让 CPU
 				loadgate.Global().Wait(nil, 30*time.Second)
-				ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+				ctx, cancel := context.WithTimeout(context.Background(), openaiclient.LLMCallTimeout)
 				err := c.problem.ProcessAnalyze(ctx, msg)
 				cancel()
 				if err != nil {

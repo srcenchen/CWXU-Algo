@@ -448,6 +448,7 @@ message ActiveJob {
   // running | finished，finished 任务在 Redis 中保留 1 小时供诊断
   string state = 8;
   int64 ended_at = 9;
+  string prompt = 10;
 }
 
 message QueueStatus {

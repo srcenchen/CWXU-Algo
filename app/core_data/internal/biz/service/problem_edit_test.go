@@ -66,6 +66,15 @@ func problemFactsTestDB(t *testing.T) *gorm.DB {
 	return db
 }
 
+func TestProblemAnalyzeSystemPromptPrioritizesSpeed(t *testing.T) {
+	prompt := problemAnalyzeSystemPrompt()
+	for _, want := range []string{"优先快速完成", "大致判断", "完整翻译不得省略"} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("problem analysis system prompt missing %q", want)
+		}
+	}
+}
+
 func TestCreateManualProblemPersistsTagInvertedIndex(t *testing.T) {
 	db := problemFactsTestDB(t)
 	uc := &ProblemUseCase{data: &data.Data{DB: db}}

@@ -11,6 +11,7 @@ import (
 
 	agent "cwxu-algo/app/agent/internal/agent"
 	"cwxu-algo/app/common/mail"
+	"cwxu-algo/app/common/openaiclient"
 
 	"github.com/go-kratos/kratos/v2/log"
 )
@@ -147,7 +148,7 @@ func (uc *SummaryUseCase) runTrainingReportJob(jobID string) {
 	trainingReportSem <- struct{}{}
 	defer func() { <-trainingReportSem }()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), openaiclient.LLMCallTimeout)
 	defer cancel()
 	defer func() {
 		if r := recover(); r != nil {

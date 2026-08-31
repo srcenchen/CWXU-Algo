@@ -815,7 +815,7 @@ func TestRenderRuleTemplate_TrendUsesChartOnly(t *testing.T) {
 
 func TestTrainingReportPrompts_Dimensions(t *testing.T) {
 	sys := trainingReportSystemPrompt(DetailModeFull)
-	for _, s := range []string{"activeRanking", "禁止", "HTML", "teamTags"} {
+	for _, s := range []string{"activeRanking", "禁止", "HTML", "teamTags", "快速直接完成", "不做冗长推理"} {
 		if !strings.Contains(sys, s) {
 			t.Fatalf("system prompt missing %q", s)
 		}
@@ -827,6 +827,15 @@ func TestTrainingReportPrompts_Dimensions(t *testing.T) {
 	up := trainingReportUserPrompt(fixtureTrainingData(), DetailModeFull)
 	if !strings.Contains(up, "详版") || !strings.Contains(up, "activeRanking") {
 		t.Fatal("user prompt")
+	}
+}
+
+func TestDailySystemPromptPrioritizesSpeed(t *testing.T) {
+	prompt := dailySystemPrompt("test")
+	for _, want := range []string{"快速直接完成", "不做冗长推理"} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("daily system prompt missing %q", want)
+		}
 	}
 }
 

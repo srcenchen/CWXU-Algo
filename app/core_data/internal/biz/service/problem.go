@@ -761,6 +761,9 @@ func (uc *ProblemUseCase) ProcessFetch(ctx context.Context, ev event.ProblemFetc
 	}
 	pipelineControl.TrackStart("fetch", p.ID, p.Platform, p.ExternalID, p.Title)
 	defer pipelineControl.TrackEnd("fetch", p.ID)
+	if p.Status == model.ProblemStatusFailedPerm {
+		return nil
+	}
 	// 已识别完成且有题面：跳过。无题面的 COMPLETED/TAGGING 必须允许补爬（全平台）。
 	hasContent := strings.TrimSpace(p.ContentMD) != ""
 	if p.Status == model.ProblemStatusCompleted && hasContent && !ev.ForceRefetch {
@@ -1004,6 +1007,9 @@ func (uc *ProblemUseCase) ForceEnqueueRefetch(problemID uint, actorUID uint) err
 	var p model.Problem
 	if err := uc.data.DB.First(&p, problemID).Error; err != nil {
 		return err
+	}
+	if p.Status == model.ProblemStatusFailedPerm {
+		return fmt.Errorf("题目已进入永久失败，不再重新爬取")
 	}
 	uc.scheduleUserPriorityFetchWithMode(p.ID, p.Platform, p.ExternalID, p.URL, true, actorUID, true)
 	return nil
@@ -1573,6 +1579,7 @@ func (uc *ProblemUseCase) ProcessAnalyze(ctx context.Context, ev event.ProblemAn
 
 	_ = uc.data.DB.Model(&p).Update("status", model.ProblemStatusTagging).Error
 	log.Infof("ProcessAnalyze start id=%d platform=%s ext=%s last=%v", p.ID, p.Platform, p.ExternalID, p.LastSubmittedAt)
+	pipelineControl.TrackPrompt("analyze", p.ID, problemAnalyzePrompt(p.Title, p.ContentMD))
 
 	var result *aiAnalyzeResult
 	var aerr error
@@ -2870,7 +2877,8 @@ type ProgressSnapshot struct {
 	}
 }
 
-const progressSnapshotCacheKey = "problem:progress:snapshot:v1"
+// v2 drops snapshots created before the progress page stopped exposing permanent failures.
+const progressSnapshotCacheKey = "problem:progress:snapshot:v2"
 const progressSnapshotCacheTTL = 15 * time.Second
 
 func (uc *ProblemUseCase) Progress(page, pageSize, inProgressPage, inProgressPageSize int64) (ProgressSnapshot, error) {

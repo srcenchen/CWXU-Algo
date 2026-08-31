@@ -12,6 +12,7 @@ import (
 	"cwxu-algo/app/agent/internal/data"
 	"cwxu-algo/app/common/discovery"
 	"cwxu-algo/app/common/mail"
+	"cwxu-algo/app/common/openaiclient"
 	"cwxu-algo/app/common/sitesettings"
 
 	"github.com/go-kratos/kratos/v2/log"
@@ -54,12 +55,12 @@ func (uc *SummaryUseCase) PersonalLastDay(userId int64) error {
 	}
 
 	lockKey := fmt.Sprintf("agent:lock:summary:daily:%d", userId)
-	if !uc.tryAcquireLock(context.Background(), lockKey, 3*time.Minute) {
+	if !uc.tryAcquireLock(context.Background(), lockKey, openaiclient.LLMCallTimeout) {
 		log.Infof("用户 %d 日报生成进行中，跳过", userId)
 		return nil
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), openaiclient.LLMCallTimeout)
 	defer cancel()
 
 	data, err := uc.loadDailyReportData(ctx, userId)
@@ -151,9 +152,9 @@ func (uc *SummaryUseCase) WeeklyStaff(userId int64) error {
 		return nil
 	}
 
-	// 锁 TTL ≥ 最大工作时长（工作 ctx 8 分钟），防止未完成时锁先过期导致并发重跑
+	// 锁 TTL 覆盖最大工作时长，防止未完成时锁先过期导致并发重跑。
 	lockKey := fmt.Sprintf("agent:lock:summary:weekly:%d", userId)
-	locked, err := uc.tryAcquireWeeklyLock(context.Background(), lockKey, 10*time.Minute)
+	locked, err := uc.tryAcquireWeeklyLock(context.Background(), lockKey, openaiclient.LLMCallTimeout)
 	if err != nil {
 		return err
 	}
@@ -162,7 +163,7 @@ func (uc *SummaryUseCase) WeeklyStaff(userId int64) error {
 		return nil
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), openaiclient.LLMCallTimeout)
 	defer cancel()
 
 	orgIDs := uc.userStaffOrgIDs(ctx, userId)

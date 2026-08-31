@@ -28,6 +28,7 @@ type ActiveJob struct {
 	Title        string    `json:"title"`
 	Stage        string    `json:"stage"` // fetch | analyze
 	StartedAt    time.Time `json:"started_at"`
+	Prompt       string    `json:"prompt,omitempty"`
 	LatestOutput string    `json:"latest_output,omitempty"`
 	State        string    `json:"state"`
 	EndedAt      time.Time `json:"ended_at,omitempty"`
@@ -41,6 +42,18 @@ func (p *PipelineControl) TrackOutput(stage string, id uint, output string) {
 			output = output[len(output)-12000:]
 		}
 		job.LatestOutput = output
+		p.persistJob(job)
+	}
+}
+
+func (p *PipelineControl) TrackPrompt(stage string, id uint, prompt string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if job := p.active[fmt.Sprintf("%s:%d", stage, id)]; job != nil {
+		if len(prompt) > 24000 {
+			prompt = prompt[:24000] + "\n...(truncated)"
+		}
+		job.Prompt = prompt
 		p.persistJob(job)
 	}
 }

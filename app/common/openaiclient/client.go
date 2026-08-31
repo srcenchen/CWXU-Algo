@@ -11,6 +11,9 @@ import (
 	"github.com/openai/openai-go/v3/option"
 )
 
+// LLMCallTimeout is the shared upper bound for one backend model operation.
+const LLMCallTimeout = 10 * time.Minute
+
 // NormalizeBaseURL 将配置 endpoint 规范为 openai-go 的 BaseURL（需含 /v1/ 前缀路径）。
 // SDK 会再拼 chat/completions → 最终 .../v1/chat/completions
 //

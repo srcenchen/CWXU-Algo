@@ -5,7 +5,6 @@ import (
 	"errors"
 	"strings"
 	"sync"
-	"time"
 
 	"cwxu-algo/app/common/openaiclient"
 	"cwxu-algo/app/common/sitesettings"
@@ -13,9 +12,6 @@ import (
 	"github.com/openai/openai-go/v3"
 	"github.com/redis/go-redis/v9"
 )
-
-// llmCallTimeout 单轮 LLM 调用上限：模型/网络挂起时不至于占死 worker
-const llmCallTimeout = 90 * time.Second
 
 // Message 业务层与 transport 之间的中立纯文本消息。
 type Message struct {
@@ -59,7 +55,7 @@ func (c *Chat) reloadWithConfig(ctx context.Context, endpoint, modelID, secret s
 		c.client = nil
 		return
 	}
-	c.client = openaiclient.NewClient(secret, openaiclient.NormalizeBaseURL(endpoint), llmCallTimeout)
+	c.client = openaiclient.NewClient(secret, openaiclient.NormalizeBaseURL(endpoint), openaiclient.LLMCallTimeout)
 }
 
 func (c *Chat) ensureConfig(ctx context.Context) (string, error) {
@@ -111,7 +107,7 @@ func (c *Chat) chat(ctx context.Context, msgs []Message) (resp string, err error
 		Model:    openai.ChatModel(modelID),
 		Messages: openaiMsgs,
 	}
-	callCtx, cancel := context.WithTimeout(ctx, llmCallTimeout)
+	callCtx, cancel := context.WithTimeout(ctx, openaiclient.LLMCallTimeout)
 	defer cancel()
 	content, err := openaiclient.StreamCompletion(callCtx, client, params)
 	if err != nil {

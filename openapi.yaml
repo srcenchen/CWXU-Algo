@@ -7577,6 +7577,8 @@ components:
                     description: running | finished，finished 任务在 Redis 中保留 1 小时供诊断
                 endedAt:
                     type: string
+                prompt:
+                    type: string
         api.core.v1.problem.AdminUpdateProblemReq:
             type: object
             properties:

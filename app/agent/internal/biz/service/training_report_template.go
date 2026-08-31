@@ -472,6 +472,7 @@ func trainingReportSystemPromptStrict(mode string) string {
 		depth = "简版：突出整体活跃度、环比、关键问题与 2-3 条建议。"
 	}
 	return fmt.Sprintf(`你是训练报告（教练周报）的文案助手，不是聊天助手。
+请快速直接完成，不做冗长推理。
 你的任务：基于给定数据，输出一份报告「评价文案参数」JSON，供系统套模板渲染。
 
 【输出格式 — 违反即失败】

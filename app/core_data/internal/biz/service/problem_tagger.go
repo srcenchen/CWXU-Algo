@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/shared"
@@ -57,7 +56,7 @@ func (t *ProblemTagger) reload(ctx context.Context) {
 		t.client = nil
 		return
 	}
-	t.client = openaiclient.NewClient(secret, base, 10*time.Minute)
+	t.client = openaiclient.NewClient(secret, base, openaiclient.LLMCallTimeout)
 }
 
 // Ready 是否已配置可用
@@ -89,6 +88,16 @@ type aiAnalyzeResult struct {
 	ContentMD          string               `json:"content_md"` // 可选：AI 优化排版后的题面
 }
 
+func problemAnalyzePrompt(title, content string) string {
+	return fmt.Sprintf("请将下列题目完整翻译/整理为中文题面，并完成标签分析。\n标题: %s\n\n原题面:\n%s", title, content)
+}
+
+func problemAnalyzeSystemPrompt() string {
+	return `优先快速完成，不做冗长推理。
+题型、难度、算法标签和建议解法根据题面大致判断即可，不要求绝对精准；完整翻译不得省略。
+`
+}
+
 func (t *ProblemTagger) Analyze(ctx context.Context, title, contentMD string) (res *aiAnalyzeResult, err error) {
 	return t.analyze(ctx, title, contentMD, nil)
 }
@@ -118,7 +127,7 @@ func (t *ProblemTagger) analyze(ctx context.Context, title, contentMD string, on
 	if len(content) > 18000 {
 		content = content[:18000] + "\n...(truncated)"
 	}
-	system := `你是算法题目标签分析器与题面「全文中文译者」。先完整翻译/中文化题面，再做轻量标签分析。不要长篇推理。
+	system := problemAnalyzeSystemPrompt() + `你是算法题目标签分析器与题面「全文中文译者」。先完整翻译/中文化题面，再做轻量标签分析。
 仅输出 JSON，不要 markdown 代码块，不要解释过程。
 
 【绝对最高优先级：全文中文】
@@ -152,7 +161,7 @@ func (t *ProblemTagger) analyze(ctx context.Context, title, contentMD string, on
 - suggested_solutions: 1~2 个，含 name, time_complexity, space_complexity, brief_explanation（中文，各一两句）
 - content_md: 完整中文 Markdown 题面（必填，全文中文）
 禁止分析用户代码；不要输出除 JSON 外的任何文字。`
-	user := fmt.Sprintf("请将下列题目完整翻译/整理为中文题面，并完成标签分析。\n标题: %s\n\n原题面:\n%s", title, content)
+	user := problemAnalyzePrompt(title, content)
 
 	params := openai.ChatCompletionNewParams{
 		Model: shared.ChatModel(modelID),

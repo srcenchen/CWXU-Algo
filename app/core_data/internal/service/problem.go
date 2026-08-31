@@ -313,7 +313,7 @@ func (s *ProblemService) Get(ctx context.Context, req *problem.GetProblemReq) (*
 	}
 	info := s.toInfo(p, "")
 	if uid := auth.GetCurrentUserId(ctx); uid > 0 {
-		info.CanRefetch = s.uc.UserCanFetchProblem(ctx, uint(uid))
+		info.CanRefetch = p.Status != model.ProblemStatusFailedPerm && s.uc.UserCanFetchProblem(ctx, uint(uid))
 		info.CanReanalyze = s.uc.UserCanReanalyzeProblem(uint(uid))
 	}
 	s.attachContributors(ctx, info)
@@ -628,6 +628,7 @@ func (s *ProblemService) Progress(ctx context.Context, req *problem.ProgressReq)
 			Title:        t,
 			Stage:        j.Stage,
 			StartedAt:    j.StartedAt.Unix(),
+			Prompt:       j.Prompt,
 			LatestOutput: j.LatestOutput,
 			State:        j.State,
 			EndedAt:      j.EndedAt.Unix(),
@@ -672,7 +673,7 @@ func activeJobsToProto(list []biz.ActiveJob) []*problem.ActiveJob {
 	for _, j := range list {
 		out = append(out, &problem.ActiveJob{
 			ProblemId: uint32(j.ProblemID), Platform: j.Platform, ExternalId: j.ExternalID,
-			Title: j.Title, Stage: j.Stage, StartedAt: j.StartedAt.Unix(), LatestOutput: j.LatestOutput,
+			Title: j.Title, Stage: j.Stage, StartedAt: j.StartedAt.Unix(), Prompt: j.Prompt, LatestOutput: j.LatestOutput,
 			State: j.State, EndedAt: j.EndedAt.Unix(),
 		})
 	}
