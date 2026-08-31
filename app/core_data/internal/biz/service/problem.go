@@ -16,6 +16,8 @@ import (
 	data2 "cwxu-algo/app/common/data"
 	"cwxu-algo/app/common/discovery"
 	"cwxu-algo/app/common/event"
+	"cwxu-algo/app/common/sitesettings"
+	"cwxu-algo/app/common/utils/ojhttp"
 	"cwxu-algo/app/common/utils/sqllike"
 	"cwxu-algo/app/core_data/internal/data"
 	"cwxu-algo/app/core_data/internal/data/dal"
@@ -743,6 +745,12 @@ func (uc *ProblemUseCase) ProcessFetch(ctx context.Context, ev event.ProblemFetc
 	if pipelineControl.IsFetchPaused() && !ev.BypassFetchPause {
 		return errProblemFetchPaused
 	}
+	runtime := sitesettings.Load(ctx, uc.data.RDB, nil)
+	ojhttp.SetProxyConfig(ojhttp.ProxyConfig{
+		BaseURL: runtime.OjProxyBaseURL,
+		Secret:  runtime.OjProxySecret,
+		Enabled: func(host string) bool { return task.IsProxyEnabled(uc.data.RDB, platformForHost(host)) },
+	})
 	var p model.Problem
 	if err := uc.data.DB.First(&p, ev.ProblemID).Error; err != nil {
 		return err
