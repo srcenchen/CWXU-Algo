@@ -744,6 +744,7 @@ func fetchLuoGu(externalID, problemURL string) (*FetchedContent, error) {
 					FormatO     string `json:"formatO"`
 					Hint        string `json:"hint"`
 				} `json:"contenu"`
+				Samples [][]string `json:"samples"`
 			} `json:"problem"`
 		} `json:"data"`
 	}
@@ -756,7 +757,7 @@ func fetchLuoGu(externalID, problemURL string) (*FetchedContent, error) {
 	if contextJSON != "" && json.Unmarshal([]byte(contextJSON), &contextContent) == nil {
 		name := strings.TrimSpace(contextContent.Data.Problem.Name)
 		content := contextContent.Data.Problem.Contenu
-		description := formatLuoGuStatement(content.Background, content.Description, content.FormatI, content.FormatO, content.Hint)
+		description := formatLuoGuStatement(content.Background, content.Description, content.FormatI, content.FormatO, content.Hint, contextContent.Data.Problem.Samples)
 		if description != "" {
 			return &FetchedContent{Title: name, ContentMD: description}, nil
 		}
@@ -777,7 +778,7 @@ func fetchLuoGu(externalID, problemURL string) (*FetchedContent, error) {
 	return &FetchedContent{Title: title, ContentMD: cleanLuoGuStatement(content)}, nil
 }
 
-func formatLuoGuStatement(background, description, input, output, hint string) string {
+func formatLuoGuStatement(background, description, input, output, hint string, samples [][]string) string {
 	parts := make([]string, 0, 5)
 	for _, part := range []struct{ title, body string }{
 		{"题目背景", background}, {"题目描述", description}, {"输入格式", input},
@@ -786,6 +787,21 @@ func formatLuoGuStatement(background, description, input, output, hint string) s
 		body := cleanLuoGuStatement(part.body)
 		if body != "" {
 			parts = append(parts, "## "+part.title+"\n\n"+body)
+		}
+	}
+	for i, sample := range samples {
+		if len(sample) == 0 {
+			continue
+		}
+		body := ""
+		if len(sample) > 0 {
+			body += "**输入**\n\n```text\n" + strings.TrimRight(sample[0], "\n") + "\n```\n\n"
+		}
+		if len(sample) > 1 {
+			body += "**输出**\n\n```text\n" + strings.TrimRight(sample[1], "\n") + "\n```\n\n"
+		}
+		if body != "" {
+			parts = append(parts, fmt.Sprintf("### 样例 %d\n\n%s", i+1, body))
 		}
 	}
 	return collapseBlankLines(strings.Join(parts, "\n\n"))
