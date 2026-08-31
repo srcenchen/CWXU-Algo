@@ -1480,26 +1480,28 @@ func (uc *ProblemUseCase) ProcessAnalyze(ctx context.Context, ev event.ProblemAn
 	if err := uc.data.DB.First(&p, ev.ProblemID).Error; err != nil {
 		return err
 	}
-	dirtyTags, dirtyDifficulty := problemFactsDirtyFlags(p.ErrorMsg)
-	pending, pendingErr := loadAbilityMaintenancePending(ctx, uc.data.DB, problemMaintenanceScope(p.ID))
-	if pendingErr != nil {
-		return pendingErr
-	}
-	if pending != nil {
-		if err := uc.recoverProblemMaintenance(ctx, pending); err != nil {
-			return err
+	if !ev.Force {
+		dirtyTags, dirtyDifficulty := problemFactsDirtyFlags(p.ErrorMsg)
+		pending, pendingErr := loadAbilityMaintenancePending(ctx, uc.data.DB, problemMaintenanceScope(p.ID))
+		if pendingErr != nil {
+			return pendingErr
 		}
-		uc.BumpProblemDetailVer(p.ID)
-		return nil
-	}
-	if dirtyTags || dirtyDifficulty {
-		updates := map[string]interface{}{"status": model.ProblemStatusCompleted, "error_msg": ""}
-		if err := uc.applyProblemFactUpdates(ctx, &p, updates, []string(p.Tags), dirtyTags, dirtyDifficulty); err != nil {
-			return err
+		if pending != nil {
+			if err := uc.recoverProblemMaintenance(ctx, pending); err != nil {
+				return err
+			}
+			uc.BumpProblemDetailVer(p.ID)
+			return nil
 		}
-		uc.BumpProblemDetailVer(p.ID)
-		uc.progressMoveStatus(p.Status, model.ProblemStatusCompleted)
-		return nil
+		if dirtyTags || dirtyDifficulty {
+			updates := map[string]interface{}{"status": model.ProblemStatusCompleted, "error_msg": ""}
+			if err := uc.applyProblemFactUpdates(ctx, &p, updates, []string(p.Tags), dirtyTags, dirtyDifficulty); err != nil {
+				return err
+			}
+			uc.BumpProblemDetailVer(p.ID)
+			uc.progressMoveStatus(p.Status, model.ProblemStatusCompleted)
+			return nil
+		}
 	}
 	pipelineControl.TrackStart("analyze", p.ID, p.Platform, p.ExternalID, p.Title)
 	defer pipelineControl.TrackEnd("analyze", p.ID)
@@ -1626,6 +1628,10 @@ func (uc *ProblemUseCase) ProcessAnalyze(ctx context.Context, ev event.ProblemAn
 	if err := uc.applyAIAnalysisResult(ctx, &p, updates, result.AlgorithmTags); err != nil {
 		return err
 	}
+	// An AI run is the newest authoritative problem-facts write. Any durable
+	// maintenance intent left by an older failed facts update must not re-enter
+	// the AI path and block or overwrite this result.
+	_ = uc.data.DB.Where("scope = ?", problemMaintenanceScope(p.ID)).Delete(&model.AbilityMaintenancePending{}).Error
 	uc.BumpProblemDetailVer(p.ID)
 	uc.BumpProblemTagsVer()
 	uc.BumpProblemListVer()

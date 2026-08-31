@@ -1074,7 +1074,11 @@ func (uc *ProblemUseCase) recoverAbilityMaintenancePending(ctx context.Context) 
 			recoverErr = fmt.Errorf("unknown ability maintenance operation %q", pending[i].Operation)
 		}
 		if recoverErr != nil {
-			log.Warnf("ability maintenance recovery scope=%s intent=%s: %v", pending[i].Scope, pending[i].OperationID, recoverErr)
+			if isProblemAnalyzeCoordinationError(recoverErr) {
+				log.Warnf("ability maintenance recovery scope=%s deferred until profile cache maintenance settles", pending[i].Scope)
+			} else {
+				log.Warnf("ability maintenance recovery scope=%s intent=%s: %v", pending[i].Scope, pending[i].OperationID, recoverErr)
+			}
 		}
 	}
 }

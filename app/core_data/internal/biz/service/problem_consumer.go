@@ -480,7 +480,7 @@ func (c *ProblemAnalyzeConsumer) consumeOnce(concurrency int, concurrencySource 
 						return
 					}
 					if isProblemAnalyzeCoordinationError(err) {
-						log.Warnf("RabbitMQ(problem_analyze) id=%d requeue coordination conflict: %v", msg.ProblemID, err)
+						log.Warnf("RabbitMQ(problem_analyze) id=%d deferred until profile cache maintenance settles", msg.ProblemID)
 						sleepOrStop(c.stopCh, pipelineRequeueDelay)
 						_ = d.Nack(false, true)
 						return
