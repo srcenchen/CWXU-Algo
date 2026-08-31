@@ -417,6 +417,8 @@ message UserProfileRes {
 message ProgressReq {
   int64 failed_page = 1;
   int64 failed_page_size = 2;
+  int64 in_progress_page = 3;
+  int64 in_progress_page_size = 4;
 }
 
 message ProgressItem {
@@ -469,6 +471,9 @@ message ProgressRes {
   int64 recent_failed_perm_total = 14;
   int64 failed_page = 15;
   int64 failed_page_size = 16;
+  int64 in_progress_total = 17;
+  int64 in_progress_page = 18;
+  int64 in_progress_page_size = 19;
 }
 
 message BackfillReq {

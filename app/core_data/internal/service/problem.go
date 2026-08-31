@@ -600,10 +600,12 @@ func (s *ProblemService) Progress(ctx context.Context, req *problem.ProgressReq)
 		return &problem.ProgressRes{Code: 1, Message: "权限不足"}, nil
 	}
 	page, pageSize := int64(1), int64(20)
+	inProgressPage, inProgressPageSize := int64(1), int64(30)
 	if req != nil {
 		page, pageSize = req.GetFailedPage(), req.GetFailedPageSize()
+		inProgressPage, inProgressPageSize = req.GetInProgressPage(), req.GetInProgressPageSize()
 	}
-	snap, err := s.uc.Progress(page, pageSize)
+	snap, err := s.uc.Progress(page, pageSize, inProgressPage, inProgressPageSize)
 	if err != nil {
 		// 不因 MQ 等附属信息失败而整页不可用
 		log.Errorf("problem progress: %v", err)
@@ -655,6 +657,9 @@ func (s *ProblemService) Progress(ctx context.Context, req *problem.ProgressReq)
 		RecentFailedPermTotal: snap.FailedPermTotal,
 		FailedPage:            snap.FailedPage,
 		FailedPageSize:        snap.FailedPageSize,
+		InProgressTotal:       snap.InProgressTotal,
+		InProgressPage:        snap.InProgressPage,
+		InProgressPageSize:    snap.InProgressPageSize,
 	}, nil
 }
 

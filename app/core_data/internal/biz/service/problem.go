@@ -2842,19 +2842,22 @@ type ProgressSnapshot struct {
 		Status string
 		Count  int64
 	}
-	Failed          []model.Problem
-	FailedPerm      []model.Problem
-	FailedTotal     int64
-	FailedPermTotal int64
-	FailedPage      int64
-	FailedPageSize  int64
-	InProgress      []model.Problem
-	Total           int64
-	Paused          bool // AI 暂停（兼容）
-	FetchPaused     bool
-	AnalyzePaused   bool
-	ActiveJobs      []ActiveJob
-	Queues          []struct {
+	Failed             []model.Problem
+	FailedPerm         []model.Problem
+	FailedTotal        int64
+	FailedPermTotal    int64
+	FailedPage         int64
+	FailedPageSize     int64
+	InProgress         []model.Problem
+	InProgressTotal    int64
+	InProgressPage     int64
+	InProgressPageSize int64
+	Total              int64
+	Paused             bool // AI 暂停（兼容）
+	FetchPaused        bool
+	AnalyzePaused      bool
+	ActiveJobs         []ActiveJob
+	Queues             []struct {
 		Name        string
 		Messages    int64
 		Consumers   int64
@@ -2865,7 +2868,7 @@ type ProgressSnapshot struct {
 const progressSnapshotCacheKey = "problem:progress:snapshot:v1"
 const progressSnapshotCacheTTL = 15 * time.Second
 
-func (uc *ProblemUseCase) Progress(page, pageSize int64) (ProgressSnapshot, error) {
+func (uc *ProblemUseCase) Progress(page, pageSize, inProgressPage, inProgressPageSize int64) (ProgressSnapshot, error) {
 	if page <= 0 {
 		page = 1
 	}
@@ -2875,9 +2878,18 @@ func (uc *ProblemUseCase) Progress(page, pageSize int64) (ProgressSnapshot, erro
 	if pageSize > 100 {
 		pageSize = 100
 	}
+	if inProgressPage <= 0 {
+		inProgressPage = 1
+	}
+	if inProgressPageSize <= 0 {
+		inProgressPageSize = 30
+	}
+	if inProgressPageSize > 100 {
+		inProgressPageSize = 100
+	}
 	// 短缓存：管理端轮询 + 并发打开时避免反复 EXISTS(submit_logs) 扫表
 	if uc.data != nil && uc.data.RDB != nil {
-		cacheKey := fmt.Sprintf("%s:p%d:s%d", progressSnapshotCacheKey, page, pageSize)
+		cacheKey := fmt.Sprintf("%s:p%d:s%d:ip%d:ips%d", progressSnapshotCacheKey, page, pageSize, inProgressPage, inProgressPageSize)
 		if b, err := uc.data.RDB.Get(context.Background(), cacheKey).Bytes(); err == nil && len(b) > 0 {
 			var cached ProgressSnapshot
 			if json.Unmarshal(b, &cached) == nil {
@@ -2958,10 +2970,13 @@ func (uc *ProblemUseCase) Progress(page, pageSize int64) (ProgressSnapshot, erro
 	snap.FailedPage, snap.FailedPageSize = page, pageSize
 	// 爬取中与待分析都要展示全量。手动重新分析可能是历史题目，不能
 	// 因为没有近 6 个月提交记录就从「正在处理」中消失。
-	_ = uc.data.DB.Where(
+	inProgressQuery := uc.data.DB.Model(&model.Problem{}).Where(
 		"status IN ?",
 		[]string{model.ProblemStatusFetching, model.ProblemStatusTagging},
-	).Order("updated_at desc").Limit(30).Find(&snap.InProgress).Error
+	)
+	_ = inProgressQuery.Count(&snap.InProgressTotal).Error
+	_ = inProgressQuery.Order("updated_at desc").Offset(int((inProgressPage - 1) * inProgressPageSize)).Limit(int(inProgressPageSize)).Find(&snap.InProgress).Error
+	snap.InProgressPage, snap.InProgressPageSize = inProgressPage, inProgressPageSize
 
 	snap.Paused = pipelineControl.IsAnalyzePaused()
 	snap.FetchPaused = pipelineControl.IsFetchPaused()
@@ -2974,7 +2989,7 @@ func (uc *ProblemUseCase) Progress(page, pageSize int64) (ProgressSnapshot, erro
 		toStore := snap
 		toStore.ActiveJobs = nil
 		if b, err := json.Marshal(toStore); err == nil {
-			cacheKey := fmt.Sprintf("%s:p%d:s%d", progressSnapshotCacheKey, page, pageSize)
+			cacheKey := fmt.Sprintf("%s:p%d:s%d:ip%d:ips%d", progressSnapshotCacheKey, page, pageSize, inProgressPage, inProgressPageSize)
 			_ = uc.data.RDB.Set(context.Background(), cacheKey, b, progressSnapshotCacheTTL).Err()
 		}
 	}

@@ -1100,6 +1100,14 @@ paths:
                   in: query
                   schema:
                     type: string
+                - name: inProgressPage
+                  in: query
+                  schema:
+                    type: string
+                - name: inProgressPageSize
+                  in: query
+                  schema:
+                    type: string
             responses:
                 "200":
                     description: OK
@@ -8063,6 +8071,12 @@ components:
                 failedPage:
                     type: string
                 failedPageSize:
+                    type: string
+                inProgressTotal:
+                    type: string
+                inProgressPage:
+                    type: string
+                inProgressPageSize:
                     type: string
         api.core.v1.problem.ProposeProblemEditReq:
             type: object

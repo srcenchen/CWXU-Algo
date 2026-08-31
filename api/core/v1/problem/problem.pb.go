@@ -2147,11 +2147,13 @@ func (x *UserProfileRes) GetTagStats() []*TagScore {
 }
 
 type ProgressReq struct {
-	state          protoimpl.MessageState `protogen:"open.v1"`
-	FailedPage     int64                  `protobuf:"varint,1,opt,name=failed_page,json=failedPage,proto3" json:"failed_page,omitempty"`
-	FailedPageSize int64                  `protobuf:"varint,2,opt,name=failed_page_size,json=failedPageSize,proto3" json:"failed_page_size,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	state              protoimpl.MessageState `protogen:"open.v1"`
+	FailedPage         int64                  `protobuf:"varint,1,opt,name=failed_page,json=failedPage,proto3" json:"failed_page,omitempty"`
+	FailedPageSize     int64                  `protobuf:"varint,2,opt,name=failed_page_size,json=failedPageSize,proto3" json:"failed_page_size,omitempty"`
+	InProgressPage     int64                  `protobuf:"varint,3,opt,name=in_progress_page,json=inProgressPage,proto3" json:"in_progress_page,omitempty"`
+	InProgressPageSize int64                  `protobuf:"varint,4,opt,name=in_progress_page_size,json=inProgressPageSize,proto3" json:"in_progress_page_size,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *ProgressReq) Reset() {
@@ -2194,6 +2196,20 @@ func (x *ProgressReq) GetFailedPage() int64 {
 func (x *ProgressReq) GetFailedPageSize() int64 {
 	if x != nil {
 		return x.FailedPageSize
+	}
+	return 0
+}
+
+func (x *ProgressReq) GetInProgressPage() int64 {
+	if x != nil {
+		return x.InProgressPage
+	}
+	return 0
+}
+
+func (x *ProgressReq) GetInProgressPageSize() int64 {
+	if x != nil {
+		return x.InProgressPageSize
 	}
 	return 0
 }
@@ -2528,6 +2544,9 @@ type ProgressRes struct {
 	RecentFailedPermTotal int64                  `protobuf:"varint,14,opt,name=recent_failed_perm_total,json=recentFailedPermTotal,proto3" json:"recent_failed_perm_total,omitempty"`
 	FailedPage            int64                  `protobuf:"varint,15,opt,name=failed_page,json=failedPage,proto3" json:"failed_page,omitempty"`
 	FailedPageSize        int64                  `protobuf:"varint,16,opt,name=failed_page_size,json=failedPageSize,proto3" json:"failed_page_size,omitempty"`
+	InProgressTotal       int64                  `protobuf:"varint,17,opt,name=in_progress_total,json=inProgressTotal,proto3" json:"in_progress_total,omitempty"`
+	InProgressPage        int64                  `protobuf:"varint,18,opt,name=in_progress_page,json=inProgressPage,proto3" json:"in_progress_page,omitempty"`
+	InProgressPageSize    int64                  `protobuf:"varint,19,opt,name=in_progress_page_size,json=inProgressPageSize,proto3" json:"in_progress_page_size,omitempty"`
 	unknownFields         protoimpl.UnknownFields
 	sizeCache             protoimpl.SizeCache
 }
@@ -2670,6 +2689,27 @@ func (x *ProgressRes) GetFailedPage() int64 {
 func (x *ProgressRes) GetFailedPageSize() int64 {
 	if x != nil {
 		return x.FailedPageSize
+	}
+	return 0
+}
+
+func (x *ProgressRes) GetInProgressTotal() int64 {
+	if x != nil {
+		return x.InProgressTotal
+	}
+	return 0
+}
+
+func (x *ProgressRes) GetInProgressPage() int64 {
+	if x != nil {
+		return x.InProgressPage
+	}
+	return 0
+}
+
+func (x *ProgressRes) GetInProgressPageSize() int64 {
+	if x != nil {
+		return x.InProgressPageSize
 	}
 	return 0
 }
@@ -4962,11 +5002,13 @@ const file_core_v1_problem_problem_proto_rawDesc = "" +
 	"\tplatforms\x18\x04 \x03(\v2\x1f.api.core.v1.problem.NamedCountR\tplatforms\x12C\n" +
 	"\fdifficulties\x18\x05 \x03(\v2\x1f.api.core.v1.problem.NamedCountR\fdifficulties\x12\x19\n" +
 	"\btotal_ac\x18\x06 \x01(\x03R\atotalAc\x12:\n" +
-	"\ttag_stats\x18\a \x03(\v2\x1d.api.core.v1.problem.TagScoreR\btagStats\"X\n" +
+	"\ttag_stats\x18\a \x03(\v2\x1d.api.core.v1.problem.TagScoreR\btagStats\"\xb5\x01\n" +
 	"\vProgressReq\x12\x1f\n" +
 	"\vfailed_page\x18\x01 \x01(\x03R\n" +
 	"failedPage\x12(\n" +
-	"\x10failed_page_size\x18\x02 \x01(\x03R\x0efailedPageSize\"<\n" +
+	"\x10failed_page_size\x18\x02 \x01(\x03R\x0efailedPageSize\x12(\n" +
+	"\x10in_progress_page\x18\x03 \x01(\x03R\x0einProgressPage\x121\n" +
+	"\x15in_progress_page_size\x18\x04 \x01(\x03R\x12inProgressPageSize\"<\n" +
 	"\fProgressItem\x12\x16\n" +
 	"\x06status\x18\x01 \x01(\tR\x06status\x12\x14\n" +
 	"\x05count\x18\x02 \x01(\x03R\x05count\"\xed\x01\n" +
@@ -4996,7 +5038,7 @@ const file_core_v1_problem_problem_proto_rawDesc = "" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1a\n" +
 	"\bmessages\x18\x02 \x01(\x03R\bmessages\x12\x1c\n" +
 	"\tconsumers\x18\x03 \x01(\x03R\tconsumers\x12 \n" +
-	"\vconcurrency\x18\x04 \x01(\x03R\vconcurrency\"\xfb\x05\n" +
+	"\vconcurrency\x18\x04 \x01(\x03R\vconcurrency\"\x84\a\n" +
 	"\vProgressRes\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\x03R\x04code\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x127\n" +
@@ -5017,7 +5059,10 @@ const file_core_v1_problem_problem_proto_rawDesc = "" +
 	"\x18recent_failed_perm_total\x18\x0e \x01(\x03R\x15recentFailedPermTotal\x12\x1f\n" +
 	"\vfailed_page\x18\x0f \x01(\x03R\n" +
 	"failedPage\x12(\n" +
-	"\x10failed_page_size\x18\x10 \x01(\x03R\x0efailedPageSize\"#\n" +
+	"\x10failed_page_size\x18\x10 \x01(\x03R\x0efailedPageSize\x12*\n" +
+	"\x11in_progress_total\x18\x11 \x01(\x03R\x0finProgressTotal\x12(\n" +
+	"\x10in_progress_page\x18\x12 \x01(\x03R\x0einProgressPage\x121\n" +
+	"\x15in_progress_page_size\x18\x13 \x01(\x03R\x12inProgressPageSize\"#\n" +
 	"\vBackfillReq\x12\x14\n" +
 	"\x05limit\x18\x01 \x01(\x03R\x05limit\"\xf3\x01\n" +
 	"\vBackfillRes\x12\x12\n" +
