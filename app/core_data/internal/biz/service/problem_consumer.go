@@ -469,7 +469,7 @@ func (c *ProblemAnalyzeConsumer) consumeOnce(concurrency int, concurrencySource 
 				}
 				// 流式 AI：整体上限 10 分钟，避免 worker 永久占用；过载先退避让 CPU
 				loadgate.Global().Wait(nil, 30*time.Second)
-				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+				ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 				err := c.problem.ProcessAnalyze(ctx, msg)
 				cancel()
 				if err != nil {
@@ -480,9 +480,11 @@ func (c *ProblemAnalyzeConsumer) consumeOnce(concurrency int, concurrencySource 
 						return
 					}
 					if isProblemAnalyzeCoordinationError(err) {
-						log.Warnf("RabbitMQ(problem_analyze) id=%d deferred until profile cache maintenance settles", msg.ProblemID)
-						sleepOrStop(c.stopCh, pipelineRequeueDelay)
-						_ = d.Nack(false, true)
+						// This is a stale message from the retired facts-maintenance
+						// coupling. Requeueing it creates a hot loop and starves real AI
+						// work; the durable TAGGING row can be re-enqueued normally.
+						log.Warnf("RabbitMQ(problem_analyze) id=%d discarded stale maintenance message", msg.ProblemID)
+						_ = d.Ack(false)
 						return
 					}
 					log.Errorf("RabbitMQ(problem_analyze) id=%d: %v", msg.ProblemID, err)
