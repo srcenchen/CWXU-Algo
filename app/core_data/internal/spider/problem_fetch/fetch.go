@@ -744,7 +744,25 @@ func fetchLuoGu(externalID, problemURL string) (*FetchedContent, error) {
 	if strings.TrimSpace(content) == "" {
 		return nil, fmt.Errorf("洛谷题面内容为空")
 	}
-	return &FetchedContent{Title: title, ContentMD: collapseBlankLines(content)}, nil
+	return &FetchedContent{Title: title, ContentMD: cleanLuoGuStatement(content)}, nil
+}
+
+// cleanLuoGuStatement removes the browser-only shell that can be returned by
+// older Luogu HTML responses. Never persist noscript warnings or toolbar text
+// as problem content, even if an upstream fallback bypasses article parsing.
+func cleanLuoGuStatement(content string) string {
+	content = regexp.MustCompile(`(?is)<(?:script|style|noscript)\b[^>]*>.*?</(?:script|style|noscript)>`).ReplaceAllString(content, "")
+	content = regexp.MustCompile(`(?is)<h[1-6][^>]*>\s*请\s*<b[^>]*>不要禁用</b>脚本，否则网页无法正常加载\s*</h[1-6]>`).ReplaceAllString(content, "")
+	content = regexp.MustCompile(`(?im)^\s*#{1,6}\s*请\s*不要禁用脚本，否则网页无法正常加载\s*$`).ReplaceAllString(content, "")
+	lines := make([]string, 0)
+	for _, line := range strings.Split(content, "\n") {
+		t := strings.TrimSpace(line)
+		if t == "plain text" || t == "复制" || t == "请不要禁用脚本，否则网页无法正常加载" {
+			continue
+		}
+		lines = append(lines, line)
+	}
+	return collapseBlankLines(strings.TrimSpace(strings.Join(lines, "\n")))
 }
 
 func parseLuoGuJSON(body []byte) (*FetchedContent, error) {
@@ -783,7 +801,7 @@ func parseLuoGuJSON(body []byte) (*FetchedContent, error) {
 	if desc == "" {
 		return nil, fmt.Errorf("洛谷 JSON 无题面")
 	}
-	return &FetchedContent{Title: title, ContentMD: collapseBlankLines(desc)}, nil
+	return &FetchedContent{Title: title, ContentMD: cleanLuoGuStatement(desc)}, nil
 }
 
 // NowCoderContestProblemURL 比赛内题面：https://ac.nowcoder.com/acm/contest/{contestId}/{A}
