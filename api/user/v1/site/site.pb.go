@@ -273,6 +273,7 @@ type GetAdminConfigRes struct {
 	BackupPrefix              string `protobuf:"bytes,61,opt,name=backup_prefix,json=backupPrefix,proto3" json:"backup_prefix,omitempty"`
 	SpiderConcurrency         int32  `protobuf:"varint,62,opt,name=spider_concurrency,json=spiderConcurrency,proto3" json:"spider_concurrency,omitempty"`
 	ProblemAnalyzeConcurrency int32  `protobuf:"varint,63,opt,name=problem_analyze_concurrency,json=problemAnalyzeConcurrency,proto3" json:"problem_analyze_concurrency,omitempty"`
+	ProblemFetchConcurrency   int32  `protobuf:"varint,67,opt,name=problem_fetch_concurrency,json=problemFetchConcurrency,proto3" json:"problem_fetch_concurrency,omitempty"`
 	OjProxyBaseUrl            string `protobuf:"bytes,64,opt,name=oj_proxy_base_url,json=ojProxyBaseUrl,proto3" json:"oj_proxy_base_url,omitempty"`
 	OjProxySecretMasked       string `protobuf:"bytes,65,opt,name=oj_proxy_secret_masked,json=ojProxySecretMasked,proto3" json:"oj_proxy_secret_masked,omitempty"`
 	OjProxySecretSet          bool   `protobuf:"varint,66,opt,name=oj_proxy_secret_set,json=ojProxySecretSet,proto3" json:"oj_proxy_secret_set,omitempty"`
@@ -751,6 +752,13 @@ func (x *GetAdminConfigRes) GetProblemAnalyzeConcurrency() int32 {
 	return 0
 }
 
+func (x *GetAdminConfigRes) GetProblemFetchConcurrency() int32 {
+	if x != nil {
+		return x.ProblemFetchConcurrency
+	}
+	return 0
+}
+
 func (x *GetAdminConfigRes) GetOjProxyBaseUrl() string {
 	if x != nil {
 		return x.OjProxyBaseUrl
@@ -837,6 +845,7 @@ type UpdateConfigReq struct {
 	BackupPrefix              string `protobuf:"bytes,45,opt,name=backup_prefix,json=backupPrefix,proto3" json:"backup_prefix,omitempty"`
 	SpiderConcurrency         int32  `protobuf:"varint,46,opt,name=spider_concurrency,json=spiderConcurrency,proto3" json:"spider_concurrency,omitempty"`
 	ProblemAnalyzeConcurrency int32  `protobuf:"varint,47,opt,name=problem_analyze_concurrency,json=problemAnalyzeConcurrency,proto3" json:"problem_analyze_concurrency,omitempty"`
+	ProblemFetchConcurrency   int32  `protobuf:"varint,51,opt,name=problem_fetch_concurrency,json=problemFetchConcurrency,proto3" json:"problem_fetch_concurrency,omitempty"`
 	OjProxyBaseUrl            string `protobuf:"bytes,48,opt,name=oj_proxy_base_url,json=ojProxyBaseUrl,proto3" json:"oj_proxy_base_url,omitempty"`
 	OjProxySecret             string `protobuf:"bytes,49,opt,name=oj_proxy_secret,json=ojProxySecret,proto3" json:"oj_proxy_secret,omitempty"`
 	ClearOjProxySecret        bool   `protobuf:"varint,50,opt,name=clear_oj_proxy_secret,json=clearOjProxySecret,proto3" json:"clear_oj_proxy_secret,omitempty"`
@@ -1199,6 +1208,13 @@ func (x *UpdateConfigReq) GetSpiderConcurrency() int32 {
 func (x *UpdateConfigReq) GetProblemAnalyzeConcurrency() int32 {
 	if x != nil {
 		return x.ProblemAnalyzeConcurrency
+	}
+	return 0
+}
+
+func (x *UpdateConfigReq) GetProblemFetchConcurrency() int32 {
+	if x != nil {
+		return x.ProblemFetchConcurrency
 	}
 	return 0
 }
@@ -2391,7 +2407,7 @@ const file_user_v1_site_site_proto_rawDesc = "" +
 	"\n" +
 	"footer_icp\x18\x06 \x01(\tR\tfooterIcp\x12)\n" +
 	"\x10payfm_configured\x18\a \x01(\bR\x0fpayfmConfigured\"\x13\n" +
-	"\x11GetAdminConfigReq\"\x95\x15\n" +
+	"\x11GetAdminConfigReq\"\xd1\x15\n" +
 	"\x11GetAdminConfigRes\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\x03R\x04code\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12\x1d\n" +
@@ -2462,10 +2478,11 @@ const file_user_v1_site_site_proto_rawDesc = "" +
 	"backupTime\x12#\n" +
 	"\rbackup_prefix\x18= \x01(\tR\fbackupPrefix\x12-\n" +
 	"\x12spider_concurrency\x18> \x01(\x05R\x11spiderConcurrency\x12>\n" +
-	"\x1bproblem_analyze_concurrency\x18? \x01(\x05R\x19problemAnalyzeConcurrency\x12)\n" +
+	"\x1bproblem_analyze_concurrency\x18? \x01(\x05R\x19problemAnalyzeConcurrency\x12:\n" +
+	"\x19problem_fetch_concurrency\x18C \x01(\x05R\x17problemFetchConcurrency\x12)\n" +
 	"\x11oj_proxy_base_url\x18@ \x01(\tR\x0eojProxyBaseUrl\x123\n" +
 	"\x16oj_proxy_secret_masked\x18A \x01(\tR\x13ojProxySecretMasked\x12-\n" +
-	"\x13oj_proxy_secret_set\x18B \x01(\bR\x10ojProxySecretSet\"\xf8\x0f\n" +
+	"\x13oj_proxy_secret_set\x18B \x01(\bR\x10ojProxySecretSet\"\xb4\x10\n" +
 	"\x0fUpdateConfigReq\x12\x1d\n" +
 	"\n" +
 	"site_title\x18\x01 \x01(\tR\tsiteTitle\x12\x1b\n" +
@@ -2518,7 +2535,8 @@ const file_user_v1_site_site_proto_rawDesc = "" +
 	"backupTime\x12#\n" +
 	"\rbackup_prefix\x18- \x01(\tR\fbackupPrefix\x12-\n" +
 	"\x12spider_concurrency\x18. \x01(\x05R\x11spiderConcurrency\x12>\n" +
-	"\x1bproblem_analyze_concurrency\x18/ \x01(\x05R\x19problemAnalyzeConcurrency\x12)\n" +
+	"\x1bproblem_analyze_concurrency\x18/ \x01(\x05R\x19problemAnalyzeConcurrency\x12:\n" +
+	"\x19problem_fetch_concurrency\x183 \x01(\x05R\x17problemFetchConcurrency\x12)\n" +
 	"\x11oj_proxy_base_url\x180 \x01(\tR\x0eojProxyBaseUrl\x12&\n" +
 	"\x0foj_proxy_secret\x181 \x01(\tR\rojProxySecret\x121\n" +
 	"\x15clear_oj_proxy_secret\x182 \x01(\bR\x12clearOjProxySecret\"\xb4\x01\n" +

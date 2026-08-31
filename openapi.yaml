@@ -13426,6 +13426,9 @@ components:
                 problemAnalyzeConcurrency:
                     type: integer
                     format: int32
+                problemFetchConcurrency:
+                    type: integer
+                    format: int32
                 ojProxyBaseUrl:
                     type: string
                 ojProxySecretMasked:
@@ -13605,6 +13608,9 @@ components:
                     type: integer
                     format: int32
                 problemAnalyzeConcurrency:
+                    type: integer
+                    format: int32
+                problemFetchConcurrency:
                     type: integer
                     format: int32
                 ojProxyBaseUrl:

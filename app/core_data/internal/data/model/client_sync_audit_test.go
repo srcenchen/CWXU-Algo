@@ -7,7 +7,7 @@ import (
 
 func TestClientSyncAuditContainsOnlySessionSummaryFields(t *testing.T) {
 	typ := reflect.TypeOf(ClientSyncAudit{})
-	want := []string{"SessionID", "AuthorizationID", "UserID", "Platform", "OJUID", "ClientKind", "ClientVersion", "Status", "CompletionReason", "StartedAt", "UpdatedAt", "TerminalAt", "RetentionUntil", "ProcessedPages", "RemoteCount", "Inserted", "RestartCount", "ErrorCode", "ErrorMessage"}
+	want := []string{"SessionID", "AuthorizationID", "UserID", "Username", "Platform", "OJUID", "ClientKind", "ClientVersion", "Status", "CompletionReason", "StartedAt", "UpdatedAt", "TerminalAt", "RetentionUntil", "ProcessedPages", "RemoteCount", "Inserted", "RestartCount", "ErrorCode", "ErrorMessage"}
 	if typ.NumField() != len(want) {
 		t.Fatalf("field count = %d, want %d", typ.NumField(), len(want))
 	}

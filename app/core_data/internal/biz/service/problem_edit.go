@@ -1106,6 +1106,16 @@ func normalizeEditDifficulty(d string) (string, error) {
 //   - 有题面 + 标签空 → TAGGING 并入队分析
 //   - 仅标签无题面 → 保留/回到 PENDING，不入队 AI
 func (uc *ProblemUseCase) ApplyProblemFields(problemID uint, updateTags bool, tags []string, updateContent bool, contentMD, title string, updateDifficulty bool, difficulty string) (*model.Problem, error) {
+	return uc.applyProblemFields(problemID, updateTags, tags, updateContent, contentMD, title, updateDifficulty, difficulty, true)
+}
+
+// ApplyProblemFieldsForReview applies approved facts without waiting for the
+// profile maintenance fence. Profile data is derived and refreshed afterward.
+func (uc *ProblemUseCase) ApplyProblemFieldsForReview(problemID uint, updateTags bool, tags []string, updateContent bool, contentMD, title string, updateDifficulty bool, difficulty string) (*model.Problem, error) {
+	return uc.applyProblemFields(problemID, updateTags, tags, updateContent, contentMD, title, updateDifficulty, difficulty, false)
+}
+
+func (uc *ProblemUseCase) applyProblemFields(problemID uint, updateTags bool, tags []string, updateContent bool, contentMD, title string, updateDifficulty bool, difficulty string, maintainProfiles bool) (*model.Problem, error) {
 	if !updateTags && !updateContent && strings.TrimSpace(title) == "" && !updateDifficulty {
 		return nil, fmt.Errorf("没有需要修改的内容")
 	}
@@ -1138,30 +1148,40 @@ func (uc *ProblemUseCase) ApplyProblemFields(problemID uint, updateTags bool, ta
 		return &p, nil
 	}
 	oldStatus := p.Status
-	dirtyTags, dirtyDifficulty := problemFactsDirtyFlags(p.ErrorMsg)
-	pending, err := loadAbilityMaintenancePending(context.Background(), uc.data.DB, problemMaintenanceScope(p.ID))
-	if err != nil {
-		return nil, err
-	}
-	if pending != nil {
-		if err := uc.recoverProblemMaintenance(context.Background(), pending); err != nil {
+	difficultyChanged := updateDifficulty && strings.TrimSpace(p.Difficulty) != strings.TrimSpace(fmt.Sprint(updates["difficulty"]))
+	if maintainProfiles {
+		dirtyTags, dirtyDifficulty := problemFactsDirtyFlags(p.ErrorMsg)
+		pending, err := loadAbilityMaintenancePending(context.Background(), uc.data.DB, problemMaintenanceScope(p.ID))
+		if err != nil {
 			return nil, err
 		}
-		if err := uc.data.DB.First(&p, problemID).Error; err != nil {
+		if pending != nil {
+			if err := uc.recoverProblemMaintenance(context.Background(), pending); err != nil {
+				return nil, err
+			}
+			if err := uc.data.DB.First(&p, problemID).Error; err != nil {
+				return nil, err
+			}
+			dirtyTags, dirtyDifficulty = problemFactsDirtyFlags(p.ErrorMsg)
+			if updateTags {
+				tagsChanged = !sameNormalizedTags([]string(p.Tags), tags)
+			}
+		}
+		tagsChanged = tagsChanged || dirtyTags
+		difficultyChanged = difficultyChanged || dirtyDifficulty
+		if tagsChanged && !updateTags {
+			tags = []string(p.Tags)
+		}
+		if err := uc.applyProblemFactUpdates(context.Background(), &p, updates, tags, tagsChanged, difficultyChanged); err != nil {
 			return nil, err
 		}
-		dirtyTags, dirtyDifficulty = problemFactsDirtyFlags(p.ErrorMsg)
-		if updateTags {
-			tagsChanged = !sameNormalizedTags([]string(p.Tags), tags)
+	} else {
+		if tagsChanged && !updateTags {
+			tags = []string(p.Tags)
 		}
-	}
-	tagsChanged = tagsChanged || dirtyTags
-	difficultyChanged := (updateDifficulty && strings.TrimSpace(p.Difficulty) != strings.TrimSpace(fmt.Sprint(updates["difficulty"]))) || dirtyDifficulty
-	if tagsChanged && !updateTags {
-		tags = []string(p.Tags)
-	}
-	if err := uc.applyProblemFactUpdates(context.Background(), &p, updates, tags, tagsChanged, difficultyChanged); err != nil {
-		return nil, err
+		if err := uc.applyAIAnalysisResult(context.Background(), &p, updates, tags); err != nil {
+			return nil, err
+		}
 	}
 	// 重新加载
 	if err := uc.data.DB.First(&p, problemID).Error; err != nil {
@@ -1221,6 +1241,12 @@ func (uc *ProblemUseCase) ApplyProblemFields(problemID uint, updateTags bool, ta
 		}
 	}
 	uc.BumpProblemDetailVer(p.ID)
+	if tagsChanged && !maintainProfiles {
+		uc.BumpProblemTagsVer()
+	}
+	if !maintainProfiles && (tagsChanged || difficultyChanged) {
+		uc.enqueueAIProfileRefresh(p.ID)
+	}
 	if newStatus != oldStatus {
 		uc.progressMoveStatus(oldStatus, newStatus)
 	}
@@ -1481,7 +1507,7 @@ func (uc *ProblemUseCase) ReviewProblemEdit(requestID, reviewerID uint, approve 
 		return nil
 	}
 	// 通过：应用修改
-	_, err := uc.ApplyProblemFields(
+	_, err := uc.ApplyProblemFieldsForReview(
 		req.ProblemID,
 		req.HasTags, []string(req.ProposedTags),
 		req.HasContent, req.ProposedContentMD,

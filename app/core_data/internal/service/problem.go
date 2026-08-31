@@ -1093,7 +1093,8 @@ func (s *ProblemService) ReviewEdit(ctx context.Context, req *problem.ReviewProb
 	}
 	uid := auth.GetCurrentUserId(ctx)
 	if err := s.uc.ReviewProblemEdit(uint(req.Id), uid, req.Approve, req.ReviewNote); err != nil {
-		return &problem.ReviewProblemEditRes{Code: 1, Message: err.Error()}, nil
+		log.Errorf("review problem edit id=%d approve=%t: %v", req.Id, req.Approve, err)
+		return &problem.ReviewProblemEditRes{Code: 1, Message: "审核未完成，请稍后重试"}, nil
 	}
 	msg := "已驳回"
 	if req.Approve {

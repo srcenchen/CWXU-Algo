@@ -48,6 +48,7 @@ func (s *SiteService) ensureRow(ctx context.Context) (*model.SiteConfig, error) 
 		FooterIcp:                 "苏ICP备2025217901号",
 		SMTPPort:                  465,
 		SpiderConcurrency:         4,
+		ProblemFetchConcurrency:   4,
 		ProblemAnalyzeConcurrency: 4,
 	}
 	if e := s.data.DB.WithContext(ctx).Create(&row).Error; e != nil {
@@ -143,6 +144,7 @@ func rowToRuntime(row *model.SiteConfig) (*sitesettings.Runtime, error) {
 		OpsNotifyEmails:           strings.TrimSpace(row.OpsNotifyEmails),
 		DataDiskPath:              strings.TrimSpace(row.DataDiskPath),
 		SpiderConcurrency:         normalizeRuntimeConcurrency(row.SpiderConcurrency),
+		ProblemFetchConcurrency:   normalizeRuntimeConcurrency(row.ProblemFetchConcurrency),
 		ProblemAnalyzeConcurrency: normalizeRuntimeConcurrency(row.ProblemAnalyzeConcurrency),
 		PayFmApiBase:              strings.TrimSpace(row.PayFmApiBase),
 		PayFmMerchantNo:           strings.TrimSpace(row.PayFmMerchantNo),
@@ -268,6 +270,7 @@ func (s *SiteService) GetAdminConfig(ctx context.Context, _ *site.GetAdminConfig
 		OpsNotifyEmails:           row.OpsNotifyEmails,
 		DataDiskPath:              strings.TrimSpace(row.DataDiskPath),
 		SpiderConcurrency:         int32(rt.SpiderConcurrency),
+		ProblemFetchConcurrency:   int32(rt.ProblemFetchConcurrency),
 		ProblemAnalyzeConcurrency: int32(rt.ProblemAnalyzeConcurrency),
 		PayfmApiBase:              strings.TrimSpace(row.PayFmApiBase),
 		PayfmMerchantNo:           strings.TrimSpace(row.PayFmMerchantNo),

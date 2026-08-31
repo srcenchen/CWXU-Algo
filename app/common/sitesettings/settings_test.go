@@ -34,16 +34,16 @@ func TestRowToRuntimeConcurrencyDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if rt.SpiderConcurrency != 4 || rt.ProblemAnalyzeConcurrency != 4 {
-		t.Fatalf("concurrency defaults = %d/%d, want 4/4", rt.SpiderConcurrency, rt.ProblemAnalyzeConcurrency)
+	if rt.SpiderConcurrency != 4 || rt.ProblemFetchConcurrency != 4 || rt.ProblemAnalyzeConcurrency != 4 {
+		t.Fatalf("concurrency defaults = %d/%d/%d, want 4/4/4", rt.SpiderConcurrency, rt.ProblemFetchConcurrency, rt.ProblemAnalyzeConcurrency)
 	}
 
-	rt, err = (&Row{SpiderConcurrency: 12, ProblemAnalyzeConcurrency: 7}).ToRuntimeChecked()
+	rt, err = (&Row{SpiderConcurrency: 12, ProblemFetchConcurrency: 9, ProblemAnalyzeConcurrency: 7}).ToRuntimeChecked()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if rt.SpiderConcurrency != 12 || rt.ProblemAnalyzeConcurrency != 7 {
-		t.Fatalf("concurrency mapping = %d/%d, want 12/7", rt.SpiderConcurrency, rt.ProblemAnalyzeConcurrency)
+	if rt.SpiderConcurrency != 12 || rt.ProblemFetchConcurrency != 9 || rt.ProblemAnalyzeConcurrency != 7 {
+		t.Fatalf("concurrency mapping = %d/%d/%d, want 12/9/7", rt.SpiderConcurrency, rt.ProblemFetchConcurrency, rt.ProblemAnalyzeConcurrency)
 	}
 }
 
@@ -52,11 +52,11 @@ func TestRuntimeJSONBackwardCompatibleConcurrency(t *testing.T) {
 	if err := json.Unmarshal([]byte(`{"siteTitle":"GoAlgo","configVersion":1}`), &old); err != nil {
 		t.Fatal(err)
 	}
-	if old.SpiderConcurrency != 0 || old.ProblemAnalyzeConcurrency != 0 {
+	if old.SpiderConcurrency != 0 || old.ProblemFetchConcurrency != 0 || old.ProblemAnalyzeConcurrency != 0 {
 		t.Fatalf("old JSON must preserve unset concurrency, got %#v", old)
 	}
 
-	b, err := json.Marshal(Runtime{SpiderConcurrency: 8, ProblemAnalyzeConcurrency: 6})
+	b, err := json.Marshal(Runtime{SpiderConcurrency: 8, ProblemFetchConcurrency: 10, ProblemAnalyzeConcurrency: 6})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,7 +64,7 @@ func TestRuntimeJSONBackwardCompatibleConcurrency(t *testing.T) {
 	if err := json.Unmarshal(b, &current); err != nil {
 		t.Fatal(err)
 	}
-	if current.SpiderConcurrency != 8 || current.ProblemAnalyzeConcurrency != 6 {
+	if current.SpiderConcurrency != 8 || current.ProblemFetchConcurrency != 10 || current.ProblemAnalyzeConcurrency != 6 {
 		t.Fatalf("JSON round trip = %#v", current)
 	}
 }

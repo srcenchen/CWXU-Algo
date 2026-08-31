@@ -231,11 +231,11 @@ func beginProfileInvalidationForAttemptWithTTL(ctx context.Context, rdb *redis.C
 	if strings.TrimSpace(ownerID) == "" {
 		return ProfileInvalidationToken{}, fmt.Errorf("invalid profile invalidation owner")
 	}
-	if rdb == nil {
-		return token, nil
-	}
 	if ttl <= 0 {
 		return ProfileInvalidationToken{}, fmt.Errorf("invalid profile invalidation lease TTL")
+	}
+	if rdb == nil {
+		return token, nil
 	}
 	leaseValue := token.IntentID + "|" + token.Owner
 	value, err := profileBeginInvalidationScript.Run(ctx, rdb, []string{key, key + ":lease", key + ":current_intent"}, leaseValue, ttl.Milliseconds(), token.IntentID).Int64()
@@ -256,10 +256,7 @@ func beginProfileInvalidationForAttemptWithTTL(ctx context.Context, rdb *redis.C
 	}
 	token.Generation = uint64(value)
 	leaseCtx, cancel := context.WithCancel(ctx)
-	token.lease = &profileInvalidationLease{
-		rdb: rdb, key: key, ttl: ttl, ctx: leaseCtx, cancel: cancel,
-		stop: make(chan struct{}), done: make(chan struct{}),
-	}
+	token.lease = &profileInvalidationLease{rdb: rdb, key: key, ttl: ttl, ctx: leaseCtx, cancel: cancel, stop: make(chan struct{}), done: make(chan struct{})}
 	go token.runHeartbeat()
 	return token, nil
 }
@@ -335,9 +332,7 @@ func incrementGenerationOwned(ctx context.Context, rdb *redis.Client, fenceKey s
 		leaseTTL = token.lease.ttl
 	}
 	leaseValue := token.IntentID + "|" + token.Owner
-	value, err := profileIncrementGenerationOwnedScript.Run(ctx, rdb, []string{
-		fenceKey, fenceKey + ":lease", fenceKey + ":current_intent", targetGenerationKey,
-	}, leaseValue, token.Generation, token.IntentID, leaseTTL.Milliseconds(), targetTTL.Milliseconds()).Int64()
+	value, err := profileIncrementGenerationOwnedScript.Run(ctx, rdb, []string{fenceKey, fenceKey + ":lease", fenceKey + ":current_intent", targetGenerationKey}, leaseValue, token.Generation, token.IntentID, leaseTTL.Milliseconds(), targetTTL.Milliseconds()).Int64()
 	if err != nil {
 		return 0, err
 	}

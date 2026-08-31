@@ -39,6 +39,7 @@ type SiteConfig struct {
 	// DataDiskPath 运维磁盘统计目录（数据盘挂载点；空=默认 /data，未挂载回退 /）
 	DataDiskPath              string `gorm:"size:256;column:data_disk_path;comment:运维磁盘统计目录"`
 	SpiderConcurrency         int    `gorm:"column:spider_concurrency;not null;default:4;comment:OJ 爬虫消费并发"`
+	ProblemFetchConcurrency   int    `gorm:"column:problem_fetch_concurrency;not null;default:4;comment:题面抓取消费并发"`
 	ProblemAnalyzeConcurrency int    `gorm:"column:problem_analyze_concurrency;not null;default:4;comment:题库分析消费并发"`
 	// 又拍云图床（博客/题解）；密码在受控数据库中明文存储
 	UpyunBucket   string `gorm:"size:128;column:upyun_bucket;comment:又拍云服务名"`

@@ -71,6 +71,7 @@ type Runtime struct {
 	// DataDiskPath 运维磁盘统计目录（数据盘挂载点；空=默认 /data，未挂载回退 /）
 	DataDiskPath              string `json:"dataDiskPath"`
 	SpiderConcurrency         int    `json:"spiderConcurrency,omitempty"`
+	ProblemFetchConcurrency   int    `json:"problemFetchConcurrency,omitempty"`
 	ProblemAnalyzeConcurrency int    `json:"problemAnalyzeConcurrency,omitempty"`
 	// 支付FM（C 端订阅在线支付；聚合支付 https://docs.zhifux.com）
 	PayFmApiBase    string `json:"payfmApiBase"`
@@ -125,6 +126,7 @@ type Row struct {
 	OpsNotifyEmails           string `gorm:"column:ops_notify_emails"`
 	DataDiskPath              string `gorm:"column:data_disk_path"`
 	SpiderConcurrency         int    `gorm:"column:spider_concurrency"`
+	ProblemFetchConcurrency   int    `gorm:"column:problem_fetch_concurrency"`
 	ProblemAnalyzeConcurrency int    `gorm:"column:problem_analyze_concurrency"`
 	PayFmApiBase              string `gorm:"column:payfm_api_base"`
 	PayFmMerchantNo           string `gorm:"column:payfm_merchant_no"`
@@ -147,6 +149,7 @@ func (r *Row) ToRuntimeChecked() (*Runtime, error) {
 		title = "GoAlgo"
 	}
 	spiderConcurrency := normalizeConcurrency(r.SpiderConcurrency)
+	problemFetchConcurrency := normalizeConcurrency(r.ProblemFetchConcurrency)
 	problemAnalyzeConcurrency := normalizeConcurrency(r.ProblemAnalyzeConcurrency)
 	secrets := map[string]string{
 		"smtp_password": r.SMTPPassword, "agent_secret": r.AgentSecret,
@@ -204,6 +207,7 @@ func (r *Row) ToRuntimeChecked() (*Runtime, error) {
 		OpsNotifyEmails:           strings.TrimSpace(r.OpsNotifyEmails),
 		DataDiskPath:              strings.TrimSpace(r.DataDiskPath),
 		SpiderConcurrency:         spiderConcurrency,
+		ProblemFetchConcurrency:   problemFetchConcurrency,
 		ProblemAnalyzeConcurrency: problemAnalyzeConcurrency,
 		PayFmApiBase:              strings.TrimSpace(r.PayFmApiBase),
 		PayFmMerchantNo:           strings.TrimSpace(r.PayFmMerchantNo),

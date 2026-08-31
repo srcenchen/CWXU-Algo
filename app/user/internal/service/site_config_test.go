@@ -242,13 +242,14 @@ func TestEndpointValidationInAI(t *testing.T) {
 func TestSectionProjectionOpsOnly(t *testing.T) {
 	updates, err := buildSectionUpdatesWith(&model.SiteConfig{}, &site.UpdateConfigReq{
 		SpiderConcurrency:         9,
+		ProblemFetchConcurrency:   8,
 		ProblemAnalyzeConcurrency: 6,
 		SmtpHost:                  "smtp.example.com",
 	}, fakeEncrypt, "ops")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if updates["spider_concurrency"] != 9 || updates["problem_analyze_concurrency"] != 6 {
+	if updates["spider_concurrency"] != 9 || updates["problem_fetch_concurrency"] != 8 || updates["problem_analyze_concurrency"] != 6 {
 		t.Fatalf("ops updates = %#v", updates)
 	}
 	if _, ok := updates["smtp_host"]; ok {

@@ -21,7 +21,7 @@ import (
 )
 
 const (
-	// 默认各 4；可用 CWXU_PROBLEM_FETCH_CONCURRENCY / CWXU_PROBLEM_ANALYZE_CONCURRENCY 覆盖
+	// 默认各 4；三个消费队列均可由站点运行时配置调整。
 	defaultProblemFetchConcurrency = 4
 	problemMaxRetry                = 5
 	// problemRetryBaseDelay 重投退避基数：按重试次数指数递增，上限 problemRetryMaxDelay
@@ -45,6 +45,11 @@ type concurrencySetting struct {
 var spiderConcurrencySetting = concurrencySetting{
 	envKey: "CWXU_SPIDER_CONCURRENCY",
 	value:  func(rt *sitesettings.Runtime) int { return rt.SpiderConcurrency },
+}
+
+var problemFetchConcurrencySetting = concurrencySetting{
+	envKey: "CWXU_PROBLEM_FETCH_CONCURRENCY",
+	value:  func(rt *sitesettings.Runtime) int { return rt.ProblemFetchConcurrency },
 }
 
 var analyzeConcurrencySetting = concurrencySetting{
@@ -153,9 +158,7 @@ func isProblemAnalyzeCoordinationError(err error) bool {
 		return false
 	}
 	message := err.Error()
-	return strings.Contains(message, "profile invalidation intent changed") ||
-		strings.Contains(message, "profile invalidation already in progress") ||
-		strings.Contains(message, "profile invalidation ownership changed")
+	return strings.Contains(message, "profile invalidation intent changed") || strings.Contains(message, "profile invalidation already in progress") || strings.Contains(message, "profile invalidation ownership changed")
 }
 
 // retryBackoff 第 n 次重试前的等待（指数退避，封顶）
@@ -210,6 +213,13 @@ type ProblemFetchConsumer struct {
 	stopOnce sync.Once
 }
 
+func (c *ProblemFetchConsumer) redis() *redis.Client {
+	if c == nil || c.problem == nil || c.problem.data == nil {
+		return nil
+	}
+	return c.problem.data.RDB
+}
+
 func NewProblemFetchConsumer(mq *event.RabbitMQ, problem *ProblemUseCase) *ProblemFetchConsumer {
 	return &ProblemFetchConsumer{
 		mq:      mq,
@@ -232,7 +242,8 @@ func (c *ProblemFetchConsumer) Consume() {
 			return
 		default:
 		}
-		if err := c.consumeOnce(); err != nil {
+		concurrencySource := runtimeConcurrencySource(c.redis(), problemFetchConcurrencySetting)
+		if err := c.consumeOnce(concurrencySource(), concurrencySource); err != nil {
 			log.Errorf("problem_fetch consumer 退出: %v，5s 后重连", err)
 		} else {
 			log.Warnf("problem_fetch consumer 通道关闭，5s 后重连")
@@ -246,7 +257,7 @@ func (c *ProblemFetchConsumer) Consume() {
 	}
 }
 
-func (c *ProblemFetchConsumer) consumeOnce() error {
+func (c *ProblemFetchConsumer) consumeOnce(concurrency int, concurrencySource func() int) error {
 	if err := c.problem.declareProblemQueue(problemFetchQueue); err != nil {
 		return fmt.Errorf("declare queue %s: %w", problemFetchQueue, err)
 	}
@@ -266,7 +277,7 @@ func (c *ProblemFetchConsumer) consumeOnce() error {
 		}
 	}()
 
-	if err := ch.Qos(problemFetchConcurrency, 0, false); err != nil {
+	if err := ch.Qos(concurrency, 0, false); err != nil {
 		return err
 	}
 	// consumer tag 留空，避免多实例/重连 tag 冲突
@@ -274,57 +285,74 @@ func (c *ProblemFetchConsumer) consumeOnce() error {
 	if err != nil {
 		return err
 	}
-	log.Infof("problem_fetch consumer 已就绪 concurrency=%d queue=problem_fetch", problemFetchConcurrency)
+	log.Infof("problem_fetch consumer 已就绪 concurrency=%d queue=problem_fetch", concurrency)
 
-	sem := make(chan struct{}, problemFetchConcurrency)
+	sem := make(chan struct{}, concurrency)
 	var wg sync.WaitGroup
-	for d := range msgs {
-		sem <- struct{}{}
-		wg.Add(1)
-		go func(d amqp.Delivery) {
-			defer wg.Done()
-			defer func() { <-sem }()
-			defer func() {
-				if r := recover(); r != nil {
-					// panic 也走带上限的重投，避免坏消息 Nack(requeue) 无限循环
-					log.Errorf("RabbitMQ(problem_fetch): panic: %v", r)
-					requeueWithRetry(c.mq, "problem_fetch", d, problemMaxRetry)
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-c.stopCh:
+			_ = ch.Close()
+			wg.Wait()
+			return nil
+		case <-ticker.C:
+			if concurrencySource() != concurrency {
+				_ = ch.Close()
+				wg.Wait()
+				return nil
+			}
+		case d, ok := <-msgs:
+			if !ok {
+				wg.Wait()
+				return nil
+			}
+			sem <- struct{}{}
+			wg.Add(1)
+			go func(d amqp.Delivery) {
+				defer wg.Done()
+				defer func() { <-sem }()
+				defer func() {
+					if r := recover(); r != nil {
+						// panic 也走带上限的重投，避免坏消息 Nack(requeue) 无限循环
+						log.Errorf("RabbitMQ(problem_fetch): panic: %v", r)
+						requeueWithRetry(c.mq, "problem_fetch", d, problemMaxRetry)
+					}
+				}()
+				var msg event.ProblemFetchEvent
+				if err := json.Unmarshal(d.Body, &msg); err != nil {
+					log.Errorf("RabbitMQ(problem_fetch): json %v", err)
+					_ = d.Nack(false, false)
+					return
 				}
-			}()
-			var msg event.ProblemFetchEvent
-			if err := json.Unmarshal(d.Body, &msg); err != nil {
-				log.Errorf("RabbitMQ(problem_fetch): json %v", err)
-				_ = d.Nack(false, false)
-				return
-			}
-			// 平台暂停必须由 ProcessFetch 读取题目后按 DB 平台判断，不能信任可能陈旧的消息平台。
-			if problemFetchEventPaused(msg) {
-				log.Warnf("problem_fetch id=%d requeue: fetch paused", msg.ProblemID)
-				sleepOrStop(c.stopCh, pipelineRequeueDelay)
-				_ = d.Nack(false, true)
-				return
-			}
-			// 系统过载时先退避，给在线访问留 CPU
-			loadgate.Global().Wait(nil, 30*time.Second)
-			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-			defer cancel()
-			if err := c.problem.ProcessFetch(ctx, msg); err != nil {
-				switch classifyProblemFetchPause(err) {
-				case problemFetchPauseGlobal:
-					log.Warnf("RabbitMQ(problem_fetch) id=%d requeue paused: %v", msg.ProblemID, err)
+				// 平台暂停必须由 ProcessFetch 读取题目后按 DB 平台判断，不能信任可能陈旧的消息平台。
+				if problemFetchEventPaused(msg) {
+					log.Warnf("problem_fetch id=%d requeue: fetch paused", msg.ProblemID)
 					sleepOrStop(c.stopCh, pipelineRequeueDelay)
 					_ = d.Nack(false, true)
 					return
 				}
-				log.Errorf("RabbitMQ(problem_fetch) id=%d: %v", msg.ProblemID, err)
-				requeueWithRetry(c.mq, "problem_fetch", d, problemMaxRetry)
-				return
-			}
-			_ = d.Ack(false)
-		}(d)
+				// 系统过载时先退避，给在线访问留 CPU
+				loadgate.Global().Wait(nil, 30*time.Second)
+				ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+				defer cancel()
+				if err := c.problem.ProcessFetch(ctx, msg); err != nil {
+					switch classifyProblemFetchPause(err) {
+					case problemFetchPauseGlobal:
+						log.Warnf("RabbitMQ(problem_fetch) id=%d requeue paused: %v", msg.ProblemID, err)
+						sleepOrStop(c.stopCh, pipelineRequeueDelay)
+						_ = d.Nack(false, true)
+						return
+					}
+					log.Errorf("RabbitMQ(problem_fetch) id=%d: %v", msg.ProblemID, err)
+					requeueWithRetry(c.mq, "problem_fetch", d, problemMaxRetry)
+					return
+				}
+				_ = d.Ack(false)
+			}(d)
+		}
 	}
-	wg.Wait()
-	return nil
 }
 
 // ProblemAnalyzeConsumer 消费 problem_analyze：仅 AI

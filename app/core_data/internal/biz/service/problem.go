@@ -2956,10 +2956,11 @@ func (uc *ProblemUseCase) Progress(page, pageSize int64) (ProgressSnapshot, erro
 	_ = failedQuery.Order("updated_at desc, id desc").Offset(int(offset)).Limit(int(pageSize)).Find(&snap.Failed).Error
 	_ = permQuery.Order("updated_at desc, id desc").Offset(int(offset)).Limit(int(pageSize)).Find(&snap.FailedPerm).Error
 	snap.FailedPage, snap.FailedPageSize = page, pageSize
-	// 爬取中全量；待分析仅近 6 个月（submit_logs）
+	// 爬取中与待分析都要展示全量。手动重新分析可能是历史题目，不能
+	// 因为没有近 6 个月提交记录就从「正在处理」中消失。
 	_ = uc.data.DB.Where(
-		"(status = ?) OR (status = ? AND "+recentClause+")",
-		append([]interface{}{model.ProblemStatusFetching, model.ProblemStatusTagging}, recentArgs...)...,
+		"status IN ?",
+		[]string{model.ProblemStatusFetching, model.ProblemStatusTagging},
 	).Order("updated_at desc").Limit(30).Find(&snap.InProgress).Error
 
 	snap.Paused = pipelineControl.IsAnalyzePaused()
@@ -2991,14 +2992,17 @@ func (uc *ProblemUseCase) queueStats() []struct {
 		Messages    int64
 		Consumers   int64
 		Concurrency int64
-	}, 0, 2)
+	}, 0, 3)
+	fetchConcurrency := runtimeConcurrency(context.Background(), uc.data.RDB, problemFetchConcurrencySetting)
 	analyzeConcurrency := runtimeConcurrency(context.Background(), uc.data.RDB, analyzeConcurrencySetting)
+	spiderConcurrency := runtimeConcurrency(context.Background(), uc.data.RDB, spiderConcurrencySetting)
 	for _, q := range []struct {
 		name string
 		conc int64
 		stat string
 	}{
-		{"problem_fetch", int64(problemFetchConcurrency), model.ProblemStatusPending},
+		{"spider", int64(spiderConcurrency), model.ProblemStatusPending},
+		{"problem_fetch", int64(fetchConcurrency), model.ProblemStatusPending},
 		{"problem_analyze", int64(analyzeConcurrency), model.ProblemStatusTagging},
 	} {
 		var msgs, consumers int64
@@ -3013,18 +3017,20 @@ func (uc *ProblemUseCase) queueStats() []struct {
 		}
 		// inspect 失败时用 DB 近似积压
 		if !inspected {
-			cq := uc.data.DB.Model(&model.Problem{}).Where("status = ?", q.stat)
-			// 分析队列仅近 6 个月（submit_logs）；爬取队列全量
-			if q.name == "problem_analyze" {
-				cutoff := time.Now().Add(-backfillWindow)
-				rc, ra := sqlHasRecentSubmit(cutoff)
-				cq = cq.Where(rc, ra...)
-			}
-			_ = cq.Count(&msgs).Error
-			if q.name == "problem_fetch" {
-				var fetching int64
-				_ = uc.data.DB.Model(&model.Problem{}).Where("status = ?", model.ProblemStatusFetching).Count(&fetching).Error
-				msgs += fetching
+			if q.name != "spider" {
+				cq := uc.data.DB.Model(&model.Problem{}).Where("status = ?", q.stat)
+				// 分析队列仅近 6 个月（submit_logs）；爬取队列全量
+				if q.name == "problem_analyze" {
+					cutoff := time.Now().Add(-backfillWindow)
+					rc, ra := sqlHasRecentSubmit(cutoff)
+					cq = cq.Where(rc, ra...)
+				}
+				_ = cq.Count(&msgs).Error
+				if q.name == "problem_fetch" {
+					var fetching int64
+					_ = uc.data.DB.Model(&model.Problem{}).Where("status = ?", model.ProblemStatusFetching).Count(&fetching).Error
+					msgs += fetching
+				}
 			}
 		}
 		out = append(out, struct {

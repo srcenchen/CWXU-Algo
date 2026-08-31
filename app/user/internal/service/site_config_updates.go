@@ -156,17 +156,22 @@ func buildSectionUpdatesWith(row *model.SiteConfig, req *site.UpdateConfigReq, e
 	}
 	if isSection(section, "ops") {
 		spider := int(req.SpiderConcurrency)
+		fetch := int(req.ProblemFetchConcurrency)
 		analyze := int(req.ProblemAnalyzeConcurrency)
 		if section == "all" && spider == 0 {
 			spider = normalizeRuntimeConcurrency(row.SpiderConcurrency)
 		}
+		if section == "all" && fetch == 0 {
+			fetch = normalizeRuntimeConcurrency(row.ProblemFetchConcurrency)
+		}
 		if section == "all" && analyze == 0 {
 			analyze = normalizeRuntimeConcurrency(row.ProblemAnalyzeConcurrency)
 		}
-		if spider < 1 || spider > 32 || analyze < 1 || analyze > 32 {
+		if spider < 1 || spider > 32 || fetch < 1 || fetch > 32 || analyze < 1 || analyze > 32 {
 			return nil, fmt.Errorf("消费并发必须在 1..32 之间")
 		}
 		updates["spider_concurrency"] = spider
+		updates["problem_fetch_concurrency"] = fetch
 		updates["problem_analyze_concurrency"] = analyze
 	}
 	return updates, nil

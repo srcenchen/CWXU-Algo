@@ -49,6 +49,9 @@ func TestAdminListClientSyncAuditsRequiresPermissionAndFiltersBeforePagination(t
 	if err := db.AutoMigrate(&model.ClientSyncAudit{}); err != nil {
 		t.Fatal(err)
 	}
+	if err := db.Exec("CREATE TABLE users (id INTEGER PRIMARY KEY, username TEXT, name TEXT)").Error; err != nil {
+		t.Fatal(err)
+	}
 	now := time.Now().UTC()
 	rows := []model.ClientSyncAudit{
 		{SessionID: "a", AuthorizationID: 1, UserID: 42, Platform: "luogu", OJUID: "998877", ClientKind: "userscript", ClientVersion: "0.2.7-beta", Status: "completed", StartedAt: now, UpdatedAt: now},
@@ -87,6 +90,9 @@ func TestAdminListClientSyncAuditsReturnsUsername(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := db.AutoMigrate(&model.ClientSyncAudit{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Exec("CREATE TABLE users (id INTEGER PRIMARY KEY, username TEXT, name TEXT)").Error; err != nil {
 		t.Fatal(err)
 	}
 	now := time.Now().UTC()
