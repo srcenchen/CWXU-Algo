@@ -187,27 +187,28 @@ func (uc *SummaryUseCase) runTrainingReportJob(jobID string) {
 
 	brand := uc.brandTitle(ctx)
 	mode := DetailModeFromSource(job.Source)
-	var html string
+	var comment AIReportComment
 	if job.UseAI {
-		html, err = uc.generateTrainingReportAI(ctx, data, mode)
+		comment, err = uc.generateTrainingReportComment(ctx, data, mode)
 		if err != nil {
 			log.Warnf("training report AI failed job=%s: %v; fallback rule template", jobID, err)
-			html = RenderRuleTemplateHTML(data, brand, mode)
+			comment = RuleReportComment(data, data.TotalSubmits-data.PrevTotalSubmits)
 			_ = uc.updateJob(ctx, jobID, func(j *TrainingReportJob) {
 				j.Message = "AI 不可用，已用规则模板"
 			})
 		}
 	} else {
-		html = RenderRuleTemplateHTML(data, brand, mode)
+		comment = RuleReportComment(data, data.TotalSubmits-data.PrevTotalSubmits)
 	}
-	html = stripCodeFence(html)
-	if strings.TrimSpace(html) == "" {
+	attachmentHTML, _ := RenderTrainingReportVariants(data, brand, comment, mode)
+	attachmentHTML = stripCodeFence(attachmentHTML)
+	if strings.TrimSpace(attachmentHTML) == "" {
 		uc.failJob(ctx, jobID, "报告内容为空")
 		return
 	}
 
 	htmlPath := jobHTMLPath(jobID)
-	if err := os.WriteFile(htmlPath, []byte(html), 0o644); err != nil {
+	if err := os.WriteFile(htmlPath, []byte(attachmentHTML), 0o644); err != nil {
 		uc.failJob(ctx, jobID, "写入 HTML 失败: "+err.Error())
 		return
 	}
@@ -234,7 +235,7 @@ func (uc *SummaryUseCase) runTrainingReportJob(jobID string) {
 		job = fresh
 	}
 
-	if err := uc.notifyTrainingReportDone(ctx, data, job, html); err != nil {
+	if err := uc.notifyTrainingReportDone(ctx, data, job, comment, mode); err != nil {
 		log.Warnf("training report notify job=%s: %v", jobID, err)
 	}
 	log.Infof("training report done job=%s org=%d", jobID, job.OrgID)
@@ -254,9 +255,9 @@ func (uc *SummaryUseCase) failJob(_ context.Context, jobID, detail string) {
 	log.Errorf("training report failed job=%s: %s", jobID, detail)
 }
 
-func (uc *SummaryUseCase) generateTrainingReportAI(ctx context.Context, data *TrainingReportData, mode string) (string, error) {
+func (uc *SummaryUseCase) generateTrainingReportComment(ctx context.Context, data *TrainingReportData, mode string) (AIReportComment, error) {
 	if uc.chat == nil {
-		return "", fmt.Errorf("chat 未初始化")
+		return AIReportComment{}, fmt.Errorf("chat 未初始化")
 	}
 	// 预置 JSON 已含全量统计：LLM 只输出评价文案参数，数字由模板渲染（防幻觉/格式乱）
 	msgs := []agent.Message{
@@ -266,28 +267,36 @@ func (uc *SummaryUseCase) generateTrainingReportAI(ctx context.Context, data *Tr
 
 	raw, err := uc.chat.Complete(ctx, msgs)
 	if err != nil {
-		return "", err
+		return AIReportComment{}, err
 	}
 	comment, cerr := ParseAIReportComment(raw)
 	if cerr == nil {
-		return RenderTemplateHTMLWithComment(data, uc.brandTitle(ctx), comment, mode), nil
+		return comment, nil
 	}
 	log.Warnf("training report AI output invalid: %v; retry strict", cerr)
 
 	// 严格重试：强调只输出 JSON
 	retryMsgs := append(msgs, agent.Message{
 		Role:    "user",
-		Content: "【重试】上次输出无法解析（" + cerr.Error() + "）。只输出 JSON 对象 {\"headline\":\"...\",\"highlights\":[],\"issues\":[],\"suggestions\":[]}，不要任何其它文字。",
+		Content: "【重试】上次输出无法解析（" + cerr.Error() + "）。只输出 JSON 对象 {\"headline\":\"...\",\"trendChanges\":[],\"highlights\":[],\"issues\":[],\"dimensionAnalysis\":[],\"suggestions\":[]}，不要任何其它文字。",
 	})
 	raw2, err2 := uc.chat.Complete(ctx, retryMsgs)
 	if err2 != nil {
-		return "", fmt.Errorf("AI 重试失败: %w（首次校验: %v）", err2, cerr)
+		return AIReportComment{}, fmt.Errorf("AI 重试失败: %w（首次校验: %v）", err2, cerr)
 	}
 	comment2, cerr2 := ParseAIReportComment(raw2)
 	if cerr2 != nil {
-		return "", fmt.Errorf("AI 输出校验失败: %v；重试仍失败: %v", cerr, cerr2)
+		return AIReportComment{}, fmt.Errorf("AI 输出校验失败: %v；重试仍失败: %v", cerr, cerr2)
 	}
-	return RenderTemplateHTMLWithComment(data, uc.brandTitle(ctx), comment2, mode), nil
+	return comment2, nil
+}
+
+func (uc *SummaryUseCase) generateTrainingReportAI(ctx context.Context, data *TrainingReportData, mode string) (string, error) {
+	comment, err := uc.generateTrainingReportComment(ctx, data, mode)
+	if err != nil {
+		return "", err
+	}
+	return RenderTemplateHTMLWithComment(data, uc.brandTitle(ctx), comment, mode), nil
 }
 
 // BuildNotifyEmail 纯函数：构造通知邮件主题/正文/附件名（可单测，不依赖 SMTP）。
@@ -312,7 +321,7 @@ func BuildNotifyEmail(job *TrainingReportJob, brand, htmlDoc string) (subject, b
 		expStr = time.Unix(expiresAt, 0).Format("2006-01-02 15:04")
 	}
 	footer := fmt.Sprintf(
-		`<div style="padding:12px 16px;font-size:12px;color:%s;border-top:1px solid %s;background:%s;">任务 %s · 下载有效期至 %s（24 小时）· 产物为 HTML 报告（邮件正文与附件均为同一份）</div>`,
+		`<div style="padding:12px 16px;font-size:12px;color:%s;border-top:1px solid %s;background:%s;">任务 %s · 下载有效期至 %s（24 小时）· 附件为完整 HTML 报告</div>`,
 		mail.ColorMutedFg, mail.ColorBorder, mail.ColorCard,
 		html.EscapeString(id), html.EscapeString(expStr),
 	)
@@ -338,7 +347,7 @@ func BuildNotifyEmail(job *TrainingReportJob, brand, htmlDoc string) (subject, b
 	return subject, body, attachName
 }
 
-func (uc *SummaryUseCase) notifyTrainingReportDone(ctx context.Context, data *TrainingReportData, job *TrainingReportJob, html string) error {
+func (uc *SummaryUseCase) notifyTrainingReportDone(ctx context.Context, data *TrainingReportData, job *TrainingReportJob, comment AIReportComment, detailMode string) error {
 	email := ""
 	if data != nil {
 		email = data.InitiatorEmail
@@ -350,7 +359,8 @@ func (uc *SummaryUseCase) notifyTrainingReportDone(ctx context.Context, data *Tr
 		return fmt.Errorf("发起人未绑定邮箱")
 	}
 	brand := uc.brandTitle(ctx)
-	subject, body, attachName := BuildNotifyEmail(job, brand, html)
+	_, emailHTML := RenderTrainingReportVariants(data, brand, comment, detailMode)
+	subject, body, attachName := BuildNotifyEmail(job, brand, emailHTML)
 
 	rt := uc.runtime(ctx)
 	sender := mail.NewSender(rt.SMTPConf())

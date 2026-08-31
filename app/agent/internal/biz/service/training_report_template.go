@@ -6,6 +6,13 @@ import (
 	"strings"
 )
 
+type ReportRenderMode string
+
+const (
+	ReportRenderAttachment ReportRenderMode = "attachment"
+	ReportRenderEmail      ReportRenderMode = "email"
+)
+
 // RenderRuleTemplateHTML 非 AI：规则文案参数 + 统一模板。
 // mode: full | compact
 func RenderRuleTemplateHTML(data *TrainingReportData, brand string, mode ...string) string {
@@ -13,7 +20,7 @@ func RenderRuleTemplateHTML(data *TrainingReportData, brand string, mode ...stri
 		return ""
 	}
 	delta := data.TotalSubmits - data.PrevTotalSubmits
-	return renderTemplateHTML(data, brand, mode, RuleReportComment(data, delta))
+	return renderTemplateHTML(data, brand, mode, RuleReportComment(data, delta), ReportRenderAttachment)
 }
 
 // RenderTemplateHTMLWithComment AI 模式：LLM 文案参数 + 统一模板。
@@ -22,10 +29,15 @@ func RenderTemplateHTMLWithComment(data *TrainingReportData, brand string, comme
 	if data == nil {
 		return ""
 	}
-	return renderTemplateHTML(data, brand, mode, comment)
+	return renderTemplateHTML(data, brand, mode, comment, ReportRenderAttachment)
 }
 
-func renderTemplateHTML(data *TrainingReportData, brand string, mode []string, comment AIReportComment) string {
+func RenderTrainingReportVariants(data *TrainingReportData, brand string, comment AIReportComment, detailMode string) (attachment, email string) {
+	mode := []string{detailMode}
+	return renderTemplateHTML(data, brand, mode, comment, ReportRenderAttachment), renderTemplateHTML(data, brand, mode, comment, ReportRenderEmail)
+}
+
+func renderTemplateHTML(data *TrainingReportData, brand string, mode []string, comment AIReportComment, renderMode ReportRenderMode) string {
 	if brand == "" {
 		brand = "GoAlgo"
 	}
@@ -121,7 +133,11 @@ func renderTemplateHTML(data *TrainingReportData, brand string, mode []string, c
 			}
 			acSeries = append(acSeries, ac)
 		}
-		b.WriteString(EmailBarChart(labels, [][]int64{subSeries, acSeries}, []string{"提交", "AC"}, []string{"#171717", "#f97316"}))
+		if renderMode == ReportRenderEmail {
+			b.WriteString(EmailBarChart(labels, [][]int64{subSeries, acSeries}, []string{"提交", "AC"}, []string{"#171717", "#f97316"}))
+		} else {
+			b.WriteString(LineChartSVG(labels, [][]int64{subSeries, acSeries}, []string{"提交", "AC"}, []string{"#171717", "#f97316"}))
+		}
 	}
 	sectionEnd(&b)
 

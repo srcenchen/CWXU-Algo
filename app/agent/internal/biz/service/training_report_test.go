@@ -427,7 +427,7 @@ func TestNonAI_EndToEndInProcess(t *testing.T) {
 		t.Fatal("expected expire error")
 	}
 	fresh.ExpiresAt = expires.Unix()
-	err = uc.notifyTrainingReportDone(ctx, data, fresh, html)
+	err = uc.notifyTrainingReportDone(ctx, data, fresh, RuleReportComment(data, data.TotalSubmits-data.PrevTotalSubmits), DetailModeFull)
 	if err == nil {
 		t.Log("SMTP configured; notify ok")
 	} else if !strings.Contains(err.Error(), "SMTP") && !strings.Contains(err.Error(), "邮箱") {
@@ -575,7 +575,7 @@ func TestCompleteJobThenNotify_Snapshot(t *testing.T) {
 	if name != fileName {
 		t.Fatalf("name %s want %s", name, fileName)
 	}
-	err = uc.notifyTrainingReportDone(ctx, data, fresh, html)
+	err = uc.notifyTrainingReportDone(ctx, data, fresh, RuleReportComment(data, data.TotalSubmits-data.PrevTotalSubmits), DetailModeFull)
 	if err == nil {
 		t.Log("SMTP configured; notify ok")
 	} else if !strings.Contains(err.Error(), "SMTP") && !strings.Contains(err.Error(), "邮箱") {
@@ -818,7 +818,7 @@ func TestRenderRuleTemplate_TrendUsesChartOnly(t *testing.T) {
 
 func TestTrainingReportPrompts_Dimensions(t *testing.T) {
 	sys := trainingReportSystemPrompt(DetailModeFull)
-	for _, s := range []string{"activeRanking", "禁止", "HTML", "teamTags", "快速直接完成", "不做冗长推理"} {
+	for _, s := range []string{"activeRanking", "禁止", "HTML", "teamTags", "快速直接完成", "不做冗长推理", "trendChanges", "dimensionAnalysis", "总体判断", "趋势变化", "分维度分析", "可执行建议"} {
 		if !strings.Contains(sys, s) {
 			t.Fatalf("system prompt missing %q", s)
 		}
