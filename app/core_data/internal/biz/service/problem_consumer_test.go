@@ -20,6 +20,18 @@ func TestProblemFetchConsumerEarlyPauseIgnoresMessagePlatform(t *testing.T) {
 	}
 }
 
+func TestProblemAnalyzeCoordinationErrorsAreRetryable(t *testing.T) {
+	for _, message := range []string{
+		"profile invalidation intent changed",
+		"profile invalidation already in progress",
+		"profile invalidation ownership changed",
+	} {
+		if !isProblemAnalyzeCoordinationError(errors.New(message)) {
+			t.Fatalf("%q should be treated as an indefinitely retryable coordination error", message)
+		}
+	}
+}
+
 func TestProblemFetchConsumerPauseHonorsExplicitBypass(t *testing.T) {
 	wasPaused := pipelineControl.IsFetchPaused()
 	pipelineControl.SetFetchPaused(true)

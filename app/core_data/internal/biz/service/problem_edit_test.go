@@ -278,6 +278,41 @@ func TestApplyProblemTagsUsesGlobalFenceButPublishesOnlyCanonicalACUsers(t *test
 	}
 }
 
+func TestApplyAIAnalysisResultIgnoresProfileInvalidationIntent(t *testing.T) {
+	db := problemFactsTestDB(t)
+	p := model.Problem{Platform: "LuoGu", ExternalID: "P5034", Title: "果冻", Status: model.ProblemStatusTagging}
+	if err := db.Create(&p).Error; err != nil {
+		t.Fatal(err)
+	}
+	_, rdb := profileTestRedis(t)
+	ctx := context.Background()
+	if err := rdb.Set(ctx, profileGlobalGenerationKey, "1", time.Hour).Err(); err != nil {
+		t.Fatal(err)
+	}
+	if err := rdb.Set(ctx, profileGlobalGenerationKey+":current_intent", "another-intent", time.Hour).Err(); err != nil {
+		t.Fatal(err)
+	}
+	uc := &ProblemUseCase{data: &data.Data{DB: db, RDB: rdb}}
+	updates := map[string]interface{}{
+		"tags":           model.StringArray{"树形结构", "贪心"},
+		"solutions_meta": model.SolutionsMeta{{Name: "贪心", BriefExplanation: "按时间顺序选择最优操作"}},
+		"status":         model.ProblemStatusCompleted,
+		"error_msg":      "",
+		"analyzed_at":    time.Now(),
+		"analyzed_model": "deepseek-v4-flash",
+	}
+	if err := uc.applyAIAnalysisResult(ctx, &p, updates, []string{"树形结构", "贪心"}); err != nil {
+		t.Fatalf("AI result should not depend on profile invalidation: %v", err)
+	}
+	var after model.Problem
+	if err := db.First(&after, p.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if after.Status != model.ProblemStatusCompleted || len(after.Tags) != 2 || len(after.SolutionsMeta) != 1 || after.AnalyzedAt.IsZero() {
+		t.Fatalf("AI result was not committed: %+v", after)
+	}
+}
+
 func TestProblemFactsCommitResponseAmbiguityDoesNotCancelCommittedIntent(t *testing.T) {
 	db := problemFactsTestDB(t)
 	p := model.Problem{Platform: "Codeforces", ExternalID: "ambiguous", Title: "A", Tags: model.StringArray{"old"}}

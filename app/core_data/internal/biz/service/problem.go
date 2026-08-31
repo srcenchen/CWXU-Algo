@@ -1623,14 +1623,57 @@ func (uc *ProblemUseCase) ProcessAnalyze(ctx context.Context, ev event.ProblemAn
 			updates["title"] = "#" + p.ExternalID
 		}
 	}
-	tagsChanged := !sameNormalizedTags([]string(p.Tags), result.AlgorithmTags)
-	difficultyChanged := strings.TrimSpace(p.Difficulty) != strings.TrimSpace(result.Difficulty)
-	if err := uc.applyProblemFactUpdates(ctx, &p, updates, result.AlgorithmTags, tagsChanged, difficultyChanged); err != nil {
+	if err := uc.applyAIAnalysisResult(ctx, &p, updates, result.AlgorithmTags); err != nil {
 		return err
 	}
 	uc.BumpProblemDetailVer(p.ID)
+	uc.BumpProblemTagsVer()
+	uc.BumpProblemListVer()
+	uc.enqueueAIProfileRefresh(p.ID)
 	uc.progressMoveStatus(oldStatus, model.ProblemStatusCompleted)
 	return nil
+}
+
+// enqueueAIProfileRefresh is derived work. It runs after the problem result is
+// committed and is intentionally best-effort so profile cache coordination
+// can never roll back or hide authoritative AI facts.
+func (uc *ProblemUseCase) enqueueAIProfileRefresh(problemID uint) {
+	if uc == nil || uc.data == nil || uc.data.DB == nil || uc.profileTask == nil || problemID == 0 {
+		return
+	}
+	users, err := dal.ListUsersACProblem(context.Background(), uc.data.DB, problemID)
+	if err != nil {
+		log.Warnf("AI profile refresh users problem=%d: %v", problemID, err)
+		return
+	}
+	for _, userID := range users {
+		result := uc.profileTask.DoForce(userID)
+		if result.Failed {
+			log.Warnf("AI profile refresh enqueue problem=%d user=%d failed", problemID, userID)
+		}
+	}
+}
+
+// applyAIAnalysisResult persists the AI result independently of user-profile
+// cache maintenance. Profile rebuilds are derived work and must never prevent
+// the authoritative problem tags and solutions from being committed.
+func (uc *ProblemUseCase) applyAIAnalysisResult(ctx context.Context, p *model.Problem, updates map[string]interface{}, tags []string) error {
+	if uc == nil || uc.data == nil || uc.data.DB == nil || p == nil || p.ID == 0 {
+		return fmt.Errorf("invalid AI analysis result")
+	}
+	return uc.data.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		res := tx.Model(&model.Problem{}).Where("id = ?", p.ID).Updates(updates)
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected != 1 {
+			return fmt.Errorf("AI analysis: expected one problem row, updated %d", res.RowsAffected)
+		}
+		if _, _, err := dal.SyncProblemTags(ctx, tx, p.ID, tags); err != nil {
+			return err
+		}
+		return nil
+	})
 }
 
 // backfillWindow 历史回填 / AI 分析仅处理最近 N 个月有提交的题

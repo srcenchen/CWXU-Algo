@@ -146,6 +146,18 @@ func requeueWithRetry(mq *event.RabbitMQ, queue string, d amqp.Delivery, max int
 	_ = d.Ack(false)
 }
 
+// profile invalidation conflicts are coordination races, not analysis failures.
+// They must remain retryable until the durable maintenance owner is available.
+func isProblemAnalyzeCoordinationError(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := err.Error()
+	return strings.Contains(message, "profile invalidation intent changed") ||
+		strings.Contains(message, "profile invalidation already in progress") ||
+		strings.Contains(message, "profile invalidation ownership changed")
+}
+
 // retryBackoff 第 n 次重试前的等待（指数退避，封顶）
 func retryBackoff(n int) time.Duration {
 	if n <= 0 {
@@ -435,6 +447,12 @@ func (c *ProblemAnalyzeConsumer) consumeOnce(concurrency int, concurrencySource 
 				if err != nil {
 					if strings.Contains(err.Error(), "paused") {
 						log.Warnf("RabbitMQ(problem_analyze) id=%d requeue paused: %v", msg.ProblemID, err)
+						sleepOrStop(c.stopCh, pipelineRequeueDelay)
+						_ = d.Nack(false, true)
+						return
+					}
+					if isProblemAnalyzeCoordinationError(err) {
+						log.Warnf("RabbitMQ(problem_analyze) id=%d requeue coordination conflict: %v", msg.ProblemID, err)
 						sleepOrStop(c.stopCh, pipelineRequeueDelay)
 						_ = d.Nack(false, true)
 						return
