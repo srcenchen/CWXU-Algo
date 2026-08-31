@@ -67,10 +67,5 @@ func Get(url string) (*http.Response, error) {
 		return nil, err
 	}
 	EnsureHeaders(req)
-	return Client.Do(req)
-}
-
-func Do(req *http.Request) (*http.Response, error) {
-	EnsureHeaders(req)
-	return Client.Do(req)
+	return Do(req)
 }

@@ -371,7 +371,7 @@ func (lg *NewLuoGu) fetchSubmitLogComplete(ctx context.Context, userId int64, us
 	}
 	baseUrl := lg.recordListBaseURL(uid)
 	req, _ := http.NewRequestWithContext(ctx, "GET", baseUrl+"1", nil)
-	resp, err := client.Do(req)
+	resp, err := ojhttp.Do(req)
 	if err != nil {
 		return nil, false, err
 	}
@@ -506,7 +506,7 @@ func (lg *NewLuoGu) FetchRating(username string) (int, bool, error) {
 	req.Header.Set("User-Agent", "Mozilla/5.0 (compatible; GoAlgoSpider/1.0)")
 	req.Header.Set("X-Requested-With", "XMLHttpRequest")
 	req.Header.Set("Accept", "application/json")
-	resp, err := client.Do(req)
+	resp, err := ojhttp.Do(req)
 	if err != nil {
 		return 0, false, fmt.Errorf("luogu user info 请求失败: %w", err)
 	}

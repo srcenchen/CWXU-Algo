@@ -1406,7 +1406,17 @@ func (s SpiderService) TogglePlatform(ctx context.Context, req *spider.TogglePla
 		if !auth.HasPerm(ctx, rbac.PermSiteSpiderOps) {
 			return &spider.TogglePlatformRes{Code: 1, Message: "需要爬虫运维权限"}, nil
 		}
-		if err := task.SetProxyEnabled(s.rdb, strings.TrimSpace(req.GetPlatform()), req.GetEnabled()); err != nil {
+		plat := calspider.NormalizePlatform(strings.TrimSpace(req.GetPlatform()))
+		if _, ok := spiderregistry.Get(plat); !ok {
+			return &spider.TogglePlatformRes{Code: 1, Message: "不支持的平台: " + plat}, nil
+		}
+		if req.GetEnabled() {
+			rt := sitesettings.Load(ctx, s.rdb, nil)
+			if rt == nil || strings.TrimSpace(rt.OjProxyBaseURL) == "" || strings.TrimSpace(rt.OjProxySecret) == "" {
+				return &spider.TogglePlatformRes{Code: 1, Message: "请先在站点设置中配置代理地址和密钥"}, nil
+			}
+		}
+		if err := task.SetProxyEnabled(s.rdb, plat, req.GetEnabled()); err != nil {
 			return &spider.TogglePlatformRes{Code: 1, Message: "操作失败"}, nil
 		}
 		return &spider.TogglePlatformRes{Code: 0, Message: "代理设置已更新"}, nil

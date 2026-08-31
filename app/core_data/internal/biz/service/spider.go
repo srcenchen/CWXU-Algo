@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"cwxu-algo/app/common/sitesettings"
+	"cwxu-algo/app/common/utils/ojhttp"
 	"cwxu-algo/app/core_data/internal/data"
 	"cwxu-algo/app/core_data/internal/data/dal"
 	"cwxu-algo/app/core_data/internal/data/model"
@@ -1018,6 +1019,13 @@ func (uc *SpiderUseCase) injectOjCredentials(ctx context.Context) {
 		return
 	}
 	rt := sitesettings.Load(ctx, uc.data.RDB, nil)
+	ojhttp.SetProxyConfig(ojhttp.ProxyConfig{
+		BaseURL: rt.OjProxyBaseURL,
+		Secret:  rt.OjProxySecret,
+		Enabled: func(host string) bool {
+			return task.IsProxyEnabled(uc.data.RDB, platformForHost(host))
+		},
+	})
 	var luoguSetter, qojSetter interface{ SetCredentials(string, string) }
 	if p, ok := spider.Get(spider.LuoGu); ok {
 		if setter, ok := p.(interface{ SetCredentials(string, string) }); ok {
@@ -1030,6 +1038,32 @@ func (uc *SpiderUseCase) injectOjCredentials(ctx context.Context) {
 		}
 	}
 	applyOjCredentials(rt, luoguSetter, qojSetter)
+}
+
+func platformForHost(host string) string {
+	host = strings.ToLower(strings.TrimSpace(host))
+	switch {
+	case strings.Contains(host, "codeforces"):
+		return spider.CodeForces
+	case strings.Contains(host, "luogu"):
+		return spider.LuoGu
+	case strings.Contains(host, "nowcoder"):
+		return spider.NowCoder
+	case strings.Contains(host, "atcoder"):
+		return spider.AtCoder
+	case strings.Contains(host, "leetcode"):
+		return spider.LeetCode
+	case strings.Contains(host, "qoj"):
+		return spider.QOJ
+	case strings.Contains(host, "loj"):
+		return spider.LOJ
+	case strings.Contains(host, "uoj"):
+		return spider.UOJ
+	case strings.Contains(host, "poj"):
+		return spider.POJ
+	default:
+		return ""
+	}
 }
 
 func applyOjCredentials(rt *sitesettings.Runtime, luogu, qoj interface{ SetCredentials(string, string) }) {
@@ -1064,10 +1098,10 @@ func (uc *SpiderUseCase) hasProfileRebuildAfterBindingMarker(userID int64, platf
 
 // loadOnePlatform 返回 (是否有数据变更, error)
 func (uc *SpiderUseCase) loadOnePlatform(ctx context.Context, userId int64, plat model.Platform, needAll bool) (bool, error) {
+	uc.injectOjCredentials(ctx)
 	// Rating 是平台公开基础数据，独立于提交记录同步、题面抓取和站点
 	// 登录账号；先执行，后续提交链路失败也不能影响 Rating 更新。
 	uc.fetchAndSaveRating(plat)
-	uc.injectOjCredentials(ctx)
 	var repairRequired bool
 	if plat.Platform == spider.QOJ {
 		var err error
