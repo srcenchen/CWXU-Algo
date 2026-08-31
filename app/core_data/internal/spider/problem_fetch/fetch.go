@@ -738,7 +738,11 @@ func fetchLuoGu(externalID, problemURL string) (*FetchedContent, error) {
 			Problem struct {
 				Name    string `json:"name"`
 				Contenu struct {
+					Background  string `json:"background"`
 					Description string `json:"description"`
+					FormatI     string `json:"formatI"`
+					FormatO     string `json:"formatO"`
+					Hint        string `json:"hint"`
 				} `json:"contenu"`
 			} `json:"problem"`
 		} `json:"data"`
@@ -751,7 +755,8 @@ func fetchLuoGu(externalID, problemURL string) (*FetchedContent, error) {
 	}
 	if contextJSON != "" && json.Unmarshal([]byte(contextJSON), &contextContent) == nil {
 		name := strings.TrimSpace(contextContent.Data.Problem.Name)
-		description := cleanLuoGuStatement(contextContent.Data.Problem.Contenu.Description)
+		content := contextContent.Data.Problem.Contenu
+		description := formatLuoGuStatement(content.Background, content.Description, content.FormatI, content.FormatO, content.Hint)
 		if description != "" {
 			return &FetchedContent{Title: name, ContentMD: description}, nil
 		}
@@ -770,6 +775,20 @@ func fetchLuoGu(externalID, problemURL string) (*FetchedContent, error) {
 		return nil, fmt.Errorf("洛谷题面内容为空")
 	}
 	return &FetchedContent{Title: title, ContentMD: cleanLuoGuStatement(content)}, nil
+}
+
+func formatLuoGuStatement(background, description, input, output, hint string) string {
+	parts := make([]string, 0, 5)
+	for _, part := range []struct{ title, body string }{
+		{"题目背景", background}, {"题目描述", description}, {"输入格式", input},
+		{"输出格式", output}, {"说明/提示", hint},
+	} {
+		body := cleanLuoGuStatement(part.body)
+		if body != "" {
+			parts = append(parts, "## "+part.title+"\n\n"+body)
+		}
+	}
+	return collapseBlankLines(strings.Join(parts, "\n\n"))
 }
 
 // cleanLuoGuStatement removes the browser-only shell that can be returned by
