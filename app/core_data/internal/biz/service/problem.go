@@ -1480,19 +1480,11 @@ func (uc *ProblemUseCase) ProcessAnalyze(ctx context.Context, ev event.ProblemAn
 	if err := uc.data.DB.First(&p, ev.ProblemID).Error; err != nil {
 		return err
 	}
-	if !ev.Force {
+	// AI analysis never enters profile-maintenance recovery. A stale
+	// maintenance intent is derived work and must not block the authoritative
+	// problem analysis. The maintenance scanner handles it independently.
+	if !ev.Force && p.Status == model.ProblemStatusCompleted {
 		dirtyTags, dirtyDifficulty := problemFactsDirtyFlags(p.ErrorMsg)
-		pending, pendingErr := loadAbilityMaintenancePending(ctx, uc.data.DB, problemMaintenanceScope(p.ID))
-		if pendingErr != nil {
-			return pendingErr
-		}
-		if pending != nil {
-			if err := uc.recoverProblemMaintenance(ctx, pending); err != nil {
-				return err
-			}
-			uc.BumpProblemDetailVer(p.ID)
-			return nil
-		}
 		if dirtyTags || dirtyDifficulty {
 			updates := map[string]interface{}{"status": model.ProblemStatusCompleted, "error_msg": ""}
 			if err := uc.applyProblemFactUpdates(ctx, &p, updates, []string(p.Tags), dirtyTags, dirtyDifficulty); err != nil {
