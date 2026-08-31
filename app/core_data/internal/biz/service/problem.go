@@ -1284,11 +1284,21 @@ func (uc *ProblemUseCase) PrepareUserReanalyze(problemID, actorUID uint) (int, e
 			_ = uc.data.RDB.Expire(context.Background(), monthKey, aiAnalyzeMonthKeyTTL()).Err()
 		}
 	}
+	previousStatus, previousError := p.Status, p.ErrorMsg
 	if err := uc.data.DB.Model(&p).Updates(map[string]interface{}{"status": model.ProblemStatusTagging, "error_msg": ""}).Error; err != nil {
 		return 0, err
 	}
 	body, _ := json.Marshal(event.ProblemAnalyzeEvent{ProblemID: problemID, Force: true})
-	uc.mq.PublishAsync("", "problem_analyze", false, false, amqp.Publishing{ContentType: "application/json", Body: body, DeliveryMode: amqp.Persistent, Priority: mqPriorityUser})
+	if err := uc.mq.Publish("", "problem_analyze", false, false, amqp.Publishing{
+		ContentType: "application/json", Body: body, DeliveryMode: amqp.Persistent, Priority: mqPriorityUser,
+	}); err != nil {
+		// Do not report a successful re-analysis when RabbitMQ did not confirm
+		// the message. Restore the previous state so the problem can be retried.
+		_ = uc.data.DB.Model(&p).Updates(map[string]interface{}{
+			"status": previousStatus, "error_msg": previousError,
+		}).Error
+		return 0, fmt.Errorf("重新分析入队失败: %w", err)
+	}
 	return maxInt(0, int(q.GetQuotaPerMonth())-int(used)), nil
 }
 
@@ -2777,15 +2787,19 @@ type ProgressSnapshot struct {
 		Status string
 		Count  int64
 	}
-	Failed        []model.Problem
-	FailedPerm    []model.Problem
-	InProgress    []model.Problem
-	Total         int64
-	Paused        bool // AI 暂停（兼容）
-	FetchPaused   bool
-	AnalyzePaused bool
-	ActiveJobs    []ActiveJob
-	Queues        []struct {
+	Failed          []model.Problem
+	FailedPerm      []model.Problem
+	FailedTotal     int64
+	FailedPermTotal int64
+	FailedPage      int64
+	FailedPageSize  int64
+	InProgress      []model.Problem
+	Total           int64
+	Paused          bool // AI 暂停（兼容）
+	FetchPaused     bool
+	AnalyzePaused   bool
+	ActiveJobs      []ActiveJob
+	Queues          []struct {
 		Name        string
 		Messages    int64
 		Consumers   int64
@@ -2796,10 +2810,20 @@ type ProgressSnapshot struct {
 const progressSnapshotCacheKey = "problem:progress:snapshot:v1"
 const progressSnapshotCacheTTL = 15 * time.Second
 
-func (uc *ProblemUseCase) Progress() (ProgressSnapshot, error) {
+func (uc *ProblemUseCase) Progress(page, pageSize int64) (ProgressSnapshot, error) {
+	if page <= 0 {
+		page = 1
+	}
+	if pageSize <= 0 {
+		pageSize = 20
+	}
+	if pageSize > 100 {
+		pageSize = 100
+	}
 	// 短缓存：管理端轮询 + 并发打开时避免反复 EXISTS(submit_logs) 扫表
 	if uc.data != nil && uc.data.RDB != nil {
-		if b, err := uc.data.RDB.Get(context.Background(), progressSnapshotCacheKey).Bytes(); err == nil && len(b) > 0 {
+		cacheKey := fmt.Sprintf("%s:p%d:s%d", progressSnapshotCacheKey, page, pageSize)
+		if b, err := uc.data.RDB.Get(context.Background(), cacheKey).Bytes(); err == nil && len(b) > 0 {
 			var cached ProgressSnapshot
 			if json.Unmarshal(b, &cached) == nil {
 				// 暂停态 / 活跃任务以进程内为准（秒级变化，不宜吃 15s 旧缓存）
@@ -2869,12 +2893,14 @@ func (uc *ProblemUseCase) Progress() (ProgressSnapshot, error) {
 		}{r.Status, r.Count})
 		snap.Total += r.Count
 	}
-	_ = uc.data.DB.Where("status = ?", model.ProblemStatusFailed).
-		Where(recentClause, recentArgs...).
-		Order("updated_at desc").Limit(20).Find(&snap.Failed).Error
-	_ = uc.data.DB.Where("status = ?", model.ProblemStatusFailedPerm).
-		Where(recentClause, recentArgs...).
-		Order("updated_at desc").Limit(50).Find(&snap.FailedPerm).Error
+	failedQuery := uc.data.DB.Model(&model.Problem{}).Where("status = ?", model.ProblemStatusFailed).Where(recentClause, recentArgs...)
+	permQuery := uc.data.DB.Model(&model.Problem{}).Where("status = ?", model.ProblemStatusFailedPerm).Where(recentClause, recentArgs...)
+	_ = failedQuery.Count(&snap.FailedTotal).Error
+	_ = permQuery.Count(&snap.FailedPermTotal).Error
+	offset := (page - 1) * pageSize
+	_ = failedQuery.Order("updated_at desc, id desc").Offset(int(offset)).Limit(int(pageSize)).Find(&snap.Failed).Error
+	_ = permQuery.Order("updated_at desc, id desc").Offset(int(offset)).Limit(int(pageSize)).Find(&snap.FailedPerm).Error
+	snap.FailedPage, snap.FailedPageSize = page, pageSize
 	// 爬取中全量；待分析仅近 6 个月（submit_logs）
 	_ = uc.data.DB.Where(
 		"(status = ?) OR (status = ? AND "+recentClause+")",
@@ -2892,7 +2918,8 @@ func (uc *ProblemUseCase) Progress() (ProgressSnapshot, error) {
 		toStore := snap
 		toStore.ActiveJobs = nil
 		if b, err := json.Marshal(toStore); err == nil {
-			_ = uc.data.RDB.Set(context.Background(), progressSnapshotCacheKey, b, progressSnapshotCacheTTL).Err()
+			cacheKey := fmt.Sprintf("%s:p%d:s%d", progressSnapshotCacheKey, page, pageSize)
+			_ = uc.data.RDB.Set(context.Background(), cacheKey, b, progressSnapshotCacheTTL).Err()
 		}
 	}
 	return snap, nil

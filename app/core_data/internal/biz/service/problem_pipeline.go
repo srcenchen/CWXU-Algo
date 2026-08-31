@@ -2,6 +2,7 @@ package service
 
 import (
 	"fmt"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -86,5 +87,14 @@ func (p *PipelineControl) SnapshotActive() []ActiveJob {
 			out = append(out, *j)
 		}
 	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].StartedAt.Equal(out[j].StartedAt) {
+			if out[i].Stage == out[j].Stage {
+				return out[i].ProblemID < out[j].ProblemID
+			}
+			return out[i].Stage < out[j].Stage
+		}
+		return out[i].StartedAt.Before(out[j].StartedAt)
+	})
 	return out
 }

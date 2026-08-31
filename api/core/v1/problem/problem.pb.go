@@ -2147,9 +2147,11 @@ func (x *UserProfileRes) GetTagStats() []*TagScore {
 }
 
 type ProgressReq struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	FailedPage     int64                  `protobuf:"varint,1,opt,name=failed_page,json=failedPage,proto3" json:"failed_page,omitempty"`
+	FailedPageSize int64                  `protobuf:"varint,2,opt,name=failed_page_size,json=failedPageSize,proto3" json:"failed_page_size,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *ProgressReq) Reset() {
@@ -2180,6 +2182,20 @@ func (x *ProgressReq) ProtoReflect() protoreflect.Message {
 // Deprecated: Use ProgressReq.ProtoReflect.Descriptor instead.
 func (*ProgressReq) Descriptor() ([]byte, []int) {
 	return file_core_v1_problem_problem_proto_rawDescGZIP(), []int{29}
+}
+
+func (x *ProgressReq) GetFailedPage() int64 {
+	if x != nil {
+		return x.FailedPage
+	}
+	return 0
+}
+
+func (x *ProgressReq) GetFailedPageSize() int64 {
+	if x != nil {
+		return x.FailedPageSize
+	}
+	return 0
 }
 
 type ProgressItem struct {
@@ -2487,21 +2503,25 @@ func (x *QueueStatus) GetConcurrency() int64 {
 }
 
 type ProgressRes struct {
-	state            protoimpl.MessageState `protogen:"open.v1"`
-	Code             int64                  `protobuf:"varint,1,opt,name=code,proto3" json:"code,omitempty"`
-	Message          string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
-	Items            []*ProgressItem        `protobuf:"bytes,3,rep,name=items,proto3" json:"items,omitempty"`
-	RecentFailed     []*FailedProblem       `protobuf:"bytes,4,rep,name=recent_failed,json=recentFailed,proto3" json:"recent_failed,omitempty"`
-	Total            int64                  `protobuf:"varint,5,opt,name=total,proto3" json:"total,omitempty"`
-	Paused           bool                   `protobuf:"varint,6,opt,name=paused,proto3" json:"paused,omitempty"` // AI 暂停（兼容）
-	ActiveJobs       []*ActiveJob           `protobuf:"bytes,7,rep,name=active_jobs,json=activeJobs,proto3" json:"active_jobs,omitempty"`
-	Queues           []*QueueStatus         `protobuf:"bytes,8,rep,name=queues,proto3" json:"queues,omitempty"`
-	InProgress       []*FailedProblem       `protobuf:"bytes,9,rep,name=in_progress,json=inProgress,proto3" json:"in_progress,omitempty"` // DB 中 FETCHING/TAGGING
-	FetchPaused      bool                   `protobuf:"varint,10,opt,name=fetch_paused,json=fetchPaused,proto3" json:"fetch_paused,omitempty"`
-	AnalyzePaused    bool                   `protobuf:"varint,11,opt,name=analyze_paused,json=analyzePaused,proto3" json:"analyze_paused,omitempty"`
-	RecentFailedPerm []*FailedProblem       `protobuf:"bytes,12,rep,name=recent_failed_perm,json=recentFailedPerm,proto3" json:"recent_failed_perm,omitempty"` // 永久失败，可点进详情
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	state                 protoimpl.MessageState `protogen:"open.v1"`
+	Code                  int64                  `protobuf:"varint,1,opt,name=code,proto3" json:"code,omitempty"`
+	Message               string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	Items                 []*ProgressItem        `protobuf:"bytes,3,rep,name=items,proto3" json:"items,omitempty"`
+	RecentFailed          []*FailedProblem       `protobuf:"bytes,4,rep,name=recent_failed,json=recentFailed,proto3" json:"recent_failed,omitempty"`
+	Total                 int64                  `protobuf:"varint,5,opt,name=total,proto3" json:"total,omitempty"`
+	Paused                bool                   `protobuf:"varint,6,opt,name=paused,proto3" json:"paused,omitempty"` // AI 暂停（兼容）
+	ActiveJobs            []*ActiveJob           `protobuf:"bytes,7,rep,name=active_jobs,json=activeJobs,proto3" json:"active_jobs,omitempty"`
+	Queues                []*QueueStatus         `protobuf:"bytes,8,rep,name=queues,proto3" json:"queues,omitempty"`
+	InProgress            []*FailedProblem       `protobuf:"bytes,9,rep,name=in_progress,json=inProgress,proto3" json:"in_progress,omitempty"` // DB 中 FETCHING/TAGGING
+	FetchPaused           bool                   `protobuf:"varint,10,opt,name=fetch_paused,json=fetchPaused,proto3" json:"fetch_paused,omitempty"`
+	AnalyzePaused         bool                   `protobuf:"varint,11,opt,name=analyze_paused,json=analyzePaused,proto3" json:"analyze_paused,omitempty"`
+	RecentFailedPerm      []*FailedProblem       `protobuf:"bytes,12,rep,name=recent_failed_perm,json=recentFailedPerm,proto3" json:"recent_failed_perm,omitempty"` // 永久失败，可点进详情
+	RecentFailedTotal     int64                  `protobuf:"varint,13,opt,name=recent_failed_total,json=recentFailedTotal,proto3" json:"recent_failed_total,omitempty"`
+	RecentFailedPermTotal int64                  `protobuf:"varint,14,opt,name=recent_failed_perm_total,json=recentFailedPermTotal,proto3" json:"recent_failed_perm_total,omitempty"`
+	FailedPage            int64                  `protobuf:"varint,15,opt,name=failed_page,json=failedPage,proto3" json:"failed_page,omitempty"`
+	FailedPageSize        int64                  `protobuf:"varint,16,opt,name=failed_page_size,json=failedPageSize,proto3" json:"failed_page_size,omitempty"`
+	unknownFields         protoimpl.UnknownFields
+	sizeCache             protoimpl.SizeCache
 }
 
 func (x *ProgressRes) Reset() {
@@ -2616,6 +2636,34 @@ func (x *ProgressRes) GetRecentFailedPerm() []*FailedProblem {
 		return x.RecentFailedPerm
 	}
 	return nil
+}
+
+func (x *ProgressRes) GetRecentFailedTotal() int64 {
+	if x != nil {
+		return x.RecentFailedTotal
+	}
+	return 0
+}
+
+func (x *ProgressRes) GetRecentFailedPermTotal() int64 {
+	if x != nil {
+		return x.RecentFailedPermTotal
+	}
+	return 0
+}
+
+func (x *ProgressRes) GetFailedPage() int64 {
+	if x != nil {
+		return x.FailedPage
+	}
+	return 0
+}
+
+func (x *ProgressRes) GetFailedPageSize() int64 {
+	if x != nil {
+		return x.FailedPageSize
+	}
+	return 0
 }
 
 type BackfillReq struct {
@@ -4906,8 +4954,11 @@ const file_core_v1_problem_problem_proto_rawDesc = "" +
 	"\tplatforms\x18\x04 \x03(\v2\x1f.api.core.v1.problem.NamedCountR\tplatforms\x12C\n" +
 	"\fdifficulties\x18\x05 \x03(\v2\x1f.api.core.v1.problem.NamedCountR\fdifficulties\x12\x19\n" +
 	"\btotal_ac\x18\x06 \x01(\x03R\atotalAc\x12:\n" +
-	"\ttag_stats\x18\a \x03(\v2\x1d.api.core.v1.problem.TagScoreR\btagStats\"\r\n" +
-	"\vProgressReq\"<\n" +
+	"\ttag_stats\x18\a \x03(\v2\x1d.api.core.v1.problem.TagScoreR\btagStats\"X\n" +
+	"\vProgressReq\x12\x1f\n" +
+	"\vfailed_page\x18\x01 \x01(\x03R\n" +
+	"failedPage\x12(\n" +
+	"\x10failed_page_size\x18\x02 \x01(\x03R\x0efailedPageSize\"<\n" +
 	"\fProgressItem\x12\x16\n" +
 	"\x06status\x18\x01 \x01(\tR\x06status\x12\x14\n" +
 	"\x05count\x18\x02 \x01(\x03R\x05count\"\xed\x01\n" +
@@ -4936,7 +4987,7 @@ const file_core_v1_problem_problem_proto_rawDesc = "" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1a\n" +
 	"\bmessages\x18\x02 \x01(\x03R\bmessages\x12\x1c\n" +
 	"\tconsumers\x18\x03 \x01(\x03R\tconsumers\x12 \n" +
-	"\vconcurrency\x18\x04 \x01(\x03R\vconcurrency\"\xc7\x04\n" +
+	"\vconcurrency\x18\x04 \x01(\x03R\vconcurrency\"\xfb\x05\n" +
 	"\vProgressRes\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\x03R\x04code\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x127\n" +
@@ -4952,7 +5003,12 @@ const file_core_v1_problem_problem_proto_rawDesc = "" +
 	"\ffetch_paused\x18\n" +
 	" \x01(\bR\vfetchPaused\x12%\n" +
 	"\x0eanalyze_paused\x18\v \x01(\bR\ranalyzePaused\x12P\n" +
-	"\x12recent_failed_perm\x18\f \x03(\v2\".api.core.v1.problem.FailedProblemR\x10recentFailedPerm\"#\n" +
+	"\x12recent_failed_perm\x18\f \x03(\v2\".api.core.v1.problem.FailedProblemR\x10recentFailedPerm\x12.\n" +
+	"\x13recent_failed_total\x18\r \x01(\x03R\x11recentFailedTotal\x127\n" +
+	"\x18recent_failed_perm_total\x18\x0e \x01(\x03R\x15recentFailedPermTotal\x12\x1f\n" +
+	"\vfailed_page\x18\x0f \x01(\x03R\n" +
+	"failedPage\x12(\n" +
+	"\x10failed_page_size\x18\x10 \x01(\x03R\x0efailedPageSize\"#\n" +
 	"\vBackfillReq\x12\x14\n" +
 	"\x05limit\x18\x01 \x01(\x03R\x05limit\"\xf3\x01\n" +
 	"\vBackfillRes\x12\x12\n" +

@@ -599,7 +599,11 @@ func (s *ProblemService) Progress(ctx context.Context, req *problem.ProgressReq)
 	if !auth.HasPerm(ctx, rbac.PermOrgReportView) {
 		return &problem.ProgressRes{Code: 1, Message: "权限不足"}, nil
 	}
-	snap, err := s.uc.Progress()
+	page, pageSize := int64(1), int64(20)
+	if req != nil {
+		page, pageSize = req.GetFailedPage(), req.GetFailedPageSize()
+	}
+	snap, err := s.uc.Progress(page, pageSize)
 	if err != nil {
 		// 不因 MQ 等附属信息失败而整页不可用
 		log.Errorf("problem progress: %v", err)
@@ -634,18 +638,22 @@ func (s *ProblemService) Progress(ctx context.Context, req *problem.ProgressReq)
 		})
 	}
 	return &problem.ProgressRes{
-		Code:             0,
-		Message:          "success",
-		Items:            pi,
-		RecentFailed:     toFailedProto(snap.Failed),
-		Total:            snap.Total,
-		Paused:           snap.Paused,
-		ActiveJobs:       jobs,
-		Queues:           qs,
-		InProgress:       toFailedProto(snap.InProgress),
-		FetchPaused:      snap.FetchPaused,
-		AnalyzePaused:    snap.AnalyzePaused,
-		RecentFailedPerm: toFailedProto(snap.FailedPerm),
+		Code:                  0,
+		Message:               "success",
+		Items:                 pi,
+		RecentFailed:          toFailedProto(snap.Failed),
+		Total:                 snap.Total,
+		Paused:                snap.Paused,
+		ActiveJobs:            jobs,
+		Queues:                qs,
+		InProgress:            toFailedProto(snap.InProgress),
+		FetchPaused:           snap.FetchPaused,
+		AnalyzePaused:         snap.AnalyzePaused,
+		RecentFailedPerm:      toFailedProto(snap.FailedPerm),
+		RecentFailedTotal:     snap.FailedTotal,
+		RecentFailedPermTotal: snap.FailedPermTotal,
+		FailedPage:            snap.FailedPage,
+		FailedPageSize:        snap.FailedPageSize,
 	}, nil
 }
 

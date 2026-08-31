@@ -1091,6 +1091,15 @@ paths:
             tags:
                 - Problem
             operationId: Problem_Progress
+            parameters:
+                - name: failedPage
+                  in: query
+                  schema:
+                    type: string
+                - name: failedPageSize
+                  in: query
+                  schema:
+                    type: string
             responses:
                 "200":
                     description: OK
@@ -8045,6 +8054,14 @@ components:
                     type: array
                     items:
                         $ref: '#/components/schemas/api.core.v1.problem.FailedProblem'
+                recentFailedTotal:
+                    type: string
+                recentFailedPermTotal:
+                    type: string
+                failedPage:
+                    type: string
+                failedPageSize:
+                    type: string
         api.core.v1.problem.ProposeProblemEditReq:
             type: object
             properties:

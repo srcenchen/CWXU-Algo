@@ -414,7 +414,10 @@ message UserProfileRes {
   repeated TagScore tag_stats = 7;
 }
 
-message ProgressReq {}
+message ProgressReq {
+  int64 failed_page = 1;
+  int64 failed_page_size = 2;
+}
 
 message ProgressItem {
   string status = 1;
@@ -461,6 +464,10 @@ message ProgressRes {
   bool fetch_paused = 10;
   bool analyze_paused = 11;
   repeated FailedProblem recent_failed_perm = 12; // 永久失败，可点进详情
+  int64 recent_failed_total = 13;
+  int64 recent_failed_perm_total = 14;
+  int64 failed_page = 15;
+  int64 failed_page_size = 16;
 }
 
 message BackfillReq {
