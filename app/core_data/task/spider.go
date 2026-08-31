@@ -159,7 +159,12 @@ func IsProxyEnabled(rdb *redis.Client, platform string) bool {
 }
 
 func SetProxyEnabled(rdb *redis.Client, platform string, enabled bool) error {
-	return setPlatformPaused(rdb, proxyPlatformsKey, platform, !enabled)
+	return setPlatformPaused(rdb, proxyPlatformsKey, platform, enabled)
+}
+
+func (t *SpiderTask) IsProblemPaused(platform string) bool {
+	if t == nil { return false }
+	return IsProblemPaused(t.rdb, platform)
 }
 
 // PausedPlatforms 返回已暂停同步的 OJ 集合（站管监控用）

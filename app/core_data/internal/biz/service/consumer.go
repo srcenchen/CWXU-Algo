@@ -65,6 +65,10 @@ func (c *Consumer) Consume() {
 				log.Infof("RabbitMQ(Spider): skip platform=%s user=%d (paused by ops)", msg.Platform, msg.UserId)
 				return nil
 			}
+			if c.spiderTask != nil && c.spiderTask.IsProblemPaused(msg.Platform) {
+				log.Infof("RabbitMQ(Spider): skip platform=%s user=%d (problem paused by ops)", msg.Platform, msg.UserId)
+				return nil
+			}
 			// 系统过载时先退避，把 CPU 让给在线访问（最多等 30s 再继续）
 			loadgate.Global().Wait(nil, 30*time.Second)
 			if c.spiderTask != nil {
