@@ -902,6 +902,9 @@ func (uc *ProblemUseCase) ProcessFetch(ctx context.Context, ev event.ProblemFetc
 	if err != nil {
 		return uc.handleFetchError(&p, err)
 	}
+	if fetchedProblemContentEmpty(fetched) {
+		return uc.handleFetchError(&p, fmt.Errorf("上游返回空题面"))
+	}
 
 	title := p.Title
 	if fetched.Title != "" {
@@ -965,6 +968,10 @@ func (uc *ProblemUseCase) ProcessFetch(ctx context.Context, ev event.ProblemFetc
 	}
 	// 分析暂停时仍入队（暂停不清队列，恢复后继续）；高优先级延续当前已出队的爬取任务
 	return uc.enqueueAnalyzePrio(p.ID, mqPriorityIncremental)
+}
+
+func fetchedProblemContentEmpty(fetched *problem_fetch.FetchedContent) bool {
+	return fetched == nil || strings.TrimSpace(fetched.ContentMD) == ""
 }
 
 // restorePausedProblemFetch closes the pause race after FETCHING is claimed.
@@ -1641,6 +1648,15 @@ func (uc *ProblemUseCase) ProcessAnalyze(ctx context.Context, ev event.ProblemAn
 		}).Error
 		return aerr
 	}
+	if emptyAIAnalyzeResult(result) {
+		aerr = fmt.Errorf("AI 返回空结果")
+		log.Errorf("AI tag problem %d: %v", p.ID, aerr)
+		_ = uc.data.DB.Model(&p).Updates(map[string]interface{}{
+			"status":    model.ProblemStatusFailed,
+			"error_msg": aerr.Error(),
+		}).Error
+		return aerr
+	}
 	oldStatus := p.Status
 	updates := map[string]interface{}{
 		"problem_type":   result.ProblemType,
@@ -1681,6 +1697,17 @@ func (uc *ProblemUseCase) ProcessAnalyze(ctx context.Context, ev event.ProblemAn
 	uc.enqueueAIProfileRefresh(p.ID)
 	uc.progressMoveStatus(oldStatus, model.ProblemStatusCompleted)
 	return nil
+}
+
+func emptyAIAnalyzeResult(result *aiAnalyzeResult) bool {
+	if result == nil {
+		return true
+	}
+	return strings.TrimSpace(result.ProblemType) == "" &&
+		strings.TrimSpace(result.Difficulty) == "" &&
+		len(nonEmptyTags(result.AlgorithmTags)) == 0 &&
+		len(result.SuggestedSolutions) == 0 &&
+		strings.TrimSpace(result.ContentMD) == ""
 }
 
 // enqueueAIProfileRefresh is derived work. It runs after the problem result is

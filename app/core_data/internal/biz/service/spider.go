@@ -909,10 +909,6 @@ func (uc *SpiderUseCase) fetchAndSaveContest(ctx context.Context, userId int64, 
 				if _, e := uc.problem.EnsureContestProblemsOnce(pName, cID); e != nil {
 					log.Warnf("Spider: ensure contest after log %s/%s: %v", pName, cID, e)
 				}
-				// EnsureOnce 内部对 done 也会 RequeueMissing；此处再兜一层
-				if m := uc.problem.RequeueMissingContestProblemFetches(pName, cID); m > 0 {
-					log.Infof("Spider: requeue missing problem content %s/%s n=%d", pName, cID, m)
-				}
 			}()
 		}
 	}

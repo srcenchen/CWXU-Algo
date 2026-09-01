@@ -23,19 +23,12 @@ import (
 // 调用方可同步等待列表写入；爬取异步。
 func (uc *ProblemUseCase) EnsureContestProblemsOnce(platform, contestID string) (status string, err error) {
 	st, err := uc.ensureContestProblems(platform, contestID, false)
-	// 无论 done/失败：已有目录则补抓无题面（后补比赛路径 / 曾 FAILED_PERM）
-	if n := uc.RequeueMissingContestProblemFetches(platform, contestID); n > 0 {
-		log.Infof("EnsureContestProblemsOnce requeue missing content %s/%s n=%d", platform, contestID, n)
-	}
 	return st, err
 }
 
 // EnsureContestProblemsForce 忽略 done 节流，强制重跑目录 + 无题面强制爬（牛客走比赛路径）。
 func (uc *ProblemUseCase) EnsureContestProblemsForce(platform, contestID string) (status string, err error) {
 	st, err := uc.ensureContestProblems(platform, contestID, true)
-	if n := uc.RequeueMissingContestProblemFetches(platform, contestID); n > 0 {
-		log.Infof("EnsureContestProblemsForce requeue missing content %s/%s n=%d", platform, contestID, n)
-	}
 	return st, err
 }
 
@@ -55,11 +48,12 @@ func (uc *ProblemUseCase) ensureContestProblems(platform, contestID string, forc
 	// failed：距上次完成不足 10 分钟则节流，避免前端/爬虫打爆 OJ
 	const (
 		ensureRunningTimeout = 5 * time.Minute
-		ensureFailedCooldown     = 10 * time.Minute
+		ensureFailedCooldown = 10 * time.Minute
 	)
 	var existing model.ContestProblemEnsure
 	err = uc.data.DB.Where("platform = ? AND contest_id = ?", platform, contestID).First(&existing).Error
 	claimed := false
+	newContest := err == gorm.ErrRecordNotFound
 	if err == nil {
 		if force {
 			// 管理员强制：无论 done/failed/running 一律抢占重跑
@@ -149,7 +143,7 @@ func (uc *ProblemUseCase) ensureContestProblems(platform, contestID string, forc
 	}
 
 	// 本 goroutine 执行发现
-	if err := uc.runContestEnsure(platform, contestID); err != nil {
+	if err := uc.runContestEnsure(platform, contestID, newContest); err != nil {
 		log.Warnf("ensureContestProblems force=%v %s/%s: %v", force, platform, contestID, err)
 		_ = uc.data.DB.Model(&model.ContestProblemEnsure{}).
 			Where("platform = ? AND contest_id = ?", platform, contestID).
@@ -171,7 +165,7 @@ func (uc *ProblemUseCase) ensureContestProblems(platform, contestID string, forc
 	return model.ContestEnsureDone, nil
 }
 
-func (uc *ProblemUseCase) runContestEnsure(platform, contestID string) error {
+func (uc *ProblemUseCase) runContestEnsure(platform, contestID string, newContest bool) error {
 	// 牛客：ensure 题目时同步官方赛时（校赛常不在 cpolar，默认 3h 会错）
 	if NormalizeCalendarPlatform(platform) == spider.NowCoder && uc.data != nil && uc.data.DB != nil {
 		var hintStart, hintEnd time.Time
@@ -251,9 +245,12 @@ func (uc *ProblemUseCase) runContestEnsure(platform, contestID string) error {
 				"sort_order", "external_id", "title", "url", "problem_id", "updated_at",
 			}),
 		}).Create(&item).Error
-		// 强制爬题面；AI 不强制（SkipAnalyze=false + Actor=0 → 走 submitter 闸门）
-		if err := uc.ForceEnqueueFetchContest(p.ID, contestURL); err != nil {
-			log.Warnf("contest ensure fetch %d: %v", p.ID, err)
+		// 仅首次创建比赛目录时补全题面。已有比赛的重新同步只更新目录，
+		// 不得因历史题面缺失再次唤起整场题目。
+		if shouldRequeueMissingContestContent(newContest) {
+			if err := uc.ForceEnqueueFetchContest(p.ID, contestURL); err != nil {
+				log.Warnf("contest ensure fetch %d: %v", p.ID, err)
+			}
 		}
 	}
 
@@ -268,6 +265,10 @@ func (uc *ProblemUseCase) runContestEnsure(platform, contestID string) error {
 			Update("total_count", n).Error
 	}
 	return nil
+}
+
+func shouldRequeueMissingContestContent(newContest bool) bool {
+	return newContest
 }
 
 // listContestProblemsFromSubmits 从 submit_logs 反推比赛题目（OJ 列表不可用时兜底）。
@@ -460,18 +461,20 @@ func (uc *ProblemUseCase) ForceEnqueueFetchContest(problemID uint, contestFallba
 	if p.Status == model.ProblemStatusSkipped {
 		return nil
 	}
-	// 无题面时允许从 COMPLETED / FAILED_PERM / FAILED 重置再爬（只补 content_md）
-	if p.Status == model.ProblemStatusCompleted ||
-		p.Status == model.ProblemStatusFailedPerm ||
-		p.Status == model.ProblemStatusFailed ||
-		p.Status == model.ProblemStatusFetching {
-		_ = uc.data.DB.Model(&p).Updates(map[string]interface{}{
-			"status":           model.ProblemStatusPending,
-			"error_msg":        "",
-			"fetch_attempts":   0,
-			"fetch_fail_since": nil,
-		}).Error
-		p.Status = model.ProblemStatusPending
+	// 比赛同步是周期性触发的，不能把同一道历史失败题无限重灌 MQ。
+	// 只有从未尝试过的 PENDING 题允许由目录发现首次入队；失败重试由
+	// handleFetchError 的退避机制负责，管理员显式重试走单独接口。
+	if !shouldForceEnqueueContestFetch(p) {
+		return nil
+	}
+	claimed := uc.data.DB.Model(&model.Problem{}).
+		Where("id = ? AND status = ? AND fetch_attempts = ?", p.ID, model.ProblemStatusPending, 0).
+		Update("status", model.ProblemStatusFetching)
+	if claimed.Error != nil {
+		return claimed.Error
+	}
+	if claimed.RowsAffected == 0 {
+		return nil
 	}
 	if uc.mq == nil {
 		return fmt.Errorf("mq not ready")
@@ -510,16 +513,24 @@ func (uc *ProblemUseCase) ForceEnqueueFetchContest(problemID uint, contestFallba
 		ActorUserID:  0,
 	})
 	if err := uc.declareProblemQueue("problem_fetch"); err != nil {
+		_ = uc.data.DB.Model(&model.Problem{}).Where("id = ? AND status = ?", p.ID, model.ProblemStatusFetching).Update("status", model.ProblemStatusPending).Error
 		return err
 	}
 	// 异步入队：比赛 ensure 批量加题时勿同步等 confirm（易拖死 HTTP）
-	uc.mq.PublishAsync("", "problem_fetch", false, false, amqp.Publishing{
+	if err := uc.mq.Publish("", "problem_fetch", false, false, amqp.Publishing{
 		ContentType:  "application/json",
 		Body:         body,
 		DeliveryMode: amqp.Persistent,
 		Priority:     mqPriorityIncremental,
-	})
+	}); err != nil {
+		_ = uc.data.DB.Model(&model.Problem{}).Where("id = ? AND status = ?", p.ID, model.ProblemStatusFetching).Update("status", model.ProblemStatusPending).Error
+		return err
+	}
 	return nil
+}
+
+func shouldForceEnqueueContestFetch(p model.Problem) bool {
+	return p.Status == model.ProblemStatusPending && p.FetchAttempts == 0
 }
 
 // ListContestProblems 读目录 + 关联 problem 状态。返回 ensureStatus、ensureError。
@@ -575,4 +586,3 @@ func (uc *ProblemUseCase) ListContestProblems(platform, contestID string) (list 
 	}
 	return out, status, ensureErr, nil
 }
-

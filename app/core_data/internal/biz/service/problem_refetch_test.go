@@ -8,6 +8,7 @@ import (
 	"cwxu-algo/app/common/event"
 	coredata "cwxu-algo/app/core_data/internal/data"
 	"cwxu-algo/app/core_data/internal/data/model"
+	"cwxu-algo/app/core_data/internal/spider/problem_fetch"
 
 	"github.com/alicebob/miniredis/v2"
 	"github.com/redis/go-redis/v9"
@@ -97,5 +98,50 @@ func TestShouldFetchProblemContentOnlyWhenMissingOrBroken(t *testing.T) {
 				t.Fatalf("shouldFetchProblemContent(%q)=%v, want %v", tt.md, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestShouldForceEnqueueContestFetchDoesNotRepeatActiveOrExhaustedProblems(t *testing.T) {
+	if !shouldForceEnqueueContestFetch(model.Problem{Status: model.ProblemStatusPending}) {
+		t.Fatal("a never-attempted pending problem should be queued")
+	}
+	for _, p := range []model.Problem{
+		{Status: model.ProblemStatusFetching},
+		{Status: model.ProblemStatusFailed, FetchAttempts: maxFetchAttempts},
+		{Status: model.ProblemStatusFailedPerm},
+	} {
+		if shouldForceEnqueueContestFetch(p) {
+			t.Fatalf("problem status=%q attempts=%d should not be queued again", p.Status, p.FetchAttempts)
+		}
+	}
+}
+
+func TestContestMissingContentRequeueOnlyForNewContest(t *testing.T) {
+	if !shouldRequeueMissingContestContent(true) {
+		t.Fatal("new contest should allow initial content fetch")
+	}
+	if shouldRequeueMissingContestContent(false) {
+		t.Fatal("existing contest must not refill missing content")
+	}
+}
+
+func TestFetchedProblemContentMustNotBeEmpty(t *testing.T) {
+	if fetchedProblemContentEmpty(nil) == false {
+		t.Fatal("nil fetch result must be treated as empty")
+	}
+	if fetchedProblemContentEmpty(&problem_fetch.FetchedContent{ContentMD: " \n"}) == false {
+		t.Fatal("blank fetch result must be treated as empty")
+	}
+	if fetchedProblemContentEmpty(&problem_fetch.FetchedContent{ContentMD: "statement"}) {
+		t.Fatal("non-empty fetch result must be accepted")
+	}
+}
+
+func TestEmptyAIAnalyzeResultIsNotCommitted(t *testing.T) {
+	if !emptyAIAnalyzeResult(nil) || !emptyAIAnalyzeResult(&aiAnalyzeResult{}) {
+		t.Fatal("nil and blank AI results must be rejected")
+	}
+	if emptyAIAnalyzeResult(&aiAnalyzeResult{Difficulty: "中等"}) {
+		t.Fatal("a result with useful facts must be accepted")
 	}
 }
