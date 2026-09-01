@@ -81,7 +81,6 @@ func renderDailyHTML(data *DailyReportData, brand string, comment AIReportCommen
 			}
 			acSeries = append(acSeries, ac)
 		}
-		b.WriteString(EmailBarChart(labels, [][]int64{subSeries, acSeries}, []string{"提交", "AC"}, []string{"#171717", "#f97316"}))
 		b.WriteString(`<div style="margin-top:12px;overflow-x:auto;-webkit-overflow-scrolling:touch;">`)
 		b.WriteString(mail.DataTableOpen())
 		b.WriteString(`<tr>`)

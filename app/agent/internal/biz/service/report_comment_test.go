@@ -78,8 +78,11 @@ func TestRenderDailyHTMLWithComment_UsesEmailSafeChartAndComment(t *testing.T) {
 	if strings.Contains(html, "<svg") || strings.Contains(html, "<polyline") || strings.Contains(html, "<rect") || strings.Contains(html, "<canvas") || strings.Contains(strings.ToLower(html), ".png") {
 		t.Fatal("email chart must not contain SVG tags")
 	}
-	if !strings.Contains(html, "data-chart=\"bar\"") || !strings.Contains(html, "提交") || !strings.Contains(html, "AC") {
-		t.Fatal("missing email-safe chart")
+	if strings.Contains(html, "data-chart=\"bar\"") {
+		t.Fatal("daily email must not contain a chart")
+	}
+	if !strings.Contains(html, "提交") || !strings.Contains(html, "AC") {
+		t.Fatal("daily email must retain trend data")
 	}
 	if !strings.Contains(html, "状态不错 🚀") {
 		t.Fatal("missing headline")
@@ -122,8 +125,11 @@ func TestRenderTrainingReportVariants_SplitsAttachmentAndEmailCharts(t *testing.
 	if strings.Contains(email, "<svg") || strings.Contains(email, "<polyline") || strings.Contains(email, "<rect") || strings.Contains(email, "<canvas") || strings.Contains(strings.ToLower(email), ".png") {
 		t.Fatal("email chart must not contain SVG tags")
 	}
-	if !strings.Contains(email, "data-chart=\"bar\"") || !strings.Contains(email, "提交") || !strings.Contains(email, "AC") {
-		t.Fatal("missing email-safe chart")
+	if strings.Contains(email, "data-chart=\"bar\"") {
+		t.Fatal("report email must not contain a chart")
+	}
+	if !strings.Contains(email, "1. 活跃度与趋势") {
+		t.Fatal("report email must retain the trend section")
 	}
 	for _, output := range []string{attachment, email} {
 		for _, want := range []string{"总体判断", "趋势变化", "亮点", "问题", "分维度分析", "可执行建议", "整体活跃上升 🔥", "42"} {

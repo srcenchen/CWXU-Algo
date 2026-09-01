@@ -3,6 +3,7 @@ package service
 import (
 	"fmt"
 	"html"
+	"regexp"
 	"strings"
 )
 
@@ -133,9 +134,7 @@ func renderTemplateHTML(data *TrainingReportData, brand string, mode []string, c
 			}
 			acSeries = append(acSeries, ac)
 		}
-		if renderMode == ReportRenderEmail {
-			b.WriteString(EmailBarChart(labels, [][]int64{subSeries, acSeries}, []string{"提交", "AC"}, []string{"#171717", "#f97316"}))
-		} else {
+		if renderMode != ReportRenderEmail {
 			b.WriteString(LineChartSVG(labels, [][]int64{subSeries, acSeries}, []string{"提交", "AC"}, []string{"#171717", "#f97316"}))
 		}
 	}
@@ -372,6 +371,13 @@ func renderTemplateHTML(data *TrainingReportData, brand string, mode []string, c
 
 	b.WriteString(`</table></td></tr></table></body></html>`)
 	return b.String()
+}
+
+var reportSVGPattern = regexp.MustCompile(`(?is)<svg\b[^>]*>.*?</svg\s*>`)
+
+// stripReportCharts removes charts only from the copy sent as email content.
+func stripReportCharts(reportHTML string) string {
+	return reportSVGPattern.ReplaceAllString(reportHTML, "")
 }
 
 func contestSolvedDisplay(ac, total int32) string {

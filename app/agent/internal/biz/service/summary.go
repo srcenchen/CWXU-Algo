@@ -202,6 +202,7 @@ func (uc *SummaryUseCase) WeeklyStaff(userId int64) error {
 			)
 			html = mail.InjectBeforeBodyClose(html, footer)
 		}
+		html = stripReportCharts(html)
 		if err := uc.sendHTMLEmail(email, subject, html); err != nil {
 			lastErr = err
 			log.Warnf("weekly email org=%d user=%d: %v", orgID, userId, err)

@@ -816,6 +816,17 @@ func TestRenderRuleTemplate_TrendUsesChartOnly(t *testing.T) {
 	}
 }
 
+func TestStripReportCharts_RemovesOnlyEmailSVG(t *testing.T) {
+	input := `<html><body><svg><polyline points="1,2"/></svg><p>报告内容</p></body></html>`
+	output := stripReportCharts(input)
+	if strings.Contains(output, "<svg") || strings.Contains(output, "<polyline") {
+		t.Fatal("email output still contains SVG chart")
+	}
+	if !strings.Contains(output, "报告内容") {
+		t.Fatal("non-chart email content was removed")
+	}
+}
+
 func TestTrainingReportPrompts_Dimensions(t *testing.T) {
 	sys := trainingReportSystemPrompt(DetailModeFull)
 	for _, s := range []string{"activeRanking", "禁止", "HTML", "teamTags", "快速直接完成", "不做冗长推理", "trendChanges", "dimensionAnalysis", "总体判断", "趋势变化", "分维度分析", "可执行建议"} {
