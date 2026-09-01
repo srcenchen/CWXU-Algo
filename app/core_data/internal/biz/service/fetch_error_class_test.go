@@ -1,6 +1,10 @@
 package service
 
-import "testing"
+import (
+	"testing"
+
+	"cwxu-algo/app/core_data/internal/data/model"
+)
 
 func TestNowCoderNoAccessIsPermanentNotTransient(t *testing.T) {
 	msgs := []string{
@@ -50,6 +54,37 @@ func TestCFFetchStatementNotFoundIsPermanent(t *testing.T) {
 		if isTransientFetchError(msg) {
 			t.Errorf("expected not transient: %q", msg)
 		}
+	}
+}
+
+func TestLuoGuPermissionErrorsArePermanent(t *testing.T) {
+	cases := []string{
+		`洛谷 status 401: {"errorMessage":"没有权限请求"}`,
+		"洛谷 status 403: 403.6 IP Restricted",
+		"洛谷 访问题面无权限",
+	}
+	for _, msg := range cases {
+		p := &model.Problem{Platform: "LuoGu", ErrorMsg: msg}
+		if !isLuoguNoAccessError(p) {
+			t.Errorf("expected Luogu no-access: %q", msg)
+		}
+		if !isPermanentFetchErrorForProblem(p) {
+			t.Errorf("expected permanent: %q", msg)
+		}
+		if isTransientFetchErrorForProblem(p) {
+			t.Errorf("expected not transient: %q", msg)
+		}
+	}
+}
+
+func TestOtherLuoGuStatusErrorsRemainTransient(t *testing.T) {
+	msg := "洛谷 status 503: service unavailable"
+	p := &model.Problem{Platform: "LuoGu", ErrorMsg: msg}
+	if isLuoguNoAccessError(p) {
+		t.Fatalf("ordinary Luogu outage is not a permission error")
+	}
+	if !isTransientFetchErrorForProblem(p) {
+		t.Fatalf("ordinary Luogu outage should remain transient")
 	}
 }
 

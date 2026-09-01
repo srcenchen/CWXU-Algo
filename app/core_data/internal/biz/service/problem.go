@@ -463,7 +463,7 @@ func (uc *ProblemUseCase) resolveOneWithCache(sl *model.SubmitLog, highPriority 
 		}
 	}
 	// 永久失败：升级标记后不再入队
-	if existing.Status == model.ProblemStatusFailed && isPermanentFetchError(existing.ErrorMsg) {
+	if existing.Status == model.ProblemStatusFailed && isPermanentFetchErrorForProblem(&existing) {
 		_ = uc.data.DB.Model(&existing).Update("status", model.ProblemStatusFailedPerm).Error
 		existing.Status = model.ProblemStatusFailedPerm
 	}
@@ -818,7 +818,7 @@ func (uc *ProblemUseCase) ProcessFetch(ctx context.Context, ev event.ProblemFetc
 	if p.Status == model.ProblemStatusFailedPerm && !allowRetryPerm {
 		return nil
 	}
-	if p.Status == model.ProblemStatusFailed && isPermanentFetchError(p.ErrorMsg) && !allowRetryPerm {
+	if p.Status == model.ProblemStatusFailed && isPermanentFetchErrorForProblem(&p) && !allowRetryPerm {
 		_ = uc.data.DB.Model(&p).Update("status", model.ProblemStatusFailedPerm).Error
 		return nil
 	}
@@ -1113,7 +1113,7 @@ func (uc *ProblemUseCase) ForceEnqueueFetch(problemID uint, actorUID uint) error
 	if p.Status == model.ProblemStatusFailedPerm ||
 		p.Status == model.ProblemStatusCompleted ||
 		p.Status == model.ProblemStatusTagging ||
-		(p.Status == model.ProblemStatusFailed && isPermanentFetchError(p.ErrorMsg)) {
+		(p.Status == model.ProblemStatusFailed && isPermanentFetchErrorForProblem(&p)) {
 		_ = uc.data.DB.Model(&p).Updates(map[string]interface{}{
 			"status":           model.ProblemStatusPending,
 			"error_msg":        "",
@@ -1564,7 +1564,7 @@ func (uc *ProblemUseCase) ProcessAnalyze(ctx context.Context, ev event.ProblemAn
 	}
 	if strings.TrimSpace(p.ContentMD) == "" {
 		// 永久错误不重爬
-		if isPermanentFetchError(p.ErrorMsg) {
+		if isPermanentFetchErrorForProblem(&p) {
 			_ = uc.data.DB.Model(&p).Update("status", model.ProblemStatusFailedPerm).Error
 			return nil
 		}
@@ -2271,7 +2271,7 @@ func (uc *ProblemUseCase) RetryFailed(limit int, includePermanent bool) (scanned
 		var unblocked int64
 		for _, p := range perms {
 			// 硬永久（QOJ 403 / 付费题等）仍跳过
-			if isPermanentFetchError(p.ErrorMsg) || isQOJFailedForbidden(&p) {
+			if isPermanentFetchErrorForProblem(&p) || isQOJFailedForbidden(&p) {
 				continue
 			}
 			if err2 := uc.data.DB.Model(&model.Problem{}).Where("id = ?", p.ID).
@@ -2317,7 +2317,7 @@ func (uc *ProblemUseCase) RetryFailed(limit int, includePermanent bool) (scanned
 		}
 		seen[p.ID] = true
 		// 双保险：error_msg 已是硬永久错误 → 黑名单，不入队
-		if isPermanentFetchError(p.ErrorMsg) {
+		if isPermanentFetchErrorForProblem(&p) {
 			_ = uc.data.DB.Model(&model.Problem{}).Where("id = ?", p.ID).
 				Update("status", model.ProblemStatusFailedPerm).Error
 			blacklisted++
@@ -2379,7 +2379,7 @@ func (uc *ProblemUseCase) markExistingPermanentFailures() int64 {
 		Find(&list).Error
 	var n int64
 	for _, p := range list {
-		if !isPermanentFetchError(p.ErrorMsg) && !isQOJFailedForbidden(&p) {
+		if !isPermanentFetchErrorForProblem(&p) && !isQOJFailedForbidden(&p) {
 			continue
 		}
 		if err := uc.data.DB.Model(&model.Problem{}).Where("id = ?", p.ID).
@@ -2939,6 +2939,8 @@ func (uc *ProblemUseCase) Progress(page, pageSize, inProgressPage, inProgressPag
 	if inProgressPageSize > 100 {
 		inProgressPageSize = 100
 	}
+	// 历史洛谷权限失败不会再进入可重试列表；在打开管理页时顺手迁移。
+	uc.markExistingLuoguPermissionFailures()
 	// 短缓存：管理端轮询 + 并发打开时避免反复 EXISTS(submit_logs) 扫表
 	if uc.data != nil && uc.data.RDB != nil {
 		cacheKey := fmt.Sprintf("%s:p%d:s%d:ip%d:ips%d", progressSnapshotCacheKey, page, pageSize, inProgressPage, inProgressPageSize)
@@ -3051,6 +3053,26 @@ func (uc *ProblemUseCase) Progress(page, pageSize, inProgressPage, inProgressPag
 		}
 	}
 	return snap, nil
+}
+
+func (uc *ProblemUseCase) markExistingLuoguPermissionFailures() int64 {
+	if uc == nil || uc.data == nil || uc.data.DB == nil {
+		return 0
+	}
+	res := uc.data.DB.Model(&model.Problem{}).
+		Where("status = ? AND lower(platform) = ?", model.ProblemStatusFailed, "luogu").
+		Where("error_msg LIKE ? OR error_msg LIKE ? OR error_msg LIKE ? OR error_msg LIKE ?",
+			"%没有权限%", "%无权限%", "%权限请求%", "%IP Restricted%").
+		Updates(map[string]interface{}{
+			"status":           model.ProblemStatusFailedPerm,
+			"fetch_fail_since": nil,
+		})
+	if res.Error != nil || res.RowsAffected == 0 {
+		return 0
+	}
+	log.Infof("markExistingLuoguPermissionFailures: %d FAILED -> FAILED_PERM", res.RowsAffected)
+	go uc.rebuildProgressCounters()
+	return res.RowsAffected
 }
 
 func (uc *ProblemUseCase) queueStats() []struct {
@@ -3563,7 +3585,7 @@ func (uc *ProblemUseCase) handleFetchError(p *model.Problem, err error) error {
 	}
 
 	// QOJ 403 = 无权限：直接永久失效（即使文案仍是旧的 "status 403"）
-	if isPermanentFetchError(msg) || isQOJFailedForbidden(&model.Problem{Platform: p.Platform, ErrorMsg: msg}) {
+	if isPermanentFetchErrorForProblem(&model.Problem{Platform: p.Platform, ErrorMsg: msg}) || isQOJFailedForbidden(&model.Problem{Platform: p.Platform, ErrorMsg: msg}) {
 		if isQOJFailedForbidden(&model.Problem{Platform: p.Platform, ErrorMsg: msg}) {
 			msg = "QOJ 无权限访问题面(403)"
 			updates["error_msg"] = msg
@@ -3575,7 +3597,7 @@ func (uc *ProblemUseCase) handleFetchError(p *model.Problem, err error) error {
 		return nil
 	}
 
-	if isTransientFetchError(msg) {
+	if isTransientFetchErrorForProblem(&model.Problem{Platform: p.Platform, ErrorMsg: msg}) {
 		// 记录首次瞬时失败时间
 		failSince := p.FetchFailSince
 		if failSince == nil {
@@ -3726,6 +3748,16 @@ func isTransientFetchError(msg string) bool {
 		strings.Contains(msg, "瞬时失败")
 }
 
+func isTransientFetchErrorForProblem(p *model.Problem) bool {
+	if p != nil && isLuoguNoAccessError(p) {
+		return false
+	}
+	if p == nil {
+		return false
+	}
+	return isTransientFetchError(p.ErrorMsg)
+}
+
 // isNowCoderNoAccessError 题库页无权限（赛后 /acm/problem/{id} 常不可匿名访问）
 // 立刻 FAILED_PERM 不退避；后补 contest_problems 后 ProcessFetch 走比赛页再给机会
 func isNowCoderNoAccessError(msg string) bool {
@@ -3743,6 +3775,17 @@ func isNowCoderNoAccessError(msg string) bool {
 // - QOJ 403 = 无权限：直接永久
 // - 其余 DOM/空题面：走瞬时退避（满 24h 才永久）
 func isPermanentFetchError(msg string) bool {
+	return isPermanentFetchErrorForProblem(&model.Problem{ErrorMsg: msg})
+}
+
+func isPermanentFetchErrorForProblem(p *model.Problem) bool {
+	if p != nil && isLuoguNoAccessError(p) {
+		return true
+	}
+	if p == nil {
+		return false
+	}
+	msg := p.ErrorMsg
 	msg = strings.TrimSpace(msg)
 	if msg == "" {
 		return false
@@ -3783,6 +3826,27 @@ func isPermanentFetchError(msg string) bool {
 		}
 	}
 	return false
+}
+
+// isLuoguNoAccessError 识别洛谷题面接口返回的权限/IP 限制，不再自动重试。
+func isLuoguNoAccessError(p *model.Problem) bool {
+	if p == nil || !strings.EqualFold(strings.TrimSpace(p.Platform), "LuoGu") {
+		return false
+	}
+	msg := strings.TrimSpace(p.ErrorMsg)
+	if msg == "" {
+		return false
+	}
+	permission := strings.Contains(msg, "没有权限") ||
+		strings.Contains(msg, "无权限") ||
+		strings.Contains(msg, "权限请求") ||
+		strings.Contains(msg, "IP Restricted")
+	if !permission {
+		return false
+	}
+	return strings.Contains(msg, "洛谷") ||
+		strings.Contains(msg, "status 401") ||
+		strings.Contains(msg, "status 403")
 }
 
 // isQOJForbiddenError 错误文案本身已标明 QOJ 无权限/403
