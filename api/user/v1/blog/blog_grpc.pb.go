@@ -35,6 +35,9 @@ const (
 	Blog_Update_FullMethodName                     = "/api.user.v1.blog.Blog/Update"
 	Blog_Delete_FullMethodName                     = "/api.user.v1.blog.Blog/Delete"
 	Blog_Mine_FullMethodName                       = "/api.user.v1.blog.Blog/Mine"
+	Blog_PinnedMine_FullMethodName                 = "/api.user.v1.blog.Blog/PinnedMine"
+	Blog_Pin_FullMethodName                        = "/api.user.v1.blog.Blog/Pin"
+	Blog_PinnedReorder_FullMethodName              = "/api.user.v1.blog.Blog/PinnedReorder"
 	Blog_Analytics_FullMethodName                  = "/api.user.v1.blog.Blog/Analytics"
 	Blog_PageMine_FullMethodName                   = "/api.user.v1.blog.Blog/PageMine"
 	Blog_PageCreate_FullMethodName                 = "/api.user.v1.blog.Blog/PageCreate"
@@ -115,6 +118,12 @@ type BlogClient interface {
 	Delete(ctx context.Context, in *DeleteReq, opts ...grpc.CallOption) (*DeleteRes, error)
 	// 登录：我的文章列表
 	Mine(ctx context.Context, in *MineReq, opts ...grpc.CallOption) (*MineRes, error)
+	// 登录：当前用户全部有效置顶文章
+	PinnedMine(ctx context.Context, in *PinnedMineReq, opts ...grpc.CallOption) (*PinnedMineRes, error)
+	// 登录：置顶/取消置顶自己的文章
+	Pin(ctx context.Context, in *PinReq, opts ...grpc.CallOption) (*PinRes, error)
+	// 登录：重排自己的有效置顶文章
+	PinnedReorder(ctx context.Context, in *PinnedReorderReq, opts ...grpc.CallOption) (*PinnedReorderRes, error)
 	// 登录：作者统计（汇总 + top 文章）
 	Analytics(ctx context.Context, in *AnalyticsReq, opts ...grpc.CallOption) (*AnalyticsRes, error)
 	// 登录：我的页面列表
@@ -355,6 +364,36 @@ func (c *blogClient) Mine(ctx context.Context, in *MineReq, opts ...grpc.CallOpt
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(MineRes)
 	err := c.cc.Invoke(ctx, Blog_Mine_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *blogClient) PinnedMine(ctx context.Context, in *PinnedMineReq, opts ...grpc.CallOption) (*PinnedMineRes, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(PinnedMineRes)
+	err := c.cc.Invoke(ctx, Blog_PinnedMine_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *blogClient) Pin(ctx context.Context, in *PinReq, opts ...grpc.CallOption) (*PinRes, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(PinRes)
+	err := c.cc.Invoke(ctx, Blog_Pin_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *blogClient) PinnedReorder(ctx context.Context, in *PinnedReorderReq, opts ...grpc.CallOption) (*PinnedReorderRes, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(PinnedReorderRes)
+	err := c.cc.Invoke(ctx, Blog_PinnedReorder_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -781,6 +820,12 @@ type BlogServer interface {
 	Delete(context.Context, *DeleteReq) (*DeleteRes, error)
 	// 登录：我的文章列表
 	Mine(context.Context, *MineReq) (*MineRes, error)
+	// 登录：当前用户全部有效置顶文章
+	PinnedMine(context.Context, *PinnedMineReq) (*PinnedMineRes, error)
+	// 登录：置顶/取消置顶自己的文章
+	Pin(context.Context, *PinReq) (*PinRes, error)
+	// 登录：重排自己的有效置顶文章
+	PinnedReorder(context.Context, *PinnedReorderReq) (*PinnedReorderRes, error)
 	// 登录：作者统计（汇总 + top 文章）
 	Analytics(context.Context, *AnalyticsReq) (*AnalyticsRes, error)
 	// 登录：我的页面列表
@@ -914,6 +959,15 @@ func (UnimplementedBlogServer) Delete(context.Context, *DeleteReq) (*DeleteRes, 
 }
 func (UnimplementedBlogServer) Mine(context.Context, *MineReq) (*MineRes, error) {
 	return nil, status.Error(codes.Unimplemented, "method Mine not implemented")
+}
+func (UnimplementedBlogServer) PinnedMine(context.Context, *PinnedMineReq) (*PinnedMineRes, error) {
+	return nil, status.Error(codes.Unimplemented, "method PinnedMine not implemented")
+}
+func (UnimplementedBlogServer) Pin(context.Context, *PinReq) (*PinRes, error) {
+	return nil, status.Error(codes.Unimplemented, "method Pin not implemented")
+}
+func (UnimplementedBlogServer) PinnedReorder(context.Context, *PinnedReorderReq) (*PinnedReorderRes, error) {
+	return nil, status.Error(codes.Unimplemented, "method PinnedReorder not implemented")
 }
 func (UnimplementedBlogServer) Analytics(context.Context, *AnalyticsReq) (*AnalyticsRes, error) {
 	return nil, status.Error(codes.Unimplemented, "method Analytics not implemented")
@@ -1334,6 +1388,60 @@ func _Blog_Mine_Handler(srv interface{}, ctx context.Context, dec func(interface
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(BlogServer).Mine(ctx, req.(*MineReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Blog_PinnedMine_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(PinnedMineReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(BlogServer).PinnedMine(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Blog_PinnedMine_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(BlogServer).PinnedMine(ctx, req.(*PinnedMineReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Blog_Pin_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(PinReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(BlogServer).Pin(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Blog_Pin_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(BlogServer).Pin(ctx, req.(*PinReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Blog_PinnedReorder_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(PinnedReorderReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(BlogServer).PinnedReorder(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Blog_PinnedReorder_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(BlogServer).PinnedReorder(ctx, req.(*PinnedReorderReq))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -2092,6 +2200,18 @@ var Blog_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Mine",
 			Handler:    _Blog_Mine_Handler,
+		},
+		{
+			MethodName: "PinnedMine",
+			Handler:    _Blog_PinnedMine_Handler,
+		},
+		{
+			MethodName: "Pin",
+			Handler:    _Blog_Pin_Handler,
+		},
+		{
+			MethodName: "PinnedReorder",
+			Handler:    _Blog_PinnedReorder_Handler,
 		},
 		{
 			MethodName: "Analytics",

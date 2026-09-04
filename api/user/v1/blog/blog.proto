@@ -76,6 +76,18 @@ service Blog {
   rpc Mine (MineReq) returns (MineRes) {
     option (google.api.http) = { get: "/v1/user/blog/article/mine" };
   }
+  // 登录：当前用户全部有效置顶文章
+  rpc PinnedMine (PinnedMineReq) returns (PinnedMineRes) {
+    option (google.api.http) = { get: "/v1/user/blog/article/pinned/mine" };
+  }
+  // 登录：置顶/取消置顶自己的文章
+  rpc Pin (PinReq) returns (PinRes) {
+    option (google.api.http) = { post: "/v1/user/blog/article/pin" body: "*" };
+  }
+  // 登录：重排自己的有效置顶文章
+  rpc PinnedReorder (PinnedReorderReq) returns (PinnedReorderRes) {
+    option (google.api.http) = { post: "/v1/user/blog/article/pinned/reorder" body: "*" };
+  }
   // 登录：作者统计（汇总 + top 文章）
   rpc Analytics (AnalyticsReq) returns (AnalyticsRes) {
     option (google.api.http) = { get: "/v1/user/blog/analytics" };
@@ -278,6 +290,8 @@ message ArticleInfo {
   string content = 29;      // 有权限看正文时才有内容
   string message = 30;      // get 需密码提示
   string unlockToken = 31;  // 仅 unlock 返回
+  int64 pinnedAt = 32;
+  int64 pinOrder = 33;
 }
 
 message BlogPageInfo {
@@ -649,6 +663,7 @@ message ListByUsernameReq {
   int64 categoryId = 4;
   string keyword = 5;
   string tag = 6;
+  bool pinnedFirst = 7; // 仅个人博客首页传 true
 }
 message ByUsernameAuthorData {
   Author author = 1;
@@ -856,6 +871,28 @@ message MineRes {
   int32 code = 1;
   string message = 2;
   ArticleListData data = 3;
+}
+message PinnedMineReq {}
+message PinnedMineRes {
+  int32 code = 1;
+  string message = 2;
+  repeated ArticleInfo data = 3;
+}
+message PinReq {
+  int64 id = 1;
+  bool pinned = 2;
+}
+message PinRes {
+  int32 code = 1;
+  string message = 2;
+  ArticleInfo data = 3;
+}
+message PinnedReorderReq {
+  repeated int64 articleIds = 1;
+}
+message PinnedReorderRes {
+  int32 code = 1;
+  string message = 2;
 }
 
 message AnalyticsReq {}

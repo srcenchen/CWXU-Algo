@@ -54,6 +54,8 @@ type Article struct {
 	LikeCount         int        `gorm:"column:like_count"`
 	CommentCount      int        `gorm:"column:comment_count"`
 	PublishedAt       *time.Time `gorm:"column:published_at"`
+	PinnedAt          *time.Time `gorm:"column:pinned_at"`
+	PinOrder          int64      `gorm:"column:pin_order"`
 	// SourceSolutionID 主站题解 id；>0 表示由题解同步生成
 	SourceSolutionID *uint `gorm:"column:source_solution_id"`
 	SourceProblemID  *uint `gorm:"column:source_problem_id"`
@@ -333,6 +335,13 @@ func deleteBySolution(db *gorm.DB, userID, solutionID, articleID uint) error {
 			continue
 		}
 		seen[id] = struct{}{}
+		var article Article
+		if err := db.Select("id", "user_id", "visibility", "pinned_at", "pin_order").Where("id = ?", id).First(&article).Error; err != nil {
+			if err == gorm.ErrRecordNotFound {
+				continue
+			}
+			return err
+		}
 		if err := db.Where("article_id = ?", id).Delete(&articleOrg{}).Error; err != nil {
 			return err
 		}
@@ -344,6 +353,13 @@ func deleteBySolution(db *gorm.DB, userID, solutionID, articleID uint) error {
 		}
 		if err := db.Where("id = ?", id).Delete(&Article{}).Error; err != nil {
 			return err
+		}
+		if article.PinnedAt != nil && article.PinOrder > 0 {
+			if err := db.Model(&Article{}).
+				Where("user_id = ? AND pinned_at IS NOT NULL AND visibility IN ? AND pin_order > ?", article.UserID, []string{"public", "password"}, article.PinOrder).
+				UpdateColumn("pin_order", gorm.Expr("pin_order - 1")).Error; err != nil {
+				return err
+			}
 		}
 	}
 	return nil

@@ -89,6 +89,26 @@ func TestUpsertFromSolutionNormalizesBlogImageURLs(t *testing.T) {
 	}
 }
 
+func TestDeleteBySolutionCompactsPinnedOrder(t *testing.T) {
+	db := testDB(t)
+	stamp := time.Now()
+	solutionID := uint(91)
+	rows := []Article{
+		{UserID: 3, Slug: "a", Title: "a", Content: "x", Visibility: "public", PinnedAt: &stamp, PinOrder: 1},
+		{UserID: 3, Slug: "solution-91", Title: "b", Content: "x", Visibility: "public", SourceSolutionID: &solutionID, PinnedAt: &stamp, PinOrder: 2},
+		{UserID: 3, Slug: "c", Title: "c", Content: "x", Visibility: "public", PinnedAt: &stamp, PinOrder: 3},
+	}
+	if err := db.Create(&rows).Error; err != nil {
+		t.Fatalf("seed articles: %v", err)
+	}
+	DeleteBySolution(db, 3, solutionID, rows[1].ID)
+	var remaining []Article
+	db.Where("user_id = ? AND pinned_at IS NOT NULL", 3).Order("pin_order").Find(&remaining)
+	if len(remaining) != 2 || remaining[0].PinOrder != 1 || remaining[1].PinOrder != 2 {
+		t.Fatalf("delete solution must compact remaining pin order: %+v", remaining)
+	}
+}
+
 func TestUpsertFromSolution(t *testing.T) {
 	db := testDB(t)
 	aid, slug, err := UpsertFromSolution(db, 3, 99, 0, "差分题解", "## 思路\nO(n)")

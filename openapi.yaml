@@ -2884,6 +2884,57 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/api.user.v1.blog.MineRes'
+    /v1/user/blog/article/pin:
+        post:
+            tags:
+                - Blog
+            description: 登录：置顶/取消置顶自己的文章
+            operationId: Blog_Pin
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/api.user.v1.blog.PinReq'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.user.v1.blog.PinRes'
+    /v1/user/blog/article/pinned/mine:
+        get:
+            tags:
+                - Blog
+            description: 登录：当前用户全部有效置顶文章
+            operationId: Blog_PinnedMine
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.user.v1.blog.PinnedMineRes'
+    /v1/user/blog/article/pinned/reorder:
+        post:
+            tags:
+                - Blog
+            description: 登录：重排自己的有效置顶文章
+            operationId: Blog_PinnedReorder
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/api.user.v1.blog.PinnedReorderReq'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.user.v1.blog.PinnedReorderRes'
     /v1/user/blog/article/unlock:
         post:
             tags:
@@ -2979,6 +3030,10 @@ paths:
                   in: query
                   schema:
                     type: string
+                - name: pinnedFirst
+                  in: query
+                  schema:
+                    type: boolean
             responses:
                 "200":
                     description: OK
@@ -10603,6 +10658,10 @@ components:
                     type: string
                 unlockToken:
                     type: string
+                pinnedAt:
+                    type: string
+                pinOrder:
+                    type: string
             description: 文章序列化（与手写 articleToMap 形状一致；零值字段也输出）
         api.user.v1.blog.ArticleListData:
             type: object
@@ -11386,6 +11445,50 @@ components:
                     type: string
                 data:
                     $ref: '#/components/schemas/api.user.v1.blog.BlogPageInfo'
+        api.user.v1.blog.PinReq:
+            type: object
+            properties:
+                id:
+                    type: string
+                pinned:
+                    type: boolean
+        api.user.v1.blog.PinRes:
+            type: object
+            properties:
+                code:
+                    type: integer
+                    format: int32
+                message:
+                    type: string
+                data:
+                    $ref: '#/components/schemas/api.user.v1.blog.ArticleInfo'
+        api.user.v1.blog.PinnedMineRes:
+            type: object
+            properties:
+                code:
+                    type: integer
+                    format: int32
+                message:
+                    type: string
+                data:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/api.user.v1.blog.ArticleInfo'
+        api.user.v1.blog.PinnedReorderReq:
+            type: object
+            properties:
+                articleIds:
+                    type: array
+                    items:
+                        type: string
+        api.user.v1.blog.PinnedReorderRes:
+            type: object
+            properties:
+                code:
+                    type: integer
+                    format: int32
+                message:
+                    type: string
         api.user.v1.blog.PlazaAuthorInfo:
             type: object
             properties:

@@ -32,3 +32,22 @@ func TestBlogImageCleanupRoutesAreAdminOnly(t *testing.T) {
 		t.Fatalf("admin image route status=%d want 401", adminRecorder.Code)
 	}
 }
+
+func TestBlogPinnedRoutesRequireLogin(t *testing.T) {
+	srv := khttp.NewServer()
+	blogpb.RegisterBlogHTTPServer(srv, &BlogService{})
+	request := httptest.NewRequest(http.MethodGet, "/v1/user/blog/article/pinned/mine", nil)
+	recorder := httptest.NewRecorder()
+	srv.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusUnauthorized {
+		t.Fatalf("pinned mine route status=%d want 401", recorder.Code)
+	}
+	for _, path := range []string{"/v1/user/blog/article/pin", "/v1/user/blog/article/pinned/reorder"} {
+		request := httptest.NewRequest(http.MethodPost, path, nil)
+		recorder := httptest.NewRecorder()
+		srv.ServeHTTP(recorder, request)
+		if recorder.Code == http.StatusNotFound {
+			t.Fatalf("pinned route was not registered: %s", path)
+		}
+	}
+}

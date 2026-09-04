@@ -9,6 +9,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -57,8 +58,6 @@ type BlogService struct {
 func NewBlogService(d *data.Data) *BlogService {
 	return &BlogService{db: d.DB, coreDB: d.CoreDB}
 }
-
-
 
 // ---------- helpers ----------
 
@@ -318,6 +317,10 @@ func (s *BlogService) articleToProto(a *model.BlogArticle, author *model.User, d
 		UpdatedAt:         a.UpdatedAt.Unix(),
 		OrgIds:            toInt64s(orgIDs),
 	}
+	if a.PinnedAt != nil {
+		m.PinnedAt = a.PinnedAt.Unix()
+	}
+	m.PinOrder = a.PinOrder
 	if a.CategoryID != nil {
 		m.CategoryId = int64(*a.CategoryID)
 	}
@@ -539,10 +542,8 @@ func (s *BlogService) ListByUsername(ctx context.Context, req *pb.ListByUsername
 	if err := q.Count(&total).Error; err != nil {
 		return nil, blogErr(http.StatusInternalServerError, "加载失败")
 	}
-	var list []model.BlogArticle
-	if err := q.Order("COALESCE(published_at, created_at) DESC").
-		Offset((page - 1) * pageSize).Limit(pageSize).
-		Find(&list).Error; err != nil {
+	list, err := findBlogArticles(q, usePinnedArticleOrder(req.PinnedFirst, categoryID, keyword, tagFilter), (page-1)*pageSize, pageSize)
+	if err != nil {
 		return nil, blogErr(http.StatusInternalServerError, "加载失败")
 	}
 	pre := s.prefetchArticleExtras(list, viewer)
@@ -597,6 +598,182 @@ func (s *BlogService) ListByUsername(ctx context.Context, req *pb.ListByUsername
 			Activated:    activated,
 		},
 	}, nil
+}
+
+func usePinnedArticleOrder(pinnedFirst bool, categoryID uint, keyword, tag string) bool {
+	return pinnedFirst && categoryID == 0 && keyword == "" && tag == ""
+}
+
+func findBlogArticles(q *gorm.DB, usePinnedOrder bool, offset, limit int) ([]model.BlogArticle, error) {
+	if usePinnedOrder {
+		q = q.Order("CASE WHEN pinned_at IS NOT NULL AND visibility IN ('public', 'password') THEN 0 ELSE 1 END ASC, CASE WHEN pinned_at IS NOT NULL AND visibility IN ('public', 'password') THEN pin_order ELSE 0 END ASC, COALESCE(published_at, created_at) DESC, id DESC")
+	} else {
+		q = q.Order("COALESCE(published_at, created_at) DESC, id DESC")
+	}
+	var list []model.BlogArticle
+	return list, q.Offset(offset).Limit(limit).Find(&list).Error
+}
+
+func preserveArticlePin(a, existing *model.BlogArticle) {
+	if blogaccess.NormalizeVisibility(a.Visibility) == blogaccess.VisibilityPrivate {
+		a.PinnedAt = nil
+		a.PinOrder = 0
+		return
+	}
+	a.PinnedAt = existing.PinnedAt
+	a.PinOrder = existing.PinOrder
+}
+
+func compactPinnedArticleOrder(tx *gorm.DB, userID uint, removedOrder int64) error {
+	if removedOrder <= 0 {
+		return nil
+	}
+	return tx.Model(&model.BlogArticle{}).
+		Where("user_id = ? AND pinned_at IS NOT NULL AND visibility IN ? AND pin_order > ?", userID, []string{model.BlogVisPublic, model.BlogVisPassword}, removedOrder).
+		UpdateColumn("pin_order", gorm.Expr("pin_order - 1")).Error
+}
+
+func deleteBlogArticleAndCompact(tx *gorm.DB, article *model.BlogArticle) error {
+	if err := tx.Delete(article).Error; err != nil {
+		return err
+	}
+	if article.PinnedAt == nil {
+		return nil
+	}
+	return compactPinnedArticleOrder(tx, article.UserID, article.PinOrder)
+}
+
+func (s *BlogService) pinArticle(userID, articleID uint, pinned bool) error {
+	if userID == 0 || articleID == 0 {
+		return gorm.ErrInvalidData
+	}
+	return blogimg.WithUserImageReferenceTx(s.db, userID, func(tx *gorm.DB) error {
+		var a model.BlogArticle
+		if err := tx.Where("id = ? AND user_id = ?", articleID, userID).First(&a).Error; err != nil {
+			return err
+		}
+		if !pinned {
+			if a.PinnedAt == nil {
+				return nil
+			}
+			oldOrder := a.PinOrder
+			if err := tx.Model(&a).Updates(map[string]interface{}{"pinned_at": nil, "pin_order": 0}).Error; err != nil {
+				return err
+			}
+			return compactPinnedArticleOrder(tx, userID, oldOrder)
+		}
+		if a.Visibility != model.BlogVisPublic && a.Visibility != model.BlogVisPassword {
+			return gorm.ErrInvalidData
+		}
+		if a.PinnedAt != nil {
+			return nil
+		}
+		if err := tx.Model(&model.BlogArticle{}).Where("user_id = ? AND pinned_at IS NOT NULL AND visibility IN ?", userID, []string{model.BlogVisPublic, model.BlogVisPassword}).UpdateColumn("pin_order", gorm.Expr("pin_order + 1")).Error; err != nil {
+			return err
+		}
+		now := time.Now()
+		return tx.Model(&a).Updates(map[string]interface{}{"pinned_at": now, "pin_order": 1}).Error
+	})
+}
+
+func (s *BlogService) reorderPinnedArticles(userID uint, ids []uint) error {
+	if userID == 0 {
+		return gorm.ErrInvalidData
+	}
+	return blogimg.WithUserImageReferenceTx(s.db, userID, func(tx *gorm.DB) error {
+		var current []model.BlogArticle
+		if err := tx.Where("user_id = ? AND pinned_at IS NOT NULL AND visibility IN ?", userID, []string{model.BlogVisPublic, model.BlogVisPassword}).Find(&current).Error; err != nil {
+			return err
+		}
+		if len(current) != len(ids) {
+			return gorm.ErrInvalidData
+		}
+		valid := make(map[uint]struct{}, len(current))
+		for _, a := range current {
+			valid[a.ID] = struct{}{}
+		}
+		seen := make(map[uint]struct{}, len(ids))
+		for _, id := range ids {
+			if id == 0 {
+				return gorm.ErrInvalidData
+			}
+			if _, ok := valid[id]; !ok {
+				return gorm.ErrInvalidData
+			}
+			if _, ok := seen[id]; ok {
+				return gorm.ErrInvalidData
+			}
+			seen[id] = struct{}{}
+		}
+		for i, id := range ids {
+			if err := tx.Model(&model.BlogArticle{}).Where("id = ? AND user_id = ? AND pinned_at IS NOT NULL", id, userID).Update("pin_order", int64(i+1)).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+// PinnedMine GET /v1/user/blog/article/pinned/mine
+func (s *BlogService) PinnedMine(ctx context.Context, _ *pb.PinnedMineReq) (*pb.PinnedMineRes, error) {
+	pd := auth.GetCurrentUser(ctx)
+	if pd == nil || pd.UserID == 0 {
+		return nil, blogErr(http.StatusUnauthorized, "请先登录")
+	}
+	var list []model.BlogArticle
+	if err := s.db.Where("user_id = ? AND pinned_at IS NOT NULL AND visibility IN ?", pd.UserID, []string{model.BlogVisPublic, model.BlogVisPassword}).
+		Order("pin_order ASC, COALESCE(published_at, created_at) DESC, id DESC").Find(&list).Error; err != nil {
+		return nil, blogErr(http.StatusInternalServerError, "加载失败")
+	}
+	pre := s.prefetchArticleExtras(list, pd.UserID)
+	out := make([]*pb.ArticleInfo, 0, len(list))
+	for i := range list {
+		d := blogaccess.Evaluate(blogaccess.ArticleAccess{Visibility: list[i].Visibility, OwnerID: list[i].UserID, HasPassword: list[i].PasswordHash != ""}, pd.UserID, true)
+		out = append(out, s.articleToProto(&list[i], nil, d, pd.UserID, false, pre))
+	}
+	return &pb.PinnedMineRes{Code: 0, Message: "success", Data: out}, nil
+}
+
+// Pin POST /v1/user/blog/article/pin
+func (s *BlogService) Pin(ctx context.Context, req *pb.PinReq) (*pb.PinRes, error) {
+	pd := auth.GetCurrentUser(ctx)
+	if pd == nil || pd.UserID == 0 {
+		return nil, blogErr(http.StatusUnauthorized, "请先登录")
+	}
+	if req.Id <= 0 {
+		return nil, blogErr(http.StatusBadRequest, "参数错误")
+	}
+	if err := s.pinArticle(pd.UserID, uint(req.Id), req.Pinned); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, blogErr(http.StatusNotFound, "文章不存在")
+		}
+		return nil, blogErr(http.StatusBadRequest, "仅公开或密码文章可置顶")
+	}
+	var a model.BlogArticle
+	if err := s.db.Where("id = ? AND user_id = ?", req.Id, pd.UserID).First(&a).Error; err != nil {
+		return nil, blogErr(http.StatusNotFound, "文章不存在")
+	}
+	d := blogaccess.Evaluate(blogaccess.ArticleAccess{Visibility: a.Visibility, OwnerID: a.UserID, HasPassword: a.PasswordHash != ""}, pd.UserID, true)
+	return &pb.PinRes{Code: 0, Message: "success", Data: s.articleToProto(&a, nil, d, pd.UserID, false, nil)}, nil
+}
+
+// PinnedReorder POST /v1/user/blog/article/pinned/reorder
+func (s *BlogService) PinnedReorder(ctx context.Context, req *pb.PinnedReorderReq) (*pb.PinnedReorderRes, error) {
+	pd := auth.GetCurrentUser(ctx)
+	if pd == nil || pd.UserID == 0 {
+		return nil, blogErr(http.StatusUnauthorized, "请先登录")
+	}
+	ids := make([]uint, len(req.ArticleIds))
+	for i, id := range req.ArticleIds {
+		if id <= 0 {
+			return nil, blogErr(http.StatusBadRequest, "排序内容无效")
+		}
+		ids[i] = uint(id)
+	}
+	if err := s.reorderPinnedArticles(pd.UserID, ids); err != nil {
+		return nil, blogErr(http.StatusBadRequest, "排序内容必须精确覆盖当前置顶文章")
+	}
+	return &pb.PinnedReorderRes{Code: 0, Message: "已保存"}, nil
 }
 
 // ---------- get article ----------
@@ -835,6 +1012,7 @@ func (s *BlogService) Update(ctx context.Context, req *pb.UpdateReq) (*pb.Update
 		a.ModerationNote = existing.ModerationNote
 		a.ModeratedAt = existing.ModeratedAt
 		a.ModeratedBy = existing.ModeratedBy
+		preserveArticlePin(a, &existing)
 		if a.PasswordHash == "" && !writeReq.ClearPassword && existing.PasswordHash != "" &&
 			blogaccess.NormalizeVisibility(a.Visibility) == blogaccess.VisibilityPassword &&
 			strings.TrimSpace(writeReq.Password) == "" {
@@ -850,6 +1028,11 @@ func (s *BlogService) Update(ctx context.Context, req *pb.UpdateReq) (*pb.Update
 		}
 		if err := tx.Save(a).Error; err != nil {
 			return err
+		}
+		if existing.PinnedAt != nil && a.PinnedAt == nil {
+			if err := compactPinnedArticleOrder(tx, existing.UserID, existing.PinOrder); err != nil {
+				return err
+			}
 		}
 		if writeReq.Tags != nil {
 			if validationMsg = txService.replaceArticleTags(a.ID, a.UserID, writeReq.Tags); validationMsg != "" {
@@ -1157,6 +1340,9 @@ func (s *BlogService) Delete(ctx context.Context, req *pb.DeleteReq) (*pb.Delete
 		return nil, blogErr(http.StatusForbidden, "只能删除自己的文章")
 	}
 	err := blogimg.WithUserImageReferenceTx(s.db, a.UserID, func(tx *gorm.DB) error {
+		if err := tx.First(&a, a.ID).Error; err != nil {
+			return err
+		}
 		if err := tx.Where("article_id = ?", a.ID).Delete(&model.BlogArticleOrg{}).Error; err != nil {
 			return err
 		}
@@ -1182,7 +1368,7 @@ func (s *BlogService) Delete(ctx context.Context, req *pb.DeleteReq) (*pb.Delete
 		if err := tx.Where("article_id = ?", a.ID).Delete(&model.BlogArticleViewUV{}).Error; err != nil {
 			return err
 		}
-		return tx.Delete(&a).Error
+		return deleteBlogArticleAndCompact(tx, &a)
 	})
 	if err != nil {
 		return nil, blogErr(http.StatusInternalServerError, "删除失败")

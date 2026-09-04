@@ -57,6 +57,8 @@ type BlogArticle struct {
 	ModeratedBy      uint `gorm:"default:0;comment:审核人"`
 
 	PublishedAt *time.Time `gorm:"index:idx_blog_user_created,priority:2;comment:发布时间"`
+	PinnedAt    *time.Time `gorm:"index;comment:置顶时间"`
+	PinOrder    int64      `gorm:"not null;default:0;comment:置顶顺序"`
 }
 
 func (BlogArticle) TableName() string { return "blog_articles" }

@@ -63,6 +63,9 @@ const OperationBlogPageListPublic = "/api.user.v1.blog.Blog/PageListPublic"
 const OperationBlogPageMine = "/api.user.v1.blog.Blog/PageMine"
 const OperationBlogPageReorder = "/api.user.v1.blog.Blog/PageReorder"
 const OperationBlogPageUpdate = "/api.user.v1.blog.Blog/PageUpdate"
+const OperationBlogPin = "/api.user.v1.blog.Blog/Pin"
+const OperationBlogPinnedMine = "/api.user.v1.blog.Blog/PinnedMine"
+const OperationBlogPinnedReorder = "/api.user.v1.blog.Blog/PinnedReorder"
 const OperationBlogPlaza = "/api.user.v1.blog.Blog/Plaza"
 const OperationBlogRecommend = "/api.user.v1.blog.Blog/Recommend"
 const OperationBlogReport = "/api.user.v1.blog.Blog/Report"
@@ -163,6 +166,12 @@ type BlogHTTPServer interface {
 	PageReorder(context.Context, *PageReorderReq) (*PageReorderRes, error)
 	// PageUpdate 登录：更新页面
 	PageUpdate(context.Context, *PageUpdateReq) (*PageUpdateRes, error)
+	// Pin 登录：置顶/取消置顶自己的文章
+	Pin(context.Context, *PinReq) (*PinRes, error)
+	// PinnedMine 登录：当前用户全部有效置顶文章
+	PinnedMine(context.Context, *PinnedMineReq) (*PinnedMineRes, error)
+	// PinnedReorder 登录：重排自己的有效置顶文章
+	PinnedReorder(context.Context, *PinnedReorderReq) (*PinnedReorderRes, error)
 	// Plaza 公开：主站博客广场文章流
 	Plaza(context.Context, *PlazaReq) (*PlazaRes, error)
 	// Recommend 公开：精选文章（推荐）
@@ -203,6 +212,9 @@ func RegisterBlogHTTPServer(s *http.Server, srv BlogHTTPServer) {
 	r.POST("/v1/user/blog/article/update", _Blog_Update6_HTTP_Handler(srv))
 	r.POST("/v1/user/blog/article/delete", _Blog_Delete5_HTTP_Handler(srv))
 	r.GET("/v1/user/blog/article/mine", _Blog_Mine1_HTTP_Handler(srv))
+	r.GET("/v1/user/blog/article/pinned/mine", _Blog_PinnedMine0_HTTP_Handler(srv))
+	r.POST("/v1/user/blog/article/pin", _Blog_Pin0_HTTP_Handler(srv))
+	r.POST("/v1/user/blog/article/pinned/reorder", _Blog_PinnedReorder0_HTTP_Handler(srv))
 	r.GET("/v1/user/blog/analytics", _Blog_Analytics0_HTTP_Handler(srv))
 	r.GET("/v1/user/blog/page/mine", _Blog_PageMine0_HTTP_Handler(srv))
 	r.POST("/v1/user/blog/page/create", _Blog_PageCreate0_HTTP_Handler(srv))
@@ -555,6 +567,69 @@ func _Blog_Mine1_HTTP_Handler(srv BlogHTTPServer) func(ctx http.Context) error {
 			return err
 		}
 		reply := out.(*MineRes)
+		return ctx.Result(200, reply)
+	}
+}
+
+func _Blog_PinnedMine0_HTTP_Handler(srv BlogHTTPServer) func(ctx http.Context) error {
+	return func(ctx http.Context) error {
+		var in PinnedMineReq
+		if err := ctx.BindQuery(&in); err != nil {
+			return err
+		}
+		http.SetOperation(ctx, OperationBlogPinnedMine)
+		h := ctx.Middleware(func(ctx context.Context, req interface{}) (interface{}, error) {
+			return srv.PinnedMine(ctx, req.(*PinnedMineReq))
+		})
+		out, err := h(ctx, &in)
+		if err != nil {
+			return err
+		}
+		reply := out.(*PinnedMineRes)
+		return ctx.Result(200, reply)
+	}
+}
+
+func _Blog_Pin0_HTTP_Handler(srv BlogHTTPServer) func(ctx http.Context) error {
+	return func(ctx http.Context) error {
+		var in PinReq
+		if err := ctx.Bind(&in); err != nil {
+			return err
+		}
+		if err := ctx.BindQuery(&in); err != nil {
+			return err
+		}
+		http.SetOperation(ctx, OperationBlogPin)
+		h := ctx.Middleware(func(ctx context.Context, req interface{}) (interface{}, error) {
+			return srv.Pin(ctx, req.(*PinReq))
+		})
+		out, err := h(ctx, &in)
+		if err != nil {
+			return err
+		}
+		reply := out.(*PinRes)
+		return ctx.Result(200, reply)
+	}
+}
+
+func _Blog_PinnedReorder0_HTTP_Handler(srv BlogHTTPServer) func(ctx http.Context) error {
+	return func(ctx http.Context) error {
+		var in PinnedReorderReq
+		if err := ctx.Bind(&in); err != nil {
+			return err
+		}
+		if err := ctx.BindQuery(&in); err != nil {
+			return err
+		}
+		http.SetOperation(ctx, OperationBlogPinnedReorder)
+		h := ctx.Middleware(func(ctx context.Context, req interface{}) (interface{}, error) {
+			return srv.PinnedReorder(ctx, req.(*PinnedReorderReq))
+		})
+		out, err := h(ctx, &in)
+		if err != nil {
+			return err
+		}
+		reply := out.(*PinnedReorderRes)
 		return ctx.Result(200, reply)
 	}
 }
@@ -1445,6 +1520,12 @@ type BlogHTTPClient interface {
 	PageReorder(ctx context.Context, req *PageReorderReq, opts ...http.CallOption) (rsp *PageReorderRes, err error)
 	// PageUpdate 登录：更新页面
 	PageUpdate(ctx context.Context, req *PageUpdateReq, opts ...http.CallOption) (rsp *PageUpdateRes, err error)
+	// Pin 登录：置顶/取消置顶自己的文章
+	Pin(ctx context.Context, req *PinReq, opts ...http.CallOption) (rsp *PinRes, err error)
+	// PinnedMine 登录：当前用户全部有效置顶文章
+	PinnedMine(ctx context.Context, req *PinnedMineReq, opts ...http.CallOption) (rsp *PinnedMineRes, err error)
+	// PinnedReorder 登录：重排自己的有效置顶文章
+	PinnedReorder(ctx context.Context, req *PinnedReorderReq, opts ...http.CallOption) (rsp *PinnedReorderRes, err error)
 	// Plaza 公开：主站博客广场文章流
 	Plaza(ctx context.Context, req *PlazaReq, opts ...http.CallOption) (rsp *PlazaRes, err error)
 	// Recommend 公开：精选文章（推荐）
@@ -2083,6 +2164,48 @@ func (c *BlogHTTPClientImpl) PageUpdate(ctx context.Context, in *PageUpdateReq, 
 	pattern := "/v1/user/blog/page/update"
 	path := binding.EncodeURL(pattern, in, false)
 	opts = append(opts, http.Operation(OperationBlogPageUpdate))
+	opts = append(opts, http.PathTemplate(pattern))
+	err := c.cc.Invoke(ctx, "POST", path, in, &out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// Pin 登录：置顶/取消置顶自己的文章
+func (c *BlogHTTPClientImpl) Pin(ctx context.Context, in *PinReq, opts ...http.CallOption) (*PinRes, error) {
+	var out PinRes
+	pattern := "/v1/user/blog/article/pin"
+	path := binding.EncodeURL(pattern, in, false)
+	opts = append(opts, http.Operation(OperationBlogPin))
+	opts = append(opts, http.PathTemplate(pattern))
+	err := c.cc.Invoke(ctx, "POST", path, in, &out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// PinnedMine 登录：当前用户全部有效置顶文章
+func (c *BlogHTTPClientImpl) PinnedMine(ctx context.Context, in *PinnedMineReq, opts ...http.CallOption) (*PinnedMineRes, error) {
+	var out PinnedMineRes
+	pattern := "/v1/user/blog/article/pinned/mine"
+	path := binding.EncodeURL(pattern, in, true)
+	opts = append(opts, http.Operation(OperationBlogPinnedMine))
+	opts = append(opts, http.PathTemplate(pattern))
+	err := c.cc.Invoke(ctx, "GET", path, nil, &out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// PinnedReorder 登录：重排自己的有效置顶文章
+func (c *BlogHTTPClientImpl) PinnedReorder(ctx context.Context, in *PinnedReorderReq, opts ...http.CallOption) (*PinnedReorderRes, error) {
+	var out PinnedReorderRes
+	pattern := "/v1/user/blog/article/pinned/reorder"
+	path := binding.EncodeURL(pattern, in, false)
+	opts = append(opts, http.Operation(OperationBlogPinnedReorder))
 	opts = append(opts, http.PathTemplate(pattern))
 	err := c.cc.Invoke(ctx, "POST", path, in, &out, opts...)
 	if err != nil {
