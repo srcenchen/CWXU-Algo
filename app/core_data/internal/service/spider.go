@@ -46,6 +46,26 @@ func clientSyncAuditKeywordCondition(dialect string) string {
 	}
 	return "oj_uid ILIKE ? OR client_version ILIKE ? OR CAST(user_id AS TEXT) ILIKE ?"
 }
+// clientSyncAuditOrderClause 按语义版本（主.次.修订）排序，避免字典序把
+// 0.1.9 排在 0.1.13 之前。版本串可能带预发布后缀（0.2.7-beta）或只有一段
+// （1），各段只取数字前缀、缺省为 0，保证非法/缺省值不会让整个列表查询报错。
+func clientSyncAuditOrderClause(dialect string) string {
+	if dialect == "sqlite" {
+		// SQLite CAST 取字符串前导数字；末尾补 '.' 保证 instr 永远找得到点，
+		// 缺段的版本不会把整串当成下一段。
+		padded := "client_version || '.'"
+		minor := "substr(" + padded + ", instr(" + padded + ", '.') + 1)"
+		minorDot := "instr(" + minor + ", '.')"
+		patch := "substr(" + minor + ", " + minorDot + " + 1)"
+		return "CAST(" + padded + " AS INTEGER) DESC, " +
+			"CAST(substr(" + minor + ", 1, " + minorDot + " - 1) AS INTEGER) DESC, " +
+			"CAST(" + patch + " AS INTEGER) DESC, started_at DESC"
+	}
+	return "COALESCE(NULLIF(regexp_replace(split_part(client_version, '.', 1), '[^0-9]', '', 'g'), '')::int, 0) DESC, " +
+		"COALESCE(NULLIF(regexp_replace(split_part(client_version, '.', 2), '[^0-9]', '', 'g'), '')::int, 0) DESC, " +
+		"COALESCE(NULLIF(regexp_replace(split_part(client_version, '.', 3), '[^0-9]', '', 'g'), '')::int, 0) DESC, " +
+		"started_at DESC"
+}
 
 func normalizeClientSyncAuditPlatform(platform string) (string, error) {
 	switch strings.TrimSpace(platform) {
@@ -160,7 +180,7 @@ func (s *SpiderService) AdminListClientSyncAudits(ctx context.Context, req *spid
 		return nil, errors.InternalServer("SYNC_AUDIT_LIST_FAILED", "加载同步日志失败")
 	}
 	var rows []model.ClientSyncAudit
-	if err := q.Order("client_version DESC, started_at DESC").Offset(int((pageNum - 1) * pageSize)).Limit(int(pageSize)).Find(&rows).Error; err != nil {
+	if err := q.Order(clientSyncAuditOrderClause(s.db.Dialector.Name())).Offset(int((pageNum - 1) * pageSize)).Limit(int(pageSize)).Find(&rows).Error; err != nil {
 		return nil, errors.InternalServer("SYNC_AUDIT_LIST_FAILED", "加载同步日志失败")
 	}
 	items := make([]*spider.ClientSyncAuditInfo, 0, len(rows))

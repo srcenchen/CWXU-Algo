@@ -2450,10 +2450,36 @@ func TestLuoguSyncImporterInternalErrorWritesFailedAudit(t *testing.T) {
 	}
 }
 
+func TestLuoguSyncStartFailsWhenAuditUnavailableThenRecoversOnReplay(t *testing.T) {
+	svc, db, _, _, importer := newLuoguSyncServiceTest(t)
+	importer.auditDB = db // client_sync_audits 尚未迁移，启动审计必然失败
+	req := &spiderpb.StartLuoguSyncReq{ClientKind: "userscript", ClientVersion: "1.0.0", RequestId: strings.Repeat("a", 43)}
+	if _, err := svc.StartLuoguSync(luoguHeaderContext(luoguPluginTokenHeader, "device-token"), req); luoguReason(err) != "SYNC_UNAVAILABLE" {
+		t.Fatalf("audit failure was not surfaced: %v", err)
+	}
+	if err := db.AutoMigrate(&model.ClientSyncAudit{}); err != nil {
+		t.Fatal(err)
+	}
+	res, err := svc.StartLuoguSync(luoguHeaderContext(luoguPluginTokenHeader, "device-token"), req)
+	if err != nil {
+		t.Fatalf("replay after audit recovery failed: %v", err)
+	}
+	if !res.Resumed {
+		t.Fatalf("expected replay after failed start, got %+v", res)
+	}
+	var audit model.ClientSyncAudit
+	if err := db.First(&audit, "session_id = ?", res.SessionId).Error; err != nil {
+		t.Fatalf("audit row missing after recovery: %v", err)
+	}
+	if audit.Status != "running" || audit.ClientVersion != "1.0.0" {
+		t.Fatalf("unexpected audit row: %+v", audit)
+	}
+}
+
 func TestLuoguSyncPageRecoversAfterDatabaseCommitAndRedisCheckpointFailure(t *testing.T) {
 	svc, db, rdb, clock, _ := newLuoguSyncServiceTest(t)
 	if err := db.AutoMigrate(
-		&model.SubmitLog{}, &model.DailyUserStat{}, &model.UserACProblem{}, &model.UserACProblemDay{}, &model.ClientSyncPageReceipt{}, &model.ClientSyncPostProcessJob{},
+		&model.SubmitLog{}, &model.DailyUserStat{}, &model.UserACProblem{}, &model.UserACProblemDay{}, &model.ClientSyncAudit{}, &model.ClientSyncPageReceipt{}, &model.ClientSyncPostProcessJob{},
 	); err != nil {
 		t.Fatal(err)
 	}
@@ -2491,7 +2517,7 @@ func TestLuoguSyncPageRecoversAfterDatabaseCommitAndRedisCheckpointFailure(t *te
 func TestLuoguSyncChangedPageAfterCommittedReceiptUsesDeclaredRestart(t *testing.T) {
 	svc, db, rdb, clock, _ := newLuoguSyncServiceTest(t)
 	if err := db.AutoMigrate(
-		&model.SubmitLog{}, &model.DailyUserStat{}, &model.UserACProblem{}, &model.UserACProblemDay{}, &model.ClientSyncPageReceipt{}, &model.ClientSyncPostProcessJob{},
+		&model.SubmitLog{}, &model.DailyUserStat{}, &model.UserACProblem{}, &model.UserACProblemDay{}, &model.ClientSyncAudit{}, &model.ClientSyncPageReceipt{}, &model.ClientSyncPostProcessJob{},
 	); err != nil {
 		t.Fatal(err)
 	}
@@ -2519,7 +2545,7 @@ func TestLuoguSyncChangedPageAfterCommittedReceiptUsesDeclaredRestart(t *testing
 func TestLuoguSyncReceiptReplayRepairsFailedCacheInvalidation(t *testing.T) {
 	svc, db, rdb, clock, _ := newLuoguSyncServiceTest(t)
 	if err := db.AutoMigrate(
-		&model.SubmitLog{}, &model.DailyUserStat{}, &model.UserACProblem{}, &model.UserACProblemDay{}, &model.ClientSyncPageReceipt{}, &model.ClientSyncPostProcessJob{},
+		&model.SubmitLog{}, &model.DailyUserStat{}, &model.UserACProblem{}, &model.UserACProblemDay{}, &model.ClientSyncAudit{}, &model.ClientSyncPageReceipt{}, &model.ClientSyncPostProcessJob{},
 	); err != nil {
 		t.Fatal(err)
 	}

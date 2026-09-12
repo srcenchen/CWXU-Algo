@@ -329,28 +329,30 @@ func (s *SpiderService) StartLuoguSync(ctx context.Context, req *spiderpb.StartL
 		if state.TokenHash != hashLuoguSessionToken(sessionToken) {
 			return nil, kratoserrors.Unauthorized("SESSION_EXPIRED", "同步会话已失效")
 		}
-		s.recordLuoguSyncAuditStart(ctx, state, req.ClientVersion, identity.Username, now)
+		if err := s.recordLuoguSyncAuditStart(ctx, state, req.ClientVersion, identity.Username, now); err != nil {
+			return nil, kratoserrors.ServiceUnavailable("SYNC_UNAVAILABLE", "同步日志暂不可用，请稍后重试")
+		}
 		return luoguStartResponse(state, sessionToken, true), nil
 	}
 	state, err := s.loadLuoguSessionByID(ctx, sessionID)
 	if err != nil {
 		return nil, err
 	}
-	s.recordLuoguSyncAuditStart(ctx, state, req.ClientVersion, identity.Username, now)
+	if err := s.recordLuoguSyncAuditStart(ctx, state, req.ClientVersion, identity.Username, now); err != nil {
+		return nil, kratoserrors.ServiceUnavailable("SYNC_UNAVAILABLE", "同步日志暂不可用，请稍后重试")
+	}
 	return luoguStartResponse(state, sessionToken, false), nil
 }
 
-func (s *SpiderService) recordLuoguSyncAuditStart(ctx context.Context, state *luoguSession, clientVersion, username string, startedAt time.Time) {
+func (s *SpiderService) recordLuoguSyncAuditStart(ctx context.Context, state *luoguSession, clientVersion, username string, startedAt time.Time) error {
 	if state == nil {
-		return
+		return nil
 	}
 	if auditor, ok := s.luoguImporter.(luoguSyncAuditor); ok {
-		if auditErr := auditor.StartClientSyncAudit(ctx, bizservice.ClientSyncAuditStart{SessionID: state.ID, AuthorizationID: state.AuthorizationID, UserID: state.UserID, Username: username, Platform: "luogu", OJUID: state.LuoguUID, ClientKind: state.ClientKind, ClientVersion: clientVersion, StartedAt: startedAt}); auditErr != nil {
-			log.Warnf("client-sync audit start session=%s: %v", state.ID, auditErr)
-		}
+		return auditor.StartClientSyncAudit(ctx, bizservice.ClientSyncAuditStart{SessionID: state.ID, AuthorizationID: state.AuthorizationID, UserID: state.UserID, Username: username, Platform: "luogu", OJUID: state.LuoguUID, ClientKind: state.ClientKind, ClientVersion: clientVersion, StartedAt: startedAt})
 	}
+	return nil
 }
-
 func (s *SpiderService) LuoguSyncStatus(ctx context.Context, _ *spiderpb.LuoguSyncStatusReq) (*spiderpb.LuoguSyncStatusRes, error) {
 	state, err := s.authorizeLuoguSession(ctx)
 	if err != nil {
