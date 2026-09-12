@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"cwxu-algo/app/common/event"
+	"cwxu-algo/app/core_data/internal/data/dal"
 	profiletask "cwxu-algo/app/core_data/task"
 
 	"github.com/redis/go-redis/v9"
@@ -502,5 +503,24 @@ func TestUserProfileConsumerRunsOrphanInvalidationRecovery(t *testing.T) {
 	consumer.recoverOrphanedInvalidations()
 	if builder.recovered != 1 {
 		t.Fatalf("recovery called %d times, want 1", builder.recovered)
+	}
+}
+
+func TestIsTransientProfileBuildError(t *testing.T) {
+	for _, err := range []error{
+		ErrUserProfileInvalidationInProgress,
+		dal.ErrUserTagAbilityIncomplete,
+		dal.ErrUserTagAbilityModelChanged,
+		dal.ErrUserTagAbilityEvidenceChanged,
+		fmt.Errorf("wrapped: %w", dal.ErrUserTagAbilityIncomplete),
+	} {
+		if !isTransientProfileBuildError(err) {
+			t.Fatalf("expected transient: %v", err)
+		}
+	}
+	for _, err := range []error{nil, errors.New("boom"), dal.ErrUserTagAbilitySnapshotCorrupt} {
+		if isTransientProfileBuildError(err) {
+			t.Fatalf("expected non-transient: %v", err)
+		}
 	}
 }

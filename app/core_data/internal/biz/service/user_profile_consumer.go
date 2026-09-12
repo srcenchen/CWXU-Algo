@@ -10,6 +10,7 @@ import (
 
 	"cwxu-algo/app/common/event"
 	"cwxu-algo/app/common/utils/mqconsume"
+	"cwxu-algo/app/core_data/internal/data/dal"
 	"cwxu-algo/app/core_data/task"
 
 	"github.com/go-kratos/kratos/v2/log"
@@ -34,6 +35,21 @@ type userProfileBuilder interface {
 // 用接口断言而非扩展 userProfileBuilder，避免测试桩被迫实现。
 type userProfileInvalidationRecoverer interface {
 	RecoverOrphanedProfileInvalidations(context.Context) error
+}
+
+// isTransientProfileBuildError 判断画像构建失败是否属于“等依赖就绪后重试即可”
+// 的瞬态协作状态（失效围栏进行中、题库异步打标未完成、模型/证据正在切换）。
+// 这类失败不应按 ERROR 处理，也不该烧掉 MQ 重试次数。
+func isTransientProfileBuildError(err error) bool {
+	switch {
+	case errors.Is(err, ErrUserProfileInvalidationInProgress),
+		errors.Is(err, dal.ErrUserTagAbilityIncomplete),
+		errors.Is(err, dal.ErrUserTagAbilityModelChanged),
+		errors.Is(err, dal.ErrUserTagAbilityEvidenceChanged):
+		return true
+	default:
+		return false
+	}
 }
 
 // UserProfileConsumer 消费 user_profile 队列，预计算写入 Redis
@@ -144,10 +160,10 @@ func (c *UserProfileConsumer) handle(body []byte) error {
 	}
 	start := time.Now()
 	if err := c.problem.BuildAndCacheUserProfile(msg.UserId, msg.Force); err != nil {
-		if errors.Is(err, ErrUserProfileInvalidationInProgress) {
-			// 画像失效围栏正在被另一维护/重建持有，属预期瞬态：不做
-			// ERROR 与无效重试，直接按兜底路径重新排队（普通事件清 pending、
-			// 维护意图标记 due），失效结束后由维护队列重建。
+		if isTransientProfileBuildError(err) {
+			// 依赖尚未就绪（失效围栏/异步打标/模型切换）：不做 ERROR 与
+			// 无效重试，直接按兜底路径重新排队（普通事件清 pending、维护
+			// 意图标记 due），依赖就绪后由维护队列重建。
 			log.Warnf("user_profile deferred user=%d: %v", msg.UserId, err)
 			return c.handleExhausted(body)
 		}
