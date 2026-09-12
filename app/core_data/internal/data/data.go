@@ -21,7 +21,6 @@ import (
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
-	"gorm.io/gorm/logger"
 )
 
 // ProviderSet is data providers.
@@ -91,7 +90,7 @@ func openUserDB(c *conf.Data) *gorm.DB {
 		return nil
 	}
 	db, err := gorm.Open(postgres.Open(src), &gorm.Config{
-		Logger:      logger.Default.LogMode(logger.Warn),
+		Logger:      gorm2.NewLogger(),
 		PrepareStmt: true,
 	})
 	if err != nil {
