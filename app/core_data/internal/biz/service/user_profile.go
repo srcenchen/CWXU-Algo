@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -182,6 +183,10 @@ func profileUserGenerationKey(userID int64) string {
 	return fmt.Sprintf("%s%d", profileUserGenerationPref, userID)
 }
 
+// ErrUserProfileInvalidationInProgress 表示另一个操作正持有画像失效围栏
+// （奇数 generation）。这是预期中的瞬态，调用方应退避/延后重试，而不是当作故障。
+var ErrUserProfileInvalidationInProgress = errors.New("user profile cache invalidation in progress")
+
 func readProfileCacheGeneration(ctx context.Context, rdb *redis.Client, userID int64) (profileCacheGeneration, error) {
 	if rdb == nil {
 		return profileCacheGeneration{}, nil
@@ -210,9 +215,83 @@ func readProfileCacheGeneration(ctx context.Context, rdb *redis.Client, userID i
 	}
 	gen := profileCacheGeneration{Global: global, User: user}
 	if gen.Global%2 == 1 || gen.User%2 == 1 {
-		return gen, fmt.Errorf("user profile cache invalidation in progress")
+		return gen, ErrUserProfileInvalidationInProgress
 	}
 	return gen, nil
+}
+
+// profileRecoverOrphanScript 清除“奇数 generation 但租约已消失”的孤儿失效围栏
+// （持有者进程崩溃/重启，心跳停止后租约过期）。INCR 把 generation 推到下一个
+// 偶数值，使所有携带旧奇数值的缓存 key 失效不可达，读取方随后 miss 并重建；
+// 有存活持有者的围栏仍持有 :lease，不会被误清。
+var profileRecoverOrphanScript = redis.NewScript(`
+local current = tonumber(redis.call("GET", KEYS[1]) or "0")
+if current % 2 == 0 then return 0 end
+if redis.call("EXISTS", KEYS[2]) == 1 then return 0 end
+redis.call("INCR", KEYS[1])
+redis.call("DEL", KEYS[3])
+return 1`)
+
+// RecoverOrphanedProfileInvalidations 重开被死亡持有者遗留的画像失效围栏，
+// 可重复调用。已在用户/全局 generation key 上幂等。
+func RecoverOrphanedProfileInvalidations(ctx context.Context, rdb *redis.Client) error {
+	if rdb == nil {
+		return nil
+	}
+	keys := []string{profileGlobalGenerationKey}
+	var cursor uint64
+	for {
+		batch, next, err := rdb.Scan(ctx, cursor, profileUserGenerationPref+"*", 500).Result()
+		if err != nil {
+			return err
+		}
+		for _, key := range batch {
+			if strings.HasSuffix(key, ":lease") || strings.HasSuffix(key, ":current_intent") {
+				continue
+			}
+			keys = append(keys, key)
+		}
+		cursor = next
+		if cursor == 0 {
+			break
+		}
+	}
+	values, err := rdb.MGet(ctx, keys...).Result()
+	if err != nil {
+		return err
+	}
+	recovered := 0
+	for i, key := range keys {
+		value := values[i]
+		if value == nil {
+			continue
+		}
+		generation, parseErr := strconv.ParseUint(fmt.Sprint(value), 10, 64)
+		if parseErr != nil || generation%2 == 0 {
+			continue
+		}
+		cleared, runErr := profileRecoverOrphanScript.Run(ctx, rdb, []string{key, key + ":lease", key + ":current_intent"}).Int64()
+		if runErr != nil {
+			log.Warnf("user_profile invalidation recovery key=%s: %v", key, runErr)
+			continue
+		}
+		if cleared == 1 {
+			recovered++
+			log.Warnf("user_profile recovered orphaned invalidation fence key=%s", key)
+		}
+	}
+	if recovered > 0 {
+		log.Warnf("user_profile invalidation recovery cleared %d orphaned fence(s)", recovered)
+	}
+	return nil
+}
+
+// RecoverOrphanedProfileInvalidations 暴露给后台 worker 的入口。
+func (uc *ProblemUseCase) RecoverOrphanedProfileInvalidations(ctx context.Context) error {
+	if uc == nil || uc.data == nil {
+		return nil
+	}
+	return RecoverOrphanedProfileInvalidations(ctx, uc.data.RDB)
 }
 
 func beginProfileInvalidation(ctx context.Context, rdb *redis.Client, key string) (ProfileInvalidationToken, error) {

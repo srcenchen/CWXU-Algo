@@ -458,3 +458,49 @@ func (b *flakyMaintenanceProfileBuilder) ConfirmAbilityMaintenanceTarget(ctx con
 func (b *flakyMaintenanceProfileBuilder) MarkAbilityMaintenanceTargetDue(ctx context.Context, intentID string, userID int64) error {
 	return b.confirm.MarkAbilityMaintenanceTargetDue(ctx, intentID, userID)
 }
+
+type invalidationBlockedProfileBuilder struct {
+	marks     int
+	confirms  int
+	recovered int
+}
+
+func (b *invalidationBlockedProfileBuilder) BuildAndCacheUserProfile(int64, bool) error {
+	return ErrUserProfileInvalidationInProgress
+}
+
+func (b *invalidationBlockedProfileBuilder) ConfirmAbilityMaintenanceTarget(context.Context, string, int64) error {
+	b.confirms++
+	return nil
+}
+
+func (b *invalidationBlockedProfileBuilder) MarkAbilityMaintenanceTargetDue(context.Context, string, int64) error {
+	b.marks++
+	return nil
+}
+
+func (b *invalidationBlockedProfileBuilder) RecoverOrphanedProfileInvalidations(context.Context) error {
+	b.recovered++
+	return nil
+}
+
+func TestUserProfileConsumerDefersWhileInvalidationInProgress(t *testing.T) {
+	builder := &invalidationBlockedProfileBuilder{}
+	consumer := &UserProfileConsumer{problem: builder}
+	body := []byte(`{"user_id":911,"force":true,"intent_id":"maintenance-911"}`)
+	if err := consumer.handle(body); err != nil {
+		t.Fatalf("transient invalidation must be deferred, not failed: %v", err)
+	}
+	if builder.marks != 1 || builder.confirms != 0 {
+		t.Fatalf("deferred maintenance re-arm marks=%d confirms=%d", builder.marks, builder.confirms)
+	}
+}
+
+func TestUserProfileConsumerRunsOrphanInvalidationRecovery(t *testing.T) {
+	builder := &invalidationBlockedProfileBuilder{}
+	consumer := &UserProfileConsumer{problem: builder}
+	consumer.recoverOrphanedInvalidations()
+	if builder.recovered != 1 {
+		t.Fatalf("recovery called %d times, want 1", builder.recovered)
+	}
+}

@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -18,10 +19,21 @@ import (
 // 画像重 JOIN 限并发，避免拖垮 DB
 const userProfileConcurrency = 1
 
+// profileInvalidationRecoveryInterval 孤儿失效围栏的巡检间隔。围栏正常由
+// 持有者心跳续约；进程崩溃/重启会遗留奇数 generation + 无租约，需尽快重开，
+// 否则该用户（或全局）的画像重建会持续失败。
+const profileInvalidationRecoveryInterval = 2 * time.Minute
+
 type userProfileBuilder interface {
 	BuildAndCacheUserProfile(int64, bool) error
 	ConfirmAbilityMaintenanceTarget(context.Context, string, int64) error
 	MarkAbilityMaintenanceTargetDue(context.Context, string, int64) error
+}
+
+// userProfileInvalidationRecoverer 可选能力：由真实 ProblemUseCase 实现。
+// 用接口断言而非扩展 userProfileBuilder，避免测试桩被迫实现。
+type userProfileInvalidationRecoverer interface {
+	RecoverOrphanedProfileInvalidations(context.Context) error
 }
 
 // UserProfileConsumer 消费 user_profile 队列，预计算写入 Redis
@@ -52,6 +64,9 @@ func (c *UserProfileConsumer) Consume() {
 	if c.mq != nil {
 		_, _ = c.mq.QueueDeclare("user_profile", true, false, false, false, nil)
 	}
+	// 启动即修复上次进程遗留的孤儿围栏，之后周期巡检。
+	c.recoverOrphanedInvalidations()
+	go c.runInvalidationRecovery()
 	_ = mqconsume.Run(c.mq, mqconsume.Options{
 		Name:             "user_profile",
 		Queue:            "user_profile",
@@ -62,6 +77,29 @@ func (c *UserProfileConsumer) Consume() {
 		Handler:          func(body []byte, _ amqp.Table) error { return c.handle(body) },
 		OnExhausted:      func(body []byte, _ amqp.Table) error { return c.handleExhausted(body) },
 	})
+}
+
+func (c *UserProfileConsumer) recoverOrphanedInvalidations() {
+	recoverer, ok := c.problem.(userProfileInvalidationRecoverer)
+	if !ok {
+		return
+	}
+	if err := recoverer.RecoverOrphanedProfileInvalidations(context.Background()); err != nil {
+		log.Warnf("user_profile invalidation recovery: %v", err)
+	}
+}
+
+func (c *UserProfileConsumer) runInvalidationRecovery() {
+	ticker := time.NewTicker(profileInvalidationRecoveryInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-c.stopCh:
+			return
+		case <-ticker.C:
+			c.recoverOrphanedInvalidations()
+		}
+	}
 }
 
 func (c *UserProfileConsumer) handleExhausted(body []byte) error {
@@ -106,6 +144,13 @@ func (c *UserProfileConsumer) handle(body []byte) error {
 	}
 	start := time.Now()
 	if err := c.problem.BuildAndCacheUserProfile(msg.UserId, msg.Force); err != nil {
+		if errors.Is(err, ErrUserProfileInvalidationInProgress) {
+			// 画像失效围栏正在被另一维护/重建持有，属预期瞬态：不做
+			// ERROR 与无效重试，直接按兜底路径重新排队（普通事件清 pending、
+			// 维护意图标记 due），失效结束后由维护队列重建。
+			log.Warnf("user_profile deferred user=%d: %v", msg.UserId, err)
+			return c.handleExhausted(body)
+		}
 		log.Errorf("user_profile build user=%d: %v", msg.UserId, err)
 		return err
 	}

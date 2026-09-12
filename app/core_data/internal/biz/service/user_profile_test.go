@@ -1372,3 +1372,79 @@ func TestUserProfileRejectsMismatchedSnapshotAtExactKey(t *testing.T) {
 		t.Fatalf("mismatched exact/latest snapshot was exposed: total=%d", total)
 	}
 }
+
+func TestRecoverOrphanedProfileInvalidationsReopensDeadFence(t *testing.T) {
+	_, rdb := profileTestRedis(t)
+	ctx := context.Background()
+	if err := rdb.Set(ctx, profileGlobalGenerationKey, 97, 0).Err(); err != nil {
+		t.Fatal(err)
+	}
+	if err := rdb.Set(ctx, profileGlobalGenerationKey+":current_intent", "dead-intent", 0).Err(); err != nil {
+		t.Fatal(err)
+	}
+	if err := RecoverOrphanedProfileInvalidations(ctx, rdb); err != nil {
+		t.Fatal(err)
+	}
+	if got := rdb.Get(ctx, profileGlobalGenerationKey).Val(); got != "98" {
+		t.Fatalf("global generation = %q, want 98", got)
+	}
+	if got := rdb.Exists(ctx, profileGlobalGenerationKey+":current_intent").Val(); got != 0 {
+		t.Fatal("stale invalidation intent survived recovery")
+	}
+	if _, err := readProfileCacheGeneration(ctx, rdb, 1); err != nil {
+		t.Fatalf("reads still fenced after recovery: %v", err)
+	}
+}
+
+func TestRecoverOrphanedProfileInvalidationsKeepsLiveFence(t *testing.T) {
+	_, rdb := profileTestRedis(t)
+	ctx := context.Background()
+	if err := rdb.Set(ctx, profileGlobalGenerationKey, 97, 0).Err(); err != nil {
+		t.Fatal(err)
+	}
+	if err := rdb.Set(ctx, profileGlobalGenerationKey+":lease", "intent|owner", time.Minute).Err(); err != nil {
+		t.Fatal(err)
+	}
+	if err := RecoverOrphanedProfileInvalidations(ctx, rdb); err != nil {
+		t.Fatal(err)
+	}
+	if got := rdb.Get(ctx, profileGlobalGenerationKey).Val(); got != "97" {
+		t.Fatalf("live fence generation changed to %q", got)
+	}
+	if got := rdb.Exists(ctx, profileGlobalGenerationKey+":lease").Val(); got != 1 {
+		t.Fatal("live fence lease was removed")
+	}
+}
+
+func TestRecoverOrphanedProfileInvalidationsSkipsEvenAndLeaseKeys(t *testing.T) {
+	_, rdb := profileTestRedis(t)
+	ctx := context.Background()
+	if err := rdb.Set(ctx, profileUserGenerationKey(42), 10, 0).Err(); err != nil {
+		t.Fatal(err)
+	}
+	if err := rdb.Set(ctx, profileUserGenerationKey(43), 11, 0).Err(); err != nil {
+		t.Fatal(err)
+	}
+	if err := rdb.Set(ctx, profileUserGenerationKey(43)+":lease", "intent|owner", time.Minute).Err(); err != nil {
+		t.Fatal(err)
+	}
+	// 数值型 intent：若被误当作 generation key，会被 INCR 成 1000。
+	if err := rdb.Set(ctx, profileUserGenerationKey(43)+":current_intent", 999, 0).Err(); err != nil {
+		t.Fatal(err)
+	}
+	if err := RecoverOrphanedProfileInvalidations(ctx, rdb); err != nil {
+		t.Fatal(err)
+	}
+	if got := rdb.Get(ctx, profileUserGenerationKey(42)).Val(); got != "10" {
+		t.Fatalf("even user generation changed to %q", got)
+	}
+	if got := rdb.Get(ctx, profileUserGenerationKey(43)).Val(); got != "11" {
+		t.Fatalf("live user fence changed to %q", got)
+	}
+	if got := rdb.Get(ctx, profileUserGenerationKey(43)+":lease").Val(); got != "intent|owner" {
+		t.Fatalf("lease value changed to %q", got)
+	}
+	if got := rdb.Get(ctx, profileUserGenerationKey(43)+":current_intent").Val(); got != "999" {
+		t.Fatalf("lease/intent key was treated as a generation: %q", got)
+	}
+}
