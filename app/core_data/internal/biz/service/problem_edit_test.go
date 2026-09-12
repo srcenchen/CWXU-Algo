@@ -1310,3 +1310,21 @@ func TestNonEmptyTags(t *testing.T) {
 		t.Fatal("expected one tag")
 	}
 }
+
+func TestDecodeProblemMaintenancePayloadCoercesJSONColumns(t *testing.T) {
+	raw := `{"updates":{"solutions_meta":[{"name":"dp","time_complexity":"O(n)","space_complexity":"O(n)","brief_explanation":"x"}],"tags":["dp"]},"tags":["dp"],"tagsChanged":true}`
+	payload, err := decodeProblemMaintenancePayload(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	meta, ok := payload.Updates["solutions_meta"].(model.SolutionsMeta)
+	if !ok {
+		t.Fatalf("solutions_meta type = %T, want model.SolutionsMeta", payload.Updates["solutions_meta"])
+	}
+	if len(meta) != 1 || meta[0].Name != "dp" {
+		t.Fatalf("solutions_meta = %+v", meta)
+	}
+	if _, ok := payload.Updates["tags"].(model.StringArray); !ok {
+		t.Fatalf("tags type = %T, want model.StringArray", payload.Updates["tags"])
+	}
+}

@@ -125,6 +125,18 @@ func decodeProblemMaintenancePayload(raw string) (problemMaintenancePayload, err
 	if _, ok := payload.Updates["tags"]; ok {
 		payload.Updates["tags"] = model.StringArray(payload.Tags)
 	}
+	// JSON 往返会把 jsonb 列解成 []interface{}，直接 Update 会被 PostgreSQL
+	// 当作 record 写入而报 type 错。这里还原为带 Valuer 的类型。
+	if raw, ok := payload.Updates["solutions_meta"]; ok {
+		if encoded, err := json.Marshal(raw); err == nil {
+			var meta model.SolutionsMeta
+			if err := json.Unmarshal(encoded, &meta); err == nil {
+				payload.Updates["solutions_meta"] = meta
+			} else {
+				payload.Updates["solutions_meta"] = model.SolutionsMeta{}
+			}
+		}
+	}
 	return payload, nil
 }
 
