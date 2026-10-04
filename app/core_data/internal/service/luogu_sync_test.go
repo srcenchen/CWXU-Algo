@@ -455,7 +455,7 @@ func (i *fakeLuoguImporter) CompleteClientSync(_ context.Context, _ int64, _ str
 	return nil
 }
 
-func (i *fakeLuoguImporter) ScheduleSubmitPostProcess(int64) {
+func (i *fakeLuoguImporter) ScheduleSubmitPostProcess(int64, string) {
 	i.mu.Lock()
 	i.postProcessed++
 	i.mu.Unlock()

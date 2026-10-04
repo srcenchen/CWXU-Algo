@@ -8882,6 +8882,15 @@ components:
                     format: int32
                 problem:
                     $ref: '#/components/schemas/api.core.v1.spider.LuoguSyncProblem'
+                verdict:
+                    type: string
+                    description: QOJ verdict text. Luogu clients leave this empty and use status.
+                languageName:
+                    type: string
+                    description: QOJ language name. Luogu clients leave this empty and use language.
+                submitTimeText:
+                    type: string
+                    description: QOJ page time text, parsed by the server in its local timezone.
         api.core.v1.spider.LuoguSyncStatusRes:
             type: object
             properties:
@@ -8907,6 +8916,10 @@ components:
                 done:
                     type: boolean
                 completionReason:
+                    type: string
+                platform:
+                    type: string
+                ojUid:
                     type: string
         api.core.v1.spider.PlatformUserItem:
             type: object
@@ -9126,6 +9139,10 @@ components:
                     description: |-
                         Stable random id persisted by the browser before the first request. The
                          same id always replays the same session issuance without rotating tokens.
+                platform:
+                    type: string
+                ojUid:
+                    type: string
         api.core.v1.spider.StartLuoguSyncRes:
             type: object
             properties:
@@ -9144,6 +9161,10 @@ components:
                 expiresAt:
                     type: string
                 nextAvailableAt:
+                    type: string
+                platform:
+                    type: string
+                ojUid:
                     type: string
         api.core.v1.spider.SubmitInventoryRes:
             type: object
@@ -9255,6 +9276,11 @@ components:
                     type: array
                     items:
                         $ref: '#/components/schemas/api.core.v1.spider.LuoguSyncRecord'
+                platform:
+                    type: string
+                hasNext:
+                    type: boolean
+                    description: QOJ pages report whether another submissions page exists.
         api.core.v1.spider.UploadLuoguSyncPageRes:
             type: object
             properties:
@@ -9280,6 +9306,10 @@ components:
                     type: integer
                     format: int32
                 nextAvailableAt:
+                    type: string
+                platform:
+                    type: string
+                ojUid:
                     type: string
         api.core.v1.statistic.AcCount:
             type: object
@@ -12908,6 +12938,8 @@ components:
                     type: string
                 scope:
                     type: string
+                platform:
+                    type: string
         api.user.v1.plugin.AuthorizeCodeRes:
             type: object
             properties:
@@ -12952,6 +12984,8 @@ components:
                 createdAt:
                     type: string
                 scope:
+                    type: string
+                platform:
                     type: string
         api.user.v1.plugin.RevokeReq:
             type: object

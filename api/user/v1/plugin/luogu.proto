@@ -65,6 +65,7 @@ message AuthorizeCodeReq {
   bool risk_accepted = 7;
   string risk_version = 8;
   string scope = 9;
+  string platform = 10;
 }
 
 message AuthorizeCodeRes {
@@ -103,6 +104,7 @@ message PluginAuthorizationInfo {
   int64 revoked_at = 10;
   int64 created_at = 11;
   string scope = 12;
+  string platform = 13;
 }
 
 message ListAuthorizationsRes {
@@ -165,4 +167,5 @@ message ValidateLuoguPluginTokenRes {
   int64 expires_at = 7;
   string scope = 8;
   string username = 9;
+  string platform = 10;
 }

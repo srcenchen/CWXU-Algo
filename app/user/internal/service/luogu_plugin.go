@@ -29,6 +29,7 @@ const (
 	LuoguPluginScope       = "luogu.sync"
 
 	luoguPluginProvider       = "luogu"
+	qojPluginProvider         = "qoj"
 	luoguAuthorizationCodeTTL = 2 * time.Minute
 	luoguDeviceTokenTTL       = 90 * 24 * time.Hour
 	luoguRevokedMinimumTTL    = 30 * time.Minute
@@ -36,6 +37,7 @@ const (
 
 var (
 	luoguUIDPattern        = regexp.MustCompile(`^[1-9][0-9]{0,18}$`)
+	qojUsernamePattern     = regexp.MustCompile(`^[A-Za-z0-9_]{1,64}$`)
 	pkceVerifierPattern    = regexp.MustCompile(`^[A-Za-z0-9._~-]{43,128}$`)
 	consumeLuoguCodeScript = redis.NewScript(`
 local value = redis.call("GET", KEYS[1])
@@ -54,6 +56,7 @@ type luoguAuthorizationCode struct {
 	CodeChallenge string    `json:"codeChallenge"`
 	State         string    `json:"state"`
 	RiskVersion   string    `json:"riskVersion"`
+	Platform      string    `json:"platform"`
 	AcceptedAt    time.Time `json:"acceptedAt"`
 }
 
@@ -109,8 +112,17 @@ func validateLuoguAuthorizeRequest(req *pb.AuthorizeCodeReq) error {
 	if req.Scope != LuoguPluginScope {
 		return luoguPluginError(http.StatusBadRequest, "INVALID_SCOPE", "授权范围无效")
 	}
-	if !luoguUIDPattern.MatchString(req.LuoguUid) {
-		return luoguPluginError(http.StatusBadRequest, "INVALID_LUOGU_UID", "洛谷 UID 无效")
+	platform := strings.TrimSpace(req.Platform)
+	if platform == "" || platform == "LuoGu" {
+		if !luoguUIDPattern.MatchString(req.LuoguUid) {
+			return luoguPluginError(http.StatusBadRequest, "INVALID_LUOGU_UID", "洛谷 UID 无效")
+		}
+	} else if platform == "QOJ" {
+		if !qojUsernamePattern.MatchString(req.LuoguUid) {
+			return luoguPluginError(http.StatusBadRequest, "INVALID_QOJ_UID", "QOJ 用户名无效")
+		}
+	} else {
+		return luoguPluginError(http.StatusBadRequest, "INVALID_PLATFORM", "平台无效")
 	}
 	if req.ClientKind != "userscript" {
 		return luoguPluginError(http.StatusBadRequest, "INVALID_CLIENT_KIND", "客户端类型无效")
@@ -152,6 +164,7 @@ func (s *LuoguPluginService) AuthorizeCode(ctx context.Context, req *pb.Authoriz
 		CodeChallenge: req.CodeChallenge,
 		State:         req.State,
 		RiskVersion:   req.RiskVersion,
+		Platform:      normalizePluginPlatform(req.Platform),
 		AcceptedAt:    now,
 	})
 	if err != nil {
@@ -211,7 +224,7 @@ func (s *LuoguPluginService) Token(ctx context.Context, req *pb.TokenReq) (*pb.T
 	now := s.now().UTC()
 	authorization := model.PluginAuthorization{
 		UserID:        grant.UserID,
-		Provider:      luoguPluginProvider,
+		Provider:      pluginProvider(grant.Platform),
 		ClientKind:    grant.ClientKind,
 		ClientVersion: grant.ClientVersion,
 		LuoguUID:      grant.LuoguUID,
@@ -238,7 +251,7 @@ func (s *LuoguPluginService) ListAuthorizations(ctx context.Context, _ *pb.ListA
 	}
 	var rows []model.PluginAuthorization
 	if err := s.db.WithContext(ctx).
-		Where("user_id = ? AND provider = ?", current.UserID, luoguPluginProvider).
+		Where("user_id = ? AND provider IN ?", current.UserID, []string{luoguPluginProvider, qojPluginProvider}).
 		Order("id DESC").Find(&rows).Error; err != nil {
 		return nil, luoguPluginError(http.StatusInternalServerError, "AUTHORIZATION_LIST_FAILED", "加载授权失败")
 	}
@@ -246,7 +259,7 @@ func (s *LuoguPluginService) ListAuthorizations(ctx context.Context, _ *pb.ListA
 	for i := range rows {
 		row := &rows[i]
 		item := &pb.PluginAuthorizationInfo{
-			Id: uint64(row.ID), Provider: row.Provider, ClientKind: row.ClientKind,
+			Id: uint64(row.ID), Provider: row.Provider, Platform: pluginPlatform(row.Provider), ClientKind: row.ClientKind,
 			ClientVersion: row.ClientVersion, LuoguUid: row.LuoguUID,
 			RiskVersion: row.RiskVersion, AcceptedAt: row.AcceptedAt.Unix(),
 			ExpiresAt: row.ExpiresAt.Unix(), CreatedAt: row.CreatedAt.Unix(), Scope: LuoguPluginScope,
@@ -281,6 +294,8 @@ func normalizeLuoguAdminPlatform(platform string) (string, error) {
 		return "", nil
 	case "luogu", "LuoGu":
 		return luoguPluginProvider, nil
+	case "qoj", "QOJ":
+		return qojPluginProvider, nil
 	default:
 		return "", luoguPluginError(http.StatusBadRequest, "INVALID_PLATFORM", "平台无效")
 	}
@@ -309,7 +324,7 @@ func (s *LuoguPluginService) AdminListAuthorizations(ctx context.Context, req *p
 	// each user/account/client combination in the management list.
 	latest := s.db.WithContext(ctx).Table("plugin_authorizations").
 		Select("MAX(id)").
-		Where("provider = ?", luoguPluginProvider).
+		Where("provider IN ?", []string{luoguPluginProvider, qojPluginProvider}).
 		Group("user_id, provider, luogu_uid, client_kind")
 	q = q.Where("pa.id IN (?)", latest)
 	if req != nil {
@@ -354,7 +369,7 @@ func (s *LuoguPluginService) AdminListAuthorizations(ctx context.Context, req *p
 		} else if !now.Before(row.ExpiresAt) {
 			status = "expired"
 		}
-		item := &pb.AdminPluginAuthorizationInfo{Id: uint64(row.ID), UserId: uint64(row.UserID), Username: row.Username, Name: row.Name, Provider: luoguPluginProvider, Platform: luoguPluginProvider, OjUid: row.LuoguUID, ClientKind: row.ClientKind, ClientVersion: row.ClientVersion, AcceptedAt: row.AcceptedAt.Unix(), ExpiresAt: row.ExpiresAt.Unix(), Status: status}
+		item := &pb.AdminPluginAuthorizationInfo{Id: uint64(row.ID), UserId: uint64(row.UserID), Username: row.Username, Name: row.Name, Provider: row.Provider, Platform: row.Provider, OjUid: row.LuoguUID, ClientKind: row.ClientKind, ClientVersion: row.ClientVersion, AcceptedAt: row.AcceptedAt.Unix(), ExpiresAt: row.ExpiresAt.Unix(), Status: status}
 		if row.LastUsedAt != nil {
 			item.LastUsedAt = row.LastUsedAt.Unix()
 		}
@@ -377,7 +392,7 @@ func (s *LuoguPluginService) Revoke(ctx context.Context, req *pb.RevokeReq) (*pb
 	now := s.now().UTC()
 	var revoked []model.PluginAuthorization
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		query := tx.Where("user_id = ? AND provider = ? AND revoked_at IS NULL", current.UserID, luoguPluginProvider)
+		query := tx.Where("user_id = ? AND provider IN ? AND revoked_at IS NULL", current.UserID, []string{luoguPluginProvider, qojPluginProvider})
 		if !req.All {
 			query = query.Where("id = ?", req.AuthorizationId)
 		}
@@ -459,5 +474,27 @@ func (s *LuoguPluginService) ValidateLuoguPluginToken(ctx context.Context, req *
 		AuthorizationId: uint64(row.ID), UserId: uint64(row.UserID), LuoguUid: row.LuoguUID,
 		ClientKind: row.ClientKind, ClientVersion: row.ClientVersion,
 		RiskVersion: row.RiskVersion, ExpiresAt: row.ExpiresAt.Unix(), Scope: LuoguPluginScope, Username: user.Username,
+		Platform: pluginPlatform(row.Provider),
 	}, nil
+}
+
+func normalizePluginPlatform(value string) string {
+	if strings.TrimSpace(value) == "QOJ" {
+		return "QOJ"
+	}
+	return "LuoGu"
+}
+
+func pluginProvider(platform string) string {
+	if normalizePluginPlatform(platform) == "QOJ" {
+		return qojPluginProvider
+	}
+	return luoguPluginProvider
+}
+
+func pluginPlatform(provider string) string {
+	if provider == qojPluginProvider {
+		return "QOJ"
+	}
+	return "LuoGu"
 }

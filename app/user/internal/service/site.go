@@ -399,30 +399,8 @@ func verifyOjCredentialsBeforeSave(row *model.SiteConfig, req *site.UpdateConfig
 			return "洛谷账号验证失败：" + err.Error()
 		}
 	}
-	// QOJ
-	qojUser := strings.TrimSpace(req.OjQojUsername)
-	if qojUser != "" {
-		if req.ClearOjQojPassword {
-			return "QOJ 账号已填写，不能清空密码"
-		}
-		qojPass := ""
-		if isRealSecret(req.OjQojPassword) {
-			qojPass = strings.TrimSpace(req.OjQojPassword)
-		} else {
-			var err error
-			qojPass, err = readSiteSecret("oj_qoj_password", row.OjQojPassword)
-			if err != nil {
-				return "QOJ 密码读取失败：" + err.Error()
-			}
-		}
-		if strings.TrimSpace(qojPass) == "" {
-			return "请填写 QOJ 密码"
-		}
-		if err := ojlogin.VerifyQOJ(qojUser, qojPass); err != nil {
-			log.Warnf("oj login verify qoj: %v", err)
-			return "QOJ 账号验证失败：" + err.Error()
-		}
-	}
+	// QOJ 服务端登录经常被 Cloudflare 拦住。浏览器同步不依赖这个账号，
+	// 所以保存站点设置时不要求密码，也不因登录失败拒绝保存。
 	return ""
 }
 

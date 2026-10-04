@@ -306,13 +306,17 @@ func (uc *SpiderUseCase) CompleteClientSync(ctx context.Context, userID int64, p
 
 // ScheduleSubmitPostProcess keeps browser imports on the existing problem
 // binding path. It is safe to call more than once.
-func (uc *SpiderUseCase) ScheduleSubmitPostProcess(userID int64) {
+func (uc *SpiderUseCase) ScheduleSubmitPostProcess(userID int64, platformName string) {
 	if uc == nil || uc.problem == nil || userID <= 0 {
 		return
 	}
+	platformName = strings.TrimSpace(platformName)
+	if platformName == "" {
+		platformName = spider.LuoGu
+	}
 	go func() {
-		if err := uc.problem.BindSubmitsAfterSpiderForPlatform(userID, spider.LuoGu); err != nil {
-			log.Warnf("SpiderUseCase: bind browser-sync submits user=%d platform=%s: %v", userID, spider.LuoGu, err)
+		if err := uc.problem.BindSubmitsAfterSpiderForPlatform(userID, platformName); err != nil {
+			log.Warnf("SpiderUseCase: bind browser-sync submits user=%d platform=%s: %v", userID, platformName, err)
 		}
 	}()
 }

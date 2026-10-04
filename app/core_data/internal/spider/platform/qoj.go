@@ -69,6 +69,11 @@ func isQOJReasonableVerdict(result string) bool {
 	return true
 }
 
+// NormalizeQOJResult maps a submissions-table verdict to the stored status.
+func NormalizeQOJResult(raw string) (string, error) {
+	return normalizeQOJResult(raw)
+}
+
 func normalizeQOJResult(raw string) (string, error) {
 	result := strings.TrimSpace(stdhtml.UnescapeString(raw))
 	if result == "" {

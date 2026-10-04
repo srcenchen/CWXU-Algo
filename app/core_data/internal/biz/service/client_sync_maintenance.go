@@ -215,9 +215,13 @@ func (uc *SpiderUseCase) applyClientSyncReceiptEffects(ctx context.Context, rece
 	// tick。维护任务仍保留作为崩溃/重试兜底，绑定本身是幂等的。
 	if receipt.CompletionReason != "" && uc.problem != nil {
 		userID := receipt.UserID
+		platformName := strings.TrimSpace(receipt.Platform)
+		if platformName == "" {
+			platformName = spider.LuoGu
+		}
 		go func() {
-			if err := uc.problem.BindSubmitsAfterSpiderForPlatform(userID, spider.LuoGu); err != nil {
-				log.Warnf("client-sync immediate submit binding user=%d: %v", userID, err)
+			if err := uc.problem.BindSubmitsAfterSpiderForPlatform(userID, platformName); err != nil {
+				log.Warnf("client-sync immediate submit binding user=%d platform=%s: %v", userID, platformName, err)
 			}
 		}()
 	}
@@ -324,7 +328,7 @@ func (uc *SpiderUseCase) processClientSyncPostProcessJobs(ctx context.Context, n
 		if claimed.RowsAffected != 1 {
 			continue
 		}
-		err := uc.runClientSyncPostProcess(jobs[i].UserID)
+		err := uc.runClientSyncPostProcess(jobs[i].UserID, jobs[i].Platform)
 		if err == nil {
 			completedAt := time.Now().UTC()
 			if updateErr := uc.data.DB.WithContext(ctx).Model(&model.ClientSyncPostProcessJob{}).
@@ -362,11 +366,15 @@ func clientSyncRetryDelay(attempt int) time.Duration {
 	return time.Duration(attempt) * time.Minute
 }
 
-func (uc *SpiderUseCase) runClientSyncPostProcess(userID int64) error {
+func (uc *SpiderUseCase) runClientSyncPostProcess(userID int64, platformName string) error {
 	if uc.problem == nil {
 		return fmt.Errorf("problem postprocess is not configured")
 	}
-	return uc.problem.BindSubmitsAfterSpiderForPlatform(userID, spider.LuoGu)
+	platformName = strings.TrimSpace(platformName)
+	if platformName == "" {
+		platformName = spider.LuoGu
+	}
+	return uc.problem.BindSubmitsAfterSpiderForPlatform(userID, platformName)
 }
 
 func (uc *SpiderUseCase) cleanupClientSyncReceipts(ctx context.Context, now time.Time) error {

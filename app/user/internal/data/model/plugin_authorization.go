@@ -10,7 +10,7 @@ type PluginAuthorization struct {
 	Provider      string    `gorm:"size:32;not null;index:idx_plugin_authorizations_user_provider"`
 	ClientKind    string    `gorm:"size:32;not null"`
 	ClientVersion string    `gorm:"size:64;not null"`
-	LuoguUID      string    `gorm:"size:32;not null;index"`
+	LuoguUID      string    `gorm:"size:64;not null;index"`
 	TokenHash     string    `gorm:"size:72;not null;uniqueIndex"`
 	RiskVersion   string    `gorm:"size:32;not null"`
 	AcceptedAt    time.Time `gorm:"not null"`

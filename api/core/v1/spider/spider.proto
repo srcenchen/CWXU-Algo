@@ -390,6 +390,8 @@ message StartLuoguSyncReq {
   // Stable random id persisted by the browser before the first request. The
   // same id always replays the same session issuance without rotating tokens.
   string request_id = 3;
+  string platform = 4;
+  string oj_uid = 5;
 }
 
 message StartLuoguSyncRes {
@@ -400,6 +402,8 @@ message StartLuoguSyncRes {
   int32 page_delay_ms = 5;
   int64 expires_at = 6;
   int64 next_available_at = 7;
+  string platform = 8;
+  string oj_uid = 9;
 }
 
 message LuoguSyncStatusReq {}
@@ -415,6 +419,8 @@ message LuoguSyncStatusRes {
   bool connected = 8;
   bool done = 9;
   string completion_reason = 10;
+  string platform = 11;
+  string oj_uid = 12;
 }
 
 message LuoguSyncProblem {
@@ -429,6 +435,12 @@ message LuoguSyncRecord {
   int32 status = 3;
   int32 language = 4;
   LuoguSyncProblem problem = 5;
+  // QOJ verdict text. Luogu clients leave this empty and use status.
+  string verdict = 6;
+  // QOJ language name. Luogu clients leave this empty and use language.
+  string language_name = 7;
+  // QOJ page time text, parsed by the server in its local timezone.
+  string submit_time_text = 8;
 }
 
 message UploadLuoguSyncPageReq {
@@ -437,6 +449,9 @@ message UploadLuoguSyncPageReq {
   int32 remote_count = 3;
   int32 per_page = 4;
   repeated LuoguSyncRecord records = 5;
+  string platform = 6;
+  // QOJ pages report whether another submissions page exists.
+  bool has_next = 7;
 }
 
 message UploadLuoguSyncPageRes {
@@ -450,6 +465,8 @@ message UploadLuoguSyncPageRes {
   int32 processed_pages = 8;
   int32 total_pages = 9;
   int64 next_available_at = 10;
+  string platform = 11;
+  string oj_uid = 12;
 }
 
 message AdminListClientSyncAuditsReq {

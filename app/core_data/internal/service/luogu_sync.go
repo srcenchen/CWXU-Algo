@@ -48,6 +48,9 @@ var (
 	luoguUIDPattern       = regexp.MustCompile(`^[1-9][0-9]{0,9}$`)
 	luoguSubmitIDPattern  = regexp.MustCompile(`^[1-9][0-9]{0,19}$`)
 	luoguProblemID        = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
+	qojUsernamePattern    = regexp.MustCompile(`^[A-Za-z0-9_]{1,64}$`)
+	qojProblemIDPattern   = regexp.MustCompile(`^[1-9][0-9]{0,9}$`)
+	qojTimePattern        = regexp.MustCompile(`^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$`)
 	luoguRequestIDPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{43}$`)
 )
 
@@ -58,6 +61,7 @@ type luoguPluginIdentity struct {
 	ClientKind      string
 	ClientVersion   string
 	Username        string
+	Platform        string
 }
 
 type luoguTokenValidator interface {
@@ -67,7 +71,7 @@ type luoguTokenValidator interface {
 type luoguSubmitImporter interface {
 	ImportSubmitLogs(context.Context, int64, string, int64, []model.SubmitLog) (bizservice.SubmitImportResult, error)
 	CompleteClientSync(context.Context, int64, string, int64, string, time.Time) error
-	ScheduleSubmitPostProcess(int64)
+	ScheduleSubmitPostProcess(int64, string)
 }
 
 type luoguClientPageImporter interface {
@@ -123,6 +127,7 @@ func (v *grpcLuoguTokenValidator) ValidateLuoguPluginToken(ctx context.Context, 
 		ClientKind:      res.ClientKind,
 		ClientVersion:   res.ClientVersion,
 		Username:        res.Username,
+		Platform:        res.Platform,
 	}, nil
 }
 
@@ -132,6 +137,7 @@ type luoguSession struct {
 	AuthorizationID uint64
 	UserID          int64
 	LuoguUID        string
+	Platform        string
 	ClientKind      string
 	RequestIDHash   string
 	Generation      int64
@@ -205,7 +211,7 @@ end
 redis.call("SET", KEYS[2], ARGV[2], "PX", ARGV[3])
 redis.call("HSET", KEYS[3],
   "id", ARGV[4], "token_hash", ARGV[5], "authorization_id", ARGV[6],
-  "user_id", ARGV[7], "luogu_uid", ARGV[8], "client_kind", ARGV[9],
+  "user_id", ARGV[7], "luogu_uid", ARGV[8], "client_kind", ARGV[9], "platform", ARGV[15],
 	"request_id_hash", ARGV[14],
   "generation", ARGV[10], "expected_page", "1", "first_submit_id", "",
   "remote_count", "-1", "per_page", "0", "old_checkpoint", ARGV[11], "inserted", "0",
@@ -272,11 +278,22 @@ func (s *SpiderService) StartLuoguSync(ctx context.Context, req *spiderpb.StartL
 	if err := validateLuoguStartRequest(req, identity); err != nil {
 		return nil, err
 	}
-	binding, generation, err := s.validateLuoguBinding(ctx, identity.UserID, identity.LuoguUID)
+	platformName := normalizeSyncPlatform(identity.Platform)
+	var binding model.Platform
+	var generation int64
+	if platformName == spiderregistry.LuoGu {
+		binding, generation, err = s.validateLuoguBinding(ctx, identity.UserID, identity.LuoguUID)
+	} else {
+		binding, err = s.ensureQOJBrowserBinding(ctx, identity.UserID, identity.LuoguUID)
+		if err != nil {
+			return nil, err
+		}
+		generation, err = task.CurrentGeneration(ctx, s.rdb, identity.UserID, platformName)
+	}
 	if err != nil {
 		return nil, err
 	}
-	if strings.TrimSpace(binding.ClientSyncHeadSubmitID) == "" {
+	if platformName == spiderregistry.LuoGu && strings.TrimSpace(binding.ClientSyncHeadSubmitID) == "" {
 		binding.ClientSyncHeadSubmitID, err = s.inferLuoguCheckpoint(ctx, identity.UserID)
 		if err != nil {
 			return nil, kratoserrors.ServiceUnavailable("SYNC_UNAVAILABLE", "同步服务暂不可用")
@@ -294,12 +311,13 @@ func (s *SpiderService) StartLuoguSync(ctx context.Context, req *spiderpb.StartL
 	requestIDHash := hashLuoguRequestID(requestID)
 	sessionToken := deriveLuoguSessionToken(token, identity.AuthorizationID, requestID, sessionID)
 	tokenHash := hashLuoguSessionToken(sessionToken)
-	activeKey := luoguSyncActiveKey(identity.UserID, identity.LuoguUID)
+	subject := syncSubject(platformName, identity.LuoguUID)
+	activeKey := luoguSyncActiveKey(identity.UserID, subject)
 	result, err := luoguStartScript.Run(ctx, s.rdb,
-		[]string{activeKey, luoguSyncCooldownKey(identity.UserID, identity.LuoguUID), luoguSyncSessionKey(sessionID), luoguSyncTokenKey(tokenHash), luoguSyncIssuanceKey(identity.AuthorizationID, requestIDHash), luoguSyncUserSessionsKey(identity.UserID), luoguSyncUserUIDsKey(identity.UserID)},
+		[]string{activeKey, luoguSyncCooldownKey(identity.UserID, subject), luoguSyncSessionKey(sessionID), luoguSyncTokenKey(tokenHash), luoguSyncIssuanceKey(identity.AuthorizationID, requestIDHash), luoguSyncUserSessionsKey(identity.UserID), luoguSyncUserUIDsKey(identity.UserID)},
 		"luogu:sync:session:", nextAvailableAt.Unix(), luoguSyncCooldown.Milliseconds(), sessionID, tokenHash,
 		identity.AuthorizationID, identity.UserID, identity.LuoguUID, identity.ClientKind, generation,
-		binding.ClientSyncHeadSubmitID, expiresAt.Unix(), luoguSyncSessionTTL.Milliseconds(), requestIDHash,
+		binding.ClientSyncHeadSubmitID, expiresAt.Unix(), luoguSyncSessionTTL.Milliseconds(), requestIDHash, platformName,
 	).Slice()
 	if err != nil || len(result) != 2 {
 		return nil, kratoserrors.ServiceUnavailable("SYNC_UNAVAILABLE", "同步服务暂不可用")
@@ -349,7 +367,7 @@ func (s *SpiderService) recordLuoguSyncAuditStart(ctx context.Context, state *lu
 		return nil
 	}
 	if auditor, ok := s.luoguImporter.(luoguSyncAuditor); ok {
-		return auditor.StartClientSyncAudit(ctx, bizservice.ClientSyncAuditStart{SessionID: state.ID, AuthorizationID: state.AuthorizationID, UserID: state.UserID, Username: username, Platform: "luogu", OJUID: state.LuoguUID, ClientKind: state.ClientKind, ClientVersion: clientVersion, StartedAt: startedAt})
+		return auditor.StartClientSyncAudit(ctx, bizservice.ClientSyncAuditStart{SessionID: state.ID, AuthorizationID: state.AuthorizationID, UserID: state.UserID, Username: username, Platform: strings.ToLower(normalizeSyncPlatform(state.Platform)), OJUID: state.LuoguUID, ClientKind: state.ClientKind, ClientVersion: clientVersion, StartedAt: startedAt})
 	}
 	return nil
 }
@@ -368,6 +386,7 @@ func (s *SpiderService) LuoguSyncStatus(ctx context.Context, _ *spiderpb.LuoguSy
 		SessionId: state.ID, NextPage: state.ExpectedPage, Inserted: state.Inserted,
 		ProcessedPages: state.ProcessedPages, TotalPages: totalLuoguPages(state.RemoteCount, state.PerPage),
 		ExpiresAt: state.ExpiresAt, NextAvailableAt: state.NextAvailableAt, Done: state.Done,
+		Platform: normalizeSyncPlatform(state.Platform), OjUid: state.LuoguUID,
 	}
 	if state.Done && state.LastResponse != "" {
 		var completed spiderpb.UploadLuoguSyncPageRes
@@ -444,6 +463,11 @@ func (s *SpiderService) UploadLuoguSyncPage(ctx context.Context, req *spiderpb.U
 	remoteChanged := state.RemoteCount >= 0 && state.RemoteCount != req.RemoteCount
 	perPageChanged := state.PerPage > 0 && state.PerPage != req.PerPage
 	samePageChanged := req.Page == state.LastPage && state.LastPage > 0 && digest != state.LastPageDigest
+	// QOJ pages do not publish a stable total. Completion uses has_next, so a
+	// changing page size must not discard the checkpoint.
+	if normalizeSyncPlatform(state.Platform) == spiderregistry.QOJ {
+		remoteChanged, perPageChanged = false, false
+	}
 	if remoteChanged || perPageChanged || samePageChanged {
 		return s.restartLuoguScan(ctx, state, req.RemoteCount, req.PerPage)
 	}
@@ -463,11 +487,11 @@ func (s *SpiderService) UploadLuoguSyncPage(ctx context.Context, req *spiderpb.U
 
 	logs := make([]model.SubmitLog, 0, len(req.Records))
 	for _, raw := range req.Records {
-		record, convErr := luoguProtoRecord(raw)
+		logRow, convErr := browserRecordToSubmitLog(state.UserID, normalizeSyncPlatform(state.Platform), raw)
 		if convErr != nil {
 			return nil, convErr
 		}
-		logs = append(logs, platform.LuoGuRecordToSubmitLog(state.UserID, record))
+		logs = append(logs, logRow)
 	}
 	importer := s.luoguImporter
 	if importer == nil {
@@ -480,12 +504,16 @@ func (s *SpiderService) UploadLuoguSyncPage(ctx context.Context, req *spiderpb.U
 	connected, done, reason := false, false, ""
 	if state.OldCheckpoint != "" && pageContainsLuoguSubmit(req.Records, state.OldCheckpoint) {
 		connected, done, reason = true, true, "checkpoint"
+	} else if normalizeSyncPlatform(state.Platform) == spiderregistry.QOJ {
+		if !req.HasNext {
+			connected, done, reason = true, true, "remote_end"
+		}
 	} else if req.Page >= totalLuoguPages(req.RemoteCount, req.PerPage) {
 		connected, done, reason = true, true, "remote_end"
 	}
 	var pageInserted int64
 	if receiptImporter, ok := importer.(luoguClientPageImporter); ok {
-		pageResult, importErr := receiptImporter.ImportClientSyncPage(ctx, state.UserID, spiderregistry.LuoGu, state.Generation, logs, bizservice.ClientSyncPageImport{
+		pageResult, importErr := receiptImporter.ImportClientSyncPage(ctx, state.UserID, normalizeSyncPlatform(state.Platform), state.Generation, logs, bizservice.ClientSyncPageImport{
 			SessionID: state.ID, Restart: state.Restarts, Page: req.Page, Digest: digest,
 			FirstSubmitID: firstSubmitID, RemoteCount: req.RemoteCount, PerPage: req.PerPage,
 			InsertedBefore: state.Inserted, ProcessedPagesBefore: state.ProcessedPages,
@@ -505,7 +533,7 @@ func (s *SpiderService) UploadLuoguSyncPage(ctx context.Context, req *spiderpb.U
 			return s.restartLuoguScan(ctx, state, req.RemoteCount, req.PerPage)
 		}
 	} else {
-		imported, importErr := importer.ImportSubmitLogs(ctx, state.UserID, spiderregistry.LuoGu, state.Generation, logs)
+		imported, importErr := importer.ImportSubmitLogs(ctx, state.UserID, normalizeSyncPlatform(state.Platform), state.Generation, logs)
 		if importErr != nil {
 			return nil, s.mapLuoguImporterError(ctx, state, importErr)
 		}
@@ -515,7 +543,7 @@ func (s *SpiderService) UploadLuoguSyncPage(ctx context.Context, req *spiderpb.U
 		state.ProcessedPages++
 		state.ExpectedPage++
 		if done {
-			if err := importer.CompleteClientSync(ctx, state.UserID, spiderregistry.LuoGu, state.Generation, state.FirstSubmitID, s.luoguNow()); err != nil {
+			if err := importer.CompleteClientSync(ctx, state.UserID, normalizeSyncPlatform(state.Platform), state.Generation, state.FirstSubmitID, s.luoguNow()); err != nil {
 				return nil, s.mapLuoguImporterError(ctx, state, err)
 			}
 		}
@@ -524,14 +552,14 @@ func (s *SpiderService) UploadLuoguSyncPage(ctx context.Context, req *spiderpb.U
 	response := &spiderpb.UploadLuoguSyncPageRes{
 		Connected: connected, Done: done, CompletionReason: reason,
 		NextPage: state.ExpectedPage, PageInserted: pageInserted, Inserted: state.Inserted,
-		ProcessedPages: state.ProcessedPages, TotalPages: totalLuoguPages(req.RemoteCount, req.PerPage),
-		NextAvailableAt: state.NextAvailableAt,
+		ProcessedPages: state.ProcessedPages, TotalPages: browserSyncTotalPages(state.Platform, req),
+		NextAvailableAt: state.NextAvailableAt, Platform: normalizeSyncPlatform(state.Platform), OjUid: state.LuoguUID,
 	}
 	if done {
 		state.Done = true
 		if state.Inserted > 0 {
 			if _, durable := importer.(luoguClientPageImporter); !durable {
-				importer.ScheduleSubmitPostProcess(state.UserID)
+				importer.ScheduleSubmitPostProcess(state.UserID, normalizeSyncPlatform(state.Platform))
 			}
 		}
 	}
@@ -574,10 +602,65 @@ func validateLuoguStartRequest(req *spiderpb.StartLuoguSyncReq, identity luoguPl
 		return kratoserrors.BadRequest("GOALGO_CONNECT_REQUIRED", "客户端授权不匹配")
 	}
 	version := strings.TrimSpace(req.ClientVersion)
-	if version == "" || len(version) > 64 || identity.UserID <= 0 || identity.AuthorizationID == 0 || !luoguUIDPattern.MatchString(identity.LuoguUID) {
+	platformName := normalizeSyncPlatform(identity.Platform)
+	if requested := normalizeSyncPlatform(req.Platform); requested != platformName {
+		return kratoserrors.BadRequest("GOALGO_CONNECT_REQUIRED", "客户端平台与授权不匹配")
+	}
+	validUID := luoguUIDPattern.MatchString(identity.LuoguUID)
+	if platformName == spiderregistry.QOJ {
+		validUID = qojUsernamePattern.MatchString(identity.LuoguUID)
+	}
+	if version == "" || len(version) > 64 || identity.UserID <= 0 || identity.AuthorizationID == 0 || !validUID {
 		return kratoserrors.BadRequest("GOALGO_CONNECT_REQUIRED", "客户端授权无效")
 	}
 	return nil
+}
+
+func browserSyncTotalPages(platformName string, req *spiderpb.UploadLuoguSyncPageReq) int32 {
+	if normalizeSyncPlatform(platformName) != spiderregistry.QOJ || req == nil {
+		if req == nil {
+			return 0
+		}
+		return totalLuoguPages(req.RemoteCount, req.PerPage)
+	}
+	if req.HasNext || req.Page <= 0 {
+		return 0
+	}
+	return req.Page
+}
+
+func normalizeSyncPlatform(value string) string {
+	if strings.EqualFold(strings.TrimSpace(value), "QOJ") {
+		return spiderregistry.QOJ
+	}
+	return spiderregistry.LuoGu
+}
+
+// syncSubject keeps existing Luogu Redis keys unchanged and isolates QOJ.
+func syncSubject(platformName, uid string) string {
+	if normalizeSyncPlatform(platformName) == spiderregistry.QOJ {
+		return spiderregistry.QOJ + ":" + uid
+	}
+	return uid
+}
+
+func (s *SpiderService) ensureQOJBrowserBinding(ctx context.Context, userID int64, username string) (model.Platform, error) {
+	var binding model.Platform
+	err := s.db.WithContext(ctx).Where("user_id = ? AND platform = ?", userID, spiderregistry.QOJ).First(&binding).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		binding = model.Platform{UserID: userID, Platform: spiderregistry.QOJ, Username: username}
+		if createErr := s.db.WithContext(ctx).Create(&binding).Error; createErr != nil {
+			if reloadErr := s.db.WithContext(ctx).Where("user_id = ? AND platform = ?", userID, spiderregistry.QOJ).First(&binding).Error; reloadErr != nil {
+				return binding, kratoserrors.ServiceUnavailable("SYNC_UNAVAILABLE", "同步服务暂不可用")
+			}
+		}
+	} else if err != nil {
+		return binding, kratoserrors.ServiceUnavailable("SYNC_UNAVAILABLE", "同步服务暂不可用")
+	}
+	if binding.Username != username {
+		return binding, kratoserrors.Conflict("QOJ_ACCOUNT_MISMATCH", "当前 QOJ 账号与已绑定账号不一致")
+	}
+	return binding, nil
 }
 
 func (s *SpiderService) validateLuoguBinding(ctx context.Context, userID int64, uid string) (model.Platform, int64, error) {
@@ -1137,12 +1220,26 @@ func (s *SpiderService) runLuoguCleanupRecovery() {
 }
 
 func validateLuoguPage(req *spiderpb.UploadLuoguSyncPageReq, state *luoguSession, now time.Time) error {
-	bad := func() error { return kratoserrors.BadRequest("LUOGU_LAYOUT_CHANGED", "同步页内容无效") }
+	bad := func() error {
+		if state != nil && normalizeSyncPlatform(state.Platform) == spiderregistry.QOJ {
+			return kratoserrors.BadRequest("QOJ_LAYOUT_CHANGED", "QOJ 页面结构已变化")
+		}
+		return kratoserrors.BadRequest("LUOGU_LAYOUT_CHANGED", "同步页内容无效")
+	}
 	if req == nil || state == nil {
 		return bad()
 	}
+	if requested := strings.TrimSpace(req.Platform); requested != "" && normalizeSyncPlatform(requested) != normalizeSyncPlatform(state.Platform) {
+		return kratoserrors.BadRequest("GOALGO_CONNECT_REQUIRED", "客户端平台与会话不匹配")
+	}
 	if req.LuoguUid != state.LuoguUID {
+		if normalizeSyncPlatform(state.Platform) == spiderregistry.QOJ {
+			return kratoserrors.Conflict("QOJ_ACCOUNT_MISMATCH", "当前 QOJ 账号与同步会话不一致")
+		}
 		return kratoserrors.Conflict("LUOGU_UID_MISMATCH", "当前洛谷账号与 GoAlgo 绑定不一致")
+	}
+	if normalizeSyncPlatform(state.Platform) == spiderregistry.QOJ {
+		return validateQOJPage(req, now, bad)
 	}
 	if req.Page <= 0 || req.RemoteCount < 0 || req.RemoteCount > 10_000_000 || req.PerPage <= 0 || req.PerPage > 20 || len(req.Records) > 20 {
 		return bad()
@@ -1182,6 +1279,62 @@ func validateLuoguPage(req *spiderpb.UploadLuoguSyncPageReq, state *luoguSession
 	return nil
 }
 
+func validateQOJPage(req *spiderpb.UploadLuoguSyncPageReq, now time.Time, bad func() error) error {
+	if req.Page <= 0 || req.RemoteCount < 0 || req.PerPage <= 0 || req.PerPage > 100 || len(req.Records) > 100 {
+		return bad()
+	}
+	if len(req.Records) == 0 {
+		if req.Page != 1 || req.HasNext || req.RemoteCount != 0 {
+			return bad()
+		}
+		return nil
+	}
+	if len(req.Records) > int(req.PerPage) {
+		return bad()
+	}
+	if req.HasNext && len(req.Records) != int(req.PerPage) {
+		return bad()
+	}
+	seen := make(map[string]struct{}, len(req.Records))
+	minTime := time.Date(2010, 1, 1, 0, 0, 0, 0, time.UTC)
+	maxTime := now.Add(5 * time.Minute)
+	for _, record := range req.Records {
+		if record == nil || !luoguSubmitIDPattern.MatchString(record.SubmitId) || record.Problem == nil ||
+			!qojProblemIDPattern.MatchString(record.Problem.Pid) || len(record.Problem.Title) > 512 {
+			return bad()
+		}
+		if _, err := platform.NormalizeQOJResult(record.Verdict); err != nil {
+			return bad()
+		}
+		language := strings.TrimSpace(record.LanguageName)
+		if language == "" || len(language) > 64 || strings.ContainsAny(language, "\r\n\t") {
+			return bad()
+		}
+		submittedAt, err := qojSubmittedAt(record)
+		if err != nil || submittedAt.Before(minTime) || submittedAt.After(maxTime) {
+			return bad()
+		}
+		if _, ok := seen[record.SubmitId]; ok {
+			return bad()
+		}
+		seen[record.SubmitId] = struct{}{}
+	}
+	return nil
+}
+
+func qojSubmittedAt(record *spiderpb.LuoguSyncRecord) (time.Time, error) {
+	if text := strings.TrimSpace(record.SubmitTimeText); text != "" {
+		if !qojTimePattern.MatchString(text) {
+			return time.Time{}, fmt.Errorf("invalid qoj time")
+		}
+		return time.ParseInLocation("2006-01-02 15:04:05", text, time.Local)
+	}
+	if record.SubmitTime <= 0 {
+		return time.Time{}, fmt.Errorf("missing qoj time")
+	}
+	return time.Unix(record.SubmitTime, 0), nil
+}
+
 func validLuoguStatus(status int32) bool {
 	return (status >= 0 && status <= 14) || status == -1 || status == 21 || status == 22 || status == 23
 }
@@ -1195,6 +1348,33 @@ func luoguProtoRecord(raw *spiderpb.LuoguSyncRecord) (platform.Record, error) {
 	record.ID, record.SubmitTime, record.Status, record.Language = id, raw.SubmitTime, int(raw.Status), int(raw.Language)
 	record.Problem.Pid, record.Problem.Title, record.Problem.Difficulty = raw.Problem.Pid, raw.Problem.Title, int(raw.Problem.Difficulty)
 	return record, nil
+}
+
+func browserRecordToSubmitLog(userID int64, platformName string, raw *spiderpb.LuoguSyncRecord) (model.SubmitLog, error) {
+	if platformName == spiderregistry.QOJ {
+		verdict, err := platform.NormalizeQOJResult(raw.Verdict)
+		if err != nil {
+			return model.SubmitLog{}, kratoserrors.BadRequest("QOJ_LAYOUT_CHANGED", "QOJ 页面结构已变化")
+		}
+		submittedAt, err := qojSubmittedAt(raw)
+		if err != nil {
+			return model.SubmitLog{}, kratoserrors.BadRequest("QOJ_LAYOUT_CHANGED", "QOJ 页面结构已变化")
+		}
+		problemText := strings.TrimSpace(raw.Problem.Title)
+		if problemText == "" {
+			problemText = "#" + raw.Problem.Pid
+		}
+		return model.SubmitLog{
+			UserID: userID, Platform: spiderregistry.QOJ, SubmitID: raw.SubmitId,
+			Problem: problemText, ExternalID: raw.Problem.Pid,
+			Lang: strings.TrimSpace(raw.LanguageName), Status: verdict, Time: submittedAt,
+		}, nil
+	}
+	record, err := luoguProtoRecord(raw)
+	if err != nil {
+		return model.SubmitLog{}, err
+	}
+	return platform.LuoGuRecordToSubmitLog(userID, record), nil
 }
 
 func (s *SpiderService) authorizeLuoguSession(ctx context.Context) (*luoguSession, error) {
@@ -1266,6 +1446,7 @@ func (s *SpiderService) loadLuoguSessionByID(ctx context.Context, id string) (*l
 	state.AuthorizationID = parseUint64(values["authorization_id"])
 	state.UserID = parseInt64(values["user_id"])
 	state.LuoguUID, state.ClientKind, state.RequestIDHash = values["luogu_uid"], values["client_kind"], values["request_id_hash"]
+	state.Platform = normalizeSyncPlatform(values["platform"])
 	state.Generation = parseInt64(values["generation"])
 	state.ExpectedPage = int32(parseInt64(values["expected_page"]))
 	state.FirstSubmitID, state.OldCheckpoint = values["first_submit_id"], values["old_checkpoint"]
@@ -1289,6 +1470,7 @@ func (s *SpiderService) storeLuoguSession(ctx context.Context, state *luoguSessi
 	now := s.luoguNow()
 	state.ExpiresAt = now.Add(luoguSyncSessionTTL).Unix()
 	fields := map[string]interface{}{
+		"platform":      state.Platform,
 		"expected_page": state.ExpectedPage, "first_submit_id": state.FirstSubmitID,
 		"remote_count": state.RemoteCount, "per_page": state.PerPage, "inserted": state.Inserted, "processed_pages": state.ProcessedPages,
 		"restarts": state.Restarts, "last_page": state.LastPage, "last_page_digest": state.LastPageDigest,
@@ -1301,7 +1483,7 @@ func (s *SpiderService) storeLuoguSession(ctx context.Context, state *luoguSessi
 	}
 	if err := luoguStoreSessionScript.Run(ctx, s.rdb, []string{
 		luoguSyncSessionKey(state.ID), luoguSyncTokenKey(state.TokenHash),
-		luoguSyncActiveKey(state.UserID, state.LuoguUID), luoguSyncIssuanceKey(state.AuthorizationID, state.RequestIDHash),
+		luoguSyncActiveKey(state.UserID, syncSubject(state.Platform, state.LuoguUID)), luoguSyncIssuanceKey(state.AuthorizationID, state.RequestIDHash),
 	}, args...).Err(); err != nil {
 		return kratoserrors.ServiceUnavailable("SYNC_UNAVAILABLE", "同步服务暂不可用")
 	}
@@ -1316,7 +1498,7 @@ func (s *SpiderService) refreshLuoguSessionTTL(ctx context.Context, state *luogu
 		pipe.Expire(ctx, luoguSyncTokenKey(state.TokenHash), luoguSyncSessionTTL)
 		pipe.Expire(ctx, luoguSyncIssuanceKey(state.AuthorizationID, state.RequestIDHash), luoguSyncSessionTTL)
 		if !state.Done {
-			pipe.Expire(ctx, luoguSyncActiveKey(state.UserID, state.LuoguUID), luoguSyncSessionTTL)
+			pipe.Expire(ctx, luoguSyncActiveKey(state.UserID, syncSubject(state.Platform, state.LuoguUID)), luoguSyncSessionTTL)
 		}
 		return nil
 	})
@@ -1367,7 +1549,7 @@ func (s *SpiderService) markLuoguSessionTerminated(state *luoguSession) error {
 		}
 	}
 	if state.Inserted > 0 && !state.Done && s.luoguImporter != nil {
-		s.luoguImporter.ScheduleSubmitPostProcess(state.UserID)
+		s.luoguImporter.ScheduleSubmitPostProcess(state.UserID, normalizeSyncPlatform(state.Platform))
 	}
 	return nil
 }
@@ -1378,7 +1560,7 @@ func (s *SpiderService) deleteLuoguSessionKeys(ctx context.Context, state *luogu
 	}
 	err := luoguTerminateScript.Run(ctx, s.rdb, []string{
 		luoguSyncSessionKey(state.ID), luoguSyncTokenKey(state.TokenHash),
-		luoguSyncActiveKey(state.UserID, state.LuoguUID), luoguSyncLockKey(state.ID),
+		luoguSyncActiveKey(state.UserID, syncSubject(state.Platform, state.LuoguUID)), luoguSyncLockKey(state.ID),
 		luoguSyncIssuanceKey(state.AuthorizationID, state.RequestIDHash),
 	}, state.ID).Err()
 	_ = s.rdb.SRem(ctx, luoguSyncUserSessionsKey(state.UserID), state.ID).Err()
@@ -1426,7 +1608,8 @@ func (s *SpiderService) purgeLuoguSyncRedis(ctx context.Context, userID int64) (
 		}
 		keys := []string{luoguSyncSessionKey(sessionID), luoguSyncLockKey(sessionID)}
 		if uid := parseInt64(values["user_id"]); uid == userID {
-			keys = append(keys, luoguSyncActiveKey(userID, values["luogu_uid"]), luoguSyncCooldownKey(userID, values["luogu_uid"]))
+			subject := syncSubject(values["platform"], values["luogu_uid"])
+			keys = append(keys, luoguSyncActiveKey(userID, subject), luoguSyncCooldownKey(userID, subject))
 		}
 		if hash := values["token_hash"]; hash != "" {
 			keys = append(keys, luoguSyncTokenKey(hash))
@@ -1494,7 +1677,7 @@ func luoguStartResponse(state *luoguSession, token string, resumed bool) *spider
 	return &spiderpb.StartLuoguSyncRes{
 		SessionId: state.ID, SessionToken: token, Resumed: resumed, NextPage: state.ExpectedPage,
 		PageDelayMs: int32(luoguSyncPageDelay.Milliseconds()), ExpiresAt: state.ExpiresAt,
-		NextAvailableAt: state.NextAvailableAt,
+		NextAvailableAt: state.NextAvailableAt, Platform: normalizeSyncPlatform(state.Platform), OjUid: state.LuoguUID,
 	}
 }
 

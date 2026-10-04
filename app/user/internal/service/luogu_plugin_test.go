@@ -417,7 +417,7 @@ func TestAdminListPluginAuthorizationsNormalizesLuoguAliasAndRejectsInvalidPlatf
 	if res.Total != 1 || len(res.List) != 1 || res.List[0].Provider != "luogu" || res.List[0].Platform != "luogu" {
 		t.Fatalf("normalized platform result = %+v", res)
 	}
-	if _, err := svc.AdminListAuthorizations(ctx, &pb.AdminListPluginAuthorizationsReq{Platform: "qoj"}); luoguErrorReason(t, err) != "INVALID_PLATFORM" {
+	if _, err := svc.AdminListAuthorizations(ctx, &pb.AdminListPluginAuthorizationsReq{Platform: "codeforces"}); luoguErrorReason(t, err) != "INVALID_PLATFORM" {
 		t.Fatalf("invalid platform reason = %s", kerrors.FromError(err).Reason)
 	}
 }
