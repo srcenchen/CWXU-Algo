@@ -440,7 +440,7 @@ func (s *LuoguPluginService) ValidateLuoguPluginToken(ctx context.Context, req *
 		return nil, luoguPluginError(http.StatusForbidden, "INVALID_SCOPE", "设备授权范围无效")
 	}
 	var row model.PluginAuthorization
-	if err := s.db.WithContext(ctx).Where("token_hash = ? AND provider = ?", hashLuoguPluginToken(req.Token), luoguPluginProvider).First(&row).Error; err != nil {
+	if err := s.db.WithContext(ctx).Where("token_hash = ? AND provider IN ?", hashLuoguPluginToken(req.Token), []string{luoguPluginProvider, qojPluginProvider}).First(&row).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
 			return nil, luoguPluginError(http.StatusUnauthorized, "GOALGO_CONNECT_REQUIRED", "设备授权无效")
 		}

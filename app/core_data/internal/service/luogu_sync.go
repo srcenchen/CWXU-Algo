@@ -278,7 +278,10 @@ func (s *SpiderService) StartLuoguSync(ctx context.Context, req *spiderpb.StartL
 	if err := validateLuoguStartRequest(req, identity); err != nil {
 		return nil, err
 	}
-	platformName := normalizeSyncPlatform(identity.Platform)
+	platformName := syncRequestPlatform(req, identity)
+	ojUID := syncRequestUID(req, identity, platformName)
+	identity.Platform = platformName
+	identity.LuoguUID = ojUID
 	var binding model.Platform
 	var generation int64
 	if platformName == spiderregistry.LuoGu {
@@ -596,19 +599,40 @@ func (s *SpiderService) failLuoguSyncAudit(state *luoguSession, err error) {
 	}
 }
 
+func syncRequestPlatform(req *spiderpb.StartLuoguSyncReq, identity luoguPluginIdentity) string {
+	requested := normalizeSyncPlatform(req.GetPlatform())
+	// A GoAlgo device token can start either platform. QOJ uses the page username,
+	// so an older Luogu-issued token must not be rejected as a platform mismatch.
+	if requested == spiderregistry.QOJ {
+		return spiderregistry.QOJ
+	}
+	return normalizeSyncPlatform(identity.Platform)
+}
+
+func syncRequestUID(req *spiderpb.StartLuoguSyncReq, identity luoguPluginIdentity, platformName string) string {
+	if platformName == spiderregistry.QOJ {
+		if uid := strings.TrimSpace(req.GetOjUid()); qojUsernamePattern.MatchString(uid) {
+			return uid
+		}
+		if qojUsernamePattern.MatchString(identity.LuoguUID) {
+			return identity.LuoguUID
+		}
+		return ""
+	}
+	return identity.LuoguUID
+}
+
 func validateLuoguStartRequest(req *spiderpb.StartLuoguSyncReq, identity luoguPluginIdentity) error {
 	if req == nil || req.ClientKind != "userscript" || req.ClientKind != identity.ClientKind ||
 		!luoguRequestIDPattern.MatchString(strings.TrimSpace(req.RequestId)) {
 		return kratoserrors.BadRequest("GOALGO_CONNECT_REQUIRED", "客户端授权不匹配")
 	}
 	version := strings.TrimSpace(req.ClientVersion)
-	platformName := normalizeSyncPlatform(identity.Platform)
-	if requested := normalizeSyncPlatform(req.Platform); requested != platformName {
-		return kratoserrors.BadRequest("GOALGO_CONNECT_REQUIRED", "客户端平台与授权不匹配")
-	}
-	validUID := luoguUIDPattern.MatchString(identity.LuoguUID)
+	platformName := syncRequestPlatform(req, identity)
+	uid := syncRequestUID(req, identity, platformName)
+	validUID := luoguUIDPattern.MatchString(uid)
 	if platformName == spiderregistry.QOJ {
-		validUID = qojUsernamePattern.MatchString(identity.LuoguUID)
+		validUID = qojUsernamePattern.MatchString(uid)
 	}
 	if version == "" || len(version) > 64 || identity.UserID <= 0 || identity.AuthorizationID == 0 || !validUID {
 		return kratoserrors.BadRequest("GOALGO_CONNECT_REQUIRED", "客户端授权无效")
