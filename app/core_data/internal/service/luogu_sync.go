@@ -600,24 +600,30 @@ func (s *SpiderService) failLuoguSyncAudit(state *luoguSession, err error) {
 }
 
 func syncRequestPlatform(req *spiderpb.StartLuoguSyncReq, identity luoguPluginIdentity) string {
-	requested := normalizeSyncPlatform(req.GetPlatform())
-	// A GoAlgo device token can start either platform. QOJ uses the page username,
-	// so an older Luogu-issued token must not be rejected as a platform mismatch.
-	if requested == spiderregistry.QOJ {
+	// The device token is a shared GoAlgo grant. The page says which OJ is syncing.
+	switch strings.ToLower(strings.TrimSpace(req.GetPlatform())) {
+	case "qoj":
 		return spiderregistry.QOJ
+	case "luogu":
+		return spiderregistry.LuoGu
+	default:
+		return normalizeSyncPlatform(identity.Platform)
 	}
-	return normalizeSyncPlatform(identity.Platform)
 }
 
 func syncRequestUID(req *spiderpb.StartLuoguSyncReq, identity luoguPluginIdentity, platformName string) string {
+	requested := strings.TrimSpace(req.GetOjUid())
 	if platformName == spiderregistry.QOJ {
-		if uid := strings.TrimSpace(req.GetOjUid()); qojUsernamePattern.MatchString(uid) {
-			return uid
+		if qojUsernamePattern.MatchString(requested) {
+			return requested
 		}
 		if qojUsernamePattern.MatchString(identity.LuoguUID) {
 			return identity.LuoguUID
 		}
 		return ""
+	}
+	if luoguUIDPattern.MatchString(requested) {
+		return requested
 	}
 	return identity.LuoguUID
 }
