@@ -2691,4 +2691,7 @@ func TestUploadIsQOJ(t *testing.T) {
 	if !uploadIsQOJ(&spiderpb.UploadLuoguSyncPageReq{LuoguUid: "sanenchen", Records: []*spiderpb.LuoguSyncRecord{{Verdict: "AC"}}}) {
 		t.Fatal("verdict marks a QOJ page")
 	}
+	if !uploadIsQOJ(&spiderpb.UploadLuoguSyncPageReq{Records: []*spiderpb.LuoguSyncRecord{{Problem: &spiderpb.LuoguSyncProblem{Pid: "19004"}}}}) {
+		t.Fatal("numeric problem id marks a QOJ page")
+	}
 }

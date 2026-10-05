@@ -1287,9 +1287,25 @@ func uploadIsQOJ(req *spiderpb.UploadLuoguSyncPageReq) bool {
 		if strings.TrimSpace(raw.GetVerdict()) != "" || strings.TrimSpace(raw.GetLanguageName()) != "" || strings.TrimSpace(raw.GetSubmitTimeText()) != "" {
 			return true
 		}
+		if raw.GetProblem() != nil && qojProblemID(raw.GetProblem().GetPid()) {
+			return true
+		}
 	}
 	uid := strings.TrimSpace(req.GetLuoguUid())
 	return uid != "" && !luoguUIDPattern.MatchString(uid) && qojUsernamePattern.MatchString(uid)
+}
+
+func qojProblemID(pid string) bool {
+	pid = strings.TrimSpace(pid)
+	if pid == "" || strings.HasPrefix(strings.ToUpper(pid), "P") {
+		return false
+	}
+	for _, ch := range pid {
+		if ch < '0' || ch > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 func (s *SpiderService) promoteQOJUpload(ctx context.Context, state *luoguSession, req *spiderpb.UploadLuoguSyncPageReq) error {
@@ -1298,7 +1314,13 @@ func (s *SpiderService) promoteQOJUpload(ctx context.Context, state *luoguSessio
 	}
 	username := strings.TrimSpace(req.GetLuoguUid())
 	if !qojUsernamePattern.MatchString(username) || luoguUIDPattern.MatchString(username) {
-		return kratoserrors.BadRequest("QOJ_LAYOUT_CHANGED", "QOJ 页面结构已变化")
+		var binding model.Platform
+		err := s.db.WithContext(ctx).Where("user_id = ? AND platform = ?", state.UserID, spiderregistry.QOJ).First(&binding).Error
+		if err != nil || !qojUsernamePattern.MatchString(strings.TrimSpace(binding.Username)) || luoguUIDPattern.MatchString(strings.TrimSpace(binding.Username)) {
+			log.Infof("luogu-sync reject qoj promote user=%d sessionPlatform=%s sessionUID=%s reqPlatform=%q reqUID=%q records=%d", state.UserID, state.Platform, state.LuoguUID, req.GetPlatform(), req.GetLuoguUid(), len(req.GetRecords()))
+			return kratoserrors.BadRequest("QOJ_LAYOUT_CHANGED", "QOJ 页面结构已变化")
+		}
+		username = strings.TrimSpace(binding.Username)
 	}
 	if _, err := s.ensureQOJBrowserBinding(ctx, state.UserID, username); err != nil {
 		return err
@@ -1340,6 +1362,11 @@ func validateLuoguPage(req *spiderpb.UploadLuoguSyncPageReq, state *luoguSession
 		if normalizeSyncPlatform(state.Platform) == spiderregistry.QOJ {
 			return kratoserrors.Conflict("QOJ_ACCOUNT_MISMATCH", "当前 QOJ 账号与同步会话不一致")
 		}
+		pid := ""
+		if len(req.GetRecords()) > 0 && req.Records[0].GetProblem() != nil {
+			pid = req.Records[0].GetProblem().GetPid()
+		}
+		log.Infof("luogu-sync uid mismatch user=%d sessionPlatform=%s sessionUID=%s reqPlatform=%q reqUID=%q records=%d pid=%q", state.UserID, state.Platform, state.LuoguUID, req.GetPlatform(), req.GetLuoguUid(), len(req.GetRecords()), pid)
 		return kratoserrors.Conflict("LUOGU_UID_MISMATCH", "当前洛谷账号与 GoAlgo 绑定不一致")
 	}
 	if normalizeSyncPlatform(state.Platform) == spiderregistry.QOJ {
