@@ -298,19 +298,19 @@ func (s *SpiderService) StartLuoguSync(ctx context.Context, req *spiderpb.StartL
 		return nil, err
 	}
 	platformName := syncRequestPlatform(req, identity)
-	ojUID := syncRequestUID(req, identity, platformName)
 	identity.Platform = platformName
-	identity.LuoguUID = ojUID
 	var binding model.Platform
 	var generation int64
-	if platformName == spiderregistry.LuoGu {
-		binding, generation, err = s.validateLuoguBinding(ctx, identity.UserID, identity.LuoguUID)
-	} else {
-		binding, err = s.ensureQOJBrowserBinding(ctx, identity.UserID, identity.LuoguUID)
+	if platformName == spiderregistry.QOJ {
+		// The browser only fetches pages. The account is the one bound on GoAlgo.
+		identity.LuoguUID, err = s.boundQOJUsername(ctx, identity.UserID)
 		if err != nil {
 			return nil, err
 		}
 		generation, err = task.CurrentGeneration(ctx, s.rdb, identity.UserID, platformName)
+	} else {
+		identity.LuoguUID = syncRequestUID(req, identity, platformName)
+		binding, generation, err = s.validateLuoguBinding(ctx, identity.UserID, identity.LuoguUID)
 	}
 	if err != nil {
 		return nil, err
@@ -659,12 +659,14 @@ func validateLuoguStartRequest(req *spiderpb.StartLuoguSyncReq, identity luoguPl
 	}
 	version := strings.TrimSpace(req.ClientVersion)
 	platformName := syncRequestPlatform(req, identity)
-	uid := syncRequestUID(req, identity, platformName)
-	validUID := luoguUIDPattern.MatchString(uid)
 	if platformName == spiderregistry.QOJ {
-		validUID = qojUsernamePattern.MatchString(uid)
+		if version == "" || len(version) > 64 || identity.UserID <= 0 || identity.AuthorizationID == 0 {
+			return kratoserrors.BadRequest("GOALGO_CONNECT_REQUIRED", "客户端授权无效")
+		}
+		return nil
 	}
-	if version == "" || len(version) > 64 || identity.UserID <= 0 || identity.AuthorizationID == 0 || !validUID {
+	uid := syncRequestUID(req, identity, platformName)
+	if version == "" || len(version) > 64 || identity.UserID <= 0 || identity.AuthorizationID == 0 || !luoguUIDPattern.MatchString(uid) {
 		return kratoserrors.BadRequest("GOALGO_CONNECT_REQUIRED", "客户端授权无效")
 	}
 	return nil
@@ -696,6 +698,22 @@ func syncSubject(platformName, uid string) string {
 		return spiderregistry.QOJ + ":" + uid
 	}
 	return uid
+}
+
+func (s *SpiderService) boundQOJUsername(ctx context.Context, userID int64) (string, error) {
+	var binding model.Platform
+	err := s.db.WithContext(ctx).Where("user_id = ? AND platform = ?", userID, spiderregistry.QOJ).First(&binding).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return "", kratoserrors.BadRequest("QOJ_BINDING_REQUIRED", "请先在 GoAlgo 绑定 QOJ 账号")
+	}
+	if err != nil {
+		return "", kratoserrors.ServiceUnavailable("SYNC_UNAVAILABLE", "同步服务暂不可用")
+	}
+	username := strings.TrimSpace(binding.Username)
+	if !qojUsernamePattern.MatchString(username) {
+		return "", kratoserrors.BadRequest("QOJ_BINDING_REQUIRED", "请先在 GoAlgo 绑定 QOJ 账号")
+	}
+	return username, nil
 }
 
 func (s *SpiderService) ensureQOJBrowserBinding(ctx context.Context, userID int64, username string) (model.Platform, error) {
