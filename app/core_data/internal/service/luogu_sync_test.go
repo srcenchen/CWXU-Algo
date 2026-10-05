@@ -1756,6 +1756,54 @@ func startLuoguTestSessionWithRequestID(t *testing.T, svc *SpiderService, reques
 	return res
 }
 
+func TestLuoguSyncStartTakesOverAbandonedSession(t *testing.T) {
+	svc, _, _, clock, _ := newLuoguSyncServiceTest(t)
+	first := startLuoguTestSession(t, svc)
+	// A session that never progressed is abandoned once it ages past the grace.
+	clock.Sleep(3 * time.Minute)
+	svc.luoguTokenValidator = &fakeLuoguValidator{identity: luoguPluginIdentity{
+		AuthorizationID: 99, UserID: 7, LuoguUID: "2245873", ClientKind: "userscript", ClientVersion: "1.0.0",
+	}}
+	second, err := svc.StartLuoguSync(luoguHeaderContext(luoguPluginTokenHeader, "device-token"), &spiderpb.StartLuoguSyncReq{
+		ClientKind: "userscript", ClientVersion: "1.0.0", RequestId: strings.Repeat("b", 43),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.SessionId == first.SessionId {
+		t.Fatal("an abandoned session should be replaced")
+	}
+	if _, err := svc.LuoguSyncStatus(luoguHeaderContext(luoguSyncSessionHeader, first.SessionToken), &spiderpb.LuoguSyncStatusReq{}); err == nil {
+		t.Fatal("the replaced session should be terminated")
+	}
+}
+
+func TestLuoguSyncStartKeepsBusyForSameActiveClient(t *testing.T) {
+	svc, _, _, _, _ := newLuoguSyncServiceTest(t)
+	startLuoguTestSession(t, svc)
+	_, err := svc.StartLuoguSync(luoguHeaderContext(luoguPluginTokenHeader, "device-token"), &spiderpb.StartLuoguSyncReq{
+		ClientKind: "userscript", ClientVersion: "1.0.0", RequestId: strings.Repeat("b", 43),
+	})
+	if luoguReason(err) != "SYNC_IN_PROGRESS" {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestLuoguSyncStartReplacesStalledSession(t *testing.T) {
+	svc, _, rdb, clock, _ := newLuoguSyncServiceTest(t)
+	first := startLuoguTestSession(t, svc)
+	stalled := clock.Now().Add(-10 * time.Minute).UnixMilli()
+	if err := rdb.HSet(context.Background(), luoguSyncSessionKey(first.SessionId), "last_processed_ms", stalled).Err(); err != nil {
+		t.Fatal(err)
+	}
+	second, err := svc.StartLuoguSync(luoguHeaderContext(luoguPluginTokenHeader, "device-token"), &spiderpb.StartLuoguSyncReq{
+		ClientKind: "userscript", ClientVersion: "1.0.0", RequestId: strings.Repeat("b", 43),
+	})
+	if err != nil || second.SessionId == first.SessionId {
+		t.Fatalf("second=%+v err=%v", second, err)
+	}
+}
+
 func TestLuoguSyncStartReplayAfterArbitraryDelayKeepsIssuedToken(t *testing.T) {
 	svc, _, _, clock, _ := newLuoguSyncServiceTest(t)
 	first := startLuoguTestSession(t, svc)

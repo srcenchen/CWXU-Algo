@@ -42,6 +42,9 @@ const (
 	luoguSyncCooldown      = 5 * time.Minute
 	luoguSyncPageDelay     = 500 * time.Millisecond
 	luoguSyncMaxRestarts   = 3
+	// A session that made no progress for this long is treated as abandoned and
+	// can be replaced by a new start instead of blocking it with SYNC_IN_PROGRESS.
+	luoguSyncAbandonedGrace = 2 * time.Minute
 )
 
 var (
@@ -344,6 +347,7 @@ func (s *SpiderService) StartLuoguSync(ctx context.Context, req *spiderpb.StartL
 	tokenHash := hashLuoguSessionToken(sessionToken)
 	subject := syncSubject(platformName, identity.LuoguUID)
 	activeKey := luoguSyncActiveKey(identity.UserID, subject)
+	s.replaceStaleLuoguSession(ctx, activeKey, identity.AuthorizationID, requestIDHash, now)
 	result, err := luoguStartScript.Run(ctx, s.rdb,
 		[]string{activeKey, luoguSyncCooldownKey(identity.UserID, subject), luoguSyncSessionKey(sessionID), luoguSyncTokenKey(tokenHash), luoguSyncIssuanceKey(identity.AuthorizationID, requestIDHash), luoguSyncUserSessionsKey(identity.UserID), luoguSyncUserUIDsKey(identity.UserID)},
 		"luogu:sync:session:", nextAvailableAt.Unix(), luoguSyncCooldown.Milliseconds(), sessionID, tokenHash,
@@ -1837,6 +1841,48 @@ func (s *SpiderService) terminateLuoguSession(ctx context.Context, state *luoguS
 	if err := s.deleteLuoguSessionKeys(ctx, state); err != nil {
 		log.Errorf("client-sync terminate Redis session=%s user=%d: %v", state.ID, state.UserID, err)
 	}
+}
+
+// replaceStaleLuoguSession frees the active slot when a session stopped making
+// progress. Without this a client that lost its session would be rejected with
+// SYNC_IN_PROGRESS until the 30 minute TTL, even though nothing is syncing.
+func (s *SpiderService) replaceStaleLuoguSession(ctx context.Context, activeKey string, requesterAuth uint64, requesterRequestHash string, now time.Time) {
+	if s == nil || s.rdb == nil || activeKey == "" {
+		return
+	}
+	activeID, err := s.rdb.Get(ctx, activeKey).Result()
+	if err != nil || activeID == "" {
+		return
+	}
+	state, err := s.loadLuoguSessionByID(ctx, activeID)
+	if err != nil || !luoguSessionAbandoned(state, now) {
+		return
+	}
+	// Never replace the session the caller is replaying; a client that lost the
+	// start response must still get the same session back.
+	if state.AuthorizationID == requesterAuth && state.RequestIDHash == requesterRequestHash {
+		return
+	}
+	s.terminateLuoguSession(ctx, state)
+	// The replacement must not wait out the abandoned session's cooldown either.
+	_ = s.rdb.Del(ctx, luoguSyncCooldownKey(state.UserID, syncSubject(state.Platform, state.LuoguUID))).Err()
+}
+
+// luoguSessionAbandoned reports whether a running session made no progress for
+// luoguSyncAbandonedGrace. The start time is derived from next_available_at,
+// which is fixed at creation and never refreshed.
+func luoguSessionAbandoned(state *luoguSession, now time.Time) bool {
+	if state == nil || state.Done {
+		return false
+	}
+	if state.LastProcessedMS > 0 {
+		return now.UnixMilli()-state.LastProcessedMS > luoguSyncAbandonedGrace.Milliseconds()
+	}
+	startedMS := (state.NextAvailableAt - int64(luoguSyncCooldown/time.Second)) * 1000
+	if startedMS <= 0 {
+		return false
+	}
+	return now.UnixMilli()-startedMS > luoguSyncAbandonedGrace.Milliseconds()
 }
 
 func (s *SpiderService) tryLuoguSessionLock(ctx context.Context, id string) (func(), bool) {
