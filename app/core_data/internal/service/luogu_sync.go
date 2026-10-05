@@ -302,8 +302,17 @@ func (s *SpiderService) StartLuoguSync(ctx context.Context, req *spiderpb.StartL
 	var binding model.Platform
 	var generation int64
 	if platformName == spiderregistry.QOJ {
-		// The browser only fetches pages. The account is the one bound on GoAlgo.
-		identity.LuoguUID, err = s.boundQOJUsername(ctx, identity.UserID)
+		// The browser page names the QOJ account to sync. Fall back to the
+		// account already bound on GoAlgo when the page cannot name one, so a
+		// shared device token connected from another platform still works.
+		identity.LuoguUID = syncRequestUID(req, identity, platformName)
+		if identity.LuoguUID == "" {
+			identity.LuoguUID, err = s.boundQOJUsername(ctx, identity.UserID)
+			if err != nil {
+				return nil, err
+			}
+		}
+		binding, err = s.ensureQOJBrowserBinding(ctx, identity.UserID, identity.LuoguUID)
 		if err != nil {
 			return nil, err
 		}
@@ -638,10 +647,10 @@ func syncRequestPlatform(req *spiderpb.StartLuoguSyncReq, identity luoguPluginId
 func syncRequestUID(req *spiderpb.StartLuoguSyncReq, identity luoguPluginIdentity, platformName string) string {
 	requested := strings.TrimSpace(req.GetOjUid())
 	if platformName == spiderregistry.QOJ {
-		if qojUsernamePattern.MatchString(requested) {
+		if isQOJUsername(requested) {
 			return requested
 		}
-		if qojUsernamePattern.MatchString(identity.LuoguUID) {
+		if isQOJUsername(identity.LuoguUID) {
 			return identity.LuoguUID
 		}
 		return ""
@@ -650,6 +659,13 @@ func syncRequestUID(req *spiderpb.StartLuoguSyncReq, identity luoguPluginIdentit
 		return requested
 	}
 	return identity.LuoguUID
+}
+
+// isQOJUsername rejects a purely numeric id carried by a shared device token
+// that was connected for LuoGu; such an id is not a QOJ username.
+func isQOJUsername(value string) bool {
+	value = strings.TrimSpace(value)
+	return qojUsernamePattern.MatchString(value) && !luoguUIDPattern.MatchString(value)
 }
 
 func validateLuoguStartRequest(req *spiderpb.StartLuoguSyncReq, identity luoguPluginIdentity) error {

@@ -86,6 +86,44 @@ func TestLuoguBrowserSyncStillUsesLegacyActiveKey(t *testing.T) {
 	}
 }
 
+func TestQOJSyncFallsBackToBoundAccountWithoutPageUser(t *testing.T) {
+	svc, db, rdb, _, _ := newLuoguSyncServiceTest(t)
+	if err := db.Create(&model.Platform{UserID: 7, Platform: spiderregistry.QOJ, Username: "bound_qoj"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	// The shared device token was connected from LuoGu, so it carries a numeric id.
+	svc.luoguTokenValidator = &fakeLuoguValidator{identity: luoguPluginIdentity{
+		AuthorizationID: 24, UserID: 7, LuoguUID: "2245873", ClientKind: "userscript",
+		ClientVersion: "0.2.0", Platform: "LuoGu",
+	}}
+	if err := rdb.Set(context.Background(), task.GenerationKey(7, "QOJ"), 3, time.Hour).Err(); err != nil {
+		t.Fatal(err)
+	}
+	started, err := svc.StartLuoguSync(luoguHeaderContext(luoguPluginTokenHeader, "shared-token"), &spiderpb.StartLuoguSyncReq{
+		ClientKind: "userscript", ClientVersion: "0.2.0", RequestId: strings.Repeat("f", 43), Platform: "QOJ",
+	})
+	if err != nil || started.Platform != "QOJ" || started.OjUid != "bound_qoj" {
+		t.Fatalf("start=%+v err=%v", started, err)
+	}
+}
+
+func TestQOJSyncRequiresBindingWithoutPageUserOrBinding(t *testing.T) {
+	svc, _, rdb, _, _ := newLuoguSyncServiceTest(t)
+	svc.luoguTokenValidator = &fakeLuoguValidator{identity: luoguPluginIdentity{
+		AuthorizationID: 25, UserID: 7, LuoguUID: "2245873", ClientKind: "userscript",
+		ClientVersion: "0.2.0", Platform: "LuoGu",
+	}}
+	if err := rdb.Set(context.Background(), task.GenerationKey(7, "QOJ"), 3, time.Hour).Err(); err != nil {
+		t.Fatal(err)
+	}
+	_, err := svc.StartLuoguSync(luoguHeaderContext(luoguPluginTokenHeader, "shared-token"), &spiderpb.StartLuoguSyncReq{
+		ClientKind: "userscript", ClientVersion: "0.2.0", RequestId: strings.Repeat("g", 43), Platform: "QOJ",
+	})
+	if luoguReason(err) != "QOJ_BINDING_REQUIRED" {
+		t.Fatalf("err=%v", err)
+	}
+}
+
 func TestQOJPageRejectsLuoguNumericStatus(t *testing.T) {
 	svc, _, _, clock, _ := newLuoguSyncServiceTest(t)
 	svc.luoguTokenValidator = &fakeLuoguValidator{identity: luoguPluginIdentity{
