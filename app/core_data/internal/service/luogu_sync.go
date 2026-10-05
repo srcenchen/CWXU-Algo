@@ -1550,6 +1550,20 @@ func (s *SpiderService) validateLuoguSessionState(ctx context.Context, state *lu
 		s.terminateLuoguSession(ctx, state)
 		return kratoserrors.Unauthorized("GOALGO_CONNECT_REQUIRED", "设备授权已撤销")
 	}
+	if normalizeSyncPlatform(state.Platform) == spiderregistry.QOJ {
+		if _, err := s.ensureQOJBrowserBinding(ctx, state.UserID, state.LuoguUID); err != nil {
+			return err
+		}
+		generation, err := task.CurrentGeneration(ctx, s.rdb, state.UserID, spiderregistry.QOJ)
+		if err != nil {
+			return kratoserrors.ServiceUnavailable("SYNC_UNAVAILABLE", "同步服务暂不可用")
+		}
+		if generation != state.Generation {
+			s.terminateLuoguSession(ctx, state)
+			return kratoserrors.Unauthorized("SESSION_EXPIRED", "同步会话已失效")
+		}
+		return nil
+	}
 	_, generation, bindErr := s.validateLuoguBinding(ctx, state.UserID, state.LuoguUID)
 	if bindErr != nil {
 		if kratoserrors.Reason(bindErr) != "SYNC_UNAVAILABLE" {
