@@ -206,7 +206,26 @@ if active then
 end
 local cooldown = redis.call("GET", KEYS[2])
 if cooldown then
-  return {"COOLDOWN", cooldown}
+  local active = redis.call("GET", KEYS[1])
+  local empty = true
+  if active then
+    local activeSession = ARGV[1] .. active
+    if redis.call("EXISTS", activeSession) == 1 then
+      local pages = redis.call("HGET", activeSession, "processed_pages")
+      local done = redis.call("HGET", activeSession, "done")
+      if pages ~= "0" or done == "1" then
+        empty = false
+      else
+        local tokenHash = redis.call("HGET", activeSession, "token_hash")
+        redis.call("DEL", activeSession)
+        if tokenHash and tokenHash ~= "" then redis.call("DEL", "luogu:sync:token:" .. tokenHash) end
+      end
+    end
+  end
+  if not empty then
+    return {"COOLDOWN", cooldown}
+  end
+  redis.call("DEL", KEYS[1], KEYS[2])
 end
 redis.call("SET", KEYS[2], ARGV[2], "PX", ARGV[3])
 redis.call("HSET", KEYS[3],
