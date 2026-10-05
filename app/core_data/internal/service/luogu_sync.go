@@ -453,6 +453,11 @@ func (s *SpiderService) UploadLuoguSyncPage(ctx context.Context, req *spiderpb.U
 	if err := s.ensureLuoguSyncAuditActive(ctx, state); err != nil {
 		return nil, err
 	}
+	// A shared device token can open the session as LuoGu. The page itself is the
+	// QOJ submission list; keep that page instead of rejecting the username.
+	if err := s.promoteQOJUpload(ctx, state, req); err != nil {
+		return nil, err
+	}
 	if err := validateLuoguPage(req, state, s.luoguNow()); err != nil {
 		return nil, err
 	}
@@ -1266,6 +1271,56 @@ func (s *SpiderService) runLuoguCleanupRecovery() {
 	for range ticker.C {
 		s.recoverPendingLuoguCleanups(context.Background())
 	}
+}
+
+func uploadIsQOJ(req *spiderpb.UploadLuoguSyncPageReq) bool {
+	if req == nil {
+		return false
+	}
+	if strings.EqualFold(strings.TrimSpace(req.GetPlatform()), "qoj") {
+		return true
+	}
+	for _, raw := range req.GetRecords() {
+		if raw == nil {
+			continue
+		}
+		if strings.TrimSpace(raw.GetVerdict()) != "" || strings.TrimSpace(raw.GetLanguageName()) != "" || strings.TrimSpace(raw.GetSubmitTimeText()) != "" {
+			return true
+		}
+	}
+	uid := strings.TrimSpace(req.GetLuoguUid())
+	return uid != "" && !luoguUIDPattern.MatchString(uid) && qojUsernamePattern.MatchString(uid)
+}
+
+func (s *SpiderService) promoteQOJUpload(ctx context.Context, state *luoguSession, req *spiderpb.UploadLuoguSyncPageReq) error {
+	if s == nil || state == nil || !uploadIsQOJ(req) || normalizeSyncPlatform(state.Platform) == spiderregistry.QOJ {
+		return nil
+	}
+	username := strings.TrimSpace(req.GetLuoguUid())
+	if !qojUsernamePattern.MatchString(username) || luoguUIDPattern.MatchString(username) {
+		return kratoserrors.BadRequest("QOJ_LAYOUT_CHANGED", "QOJ 页面结构已变化")
+	}
+	if _, err := s.ensureQOJBrowserBinding(ctx, state.UserID, username); err != nil {
+		return err
+	}
+	generation, err := task.CurrentGeneration(ctx, s.rdb, state.UserID, spiderregistry.QOJ)
+	if err != nil {
+		return kratoserrors.ServiceUnavailable("SYNC_UNAVAILABLE", "同步服务暂不可用")
+	}
+	state.Platform = spiderregistry.QOJ
+	state.LuoguUID = username
+	state.Generation = generation
+	if s.rdb == nil {
+		return nil
+	}
+	if err := s.rdb.HSet(ctx, luoguSyncSessionKey(state.ID),
+		"platform", state.Platform,
+		"luogu_uid", state.LuoguUID,
+		"generation", state.Generation,
+	).Err(); err != nil {
+		return kratoserrors.ServiceUnavailable("SYNC_UNAVAILABLE", "同步服务暂不可用")
+	}
+	return nil
 }
 
 func validateLuoguPage(req *spiderpb.UploadLuoguSyncPageReq, state *luoguSession, now time.Time) error {

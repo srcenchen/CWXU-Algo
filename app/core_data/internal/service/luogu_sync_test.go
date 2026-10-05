@@ -2680,3 +2680,15 @@ func TestLuoguSyncRejectsInvalidPages(t *testing.T) {
 		})
 	}
 }
+
+func TestUploadIsQOJ(t *testing.T) {
+	if uploadIsQOJ(nil) || uploadIsQOJ(&spiderpb.UploadLuoguSyncPageReq{LuoguUid: "2245873"}) {
+		t.Fatal("luogu uid is not a QOJ page")
+	}
+	if !uploadIsQOJ(&spiderpb.UploadLuoguSyncPageReq{Platform: "QOJ", LuoguUid: "sanenchen"}) {
+		t.Fatal("explicit QOJ platform")
+	}
+	if !uploadIsQOJ(&spiderpb.UploadLuoguSyncPageReq{LuoguUid: "sanenchen", Records: []*spiderpb.LuoguSyncRecord{{Verdict: "AC"}}}) {
+		t.Fatal("verdict marks a QOJ page")
+	}
+}
