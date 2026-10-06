@@ -178,6 +178,7 @@ func migrateModels(db *gorm.DB) {
 		&model.Notification{},
 		&model.BlogArticle{},
 		&model.BlogPage{},
+		&model.BlogStaticSite{},
 		&model.BlogCategory{},
 		&model.BlogArticleOrg{},
 		&model.BlogTag{},

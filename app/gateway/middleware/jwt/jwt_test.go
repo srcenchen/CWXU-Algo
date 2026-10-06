@@ -76,6 +76,8 @@ func TestBlogPagePublicReadsAreWhitelisted(t *testing.T) {
 		"/api/user/blog/page/list",
 		"/v1/user/blog/page/get",
 		"/api/user/blog/page/get",
+		"/v1/user/blog/static-site/list",
+		"/api/user/blog/static-site/list",
 		"/v1/user/blog/obsidian-plugin/latest",
 		"/api/user/blog/obsidian-plugin/latest",
 		"/v1/user/blog/obsidian-plugin/publish",

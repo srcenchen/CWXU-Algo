@@ -3594,6 +3594,75 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/api.user.v1.blog.ReportListRes'
+    /v1/user/blog/static-site/delete:
+        post:
+            tags:
+                - Blog
+            description: 登录：删除静态页记录
+            operationId: Blog_StaticSiteDelete
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/api.user.v1.blog.StaticSiteDeleteReq'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.user.v1.blog.StaticSiteDeleteRes'
+    /v1/user/blog/static-site/list:
+        get:
+            tags:
+                - Blog
+            description: 公开：已 pin 到博客导航的静态页
+            operationId: Blog_StaticSiteListPublic
+            parameters:
+                - name: username
+                  in: query
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.user.v1.blog.StaticSiteListPublicRes'
+    /v1/user/blog/static-site/mine:
+        get:
+            tags:
+                - Blog
+            description: 登录：我的静态页
+            operationId: Blog_StaticSiteMine
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.user.v1.blog.StaticSiteMineRes'
+    /v1/user/blog/static-site/update:
+        post:
+            tags:
+                - Blog
+            description: 登录：更新静态页名称、路径、是否 pin 到导航（不含 zip）
+            operationId: Blog_StaticSiteUpdate
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/api.user.v1.blog.StaticSiteUpdateReq'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/api.user.v1.blog.StaticSiteUpdateRes'
     /v1/user/blog/tags:
         get:
             tags:
@@ -10791,6 +10860,33 @@ components:
                     type: string
                 updatedAt:
                     type: string
+        api.user.v1.blog.BlogStaticSiteInfo:
+            type: object
+            properties:
+                id:
+                    type: string
+                title:
+                    type: string
+                slug:
+                    type: string
+                entry:
+                    type: string
+                fileCount:
+                    type: integer
+                    format: int32
+                showInNav:
+                    type: boolean
+                navLabel:
+                    type: string
+                navOrder:
+                    type: integer
+                    format: int32
+                publicPath:
+                    type: string
+                createdAt:
+                    type: string
+                updatedAt:
+                    type: string
         api.user.v1.blog.ByUsernameAuthorData:
             type: object
             properties:
@@ -11686,6 +11782,69 @@ components:
                     type: string
                 label:
                     type: string
+        api.user.v1.blog.StaticSiteDeleteReq:
+            type: object
+            properties:
+                id:
+                    type: string
+        api.user.v1.blog.StaticSiteDeleteRes:
+            type: object
+            properties:
+                code:
+                    type: integer
+                    format: int32
+                message:
+                    type: string
+        api.user.v1.blog.StaticSiteListPublicRes:
+            type: object
+            properties:
+                code:
+                    type: integer
+                    format: int32
+                message:
+                    type: string
+                data:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/api.user.v1.blog.BlogStaticSiteInfo'
+        api.user.v1.blog.StaticSiteMineRes:
+            type: object
+            properties:
+                code:
+                    type: integer
+                    format: int32
+                message:
+                    type: string
+                data:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/api.user.v1.blog.BlogStaticSiteInfo'
+        api.user.v1.blog.StaticSiteUpdateReq:
+            type: object
+            properties:
+                id:
+                    type: string
+                title:
+                    type: string
+                slug:
+                    type: string
+                showInNav:
+                    type: boolean
+                navLabel:
+                    type: string
+                navOrder:
+                    type: integer
+                    format: int32
+        api.user.v1.blog.StaticSiteUpdateRes:
+            type: object
+            properties:
+                code:
+                    type: integer
+                    format: int32
+                message:
+                    type: string
+                data:
+                    $ref: '#/components/schemas/api.user.v1.blog.BlogStaticSiteInfo'
         api.user.v1.blog.TagCount:
             type: object
             properties:

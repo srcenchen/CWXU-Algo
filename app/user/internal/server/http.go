@@ -162,6 +162,7 @@ func NewHTTPServer(
 	social.RegisterSocialHTTPServer(srv, socialService)
 	notificationpb.RegisterNotificationHTTPServer(srv, notificationService)
 	blog.RegisterBlogHTTPServer(srv, blogService)
+	service.RegisterBlogStaticRoutes(srv, d, blogService)
 	service.RegisterSEORoutes(srv, seoService)
 	// C 端订阅（套餐/订单/站管管理）
 	subscriptionpb.RegisterSubscriptionHTTPServer(srv, subscriptionService)

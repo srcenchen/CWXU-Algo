@@ -315,3 +315,25 @@ const (
 	BlogImageUploadApproved = "approved"
 	BlogImageUploadRejected = "rejected"
 )
+
+// BlogStaticSite is an author-owned static HTML site unpacked from a zip
+// and stored on UpYun. Public URL: /blog/{username}/static/{slug}/…
+type BlogStaticSite struct {
+	ID        uint `gorm:"primaryKey"`
+	CreatedAt time.Time
+	UpdatedAt time.Time
+
+	UserID uint   `gorm:"not null;uniqueIndex:idx_blog_static_user_slug,priority:1;index:idx_blog_static_user_nav,priority:1;comment:作者"`
+	Title  string `gorm:"size:200;not null;comment:名称"`
+	Slug   string `gorm:"size:64;not null;uniqueIndex:idx_blog_static_user_slug,priority:2;comment:访问路径"`
+	// Entry 相对入口，默认 index.html
+	Entry string `gorm:"size:256;not null;default:index.html;comment:入口文件"`
+	// Prefix 又拍云对象前缀 /blog-static/{userId}/{id}
+	Prefix    string `gorm:"size:256;not null;comment:对象前缀"`
+	FileCount int    `gorm:"not null;default:0;comment:文件数"`
+	ShowInNav bool   `gorm:"not null;default:false;index:idx_blog_static_user_nav,priority:2;comment:是否加入博客导航"`
+	NavLabel  string `gorm:"size:64;comment:导航名称，空则使用标题"`
+	NavOrder  int    `gorm:"not null;default:0;index:idx_blog_static_user_nav,priority:3;comment:导航排序"`
+}
+
+func (BlogStaticSite) TableName() string { return "blog_static_sites" }

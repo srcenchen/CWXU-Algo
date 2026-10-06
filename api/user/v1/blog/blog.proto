@@ -112,6 +112,22 @@ service Blog {
   rpc PageReorder (PageReorderReq) returns (PageReorderRes) {
     option (google.api.http) = { post: "/v1/user/blog/page/reorder" body: "*" };
   }
+  // 公开：已 pin 到博客导航的静态页
+  rpc StaticSiteListPublic (StaticSiteListPublicReq) returns (StaticSiteListPublicRes) {
+    option (google.api.http) = { get: "/v1/user/blog/static-site/list" };
+  }
+  // 登录：我的静态页
+  rpc StaticSiteMine (StaticSiteMineReq) returns (StaticSiteMineRes) {
+    option (google.api.http) = { get: "/v1/user/blog/static-site/mine" };
+  }
+  // 登录：更新静态页名称、路径、是否 pin 到导航（不含 zip）
+  rpc StaticSiteUpdate (StaticSiteUpdateReq) returns (StaticSiteUpdateRes) {
+    option (google.api.http) = { post: "/v1/user/blog/static-site/update" body: "*" };
+  }
+  // 登录：删除静态页记录
+  rpc StaticSiteDelete (StaticSiteDeleteReq) returns (StaticSiteDeleteRes) {
+    option (google.api.http) = { post: "/v1/user/blog/static-site/delete" body: "*" };
+  }
   // 登录：创建分类
   rpc CategoryCreate (CategoryCreateReq) returns (CategoryCreateRes) {
     option (google.api.http) = { post: "/v1/user/blog/category/create" body: "*" };
@@ -1279,4 +1295,56 @@ message ReportHandleRes {
   int32 code = 1;
   string message = 2;
   ReportHandleData data = 3;
+}
+
+message BlogStaticSiteInfo {
+  int64 id = 1;
+  string title = 2;
+  string slug = 3;
+  string entry = 4;
+  int32 fileCount = 5;
+  bool showInNav = 6;
+  string navLabel = 7;
+  int32 navOrder = 8;
+  string publicPath = 9;
+  int64 createdAt = 10;
+  int64 updatedAt = 11;
+}
+
+message StaticSiteListPublicReq {
+  string username = 1;
+}
+message StaticSiteListPublicRes {
+  int32 code = 1;
+  string message = 2;
+  repeated BlogStaticSiteInfo data = 3;
+}
+
+message StaticSiteMineReq {}
+message StaticSiteMineRes {
+  int32 code = 1;
+  string message = 2;
+  repeated BlogStaticSiteInfo data = 3;
+}
+
+message StaticSiteUpdateReq {
+  int64 id = 1;
+  string title = 2;
+  string slug = 3;
+  bool showInNav = 4;
+  string navLabel = 5;
+  int32 navOrder = 6;
+}
+message StaticSiteUpdateRes {
+  int32 code = 1;
+  string message = 2;
+  BlogStaticSiteInfo data = 3;
+}
+
+message StaticSiteDeleteReq {
+  int64 id = 1;
+}
+message StaticSiteDeleteRes {
+  int32 code = 1;
+  string message = 2;
 }

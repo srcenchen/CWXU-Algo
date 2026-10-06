@@ -173,15 +173,19 @@ func TestConfigUnmarshaler(t *testing.T) {
 	if gateway.Name != "cwxu-algo" || gateway.Version != "v1" {
 		t.Errorf("unexpected gateway identity: %s %s", gateway.Name, gateway.Version)
 	}
-	if len(gateway.Endpoints) != 7 {
-		t.Errorf("expected seven service endpoints, got %d", len(gateway.Endpoints))
+	if len(gateway.Endpoints) != 8 {
+		t.Errorf("expected eight service endpoints, got %d", len(gateway.Endpoints))
 	}
 	upload := gateway.Endpoints[3]
 	if upload.Path != "/v1/user/upload" || upload.Timeout == nil || upload.Timeout.AsDuration() != 90*time.Second || upload.Metadata["maxRequestBodyBytes"] != "16777216" {
 		t.Errorf("upload endpoint must use a 90s timeout and 16MiB body cap: %+v", upload)
 	}
-	if gateway.Endpoints[4].Path != "/v1/user/*" {
-		t.Errorf("upload endpoint must precede the generic user route")
+	staticUpload := gateway.Endpoints[4]
+	if staticUpload.Path != "/v1/user/blog/static-site/upload" || staticUpload.Timeout == nil || staticUpload.Timeout.AsDuration() != 180*time.Second || staticUpload.Metadata["maxRequestBodyBytes"] != "33554432" {
+		t.Errorf("static site upload endpoint must use a 180s timeout and 32MiB body cap: %+v", staticUpload)
+	}
+	if gateway.Endpoints[5].Path != "/v1/user/*" {
+		t.Errorf("upload endpoints must precede the generic user route")
 	}
 	if len(gateway.Middlewares) != 2 || gateway.Middlewares[0].Name != "jwt" || gateway.Middlewares[1].Name != "cors" {
 		t.Fatalf("global jwt and cors middleware must be enabled: %+v", gateway.Middlewares)

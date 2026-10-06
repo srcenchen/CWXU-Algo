@@ -44,6 +44,14 @@ endpoints:
       maxRequestBodyBytes: "16777216"
     backends:
       - target: 'discovery:///user'
+  # 静态页 zip 解压后逐文件写入又拍云，必须放在通用 /v1/user/* 之前。
+  - path: /v1/user/blog/static-site/upload
+    timeout: 180s
+    protocol: HTTP
+    metadata:
+      maxRequestBodyBytes: "33554432"
+    backends:
+      - target: 'discovery:///user'
   - path: /v1/user/*
     timeout: 5s
     protocol: HTTP
