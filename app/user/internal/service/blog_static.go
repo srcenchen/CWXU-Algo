@@ -348,13 +348,21 @@ func serveBlogStatic(d *data.Data) func(khttp.Context) error {
 }
 
 func serveBlogStaticCtx(d *data.Data, ctx staticRequest) error {
+	username := strings.TrimSpace(ctx.Vars().Get("username"))
+	slug := strings.ToLower(strings.TrimSpace(ctx.Vars().Get("slug")))
+	return serveBlogStaticFile(d, ctx, username, slug, staticRelFromRequest(ctx))
+}
+
+// serveBlogStaticFile 代读某个静态页的单个文件；rel 为空时 302 到入口 html。
+// 同时被专用静态路由与 SEO 兜底路由复用，保证公开路径在两种 nginx 配置下都能打开。
+func serveBlogStaticFile(d *data.Data, ctx staticRequest, username, slug, rel string) error {
 	if d == nil || d.DB == nil {
 		return ctx.JSON(http.StatusServiceUnavailable, map[string]interface{}{
 			"code": 1, "message": "暂不可用",
 		})
 	}
-	username := strings.TrimSpace(ctx.Vars().Get("username"))
-	slug := strings.ToLower(strings.TrimSpace(ctx.Vars().Get("slug")))
+	username = strings.TrimSpace(username)
+	slug = strings.ToLower(strings.TrimSpace(slug))
 	if username == "" || slug == "" {
 		return ctx.JSON(http.StatusNotFound, map[string]interface{}{
 			"code": 1, "message": "页面不存在",
@@ -372,8 +380,7 @@ func serveBlogStaticCtx(d *data.Data, ctx staticRequest) error {
 			"code": 1, "message": "页面不存在",
 		})
 	}
-	rel := staticRelFromRequest(ctx)
-	if rel == "" {
+	if strings.Trim(rel, "/") == "" {
 		http.Redirect(ctx.Response(), ctx.Request(), "/blog/"+username+"/static/"+slug+"/"+site.Entry, http.StatusFound)
 		return nil
 	}

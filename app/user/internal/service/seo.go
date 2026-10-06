@@ -820,9 +820,43 @@ func (s *SEOService) handleMetaJSON(ctx khttp.Context) error {
 	return nil
 }
 
+// blogStaticSEOPathRe 匹配公开静态页路径 /blog/{user}/static/{slug}(/子路径)?
+var blogStaticSEOPathRe = regexp.MustCompile(`^/blog/([^/]+)/static/([^/]+)(?:/(.*))?$`)
+
+// blogStaticFromPath 从原始请求路径解析静态页三元组（去掉 query 与首尾斜杠）。
+func blogStaticFromPath(rawPath string) (username, slug, rel string, ok bool) {
+	p := rawPath
+	if i := strings.IndexByte(p, '?'); i >= 0 {
+		p = p[:i]
+	}
+	m := blogStaticSEOPathRe.FindStringSubmatch(p)
+	if m == nil {
+		return "", "", "", false
+	}
+	return m[1], m[2], strings.Trim(m[3], "/"), true
+}
+
+// tryServeBlogStatic 在 nginx 还没给 /blog/{user}/static/ 配专用 location 时兜底：
+// SEO 路由（^/blog/ 会整体反代到 /v1/user/seo/html）直接代读静态文件。
+// 专用静态 location 一旦生效便不会再命中这里。
+func (s *SEOService) tryServeBlogStatic(ctx staticRequest, rawPath string) (bool, error) {
+	if s == nil || s.data == nil || s.data.DB == nil {
+		return false, nil
+	}
+	username, slug, rel, ok := blogStaticFromPath(rawPath)
+	if !ok {
+		return false, nil
+	}
+	return true, serveBlogStaticFile(s.data, ctx, username, slug, rel)
+}
+
 func (s *SEOService) handleHTML(ctx khttp.Context) error {
 	req := ctx.Request()
-	p := s.resolvePage(req, seoPathFromRequest(req))
+	rawPath := seoPathFromRequest(req)
+	if handled, err := s.tryServeBlogStatic(ctx, rawPath); handled {
+		return err
+	}
+	p := s.resolvePage(req, rawPath)
 	w := ctx.Response()
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	// Never cache SEO HTML: CDN must not serve bot page to real users.

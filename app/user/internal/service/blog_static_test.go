@@ -170,6 +170,64 @@ func (c *staticHTTPCtx) JSON(code int, v interface{}) error {
 	return nil
 }
 
+func TestBlogStaticFromPath(t *testing.T) {
+	cases := []struct {
+		in   string
+		user string
+		slug string
+		rel  string
+		ok   bool
+	}{
+		{"/blog/sanen/static/hello/", "sanen", "hello", "", true},
+		{"/blog/sanen/static/hello", "sanen", "hello", "", true},
+		{"/blog/sanen/static/hello/index.html", "sanen", "hello", "index.html", true},
+		{"/blog/sanen/static/hello/css/a.css?v=1", "sanen", "hello", "css/a.css", true},
+		{"/blog/sanen/manage/static", "", "", "", false},
+		{"/blog/sanen/cv", "", "", "", false},
+		{"/blog/sanen/static", "", "", "", false},
+	}
+	for _, c := range cases {
+		user, slug, rel, ok := blogStaticFromPath(c.in)
+		if ok != c.ok || user != c.user || slug != c.slug || rel != c.rel {
+			t.Fatalf("%s => (%s,%s,%s,%v)", c.in, user, slug, rel, ok)
+		}
+	}
+}
+
+func TestSEOFallbackServesBlogStatic(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AutoMigrate(&model.User{}, &model.BlogStaticSite{}); err != nil {
+		t.Fatal(err)
+	}
+	user := model.User{Username: "sanen", Password: "x", Email: "a@b.c"}
+	if err := db.Create(&user).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&model.BlogStaticSite{
+		UserID: user.ID, Title: "页", Slug: "hello", Entry: "index.html",
+		Prefix: "/blog-static/1/1",
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	svc := &SEOService{data: &data.Data{DB: db}, pageCache: map[string]seoPageCacheEntry{}}
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/blog/sanen/static/hello/", nil)
+	ctx := &staticHTTPCtx{req: req, w: rec}
+	handled, err := svc.tryServeBlogStatic(ctx, "/blog/sanen/static/hello/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !handled {
+		t.Fatal("expected static path to be handled by SEO fallback")
+	}
+	if rec.Code != http.StatusFound || !strings.HasSuffix(rec.Header().Get("Location"), "/blog/sanen/static/hello/index.html") {
+		t.Fatalf("code=%d loc=%s", rec.Code, rec.Header().Get("Location"))
+	}
+}
+
 func TestDefaultStaticEntryNestedOnce(t *testing.T) {
 	raw := zipOf(t, map[string]string{
 		"deck/index.html": "<html>ok</html>",
