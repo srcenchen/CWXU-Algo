@@ -107,12 +107,13 @@ func TestStaticSitePublicNavQuery(t *testing.T) {
 	}
 }
 
-func seedUpyunSiteConfig(t *testing.T, db *gorm.DB) {
+func seedUpyunSiteConfig(t *testing.T, db *gorm.DB, domain, scheme string) {
 	t.Helper()
 	if err := db.Exec("CREATE TABLE IF NOT EXISTS site_configs (id integer primary key, upyun_bucket text, upyun_operator text, upyun_password text, upyun_domain text, upyun_scheme text)").Error; err != nil {
 		t.Fatal(err)
 	}
-	if err := db.Exec("INSERT INTO site_configs (id, upyun_bucket, upyun_operator, upyun_password, upyun_domain, upyun_scheme) VALUES (1,'bucket','op','pwd','zhiyuansofts.cn','https')").Error; err != nil {
+	if err := db.Exec("INSERT INTO site_configs (id, upyun_bucket, upyun_operator, upyun_password, upyun_domain, upyun_scheme) VALUES (1,?,?,?,?,?)",
+		"bucket", "op", "pwd", domain, scheme).Error; err != nil {
 		t.Fatal(err)
 	}
 }
@@ -125,7 +126,7 @@ func TestServeBlogStaticRedirectsToEntry(t *testing.T) {
 	if err := db.AutoMigrate(&model.User{}, &model.BlogStaticSite{}); err != nil {
 		t.Fatal(err)
 	}
-	seedUpyunSiteConfig(t, db)
+	seedUpyunSiteConfig(t, db, "zhiyuansofts.cn", "https")
 	user := model.User{Username: "sanen", Password: "x", Email: "a@b.c"}
 	if err := db.Create(&user).Error; err != nil {
 		t.Fatal(err)
@@ -154,8 +155,73 @@ func TestServeBlogStaticRedirectsToEntry(t *testing.T) {
 	}
 	defer res.Body.Close()
 	loc := res.Header.Get("Location")
-	if res.StatusCode != http.StatusFound || loc != "https://zhiyuansofts.cn/blog-static/1/1/index.html" {
+	if res.StatusCode != http.StatusFound || loc != "/blog/sanen/static/hello/index.html" {
 		t.Fatalf("status=%d loc=%s", res.StatusCode, loc)
+	}
+}
+
+func TestServeBlogStaticAssetRedirectsToCDN(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AutoMigrate(&model.User{}, &model.BlogStaticSite{}); err != nil {
+		t.Fatal(err)
+	}
+	seedUpyunSiteConfig(t, db, "zhiyuansofts.cn", "https")
+	user := model.User{Username: "sanen", Password: "x", Email: "a@b.c"}
+	if err := db.Create(&user).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&model.BlogStaticSite{
+		UserID: user.ID, Title: "页", Slug: "hello", Entry: "index.html",
+		Prefix: "/blog-static/1/1",
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/v1/user/blog/static/sanen/hello/css/a.css", nil)
+	ctx := &staticHTTPCtx{req: req, w: rec}
+	if err := serveBlogStaticFile(&data.Data{DB: db}, ctx, "sanen", "hello", "css/a.css"); err != nil {
+		t.Fatal(err)
+	}
+	if rec.Code != http.StatusFound || rec.Header().Get("Location") != "https://zhiyuansofts.cn/blog-static/1/1/css/a.css" {
+		t.Fatalf("code=%d loc=%s", rec.Code, rec.Header().Get("Location"))
+	}
+}
+
+func TestServeBlogStaticRelaysHTML(t *testing.T) {
+	cdn := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		_, _ = w.Write([]byte("<html>from-cdn</html>"))
+	}))
+	defer cdn.Close()
+	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AutoMigrate(&model.User{}, &model.BlogStaticSite{}); err != nil {
+		t.Fatal(err)
+	}
+	seedUpyunSiteConfig(t, db, strings.TrimPrefix(cdn.URL, "http://"), "http")
+	user := model.User{Username: "sanen", Password: "x", Email: "a@b.c"}
+	if err := db.Create(&user).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&model.BlogStaticSite{
+		UserID: user.ID, Title: "页", Slug: "hello", Entry: "index.html",
+		Prefix: "/blog-static/1/1",
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/v1/user/blog/static/sanen/hello/index.html", nil)
+	ctx := &staticHTTPCtx{req: req, w: rec}
+	if err := serveBlogStaticFile(&data.Data{DB: db}, ctx, "sanen", "hello", "index.html"); err != nil {
+		t.Fatal(err)
+	}
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "from-cdn") {
+		t.Fatalf("code=%d body=%s", rec.Code, rec.Body.String())
 	}
 }
 
@@ -213,7 +279,7 @@ func TestSEOFallbackServesBlogStatic(t *testing.T) {
 	if err := db.AutoMigrate(&model.User{}, &model.BlogStaticSite{}); err != nil {
 		t.Fatal(err)
 	}
-	seedUpyunSiteConfig(t, db)
+	seedUpyunSiteConfig(t, db, "zhiyuansofts.cn", "https")
 	user := model.User{Username: "sanen", Password: "x", Email: "a@b.c"}
 	if err := db.Create(&user).Error; err != nil {
 		t.Fatal(err)
@@ -235,7 +301,7 @@ func TestSEOFallbackServesBlogStatic(t *testing.T) {
 	if !handled {
 		t.Fatal("expected static path to be handled by SEO fallback")
 	}
-	if rec.Code != http.StatusFound || rec.Header().Get("Location") != "https://zhiyuansofts.cn/blog-static/1/1/index.html" {
+	if rec.Code != http.StatusFound || rec.Header().Get("Location") != "/blog/sanen/static/hello/index.html" {
 		t.Fatalf("code=%d loc=%s", rec.Code, rec.Header().Get("Location"))
 	}
 }

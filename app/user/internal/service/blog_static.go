@@ -353,8 +353,9 @@ func serveBlogStaticCtx(d *data.Data, ctx staticRequest) error {
 	return serveBlogStaticFile(d, ctx, username, slug, staticRelFromRequest(ctx))
 }
 
-// serveBlogStaticFile 把静态页请求 302 到云存储/CDN 上的对象（rel 为空即入口 html），
-// 不由本站服务器中转文件字节。同时被专用静态路由与 SEO 兜底路由复用。
+// serveBlogStaticFile 只对 html 走本站中转（保持在博客域名下解析相对链接），
+// 其余资源一律 302 到云存储/CDN，避免服务器回传全部文件字节。
+// 同时被专用静态路由与 SEO 兜底路由复用。
 func serveBlogStaticFile(d *data.Data, ctx staticRequest, username, slug, rel string) error {
 	if d == nil || d.DB == nil {
 		return ctx.JSON(http.StatusServiceUnavailable, map[string]interface{}{
@@ -380,29 +381,75 @@ func serveBlogStaticFile(d *data.Data, ctx staticRequest, username, slug, rel st
 			"code": 1, "message": "页面不存在",
 		})
 	}
-	// 直接 302 到云存储/CDN 上的对象，不让本站服务器中转文件字节。
 	entry := strings.TrimSpace(site.Entry)
 	if entry == "" {
 		entry = "index.html"
 	}
-	objectKey := site.Prefix + "/" + entry
-	if relClean := strings.Trim(rel, "/"); relClean != "" {
-		clean, msg := cleanStaticRelPath(relClean)
-		if msg != "" {
-			return ctx.JSON(http.StatusBadRequest, map[string]interface{}{
-				"code": 1, "message": "路径不合法",
-			})
-		}
-		objectKey = site.Prefix + "/" + clean
+	relClean := strings.Trim(rel, "/")
+	if relClean == "" {
+		// 入口页仍留在博客域名下，站点内相对链接才能正确解析
+		http.Redirect(ctx.Response(), ctx.Request(),
+			"/blog/"+username+"/static/"+slug+"/"+entry, http.StatusFound)
+		return nil
 	}
-	url := loadUpyunFromDB(d.DB).PublicURL(objectKey)
+	clean, msg := cleanStaticRelPath(relClean)
+	if msg != "" {
+		return ctx.JSON(http.StatusBadRequest, map[string]interface{}{
+			"code": 1, "message": "路径不合法",
+		})
+	}
+	url := loadUpyunFromDB(d.DB).PublicURL(site.Prefix + "/" + clean)
 	if url == "" || !strings.HasPrefix(url, "http") {
 		return ctx.JSON(http.StatusBadGateway, map[string]interface{}{
 			"code": 1, "message": "静态资源暂不可用",
 		})
 	}
-	http.Redirect(ctx.Response(), ctx.Request(), url, http.StatusFound)
+	if !isHTMLExt(clean) {
+		// 非 html 直接转发到 CDN，不让本站中转
+		http.Redirect(ctx.Response(), ctx.Request(), url, http.StatusFound)
+		return nil
+	}
+	return relayStaticHTML(ctx, url)
+}
+
+// relayStaticHTML 从云存储取回 html 并由本站返回，保证文档地址仍在博客域名下。
+func relayStaticHTML(ctx staticRequest, url string) error {
+	upReq, err := http.NewRequestWithContext(ctx.Request().Context(), http.MethodGet, url, nil)
+	if err != nil {
+		return ctx.JSON(http.StatusBadGateway, map[string]interface{}{
+			"code": 1, "message": "静态资源暂不可用",
+		})
+	}
+	resp, err := http.DefaultClient.Do(upReq)
+	if err != nil {
+		return ctx.JSON(http.StatusBadGateway, map[string]interface{}{
+			"code": 1, "message": "静态资源暂不可用",
+		})
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		return ctx.JSON(http.StatusNotFound, map[string]interface{}{
+			"code": 1, "message": "文件不存在",
+		})
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return ctx.JSON(http.StatusBadGateway, map[string]interface{}{
+			"code": 1, "message": "静态资源暂不可用",
+		})
+	}
+	w := ctx.Response()
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "public, max-age=60")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Content-Security-Policy", "default-src 'self' https: data: blob:; script-src 'self' 'unsafe-inline' 'unsafe-eval' https:; style-src 'self' 'unsafe-inline' https:; frame-ancestors 'self'")
+	w.WriteHeader(http.StatusOK)
+	_, _ = io.Copy(w, io.LimitReader(resp.Body, maxStaticFileBytes+1))
 	return nil
+}
+
+func isHTMLExt(rel string) bool {
+	ext := strings.ToLower(path.Ext(rel))
+	return ext == ".html" || ext == ".htm"
 }
 
 func staticRelFromRequest(ctx staticRequest) string {
