@@ -107,6 +107,16 @@ func TestStaticSitePublicNavQuery(t *testing.T) {
 	}
 }
 
+func seedUpyunSiteConfig(t *testing.T, db *gorm.DB) {
+	t.Helper()
+	if err := db.Exec("CREATE TABLE IF NOT EXISTS site_configs (id integer primary key, upyun_bucket text, upyun_operator text, upyun_password text, upyun_domain text, upyun_scheme text)").Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Exec("INSERT INTO site_configs (id, upyun_bucket, upyun_operator, upyun_password, upyun_domain, upyun_scheme) VALUES (1,'bucket','op','pwd','zhiyuansofts.cn','https')").Error; err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestServeBlogStaticRedirectsToEntry(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
 	if err != nil {
@@ -115,6 +125,7 @@ func TestServeBlogStaticRedirectsToEntry(t *testing.T) {
 	if err := db.AutoMigrate(&model.User{}, &model.BlogStaticSite{}); err != nil {
 		t.Fatal(err)
 	}
+	seedUpyunSiteConfig(t, db)
 	user := model.User{Username: "sanen", Password: "x", Email: "a@b.c"}
 	if err := db.Create(&user).Error; err != nil {
 		t.Fatal(err)
@@ -143,7 +154,7 @@ func TestServeBlogStaticRedirectsToEntry(t *testing.T) {
 	}
 	defer res.Body.Close()
 	loc := res.Header.Get("Location")
-	if res.StatusCode != http.StatusFound || !strings.HasSuffix(loc, "/blog/sanen/static/hello/index.html") {
+	if res.StatusCode != http.StatusFound || loc != "https://zhiyuansofts.cn/blog-static/1/1/index.html" {
 		t.Fatalf("status=%d loc=%s", res.StatusCode, loc)
 	}
 }
@@ -202,6 +213,7 @@ func TestSEOFallbackServesBlogStatic(t *testing.T) {
 	if err := db.AutoMigrate(&model.User{}, &model.BlogStaticSite{}); err != nil {
 		t.Fatal(err)
 	}
+	seedUpyunSiteConfig(t, db)
 	user := model.User{Username: "sanen", Password: "x", Email: "a@b.c"}
 	if err := db.Create(&user).Error; err != nil {
 		t.Fatal(err)
@@ -223,7 +235,7 @@ func TestSEOFallbackServesBlogStatic(t *testing.T) {
 	if !handled {
 		t.Fatal("expected static path to be handled by SEO fallback")
 	}
-	if rec.Code != http.StatusFound || !strings.HasSuffix(rec.Header().Get("Location"), "/blog/sanen/static/hello/index.html") {
+	if rec.Code != http.StatusFound || rec.Header().Get("Location") != "https://zhiyuansofts.cn/blog-static/1/1/index.html" {
 		t.Fatalf("code=%d loc=%s", rec.Code, rec.Header().Get("Location"))
 	}
 }
