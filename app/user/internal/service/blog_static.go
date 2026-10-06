@@ -275,6 +275,9 @@ func handleStaticSiteUpload(ctx khttp.Context, d *data.Data, blogSvc *BlogServic
 	}
 	site.Prefix = prefix
 	if err := d.DB.Save(&site).Error; err != nil {
+		if existing.ID == 0 {
+			_ = d.DB.Delete(&model.BlogStaticSite{}, site.ID).Error
+		}
 		return ctx.JSON(http.StatusInternalServerError, map[string]interface{}{
 			"code": 1, "message": "保存失败",
 		})

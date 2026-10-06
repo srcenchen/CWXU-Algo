@@ -184,6 +184,41 @@ func staticZipHasEntry(files []staticZipFile, entry string) bool {
 }
 
 func defaultStaticEntry(files []staticZipFile) string {
+	if entry := findStaticEntry(files); entry != "" {
+		return entry
+	}
+	// 压缩包只有一层目录、根上没有 html 时，进这一层再找一次。
+	roots := map[string]struct{}{}
+	for _, f := range files {
+		i := strings.Index(f.RelPath, "/")
+		if i <= 0 {
+			return ""
+		}
+		roots[f.RelPath[:i]] = struct{}{}
+		if len(roots) > 1 {
+			return ""
+		}
+	}
+	if len(roots) != 1 {
+		return ""
+	}
+	var root string
+	for name := range roots {
+		root = name
+	}
+	nested := make([]staticZipFile, 0, len(files))
+	prefix := root + "/"
+	for _, f := range files {
+		nested = append(nested, staticZipFile{RelPath: strings.TrimPrefix(f.RelPath, prefix)})
+	}
+	entry := findStaticEntry(nested)
+	if entry == "" {
+		return ""
+	}
+	return prefix + entry
+}
+
+func findStaticEntry(files []staticZipFile) string {
 	for _, name := range []string{"index.html", "index.htm"} {
 		if staticZipHasEntry(files, name) {
 			return name
@@ -191,10 +226,8 @@ func defaultStaticEntry(files []staticZipFile) string {
 	}
 	for _, f := range files {
 		ext := strings.ToLower(path.Ext(f.RelPath))
-		if ext == ".html" || ext == ".htm" {
-			if !strings.Contains(f.RelPath, "/") {
-				return f.RelPath
-			}
+		if (ext == ".html" || ext == ".htm") && !strings.Contains(f.RelPath, "/") {
+			return f.RelPath
 		}
 	}
 	return ""

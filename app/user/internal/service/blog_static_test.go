@@ -170,6 +170,31 @@ func (c *staticHTTPCtx) JSON(code int, v interface{}) error {
 	return nil
 }
 
+func TestDefaultStaticEntryNestedOnce(t *testing.T) {
+	raw := zipOf(t, map[string]string{
+		"deck/index.html": "<html>ok</html>",
+		"deck/a.css":      "body{}",
+	})
+	files, msg := unpackStaticZip(raw)
+	if msg != "" {
+		t.Fatal(msg)
+	}
+	if got := defaultStaticEntry(files); got != "deck/index.html" {
+		t.Fatalf("entry=%s", got)
+	}
+	raw = zipOf(t, map[string]string{
+		"a/index.html": "<html></html>",
+		"b/index.html": "<html></html>",
+	})
+	files, msg = unpackStaticZip(raw)
+	if msg != "" {
+		t.Fatal(msg)
+	}
+	if got := defaultStaticEntry(files); got != "" {
+		t.Fatalf("two roots should not unwrap, got %s", got)
+	}
+}
+
 func TestRejectPHPInHTML(t *testing.T) {
 	raw := zipOf(t, map[string]string{"index.html": "<?php echo 1; ?>"})
 	_, msg := unpackStaticZip(raw)
