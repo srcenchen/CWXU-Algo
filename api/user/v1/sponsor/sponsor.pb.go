@@ -845,7 +845,7 @@ type DonateReq struct {
 	AmountCents int64 `protobuf:"varint,1,opt,name=amountCents,proto3" json:"amountCents,omitempty"`
 	// 留言（可空，<=60 字）
 	Message string `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
-	// 是否接受赞助回赠的 1 个月会员（金额 > ¥10 回赠 Pro，否则 Plus）
+	// 是否接受赞助回赠的 1 个月会员（金额 ≥ ¥10 回赠 Pro，否则 Plus）
 	GiftMembership bool `protobuf:"varint,3,opt,name=giftMembership,proto3" json:"giftMembership,omitempty"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache

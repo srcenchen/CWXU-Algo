@@ -173,7 +173,7 @@ message DonateReq {
   int64 amountCents = 1;
   // 留言（可空，<=60 字）
   string message = 2;
-  // 是否接受赞助回赠的 1 个月会员（金额 > ¥10 回赠 Pro，否则 Plus）
+  // 是否接受赞助回赠的 1 个月会员（金额 ≥ ¥10 回赠 Pro，否则 Plus）
   bool giftMembership = 3;
 }
 

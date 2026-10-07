@@ -12,7 +12,8 @@ func TestSponsorGiftTier(t *testing.T) {
 		tier   string
 	}{
 		{100, "plus"},
-		{1000, "plus"},
+		{999, "plus"},
+		{1000, "pro"},
 		{1001, "pro"},
 		{5000, "pro"},
 	}

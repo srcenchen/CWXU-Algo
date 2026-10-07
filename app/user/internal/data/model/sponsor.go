@@ -8,9 +8,9 @@ const DefaultSponsorIntro = "如果希望这个项目能继续做下去，欢迎
 // SponsorGiftDays 赞助回赠会员时长（天）
 const SponsorGiftDays = 30
 
-// SponsorGiftTier 按赞助金额决定回赠档位：> ¥10 回赠 Pro，否则 Plus。
+// SponsorGiftTier 按赞助金额决定回赠档位：≥ ¥10 回赠 Pro，否则 Plus。
 func SponsorGiftTier(amountCents int64) string {
-	if amountCents > 1000 {
+	if amountCents >= 1000 {
 		return "pro"
 	}
 	return "plus"
