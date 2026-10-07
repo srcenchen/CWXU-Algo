@@ -69,8 +69,8 @@ func (d *SponsorDal) UpdateSettings(ctx context.Context, membership, donation bo
 		}).Error
 }
 
-// CreateOrder 创建待支付打赏订单（order_no 唯一）
-func (d *SponsorDal) CreateOrder(ctx context.Context, orderNo string, userID uint, nickname string, amountCents int64, message string) (*model.SponsorOrder, error) {
+// CreateOrder 创建待支付打赏订单（order_no 唯一）；giftTier 非空表示支付后回赠会员
+func (d *SponsorDal) CreateOrder(ctx context.Context, orderNo string, userID uint, nickname string, amountCents int64, message, giftTier string) (*model.SponsorOrder, error) {
 	o := model.SponsorOrder{
 		OrderNo:     orderNo,
 		UserID:      userID,
@@ -78,6 +78,7 @@ func (d *SponsorDal) CreateOrder(ctx context.Context, orderNo string, userID uin
 		AmountCents: amountCents,
 		Message:     message,
 		Status:      model.OrderStatusPending,
+		GiftTier:    giftTier,
 	}
 	if err := d.db.WithContext(ctx).Create(&o).Error; err != nil {
 		var dup model.SponsorOrder
@@ -110,7 +111,7 @@ func (d *SponsorDal) MarkOrderClosed(ctx context.Context, id uint) (bool, error)
 	return res.RowsAffected > 0, res.Error
 }
 
-// ClaimPaidOrder 支付回调入账：订单置 paid（行锁，幂等）。
+// ClaimPaidOrder 支付回调入账：订单置 paid（行锁，幂等）；有回赠档位时同事务发放会员。
 // claimed=true 表示本次调用赢得入账权；false 表示已 paid（重复回调）。
 func (d *SponsorDal) ClaimPaidOrder(ctx context.Context, orderNo, platformOrderNo string, paidAt time.Time) (*model.SponsorOrder, bool, error) {
 	var o model.SponsorOrder
@@ -129,6 +130,12 @@ func (d *SponsorDal) ClaimPaidOrder(ctx context.Context, orderNo, platformOrderN
 		if err := tx.Save(&o).Error; err != nil {
 			return err
 		}
+		// 回赠会员：与入账同一事务，避免「已付款未发放」；来源记 payfm（本单为在线支付）
+		if o.GiftTier != "" {
+			if err := grantGiftInTx(tx, o.UserID, o.GiftTier, model.SponsorGiftDays, "payfm", time.Now()); err != nil {
+				return err
+			}
+		}
 		claimed = true
 		return nil
 	})
@@ -139,6 +146,29 @@ func (d *SponsorDal) ClaimPaidOrder(ctx context.Context, orderNo, platformOrderN
 		return nil, false, err
 	}
 	return &o, claimed, nil
+}
+
+// grantGiftInTx 在既有事务内发放赞助回赠会员（与订阅支付履约同语义：晋升排队档 + 档位叠加）。
+func grantGiftInTx(tx *gorm.DB, userID uint, tier string, days int, source string, now time.Time) error {
+	if days < 1 {
+		return fmt.Errorf("回赠天数非法: %d", days)
+	}
+	var u model.User
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("id = ?", userID).First(&u).Error; err != nil {
+		return err
+	}
+	promoteInPlace(&u, now)
+	applyPurchase(&u, tier, days, source, now)
+	return tx.Model(&model.User{}).Where("id = ?", userID).Updates(map[string]interface{}{
+		"sub_tier":           u.SubTier,
+		"sub_expire_at":      u.SubExpireAt,
+		"sub_source":         u.SubSource,
+		"sub_pending_tier":   u.SubPendingTier,
+		"sub_pending_days":   u.SubPendingDays,
+		"sub_pending_source": u.SubPendingSource,
+		"sub_reminded":       u.SubReminded,
+	}).Error
 }
 
 // CloseStalePendingOrders 关单：pending 超过 olderThan 置 closed（定时任务调用）

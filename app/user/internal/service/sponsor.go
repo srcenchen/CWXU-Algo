@@ -12,6 +12,7 @@ import (
 	"cwxu-algo/app/common/utils/auth"
 	"cwxu-algo/app/user/internal/data"
 	"cwxu-algo/app/user/internal/data/dal"
+	"cwxu-algo/app/user/internal/data/model"
 	"cwxu-algo/app/user/internal/external/payment"
 
 	"github.com/go-kratos/kratos/v2/errors"
@@ -197,8 +198,12 @@ func (s *SponsorService) Donate(ctx context.Context, req *sponsor.DonateReq) (*s
 	if nickname == "" {
 		nickname = "匿名"
 	}
+	giftTier := ""
+	if req.GetGiftMembership() {
+		giftTier = model.SponsorGiftTier(amount)
+	}
 	orderNo := fmt.Sprintf("D%d", time.Now().UnixNano())
-	order, err := s.dal.CreateOrder(ctx, orderNo, pd.UserID, nickname, amount, msg)
+	order, err := s.dal.CreateOrder(ctx, orderNo, pd.UserID, nickname, amount, msg, giftTier)
 	if err != nil {
 		log.Errorf("Sponsor Donate 建单 user=%d amount=%d: %v", pd.UserID, amount, err)
 		return &sponsor.DonateRes{Code: 1, Message: "下单失败，请稍后再试"}, nil

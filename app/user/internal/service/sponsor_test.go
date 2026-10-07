@@ -1,6 +1,27 @@
 package service
 
-import "testing"
+import (
+	"testing"
+
+	"cwxu-algo/app/user/internal/data/model"
+)
+
+func TestSponsorGiftTier(t *testing.T) {
+	cases := []struct {
+		amount int64
+		tier   string
+	}{
+		{100, "plus"},
+		{1000, "plus"},
+		{1001, "pro"},
+		{5000, "pro"},
+	}
+	for _, c := range cases {
+		if got := model.SponsorGiftTier(c.amount); got != c.tier {
+			t.Fatalf("amount %d: got %s want %s", c.amount, got, c.tier)
+		}
+	}
+}
 
 func TestSponsorDonateAmountBounds(t *testing.T) {
 	cases := []struct {

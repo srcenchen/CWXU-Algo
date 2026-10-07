@@ -844,9 +844,11 @@ type DonateReq struct {
 	// 赞助金额（分，>0）
 	AmountCents int64 `protobuf:"varint,1,opt,name=amountCents,proto3" json:"amountCents,omitempty"`
 	// 留言（可空，<=60 字）
-	Message       string `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Message string `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	// 是否接受赞助回赠的 1 个月会员（金额 > ¥10 回赠 Pro，否则 Plus）
+	GiftMembership bool `protobuf:"varint,3,opt,name=giftMembership,proto3" json:"giftMembership,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *DonateReq) Reset() {
@@ -891,6 +893,13 @@ func (x *DonateReq) GetMessage() string {
 		return x.Message
 	}
 	return ""
+}
+
+func (x *DonateReq) GetGiftMembership() bool {
+	if x != nil {
+		return x.GiftMembership
+	}
+	return false
 }
 
 type DonateRes struct {
@@ -1490,10 +1499,11 @@ const file_user_v1_sponsor_sponsor_proto_rawDesc = "" +
 	"\x05month\x18\x01 \x01(\tR\x05month\x12 \n" +
 	"\vincomeCents\x18\x02 \x01(\x03R\vincomeCents\x12\"\n" +
 	"\fexpenseCents\x18\x03 \x01(\x03R\fexpenseCents\x12\x1a\n" +
-	"\bnetCents\x18\x04 \x01(\x03R\bnetCents\"G\n" +
+	"\bnetCents\x18\x04 \x01(\x03R\bnetCents\"o\n" +
 	"\tDonateReq\x12 \n" +
 	"\vamountCents\x18\x01 \x01(\x03R\vamountCents\x12\x18\n" +
-	"\amessage\x18\x02 \x01(\tR\amessage\"\xa9\x01\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\x12&\n" +
+	"\x0egiftMembership\x18\x03 \x01(\bR\x0egiftMembership\"\xa9\x01\n" +
 	"\tDonateRes\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\x03R\x04code\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12\x18\n" +

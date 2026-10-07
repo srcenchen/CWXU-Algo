@@ -5,6 +5,17 @@ import "time"
 // DefaultSponsorIntro 打赏页默认说明（站管可后台改）
 const DefaultSponsorIntro = "如果希望这个项目能继续做下去，欢迎赞助支持。所有费用都会用于服务器相关业务的必要开支。"
 
+// SponsorGiftDays 赞助回赠会员时长（天）
+const SponsorGiftDays = 30
+
+// SponsorGiftTier 按赞助金额决定回赠档位：> ¥10 回赠 Pro，否则 Plus。
+func SponsorGiftTier(amountCents int64) string {
+	if amountCents > 1000 {
+		return "pro"
+	}
+	return "plus"
+}
+
 // SponsorOrder 打赏订单（order_no 幂等；paid 后计入赞助收入）
 type SponsorOrder struct {
 	ID        uint `gorm:"primaryKey"`
@@ -23,6 +34,8 @@ type SponsorOrder struct {
 	Message string `gorm:"size:200;default:'';comment:留言"`
 	// Status pending|paid|closed
 	Status string `gorm:"size:16;not null;default:'pending';index;comment:状态 pending|paid|closed"`
+	// GiftTier 赞助回赠档位（空=不回赠；plus|pro）
+	GiftTier string `gorm:"size:16;default:'';comment:赞助回赠档位 plus|pro"`
 	// PlatformOrderNo 支付FM平台订单号
 	PlatformOrderNo string `gorm:"size:64;default:'';comment:支付FM平台订单号"`
 	// PaidAt 支付成功时间
