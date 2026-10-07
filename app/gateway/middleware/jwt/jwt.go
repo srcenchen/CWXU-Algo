@@ -74,6 +74,9 @@ var publicExact = map[string]struct{}{
 	// 支付FM回调（GET query / POST form，签名验签由 user 服务完成）
 	"/v1/payment/notify":  {},
 	"/api/payment/notify": {},
+	// 打赏支付FM回调（与会员支付区分路由）
+	"/v1/payment/sponsor-notify":  {},
+	"/api/payment/sponsor-notify": {},
 	// 客户中心 webhook 回调（HMAC 验签由 user 服务完成，无 JWT）
 	"/v1/support/events":  {},
 	"/api/support/events": {},
@@ -88,6 +91,17 @@ var publicExact = map[string]struct{}{
 	// C 端订阅：套餐列表公开（前端对比表）
 	"/v1/user/subscription/plans":  {},
 	"/api/user/subscription/plans": {},
+	// 打赏赞助：展示类接口公开
+	"/v1/user/sponsor/settings":   {},
+	"/api/user/sponsor/settings":  {},
+	"/v1/user/sponsor/overview":   {},
+	"/api/user/sponsor/overview":  {},
+	"/v1/user/sponsor/donations":  {},
+	"/api/user/sponsor/donations": {},
+	"/v1/user/sponsor/expenses":   {},
+	"/api/user/sponsor/expenses":  {},
+	"/v1/user/sponsor/monthly":    {},
+	"/api/user/sponsor/monthly":   {},
 	// Blog public reads
 	"/v1/user/blog/by-username":       {},
 	"/api/user/blog/by-username":      {},

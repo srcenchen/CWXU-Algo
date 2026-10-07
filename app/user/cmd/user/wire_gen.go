@@ -54,7 +54,9 @@ func wireApp(confServer *conf.Server, confData *conf.Data, logger log.Logger, su
 	seoService := service.NewSEOService(dataData)
 	db := provideUserDB(dataData)
 	ticketService := service.NewTicketService(supportCenter, db)
-	httpServer := server.NewHTTPServer(confServer, dataData, authService, profileService, groupService, roleService, siteService, orgService, rbacService, pasteService, socialService, notificationService, blogService, seoService, subscriptionService, ticketService, luoguPluginService, logger)
+	sponsorDal := dal.NewSponsorDal(dataData)
+	sponsorService := service.NewSponsorService(dataData, sponsorDal)
+	httpServer := server.NewHTTPServer(confServer, dataData, authService, profileService, groupService, roleService, siteService, orgService, rbacService, pasteService, socialService, notificationService, blogService, seoService, subscriptionService, ticketService, luoguPluginService, sponsorService, logger)
 	app := newApp(logger, grpcServer, httpServer, register)
 	return app, func() {
 		cleanup()

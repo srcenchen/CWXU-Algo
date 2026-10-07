@@ -1,0 +1,232 @@
+syntax = "proto3";
+
+package api.user.v1.sponsor;
+import "google/api/annotations.proto";
+option go_package = "cwxu-algo/api/user/v1/sponsor;sponsor";
+option java_multiple_files = true;
+option java_package = "api.user.v1.sponsor";
+
+// 打赏赞助（纯打赏，不附带任何特殊权益）：
+// - 赞助收入用于服务器/CDN 等必要开支；可用金额 = 已支付赞助 - 全部开支
+// - 下单走支付FM在线支付（donate → 支付链接）；回调 /v1/payment/sponsor-notify 入账
+// - 站管（站点管理员）可记录开支 / 扣减可用金额 / 编辑打赏页说明
+service Sponsor {
+  // 公开：打赏页设置（两个入口开关 + 说明 Markdown）
+  rpc GetSettings (GetSettingsReq) returns (GetSettingsRes) {
+    option (google.api.http) = {
+      get: "/v1/user/sponsor/settings"
+    };
+  }
+  // 公开：资金概览（可用金额/累计/本月）
+  rpc Overview (OverviewReq) returns (OverviewRes) {
+    option (google.api.http) = {
+      get: "/v1/user/sponsor/overview"
+    };
+  }
+  // 公开：赞助名单（时间倒序；keyword 模糊昵称/留言）
+  rpc ListDonations (ListDonationsReq) returns (ListDonationsRes) {
+    option (google.api.http) = {
+      get: "/v1/user/sponsor/donations"
+    };
+  }
+  // 公开：开支明细（时间倒序）
+  rpc ListExpenses (ListExpensesReq) returns (ListExpensesRes) {
+    option (google.api.http) = {
+      get: "/v1/user/sponsor/expenses"
+    };
+  }
+  // 公开：月度收支（近 count 个月，倒序）
+  rpc Monthly (MonthlyReq) returns (MonthlyRes) {
+    option (google.api.http) = {
+      get: "/v1/user/sponsor/monthly"
+    };
+  }
+  // 登录：打赏下单（支付FM，返回支付链接 payUrl）
+  rpc Donate (DonateReq) returns (DonateRes) {
+    option (google.api.http) = {
+      post: "/v1/user/sponsor/donate"
+      body: "*"
+    };
+  }
+  // 登录：查打赏订单状态（支付回流轮询）
+  rpc DonationStatus (DonationStatusReq) returns (DonationStatusRes) {
+    option (google.api.http) = {
+      get: "/v1/user/sponsor/donation"
+    };
+  }
+  // 站管（站点管理员）：记录一笔开支（必填说明）
+  rpc RecordExpense (RecordExpenseReq) returns (RecordExpenseRes) {
+    option (google.api.http) = {
+      post: "/v1/user/sponsor/admin/record-expense"
+      body: "*"
+    };
+  }
+  // 站管（站点管理员）：扣减可用金额（必填说明）
+  rpc AdjustBalance (AdjustBalanceReq) returns (AdjustBalanceRes) {
+    option (google.api.http) = {
+      post: "/v1/user/sponsor/admin/adjust-balance"
+      body: "*"
+    };
+  }
+  // 站管（站点管理员）：更新打赏页设置（入口开关 + 说明 Markdown）
+  rpc UpdateSettings (UpdateSettingsReq) returns (UpdateSettingsRes) {
+    option (google.api.http) = {
+      post: "/v1/user/sponsor/admin/settings"
+      body: "*"
+    };
+  }
+}
+
+message GetSettingsReq {}
+
+message GetSettingsRes {
+  int64 code = 1;
+  string message = 2;
+  bool membershipSponsorEnabled = 3;
+  bool donationEnabled = 4;
+  string introMarkdown = 5;
+}
+
+message OverviewReq {}
+
+message OverviewRes {
+  int64 code = 1;
+  string message = 2;
+  // 当前可用金额（分）
+  int64 balanceCents = 3;
+  // 累计赞助（分）
+  int64 totalIncomeCents = 4;
+  // 累计开支（分）
+  int64 totalExpenseCents = 5;
+  // 累计赞助人数（已支付订单数）
+  int64 donationCount = 6;
+  // 本月赞助（分）
+  int64 monthIncomeCents = 7;
+  // 本月开支（分）
+  int64 monthExpenseCents = 8;
+  // 本月是否亏本（支出 > 收入）
+  bool loss = 9;
+}
+
+message ListDonationsReq {
+  int64 page = 1;
+  int64 pageSize = 2;
+  // 模糊搜索昵称/留言
+  string keyword = 3;
+}
+
+message ListDonationsRes {
+  int64 code = 1;
+  string message = 2;
+  repeated Donation list = 3;
+  int64 total = 4;
+}
+
+message Donation {
+  int64 id = 1;
+  string nickname = 2;
+  int64 amountCents = 3;
+  string message = 4;
+  // 支付时间（unix 秒）
+  int64 createdAt = 5;
+}
+
+message ListExpensesReq {}
+
+message ListExpensesRes {
+  int64 code = 1;
+  string message = 2;
+  repeated Expense list = 3;
+}
+
+message Expense {
+  int64 id = 1;
+  int64 amountCents = 2;
+  string note = 3;
+  // expense=日常开支；adjust=余额调整
+  string kind = 4;
+  // 发生时间（unix 秒）
+  int64 spentAt = 5;
+}
+
+message MonthlyReq {
+  // 展示近几个月（默认 6，上限 24）
+  int64 count = 1;
+}
+
+message MonthlyRes {
+  int64 code = 1;
+  string message = 2;
+  repeated MonthlyRow list = 3;
+}
+
+message MonthlyRow {
+  // YYYY-MM
+  string month = 1;
+  int64 incomeCents = 2;
+  int64 expenseCents = 3;
+  int64 netCents = 4;
+}
+
+message DonateReq {
+  // 赞助金额（分，>0）
+  int64 amountCents = 1;
+  // 留言（可空，<=60 字）
+  string message = 2;
+}
+
+message DonateRes {
+  int64 code = 1;
+  string message = 2;
+  string orderNo = 3;
+  string payUrl = 4;
+  int64 amountCents = 5;
+  // 订单失效时间（unix 秒）
+  int64 expireAt = 6;
+}
+
+message DonationStatusReq {
+  string orderNo = 1;
+}
+
+message DonationStatusRes {
+  int64 code = 1;
+  string message = 2;
+  string orderNo = 3;
+  // pending|paid|closed
+  string status = 4;
+  int64 paidAt = 5;
+}
+
+message RecordExpenseReq {
+  int64 amountCents = 1;
+  string note = 2;
+  // 发生时间（unix 秒；0=当前）
+  int64 spentAt = 3;
+}
+
+message RecordExpenseRes {
+  int64 code = 1;
+  string message = 2;
+}
+
+message AdjustBalanceReq {
+  int64 amountCents = 1;
+  string note = 2;
+}
+
+message AdjustBalanceRes {
+  int64 code = 1;
+  string message = 2;
+}
+
+message UpdateSettingsReq {
+  bool membershipSponsorEnabled = 1;
+  bool donationEnabled = 2;
+  string introMarkdown = 3;
+}
+
+message UpdateSettingsRes {
+  int64 code = 1;
+  string message = 2;
+}

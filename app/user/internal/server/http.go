@@ -17,6 +17,7 @@ import (
 	"cwxu-algo/api/user/v1/role"
 	"cwxu-algo/api/user/v1/site"
 	"cwxu-algo/api/user/v1/social"
+	sponsorpb "cwxu-algo/api/user/v1/sponsor"
 	subscriptionpb "cwxu-algo/api/user/v1/subscription"
 	ticketpb "cwxu-algo/api/user/v1/ticket"
 	"cwxu-algo/app/common/conf"
@@ -53,6 +54,14 @@ func NewWhiteListMatcher() selector.MatchFunc {
 		"/api.user.v1.site.Site/VisitPing":             "",
 		// C 端订阅：套餐列表公开（前端对比表）
 		"/api.user.v1.subscription.Subscription/ListPlans": "",
+		// 打赏赞助：展示类接口公开（下单/管理仍需登录/站管）
+		"/api.user.v1.sponsor.Sponsor/GetSettings":   "",
+		"/api.user.v1.sponsor.Sponsor/Overview":      "",
+		"/api.user.v1.sponsor.Sponsor/ListDonations": "",
+		"/api.user.v1.sponsor.Sponsor/ListExpenses":  "",
+		"/api.user.v1.sponsor.Sponsor/Monthly":       "",
+		// 打赏支付FM回调（原生路由；验签在服务内完成）
+		"/v1/payment/sponsor-notify": "",
 		// 社交：搜索/列表/计数/关系/身份/隐私状态公开读（JWT 可选，有则按当前域解析）；关注操作仍需登录
 		"/api.user.v1.social.Social/Search":        "",
 		"/api.user.v1.social.Social/Following":     "",
@@ -122,6 +131,7 @@ func NewHTTPServer(
 	subscriptionService *service.SubscriptionService,
 	ticketService *service.TicketService,
 	luoguPluginService *service.LuoguPluginService,
+	sponsorService *service.SponsorService,
 	logger log.Logger,
 
 ) *http.Server {
@@ -169,8 +179,12 @@ func NewHTTPServer(
 	// 工单（对接外部客户中心，全部需登录）
 	ticketpb.RegisterTicketServiceHTTPServer(srv, ticketService)
 	pluginpb.RegisterLuoguPluginHTTPServer(srv, luoguPluginService)
+	// 打赏赞助（展示/下单/站管管理）
+	sponsorpb.RegisterSponsorHTTPServer(srv, sponsorService)
 	// 支付FM异步回调：GET query / POST form 原生 handler（不走 proto JSON）
 	srv.Handle("/v1/payment/notify", nethttp.HandlerFunc(subscriptionService.NotifyHTTP))
+	// 打赏支付FM异步回调（独立路由，与会员支付区分）
+	srv.Handle("/v1/payment/sponsor-notify", nethttp.HandlerFunc(sponsorService.SponsorNotifyHTTP))
 	// 客户中心 webhook 回调：POST JSON 原生 handler（HMAC 验签 + 幂等 + 站内信）
 	srv.Handle("/v1/support/events", nethttp.HandlerFunc(ticketService.NotifyEventsHTTP))
 	return srv

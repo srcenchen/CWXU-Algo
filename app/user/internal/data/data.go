@@ -202,6 +202,9 @@ func migrateModels(db *gorm.DB) {
 		&model.OrgRolePerm{},
 		&model.SubscriptionPlan{},
 		&model.PaymentOrder{},
+		&model.SponsorOrder{},
+		&model.SponsorExpense{},
+		&model.SponsorSetting{},
 	)
 	if err != nil {
 		panic("数据库：数据库自动合并失败")
@@ -1020,6 +1023,11 @@ func startPaymentOrderCloser(d *Data) func() {
 				} else if n > 0 {
 					log.Infof("payment order closer closed %d stale orders", n)
 				}
+				if sn, serr := closeStaleSponsorOrders(ctx, d); serr != nil {
+					log.Warnf("sponsor order closer: %v", serr)
+				} else if sn > 0 {
+					log.Infof("sponsor order closer closed %d stale orders", sn)
+				}
 			}
 		}
 	}()
@@ -1029,6 +1037,14 @@ func startPaymentOrderCloser(d *Data) func() {
 // closeStalePendingOrders 关单实现（独立函数便于测试）
 func closeStalePendingOrders(ctx context.Context, d *Data) (int64, error) {
 	res := d.DB.WithContext(ctx).Model(&model.PaymentOrder{}).
+		Where("status = ? AND created_at < ?", model.OrderStatusPending, time.Now().Add(-paymentOrderPendingTTL)).
+		Update("status", model.OrderStatusClosed)
+	return res.RowsAffected, res.Error
+}
+
+// closeStaleSponsorOrders 打赏待支付订单关单：pending 超过 5 分钟置 closed。
+func closeStaleSponsorOrders(ctx context.Context, d *Data) (int64, error) {
+	res := d.DB.WithContext(ctx).Model(&model.SponsorOrder{}).
 		Where("status = ? AND created_at < ?", model.OrderStatusPending, time.Now().Add(-paymentOrderPendingTTL)).
 		Update("status", model.OrderStatusClosed)
 	return res.RowsAffected, res.Error
